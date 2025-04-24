@@ -1,5 +1,5 @@
-/.vscode
-/target
+**/.vscode
+**/target
 .svn
 /Netnotes/netnotes.sh
 /Netnotes/dependency-reduced-pom.xml
@@ -8,4 +8,3 @@ netnotes-log.txt
 .bloop
 .metals
 .scala-build
-target

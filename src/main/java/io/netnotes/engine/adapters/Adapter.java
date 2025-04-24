@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.adapters;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -6,6 +6,9 @@ import java.util.concurrent.Future;
 
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.NetworksData;
+import io.netnotes.engine.NoteConstants;
+import io.netnotes.engine.TabInterface;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
@@ -18,7 +21,7 @@ import javafx.scene.image.ImageView;
 import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
 
-public class Network  {
+public class Adapter  {
 
     private int m_connectionStatus = NoteConstants.STOPPED;
     private String m_networkId;
@@ -29,38 +32,23 @@ public class Network  {
     public final static long EXECUTION_TIME = 500;
 
 
-    private double m_stagePrevWidth = Stages.DEFAULT_STAGE_WIDTH;
-    private double m_stagePrevHeight = Stages.DEFAULT_STAGE_HEIGHT;
-    private double m_stageWidth = Stages.DEFAULT_STAGE_WIDTH;
-    private double m_stageHeight = Stages.DEFAULT_STAGE_HEIGHT;
-
-    private String[] m_keyWords = null;
-
-    private boolean m_stageMaximized = false;
-
-    private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
+    private ArrayList<AdapterMsgInterface> m_msgListeners = new ArrayList<>();
 
     private String m_name;
     private Image m_icon;
     private Button m_appBtn;
 
-    public Network(Image icon, String name, String id, NetworksData networksData) {
+    public Adapter(Image icon, String name, String id, NetworksData networksData) {
         m_icon = icon;
         m_name = name;
         m_networkId = id;
         m_networksData = networksData;
     }
 
-    public Network(Image icon, String name, String id, NoteInterface noteInterface) {
-        this(icon, name, id, noteInterface.getNetworksData());
-    }
+ 
 
-    public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+    public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed) {
 
-        return null;
-    }
-
-    public Object sendNote(JsonObject note){
         return null;
     }
 
@@ -83,7 +71,7 @@ public class Network  {
     }
 
     
-    public void addMsgListener(NoteMsgInterface item) {
+    public void addMsgListener(AdapterMsgInterface item) {
         if (item != null && !m_msgListeners.contains(item)) {
             if(m_connectionStatus != NoteConstants.STARTED){
                 start();
@@ -104,78 +92,6 @@ public class Network  {
         return m_description;
     }
 
-    public NoteInterface getNoteInterface(){
-       
-        return new NoteInterface() {
-            
-            public String getName(){
-                return Network.this.getName();
-            }
-
-            public String getNetworkId(){
-                return Network.this.getNetworkId();
-            }
-
-            public Image getAppIcon(){
-                return Network.this.getAppIcon();
-            }
-
-            public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-                return Network.this.sendNote(note, onSucceeded, onFailed);
-            }
-
-            public Object sendNote(JsonObject note){
-                return Network.this.sendNote(note);
-            }
-
-            public JsonObject getJsonObject(){
-                return Network.this.getJsonObject();
-            }
-
-            public TabInterface getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject,  Button networkBtn){
-                return Network.this.getTab(appStage, heightObject, widthObject, networkBtn);
-            }
-
-
-
-
-            public NetworksData getNetworksData(){
-                return Network.this.getNetworksData();
-            }
-
-            public NoteInterface getParentInterface(){
-                return null;
-            }
-
-            public void shutdown(){}
-
-            public SimpleObjectProperty<LocalDateTime> shutdownNowProperty(){
-                return null;
-            }
-
-            public void addMsgListener(NoteMsgInterface listener){
-                if(listener != null && listener.getId() != null){
-                    Network.this.addMsgListener(listener);
-                }
-            }
-            public boolean removeMsgListener(NoteMsgInterface listener){
-                
-                return Network.this.removeMsgListener(listener);
-            }
-
-            public int getConnectionStatus(){
-                return Network.this.getConnectionStatus();
-            }
-
-            public void setConnectionStatus(int status){}
-
-
-            public String getDescription(){
-                return Network.this.getDescription();
-            }
-        };
-    }
-
 
     protected void setName(String name){
         m_name = name;
@@ -191,8 +107,9 @@ public class Network  {
         return null;
     }
 
-    public boolean removeMsgListener(NoteMsgInterface item){
+    public boolean removeMsgListener(AdapterMsgInterface item){
         if(item != null){
+
             boolean removed = m_msgListeners.remove(item);
             
             if(m_msgListeners.size() == 0){
@@ -223,7 +140,7 @@ public class Network  {
         
     }
  
-    public ArrayList<NoteMsgInterface> msgListeners(){
+    public ArrayList<AdapterMsgInterface> msgListeners(){
         return m_msgListeners;
     }
 
@@ -233,22 +150,18 @@ public class Network  {
 
 
 
-    protected void sendMessage(int code, long timeStamp,String networkId, String msg){
+    protected void broadcastMessage(long timeStamp, String msg){
         for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, msg);
-        }
-    }
-
-    protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, num);
+            AdapterMsgInterface msgInterface = m_msgListeners.get(i);
+            msgInterface.msgReceived(msg, timeStamp, null, null, null);
         }
     }
 
 
-    protected NoteMsgInterface getListener(String id) {
+
+    protected AdapterMsgInterface getListener(String id) {
         for (int i = 0; i < m_msgListeners.size(); i++) {
-            NoteMsgInterface listener = m_msgListeners.get(i);
+            AdapterMsgInterface listener = m_msgListeners.get(i);
             if (listener.getId().equals(id)) {
                 return listener;
             }
@@ -256,13 +169,7 @@ public class Network  {
         return null;
     }
 
-    public String[] getKeyWords() {
-        return m_keyWords;
-    }
 
-    public void setKeyWords(String[] value){
-        m_keyWords = value;
-    }
 
     public void setNetworkId(String id) {
         m_networkId = id;
@@ -272,59 +179,7 @@ public class Network  {
         return m_networkId;
     }
 
-    public double getStageWidth() {
-        return m_stageWidth;
-    }
 
-    public void setStageWidth(double width) {
-        m_stageWidth = width;
-
-    }
-
-    public void setStageHeight(double height) {
-        m_stageHeight = height;
-    }
-
-    public double getStageHeight() {
-        return m_stageHeight;
-    }
-
-    public boolean getStageMaximized() {
-        return m_stageMaximized;
-    }
-
-    public void setStageMaximized(boolean value) {
-        m_stageMaximized = value;
-    }
-
-    public double getStagePrevWidth() {
-        return m_stagePrevWidth;
-    }
-
-    public void setStagePrevWidth(double width) {
-        m_stagePrevWidth = width;
-
-    }
-
-    public void setStagePrevHeight(double height) {
-        m_stagePrevHeight = height;
-    }
-
-    public double getStagePrevHeight() {
-        return m_stagePrevHeight;
-    }
-
-  
-
-    public JsonObject getStageJson() {
-        JsonObject json = new JsonObject();
-        json.addProperty("maximized", getStageMaximized());
-        json.addProperty("width", getStageWidth());
-        json.addProperty("height", getStageHeight());
-        json.addProperty("prevWidth", getStagePrevWidth());
-        json.addProperty("prevHeight", getStagePrevHeight());
-        return json;
-    }
 
     public String getName(){
         return m_name;

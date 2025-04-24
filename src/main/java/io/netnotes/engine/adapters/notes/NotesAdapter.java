@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.concurrent.Future;
 
 import javafx.beans.property.SimpleDoubleProperty;
@@ -50,7 +51,7 @@ public class NotesAdapter extends Network {
     public final static long WATCH_INTERVAL = 50;
 
     private boolean m_isEnabled = false;
-    private boolean m_isAvailable = false;
+    private HashMap<String, File> m_availableAdapters = new HashMap<>();
 
     private String m_adapterId = null;
     private File m_rootDir = null;
@@ -69,7 +70,6 @@ public class NotesAdapter extends Network {
     }
 
     private void openJson(JsonObject json){
-        m_isAvailable = false;
 
         JsonElement rootDirElement = json != null ? json.get("rootDir") : null;
         JsonElement adapterIdElement = json != null ? json.get("adapterId") : null;
@@ -111,7 +111,7 @@ public class NotesAdapter extends Network {
     }
 
     public boolean isAvailable(){
-        return m_isAvailable;
+        return getConnectionStatus() == NoteConstants.STARTED;
     }
 
     public static NetworkInformation getNetworkInformation(){
@@ -199,11 +199,6 @@ public class NotesAdapter extends Network {
         }
     }
 
-    public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed){
-        
-
-        return null;
-    }
 
 
     @Override
