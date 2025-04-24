@@ -1,0 +1,11 @@
+/.vscode
+/target
+.svn
+/Netnotes/netnotes.sh
+/Netnotes/dependency-reduced-pom.xml
+netnotes-log.txt
+*.erg
+.bloop
+.metals
+.scala-build
+target
