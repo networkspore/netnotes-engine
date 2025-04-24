@@ -2,4 +2,9 @@
 **/.git
 **/.vscode
 dependency-reduced-pom.xml
+netnotes-log.txt
 *.sh
+*.erg
+**/.bloop
+**/.metals
+**/.scala-build
