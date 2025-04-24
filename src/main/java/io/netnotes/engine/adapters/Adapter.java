@@ -52,6 +52,18 @@ public class Adapter  {
         return null;
     }
 
+    public AdapterNoteInterface getNoteAdapterInterface(){
+        return new AdapterNoteInterface() {
+
+            @Override
+            public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply,
+                    EventHandler<WorkerStateEvent> onFailed) {
+                return Adapter.this.sendNote(adapterId, note, onReply, onFailed);
+            }
+            
+        };
+    }
+
     public Button getButton(double size){
         if(m_appBtn != null){
             return m_appBtn;

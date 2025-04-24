@@ -1,5 +1,7 @@
 package io.netnotes.engine;
 
+import io.netnotes.engine.adapters.Adapter;
+
 public interface AppInterface {
     void shutdown();
     String[] getDefaultAppIds();
@@ -7,7 +9,7 @@ public interface AppInterface {
     String[] getDefaultAdapters();
     Network createApp(String networkId, String locationId);
     Network createNetwork(String networkId, String locationId);
-    Network createAdapter(String networkId);
+    Adapter createAdapter(String networkId);
     NetworkInformation[] getSupportedNetworks();
     NetworkInformation[] getSupportedApps();
     NetworkInformation[] getSupportedAdapters();

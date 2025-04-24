@@ -1,0 +1,5 @@
+**/target
+**/.git
+**/.vscode
+dependency-reduced-pom.xml
+*.sh

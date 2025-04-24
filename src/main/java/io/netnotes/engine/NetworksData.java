@@ -41,6 +41,8 @@ import com.google.gson.JsonObject;
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.IconButton.IconStyle;
+import io.netnotes.engine.adapters.Adapter;
+import io.netnotes.engine.adapters.AdapterNoteInterface;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.networks.NetworkConstants;
 import io.netnotes.friendly_id.FriendlyId;
@@ -110,7 +112,7 @@ public class NetworksData {
 
     private HashMap<String, Network> m_apps = new HashMap<>();
     private HashMap<String, Network> m_networks = new HashMap<>();
-    private HashMap<String, Network> m_adapters = new HashMap<>();
+    private HashMap<String, Adapter> m_adapters = new HashMap<>();
 
     private Stage m_addNetworkStage = null;
 
@@ -531,14 +533,14 @@ public class NetworksData {
             for(JsonElement element : adapterArray){
                 if(element != null && element.isJsonObject()){
                     JsonObject jsonObject = element.getAsJsonObject();
-                    JsonElement networkIdElement = jsonObject.get("networkId");
+                    JsonElement networkIdElement = jsonObject.get("adapterId");
 
                     if (networkIdElement != null) {
-                        String networkId = networkIdElement.getAsString();
+                        String adapterId = networkIdElement.getAsString();
 
-                        Network network = createAdapter(networkId);
-                        if(network != null){
-                            addAdapter(network, false);
+                        Adapter adapter = createAdapter(adapterId);
+                        if(adapter != null){
+                            addAdapter(adapter, false);
                         }
                     }
                 }
@@ -704,11 +706,11 @@ public class NetworksData {
         return null;
     }
 
-    private Network createAdapter(String networkId){
+    private Adapter createAdapter(String networkId){
         
         if(getAdapter(networkId) == null){
 
-            Network network = m_appInterface.createAdapter(networkId);
+            Adapter network = m_appInterface.createAdapter(networkId);
             
             if(network != null){
                 return network;
@@ -806,10 +808,6 @@ public class NetworksData {
     private void sendMessage(int code, long timeStamp,String networkId, String msg){
         m_appsMenu.sendMessage(code, timeStamp, networkId, msg);
         
-        for (Map.Entry<String, Network> entry : m_adapters.entrySet()) {
-            Network adapter = entry.getValue();
-            adapter.sendMessage(code, timeStamp, networkId, msg);
-        }
 
         for(int i = 0; i < m_msgListeners.size() ; i++){
             m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, msg);
@@ -822,10 +820,7 @@ public class NetworksData {
     }
 
     private void sendMessage(int code, long timeStamp, String networkId, Number num){
-        for (Map.Entry<String, Network> entry : m_adapters.entrySet()) {
-            Network adapter = entry.getValue();
-            adapter.sendMessage(code, timeStamp, networkId, num);
-        }
+ 
 
         for(int i = 0; i < m_msgListeners.size() ; i++){
             m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, num);
@@ -890,7 +885,7 @@ public class NetworksData {
         return false;
     }
 
-    private boolean addAdapter(Network network, boolean isSave) {
+    private boolean addAdapter(Adapter network, boolean isSave) {
         // int i = 0;
 
         String networkId = network.getNetworkId();
@@ -974,11 +969,11 @@ public class NetworksData {
 
     
 
-    private boolean removeAdapter(String networkId, boolean isSave){       
+    private boolean removeAdapter(String adapterId, boolean isSave){       
     
-        if(networkId != null) {
+        if(adapterId != null) {
             
-            Network adapter = m_adapters.remove(networkId);
+            Adapter adapter = m_adapters.remove(adapterId);
      
             if (adapter != null) {
                
@@ -991,7 +986,7 @@ public class NetworksData {
                     resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
                     resultJson.addProperty("type", ADAPTERS);
                     resultJson.addProperty("timeStamp", timestamp);
-                    resultJson.addProperty("id", networkId);
+                    resultJson.addProperty("id", adapterId);
                     
                     sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, ADAPTERS,  resultJson.toString());
 
@@ -1248,14 +1243,14 @@ public class NetworksData {
         return null;
     }
 
-    private Network getAdapterNetwork(String networkId) {
-        if (networkId != null) {
-            return m_adapters.get(networkId);
+    private Adapter getAdapter(String adapterId) {
+        if (adapterId != null) {
+            return m_adapters.get(adapterId);
         }
         return null;
     }
 
-    public NoteInterface getNetwork(String networkId) {
+    private NoteInterface getNetwork(String networkId) {
         if (networkId != null) {
    
             Network network = getNetworkNetwork(networkId);
@@ -1265,12 +1260,12 @@ public class NetworksData {
         return null;
     }
 
-    public NoteInterface getAdapter(String networkId) {
-        if (networkId != null) {
+    public AdapterNoteInterface getAdapterInterface(String adapterId) {
+        if (adapterId != null) {
    
-            Network network = getAdapterNetwork(networkId);
+            Adapter adapter = getAdapter(adapterId);
 
-            return network != null ? network.getNoteInterface() : null;
+            return adapter != null ? adapter.getNoteAdapterInterface() : null;
         }
         return null;
     }
