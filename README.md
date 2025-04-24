@@ -1,4 +1,4 @@
-# netnotes-engine
+# netnotes-engine - Experimental
 
 This project conains the resources and architexcture to create a Netnotes enabled project and is current in experimental phase.
 
