@@ -146,6 +146,11 @@ public class NotesAdapter extends Adapter {
         }
     }
 
+    @Override
+    public String getDescription() {
+        return DESCRIPTION;
+    }
+
     public boolean getIsEnabled(){
         return m_isEnabled;
     }

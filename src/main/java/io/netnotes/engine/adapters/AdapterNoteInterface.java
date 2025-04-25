@@ -8,4 +8,14 @@ import javafx.event.EventHandler;
 public interface AdapterNoteInterface {
 
     Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed);
+
+    int getConnectionStatus();
+
+    String getName();
+
+    String getDescription();
+
+    void addMsgListener(AdapterMsgInterface listener);
+
+    boolean removeMsgListener(AdapterMsgInterface listener);
 }

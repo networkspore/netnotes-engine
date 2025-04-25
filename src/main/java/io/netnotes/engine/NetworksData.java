@@ -463,7 +463,13 @@ public class NetworksData {
         return m_hostServices;
     }
 
+    public void addAppResource(String resource) throws IOException{
+        m_appInterface.addAppResource(resource);
+    }
 
+    public void removeAppResource(String resource) throws IOException{
+        m_appInterface.removeAppResource(resource);
+    }
     
     private ScheduledFuture<?> m_lastExecution = null;
 
@@ -1250,7 +1256,7 @@ public class NetworksData {
         return null;
     }
 
-    private NoteInterface getNetwork(String networkId) {
+    public NoteInterface getNetwork(String networkId) {
         if (networkId != null) {
    
             Network network = getNetworkNetwork(networkId);

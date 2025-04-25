@@ -1,5 +1,7 @@
 package io.netnotes.engine;
 
+import java.io.IOException;
+
 import io.netnotes.engine.adapters.Adapter;
 
 public interface AppInterface {
@@ -16,4 +18,6 @@ public interface AppInterface {
     Version getCurrentVersion();
     String getGitHubUser();
     String getGitHubProject();
+    void removeAppResource(String resource) throws IOException;
+    void addAppResource(String resource) throws IOException;
 }

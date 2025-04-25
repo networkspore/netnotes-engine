@@ -36,9 +36,6 @@ public interface NoteInterface {
 
     NetworksData getNetworksData();
 
-    NoteInterface getParentInterface();
-
-
 
     void shutdown();
 

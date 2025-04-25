@@ -60,6 +60,33 @@ public class Adapter  {
                     EventHandler<WorkerStateEvent> onFailed) {
                 return Adapter.this.sendNote(adapterId, note, onReply, onFailed);
             }
+
+            @Override
+            public int getConnectionStatus() {
+                return m_connectionStatus;
+            }
+
+            public String getName(){
+                return m_name;
+            }
+
+            @Override
+            public String getDescription() {
+                return Adapter.this.getDescription();
+            }
+
+            @Override
+            public void addMsgListener(AdapterMsgInterface listener) {
+                m_msgListeners.add(listener);
+            }
+
+            @Override
+            public boolean removeMsgListener(AdapterMsgInterface listener) {
+                boolean removed = m_msgListeners.remove(listener);
+
+                return removed;
+            }
+
             
         };
     }
