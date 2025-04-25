@@ -25,10 +25,13 @@ public class Adapter  {
 
     private int m_connectionStatus = NoteConstants.STOPPED;
     private String m_networkId;
+    private String m_adapterId = null;
     private NetworksData m_networksData;
     private SimpleObjectProperty<LocalDateTime> m_lastUpdated = new SimpleObjectProperty<LocalDateTime>(LocalDateTime.now());
     private ChangeListener<LocalDateTime> m_changeListener = null;
     private SimpleObjectProperty<LocalDateTime> m_shutdownNow = new SimpleObjectProperty<>(null);
+    private boolean m_isEnabled = false;
+
     public final static long EXECUTION_TIME = 500;
 
 
@@ -54,7 +57,11 @@ public class Adapter  {
 
     public AdapterNoteInterface getNoteAdapterInterface(){
         return new AdapterNoteInterface() {
-
+            @Override
+            public String getAdapterId() {
+                return Adapter.this.getAdapterId();
+            }
+            
             @Override
             public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply,
                     EventHandler<WorkerStateEvent> onFailed) {
@@ -87,8 +94,19 @@ public class Adapter  {
                 return removed;
             }
 
-            
+            @Override
+            public boolean isEnabled() {
+               return m_isEnabled;
+            }
         };
+    }
+
+    public boolean isEnabled(){
+        return m_isEnabled;
+    }
+
+    protected void setIsEnabled(boolean isEnabled){
+        m_isEnabled = isEnabled;
     }
 
     public Button getButton(double size){
@@ -219,6 +237,14 @@ public class Adapter  {
     }
 
 
+    public String getAdapterId(){
+        return m_adapterId;
+    }
+
+    protected void setAdapterId(String adapterId){
+        m_adapterId = adapterId;
+    }
+
 
     public String getName(){
         return m_name;
@@ -235,7 +261,7 @@ public class Adapter  {
     public JsonObject getJsonObject() {
         JsonObject networkObj = new JsonObject();
         networkObj.addProperty("name", getName());
-        networkObj.addProperty("networkId", getNetworkId());
+        networkObj.addProperty("networkId", getAdapterId());
         return networkObj;
 
     }

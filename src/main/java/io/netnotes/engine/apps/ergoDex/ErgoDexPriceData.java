@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ErgoDex;
+package io.netnotes.engine.apps.ergoDex;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

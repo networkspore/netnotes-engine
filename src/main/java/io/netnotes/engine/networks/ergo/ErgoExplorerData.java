@@ -19,8 +19,6 @@ import org.ergoplatform.appkit.NetworkType;
 
 import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
-import io.netnotes.engine.networks.ergo.ErgoNetworkUrl;
-import io.netnotes.engine.networks.ergo.ErgoTransactionView;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;

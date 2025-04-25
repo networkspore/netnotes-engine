@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ErgoDex;
+package io.netnotes.engine.apps.ergoDex;
 
 import io.netnotes.engine.networks.ergo.ErgoBox;
 import io.netnotes.engine.networks.ergo.ErgoBoxAsset;

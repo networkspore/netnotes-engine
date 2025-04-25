@@ -7,6 +7,8 @@ import javafx.event.EventHandler;
 
 public interface AdapterNoteInterface {
 
+    String getAdapterId();
+
     Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed);
 
     int getConnectionStatus();
@@ -18,4 +20,6 @@ public interface AdapterNoteInterface {
     void addMsgListener(AdapterMsgInterface listener);
 
     boolean removeMsgListener(AdapterMsgInterface listener);
+
+    boolean isEnabled();
 }

@@ -8,7 +8,7 @@ import com.google.gson.JsonObject;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
-import io.netnotes.engine.apps.ErgoDex.ErgoDex;
+import io.netnotes.engine.apps.ergoDex.ErgoDex;
 
 import com.google.gson.JsonElement;
 

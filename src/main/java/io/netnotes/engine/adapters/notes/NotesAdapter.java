@@ -45,10 +45,10 @@ public class NotesAdapter extends Adapter {
     
     public final static long WATCH_INTERVAL = 50;
 
-    private boolean m_isEnabled = false;
+
     private HashMap<String, File> m_availableAdapters = new HashMap<>();
 
-    private String m_adapterId = null;
+
     private File m_rootDir = null;
     private File m_notesDir = null;
     private File m_adapterDir = null;
@@ -71,25 +71,28 @@ public class NotesAdapter extends Adapter {
         String rootDirElementString =  rootDirElement != null ?rootDirElement.getAsString() : null;
 
         String rootDir = rootDirElementString != null && Utils.findPathPrefixInRoots(rootDirElementString) ? rootDirElementString : DEFAULT_FOLDER;
-        m_adapterId = adapterIdElement != null ? adapterIdElement.getAsString() : FriendlyId.createFriendlyId();
-        m_isEnabled = isEnabledElement != null ? isEnabledElement.getAsBoolean() : false;
+        String adapterId = adapterIdElement != null ? adapterIdElement.getAsString() : FriendlyId.createFriendlyId();
+        boolean isEnabled = isEnabledElement != null ? isEnabledElement.getAsBoolean() : true;
+
+        setIsEnabled(isEnabled);
+        setAdapterId(adapterId);
 
         m_rootDir = new File(rootDir);
-        m_notesDir = new File(m_rootDir.getAbsolutePath() + "/" + m_adapterId);
+        m_notesDir = new File(m_rootDir.getAbsolutePath() + "/" + adapterId);
 
        
             try {
                 if(!m_rootDir.getParentFile().isDirectory() || !m_rootDir.isDirectory() || !m_notesDir.isDirectory()){
                     Files.createDirectories(m_notesDir.toPath());
                 }
-                m_adapterDir = new File(m_notesDir + "/" + m_adapterId);
+                m_adapterDir = new File(m_notesDir + "/" + adapterId);
                 
                 if (!m_adapterDir.isDirectory()) {
                      Files.createDirectory(m_adapterDir.toPath());
                 }
-                if(m_isEnabled){
-                    start();
-                }
+               
+                start();
+                
 
             } catch (IOException e) {
 
@@ -115,7 +118,7 @@ public class NotesAdapter extends Adapter {
 
     @Override
     public void start(){
-        if(m_isEnabled){
+        if(isEnabled()){
             if(m_noteWatcher != null){
                 m_noteWatcher.shutdown();
             }
@@ -151,14 +154,7 @@ public class NotesAdapter extends Adapter {
         return DESCRIPTION;
     }
 
-    public boolean getIsEnabled(){
-        return m_isEnabled;
-    }
 
-    private void setIsEnabled(boolean enabled){
-        m_isEnabled = enabled;
-    }
-    
     public void setConnectionStatus(int status){
         super.setConnectionStatus(status);
     }
@@ -212,7 +208,7 @@ public class NotesAdapter extends Adapter {
         private Button m_menuBtn = null;
 
         public NotesAdapterTab(Stage appStage,  SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button menuBtn){
-            super(getNetworkId());
+            super(getAdapterId());
 
             m_appStage = appStage;
             m_menuBtn = menuBtn;

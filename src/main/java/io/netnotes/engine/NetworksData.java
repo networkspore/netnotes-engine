@@ -894,12 +894,12 @@ public class NetworksData {
     private boolean addAdapter(Adapter network, boolean isSave) {
         // int i = 0;
 
-        String networkId = network.getNetworkId();
+        String networkId = network.getAdapterId();
 
         if (getAdapter(networkId) == null) {
                
         
-            m_adapters.put(network.getNetworkId(), network);
+            m_adapters.put(network.getAdapterId(), network);
            
             if(isSave){
                 long timestamp = System.currentTimeMillis();

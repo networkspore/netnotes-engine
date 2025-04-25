@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ErgoDex;
+package io.netnotes.engine.apps.ergoDex;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
