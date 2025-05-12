@@ -79,10 +79,8 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
     private ErgoNodeConfig m_nodeConfigData = null;
 
-    private ExecutorService m_executor = null;
    
     private Future<?> m_future = null;
-    private ScheduledExecutorService m_schedualedExecutor = null;
     private ScheduledFuture<?> m_scheduledFuture = null;
     private SimpleStringProperty m_consoleOutputProperty = new SimpleStringProperty("");
 
@@ -139,11 +137,6 @@ public class ErgoNodeLocalData extends ErgoNodeData {
  
                 throw new NullPointerException("Application file missing");
             }
-        }else{
-            FxTimer.runLater(Duration.ofMillis(200), ()->{
-                updateApp();
-            });
-            
         }
 
         m_nodeConfigData = new ErgoNodeConfig(configText, configName, this);
@@ -186,7 +179,7 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
     @Override
     public void shutdown(){
-        terminate();
+        terminate(onSucceeded->{}, onFailed->{});
     }
    
 
@@ -199,7 +192,7 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     }
 
     @Override
-    public Object sendNote(JsonObject note) {
+    public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
         
         JsonElement cmdElement = note.get(NoteConstants.CMD);
 
@@ -207,20 +200,20 @@ public class ErgoNodeLocalData extends ErgoNodeData {
             switch (cmdElement.getAsString()) {
                 case "run":
                     run();
-                    return true;
+                    return Utils.returnObject(true, getExecService(), onSucceeded);
                 case "terminate":
-                    terminate();
-                    return true;
+                    return terminate(onSucceeded, onFailed);
                 case "updateApp":
-                    updateApp();
-                    return true;
+                    updateApp(note, onSucceeded, onFailed);
+                    return Utils.returnObject(true, getExecService(), onSucceeded);
                 case "getStatus":
-                    return getStatus();
+                    return getStatus(onSucceeded, onFailed);
+                case "getNetworkObject":
+                    return getNetworkObject(onSucceeded, onFailed);
             }
         }
         return null;
     }
-
 
 
 
@@ -254,12 +247,12 @@ public class ErgoNodeLocalData extends ErgoNodeData {
             
         }
         
-        JsonObject msgObject = NoteConstants.getMsgObject(code, timeStamp, NoteConstants.NODE_NETWORK);
+        JsonObject msgObject = NoteConstants.getMsgObject(code, timeStamp, ErgoConstants.NODE_NETWORK);
   
         msgObject.add("data", json);
 
         sendMessage(code, timeStamp, getNetworkId(), msgObject.toString());
-        terminate();
+
     }
 
     public void configFileError(boolean updated) {
@@ -365,7 +358,7 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
     @Override
     public void stop(){
-        terminate();
+        terminate((onSucceeded)->{}, onFailed->{});
     }
 
 
@@ -564,25 +557,35 @@ public class ErgoNodeLocalData extends ErgoNodeData {
                     isGettingInfo.set(false);
                     if (m_isSyncStuck.get() > -1) {
                         if (m_isSyncStuck.get() > SYNC_TIMEOUT_CYCLE) {
-                            terminate();
-                            NamedNodeUrl namedNode = namedNodeUrlProperty().get();
+                            terminate(onTerminated->{
+                                NamedNodeUrl namedNode = namedNodeUrlProperty().get();
                             
-                            Alert a = new Alert(AlertType.WARNING, namedNode.getName() +  " has been unable to sync. Would you like to restart the sync process?", ButtonType.YES, ButtonType.NO);
-                            a.setTitle("Attention - Node Sync: Timed out");
-                            a.setHeaderText("Attention: Node Sync: Timed out");
-                            
-                            Optional<ButtonType> result = a.showAndWait();
-                            if(result != null && result.isPresent() && result.get() == ButtonType.YES){
-        
-                                try {
-                                    cleanSync();
-                                } catch (IOException e) {
-        
+                                Alert a = new Alert(AlertType.WARNING, namedNode.getName() +  " has been unable to sync. Would you like to restart the sync process?", ButtonType.YES, ButtonType.NO);
+                                a.setTitle("Attention - Node Sync: Timed out");
+                                a.setHeaderText("Attention: Node Sync: Timed out");
+                                
+                                Optional<ButtonType> result = a.showAndWait();
+                                if(result != null && result.isPresent() && result.get() == ButtonType.YES){
+            
+                                    try {
+                                        cleanSync();
+                                    } catch (IOException e) {
+            
+                                    }
+                                    run();
+                    
                                 }
-                                run();
-                
-                            }
-                            m_isSyncStuck.set(-1);
+                                m_isSyncStuck.set(-1);
+                            }, onTermFailed->{
+                                NamedNodeUrl namedNode = namedNodeUrlProperty().get();
+                            
+                                Alert a = new Alert(AlertType.WARNING, namedNode.getName() +  " is unresponsive", ButtonType.OK);
+                                a.setTitle("Attention - Node Sync: Timed out");
+                                a.setHeaderText("Attention: Node Sync: Timed out");
+                                a.show();
+                                m_isSyncStuck.set(-1);
+                            });
+                           
                         }
                         m_isSyncStuck.set(m_isSyncStuck.get() + 1);
                     }
@@ -590,11 +593,15 @@ public class ErgoNodeLocalData extends ErgoNodeData {
                 }
             }, (onFailed) -> {
                 //String errMsg = onFailed.getSource().getException().toString();
-                terminate();
-                isGettingInfo.set(false);
+                terminate((onTerminated)->{
+                    isGettingInfo.set(false);
+                }, onTermFailed->{
+                    isGettingInfo.set(false);
+                });
+                
             });
         }else{
-            terminate();
+            stop();
         }
 
     }
@@ -643,62 +650,32 @@ public class ErgoNodeLocalData extends ErgoNodeData {
             try {
                 Files.writeString(AppConstants.LOG_FILE.toPath(), "\nLocalNode reset removeAppResource: " + e.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             } catch (IOException e1) {
+
             }
         
         }
     }
 
-    private void runNode(File appFile, File configFile) {
-        if (m_executor == null) {
-            m_executor = Executors.newSingleThreadExecutor();
+    public ScheduledExecutorService getSchedualedExecService(){
+        return getNetworksData().getSchedualedExecService();
+    }
 
-        }
-        if(m_schedualedExecutor == null){
-            m_schedualedExecutor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
-                public Thread newThread(Runnable r) {
-                    Thread t = Executors.defaultThreadFactory().newThread(r);
-                    t.setDaemon(true);
-                    return t;
-                }
-            });
-        }
-  
+
+    private void runNode(File appFile, File configFile) {
+        
         
         if ((m_future == null || m_future != null && m_future.isDone()) ) {
 
             String[] cmd = Utils.getShellCmd(getExecCmd(appFile, configFile));
         
            
-            //Thread mainThread = Thread.currentThread();
-            //ScheduledFuture<?> future = 
-            
-            m_scheduledFuture = m_schedualedExecutor.scheduleAtFixedRate(()->{
-         
-                getNetworksData().getExecService().submit(()-> updateCycle());
-
-
-            },0, 2000, TimeUnit.MILLISECONDS);
-          
-     
-           
-            m_future = m_executor.submit(new Runnable() {
+            m_future = getExecService().submit(new Runnable() {
                 
-                Process proc;
-
-                /*private final ExecutorService executor = Executors.newCachedThreadPool(
-                        new ThreadFactory() {
-                    public Thread newThread(Runnable r) {
-                        Thread t = Executors.defaultThreadFactory().newThread(r);
-                        t.setDaemon(true);
-                        return t;
-                    }
-                });
-                private Future<?> lastExecution = null;*/
                 @Override
                 public void run() {
                   
                     try {
-                        proc = Runtime.getRuntime().exec(cmd, null, appFile.getParentFile());
+                        Process proc = Runtime.getRuntime().exec(cmd, null, appFile.getParentFile());
                         BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
                         BufferedReader stderr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
 
@@ -796,6 +773,13 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
             });
 
+            m_scheduledFuture = getSchedualedExecService().scheduleAtFixedRate(()->{
+         
+                getExecService().submit(()-> updateCycle());
+
+
+            },0, 2000, TimeUnit.MILLISECONDS);
+
         }
 
         //t.start();
@@ -870,33 +854,33 @@ public class ErgoNodeLocalData extends ErgoNodeData {
                                 
                                 
                                 hashError(m_appFileName, configFile.getName(),isAppHash, isConfigHash, appFileHashData, configFileHashData, timeStamp);
-                             
+                                stop();
+
                             }
 
                      
 
                         } catch (IOException er1) {
-                            sendError(NoteConstants.STOPPED, er1.toString(), "IOException");
-                    
+                            sendError(NoteConstants.STOPPED, "Run error: " +er1.toString() , "Application");
                         }
                     } else {
                         sendError(NoteConstants.STOPPED, "File data unavailable", "Application");
-           
                     }
 
                 }else{
                     sendError(NoteConstants.STOPPED,"File system did not respond", "Application");
                 }
 
-            }, onFailed->{
-                
+            }, (onFailed)->{
+                sendError(NoteConstants.STOPPED,"File path incorrect", "Application");
             });
             
         } else {
             if (m_appDir == null) {
                 sendError(NoteConstants.STOPPED,"Setup required", "Application");
-                terminate();
+                stop();
             }
+            
         }
 
     }
@@ -954,25 +938,23 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     }
 
 
-    public void terminate() {
+    public Future<?> terminate(EventHandler<WorkerStateEvent> onSucceeded,EventHandler<WorkerStateEvent> onFailed) {
         if ( m_statusCode != NoteConstants.STOPPED) {   
-            terminateProcess();
-        }
-    }
-
-    public void terminateProcess(){
-        if (m_statusCode != NoteConstants.STOPPED) {
-
-            if(!Utils.sendTermSig(m_appFileName)){
+            return Utils.sendTermSig(m_appFileName, getExecService(), onSucceeded, (onError)->{
                 reset();
-            }else{
-                
-            }
-        
+                Throwable error = onError.getSource().getException();
+                if(error != null && error instanceof Exception){
+                    Utils.returnException((Exception) error, getExecService(), onFailed);
+                }else{
+                    Utils.returnException(error != null ? error.toString() : "Node termination error", getExecService(), onFailed);
+                }
+            });
+          
         }
+        return Utils.returnObject(true, getExecService(), onSucceeded);
     }
 
-    
+
     public void kill() {
 
         Alert a = new Alert(AlertType.NONE, "Sync-Error detected. Would you like to force shutdown and re-sync?", ButtonType.YES, ButtonType.NO);
@@ -1098,17 +1080,12 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
 
 
-    public void updateApp(){
 
-            updateApp(false);
-
-      
-    }
-
-
-
-    public void updateApp(boolean force){
+    public void updateApp(JsonObject note, EventHandler<WorkerStateEvent> onUpdateSucceeded, EventHandler<WorkerStateEvent> onUpdateFailed){
         if(m_statusCode != NoteConstants.UPDATING){
+            JsonElement forceElement = note != null ? note.get("isForce") : null;
+
+            boolean force = forceElement != null && !forceElement.isJsonNull() ? forceElement.getAsBoolean() : false;
 
             m_cancelUpdate.set(false);  
           
@@ -1116,77 +1093,90 @@ public class ErgoNodeLocalData extends ErgoNodeData {
             Version prevVersion = m_appVersion;
             File prevAppFile = getAppFile();
 
-            terminate();
-            updateStatus(NoteConstants.UPDATING, "Checking for updates...");
+            terminate((onSucceeded)->{
+                updateStatus(NoteConstants.UPDATING, "Checking for updates...");
 
-            
-
-            m_gitHubAPI.getAssetsLatestRelease(getNetworksData().getExecService(), (onFinished)->{
-                Object finishedObject = onFinished.getSource().getValue();
-                if(finishedObject != null && finishedObject instanceof GitHubAsset[] && ((GitHubAsset[]) finishedObject).length > 0){
-                
+                m_gitHubAPI.getAssetsLatestRelease(getNetworksData().getExecService(), (onFinished)->{
+                    Object finishedObject = onFinished.getSource().getValue();
+                    if(finishedObject != null && finishedObject instanceof GitHubAsset[] && ((GitHubAsset[]) finishedObject).length > 0){
                     
-
-                    GitHubAsset[] assets = (GitHubAsset[]) finishedObject;
-
-                    GitHubAsset fileAsset = assets[0];
-
-                    String name = fileAsset.getName();
-                    String url = fileAsset.getUrl();
-
-                    m_latestVersion = Utils.getFileNameVersion(name);
-
-                    if (m_latestVersion.compareTo(prevVersion) > 0  || prevAppFile == null || (prevAppFile != null && !prevAppFile.isFile()) || force) { 
-
-                        File appFile =  new File(appDirString + "/" + name);
-      
-                        Utils.getUrlFileHash(url,getAppIcon(),"Downloading...", appFile, getNetworksData().getExecService(), (onDlSucceeded) -> {
-                            Object dlObject = onDlSucceeded.getSource().getValue();
-                            if (dlObject != null && dlObject instanceof HashData) {
-                                m_appFileHashData = (HashData) dlObject;
-                                m_appFileName = name;
-                                m_appVersion = m_latestVersion;
-
-                                if (m_deleteOldFiles) {
-                                    if (prevAppFile != null && !prevAppFile.getName().equals(name) && prevAppFile.isFile()) {
-                                        prevAppFile.delete();
-                                         }
-                                }
-
-                                updateStatus(NoteConstants.STOPPED, m_appFileName +": " +  m_appVersion.get());
-                                
-                                getLastUpdated().set(LocalDateTime.now());
-                                if(m_isRunOnStart){
-                                    run();
-                                }
-                            } else {
-                
-                                
-                                sendError(NoteConstants.STOPPED, "Download incomplete", "Network");
-                            
-                            }
-                        }, (onError)->{
-                            sendError(NoteConstants.STOPPED, onError.getSource().getException().toString(), "Network");
-                        });
-
-                    }else{
-
-                        updateStatus(NoteConstants.STOPPED, "Node is latest: " + m_latestVersion.get());
-                        if(m_isRunOnStart){
-                            run();
-                        }
+                        GitHubAsset[] assets = (GitHubAsset[]) finishedObject;
+    
+                        GitHubAsset fileAsset = assets[0];
+    
+                        String name = fileAsset.getName();
+                        String url = fileAsset.getUrl();
+    
+                        m_latestVersion = Utils.getFileNameVersion(name);
+    
+                        if (m_latestVersion.compareTo(prevVersion) > 0  || prevAppFile == null || (prevAppFile != null && !prevAppFile.isFile()) || force) { 
+    
+                            File appFile =  new File(appDirString + "/" + name);
+          
+                            Utils.getUrlFileHash(url,getAppIcon(),"Downloading...", appFile, getNetworksData().getExecService(), (onDlSucceeded) -> {
+                                Object dlObject = onDlSucceeded.getSource().getValue();
+                                if (dlObject != null && dlObject instanceof HashData) {
+                                    m_appFileHashData = (HashData) dlObject;
+                                    m_appFileName = name;
+                                    m_appVersion = m_latestVersion;
+    
+                                    if (m_deleteOldFiles) {
+                                        if (prevAppFile != null && !prevAppFile.getName().equals(name) && prevAppFile.isFile()) {
+                                            prevAppFile.delete();
+                                             }
+                                    }
+    
+                                    updateStatus(NoteConstants.STOPPED, m_appFileName +": " +  m_appVersion.get());
+                                    
+                                    getLastUpdated().set(LocalDateTime.now());
+                                    Utils.returnObject(getJsonObject(), getExecService(), onUpdateSucceeded);
+                                    if(m_isRunOnStart){
+                                        run();
+                                    }
+                                } else {
+                    
+                                    Utils.returnException("Download incomplete", getExecService(), onUpdateSucceeded);
                         
+                                    
+                                }
+                            }, (onError)->{
+                                Throwable throwable = onError.getSource().getException();
+                                String msg =throwable != null ? throwable.toString() : "Download failed";
+                                Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+
+
+                            });
+    
+                        }else{
+    
+                            updateStatus(NoteConstants.STOPPED, "Node is latest: " + m_latestVersion.get());
+                            Utils.returnObject(getJsonObject(), getExecService(), onUpdateSucceeded);
+                            if(m_isRunOnStart){
+                                run();
+                            }
+                            
+                        }
+                    
+                    }else{
+                        Utils.returnException("Network unavailable" , getExecService(), onUpdateSucceeded);
+ 
+    
                     }
-                
-                }else{
-
-                    sendError(NoteConstants.STOPPED,"Network unavailable", "Network");
-
-                }
+                }, onError->{
+                    Throwable throwable = onError.getSource().getException();
+                    String msg =throwable != null ? "Update information unavailable: " + throwable.toString() : "Update information unavailable";
+                    Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+                });
             }, onError->{
-                sendError(NoteConstants.STOPPED, onError.getSource().getException().toString(), "Network");
+                Throwable throwable = onError.getSource().getException();
+                String msg =throwable != null ? "Application unresponsive: " + throwable.toString() : "Application unresponsive";
+                Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+         
             });
+           
    
+        }else{
+            Utils.returnException("Update in progress", getExecService(), onUpdateFailed);
         }
     }
 

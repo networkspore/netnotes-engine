@@ -1,19 +1,27 @@
 package io.netnotes.engine.networks.ergo;
 
+import java.util.concurrent.Future;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.AppBox;
 import io.netnotes.engine.JsonParametersBox;
+import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.Stages;
-
+import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.concurrent.WorkerStateEvent;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
@@ -44,13 +52,14 @@ public class ErgoTokenMarketAppBox extends AppBox {
     private ImageView m_menuBtnImgView;
     private MenuButton m_tokenMarketsMenuBtn;
     private Button m_disableBtn;
-
-    public ErgoTokenMarketAppBox(Stage appStage, String locationId, NoteInterface ergoNetworkInterface){
+    private NetworksData m_networksData;
+    
+    public ErgoTokenMarketAppBox(Stage appStage, String locationId,NetworksData networksData, NoteInterface ergoNetworkInterface){
         super();
         m_ergoNetworkInterface = ergoNetworkInterface;
         m_appStage = appStage;
         m_locationId = locationId;
-
+        m_networksData = networksData;
     
         ImageView logoIconView = new ImageView(new Image(ErgoConstants.ERGO_MARKETS_ICON));
         logoIconView.setPreserveRatio(true);
@@ -163,23 +172,46 @@ public class ErgoTokenMarketAppBox extends AppBox {
 
         Runnable setMarketInfo = ()->{
             NoteInterface marketInterface = m_selectedTokenMarket.get();
-            JsonObject marketJson = m_selectedTokenMarket.get() != null ? marketInterface.getJsonObject() : null;
-            
-            if(marketJson != null){
-                marketJson.remove("name");
-                marketJson.remove("networkId");
-                marketInfoParamBox.update(  marketJson);
-                if (!m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
-                    m_tokenMarketsFieldBox.getChildren().add(m_disableBtn);
+            marketInterface.sendNote(NoteConstants.getCmdObject("getNetworkObject"), (onNetworkObject)->{
+                Object obj = onNetworkObject.getSource().getValue();
+                m_tokenMarketsMenuBtn.hide();
+                if(obj != null && obj instanceof JsonObject){
+                    JsonObject marketJson = (JsonObject) obj;
+                    JsonElement nameElement = marketJson.get("name");
+                    m_tokenMarketsMenuBtn.setText(nameElement != null && !nameElement.isJsonNull() ? nameElement.getAsString() : "(Unknown market)");
+                    NoteConstants.getAppIconFromNetworkObject(marketJson, getNetworksData().getExecService(), onImage ->{
+                        Object imageObj = onImage.getSource().getValue();
+                        if(imageObj != null && imageObj instanceof Image){
+                            m_menuBtnImgView.setImage((Image)imageObj);
+                        }else{
+                            m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                        }
+                    }, onFailed->{
+                        m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                    });
+                    
+                    marketInfoParamBox.update(  marketJson);
+                    if (!m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
+                        m_tokenMarketsFieldBox.getChildren().add(m_disableBtn);
+                    }
+                    
+                }else{
+                    m_tokenMarketsMenuBtn.setText(selectString);
+                    m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                    marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
+                    if (m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
+                        m_tokenMarketsFieldBox.getChildren().remove(m_disableBtn);
+                    }
                 }
-            }else{
+            },(onObjectFailed)->{
+                m_tokenMarketsMenuBtn.setText(selectString);
+                m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
                 marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
                 if (m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
                     m_tokenMarketsFieldBox.getChildren().remove(m_disableBtn);
                 }
-            }
-            m_tokenMarketsMenuBtn.setText(marketInterface != null ?marketInterface.getName() : selectString);
-            m_menuBtnImgView.setImage(marketInterface != null ? marketInterface.getAppIcon() : null);
+            });
+
         };
         setMarketInfo.run();
       
@@ -209,7 +241,16 @@ public class ErgoTokenMarketAppBox extends AppBox {
 
         m_disableBtn.setOnMouseClicked(e -> {
             m_showInformation.set(false);
-            clearDefault();
+            clearDefault(onCleared->{
+
+            }, onFailed->{
+                Throwable exThrowable = onFailed.getSource().getException();
+                String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send message";
+
+                Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                a.setHeaderText("Error");
+                a.show();
+            });
         });
 
         m_mainBox = new VBox(layoutBox);
@@ -226,94 +267,142 @@ public class ErgoTokenMarketAppBox extends AppBox {
 
         });
 
-        getDefaultTokenMarket();
+        getDefaultMarketIds();
 
 
         getChildren().addAll(m_mainBox);
         setPadding(new Insets(0,0,5,0));
     }
 
-    public void setDefaultMarket(String id){
+    public NetworksData getNetworksData(){
+        return m_networksData;
+    }
+
+
+
+     public void setDefaultMarket(String id,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("setDefaultTokenMarket");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
         note.addProperty("locationId", m_locationId);
         note.addProperty("id", id);
         
-        m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
     }
 
-    public void clearDefault(){
+
+    public void clearDefault(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("clearDefaultTokenMarket");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
         note.addProperty("locationId", m_locationId);
-        m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note,onSucceeded, onFailed);
     }
 
-    public void getDefaultTokenMarket(){
+    public Future<?> getDefaultMarketIds(){
         
-        JsonObject note = NoteConstants.getCmdObject("getDefaultTokenInterface");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
+        JsonObject note = NoteConstants.getCmdObject("getDefaultMarketIds");
         note.addProperty("locationId", m_locationId);
-        Object obj = m_ergoNetworkInterface.sendNote(note);
-        NoteInterface noteInterface =obj != null && obj instanceof NoteInterface ? (NoteInterface) obj : null;
-        m_selectedTokenMarket.set(noteInterface);
+        return m_ergoNetworkInterface.sendNote(note, onSucceeded->{
+            Object obj = onSucceeded.getSource().getValue();
+            
+            JsonObject json = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
+            if(json != null){
+                JsonElement marketIdElement =  json.get("tokenMarketId");
+
+                m_selectedTokenMarket.set(marketIdElement != null && !marketIdElement.isJsonNull() ? getNetworksData().getApp(marketIdElement.getAsString()) : null);
+            
+            }else{
+              
+                m_selectedTokenMarket.set(null);
+            }
+        }, onFailed->{
+            
+            m_selectedTokenMarket.set(null);
+        });
+
         
     }
 
 
-    public void updateMarkets(){
+
+    public Future<?> updateMarkets(){
        
         JsonObject note = NoteConstants.getCmdObject("getTokenMarkets");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
         note.addProperty("locationId", m_locationId);
 
-        Object objResult = m_ergoNetworkInterface.sendNote(note);
+        return m_ergoNetworkInterface.sendNote(note, onMarkets->{
+            Object objResult = onMarkets.getSource().getValue();
 
-        m_tokenMarketsMenuBtn.getItems().clear();
+            m_tokenMarketsMenuBtn.getItems().clear();
 
-        if (objResult != null && objResult instanceof JsonArray) {
+            if (objResult != null && objResult instanceof JsonArray) {
 
-            JsonArray explorersArray = (JsonArray) objResult;
+                JsonArray explorersArray = (JsonArray) objResult;
 
-            for (JsonElement element : explorersArray) {
-                
-                JsonObject json = element.getAsJsonObject();
+                for (JsonElement element : explorersArray) {
+                    
+                    JsonObject json = element.getAsJsonObject();
 
-                String name = json.get("name").getAsString();
-                String id = json.get("networkId").getAsString();
+                    String name = json.get("name").getAsString();
+                    String id = json.get("networkId").getAsString();
 
-                MenuItem menuItems = new MenuItem(String.format("%-20s", " " + name));
-                menuItems.setOnAction(action -> {
-                    m_tokenMarketsMenuBtn.hide();
-                    setDefaultMarket(id);
-                });
-                m_tokenMarketsMenuBtn.getItems().add(menuItems);
-                
-            }
-
-            MenuItem disableItem = new MenuItem(String.format("%-20s", " " + "[disabled]"));
-            disableItem.setOnAction(action -> {
-                m_tokenMarketsMenuBtn.hide();
-                clearDefault();
-            });
+                    MenuItem menuItems = new MenuItem(String.format("%-20s", " " + name));
+                    menuItems.setOnAction(action -> {
+                        m_tokenMarketsMenuBtn.hide();
+                        setDefaultMarket(id,onSucceeded->{
+                            
+                        }, onFailed->{
+                            Throwable exThrowable = onFailed.getSource().getException();
+                            String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send message";
             
-            m_tokenMarketsMenuBtn.getItems().add(disableItem);
-        }else{
+                            Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                            a.setHeaderText("Error");
+                            a.show();
+                        });
+                    });
+                    m_tokenMarketsMenuBtn.getItems().add(menuItems);
+                }
+                MenuItem disableItem = new MenuItem(String.format("%-20s", " " + "[disabled]"));
+                disableItem.setOnAction(action -> {
+                    m_tokenMarketsMenuBtn.hide();
+                    clearDefault(onCleared->{
+
+                    }, onFailed->{
+                        Throwable exThrowable = onFailed.getSource().getException();
+                        String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send message";
+        
+                        Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                        a.setHeaderText("Error");
+                        a.show();
+                    });
+                });
+                m_tokenMarketsMenuBtn.getItems().add(disableItem);
+            }else{
+                MenuItem explorerItem = new MenuItem(String.format("%-50s", " Unable to find available markets."));
+                m_tokenMarketsMenuBtn.getItems().add(explorerItem);
+            }
+        }, onMarketsFailed->{
+            Throwable exThrowable = onMarketsFailed.getSource().getException();
+            String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to get markets";
+
+            Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+            a.setHeaderText("Error");
+            a.show();
+            m_tokenMarketsMenuBtn.hide();
+            m_tokenMarketsMenuBtn.getItems().clear();
             MenuItem explorerItem = new MenuItem(String.format("%-50s", " Unable to find available markets."));
             m_tokenMarketsMenuBtn.getItems().add(explorerItem);
-        }
+        });
+       
 
     }
 
     @Override
     public void sendMessage(int code, long timestamp,String networkId, String msg){
         
-        if(networkId != null && networkId.equals(NoteConstants.TOKEN_MARKET_NETWORK)){
+        if(networkId != null){
 
             switch(code){
                 
                 case NoteConstants.LIST_DEFAULT_CHANGED:
-                    getDefaultTokenMarket(); 
+                    getDefaultMarketIds(); 
                 break;
               
             }

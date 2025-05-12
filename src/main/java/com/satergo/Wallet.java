@@ -78,7 +78,7 @@ public final class Wallet {
 
     public final SimpleObjectProperty<Balance> lastKnownBalance = new SimpleObjectProperty<>();
 
-    public Address publicAddress(NetworkType networkType, int index) throws WalletKey.Failure {
+    public Address publicAddress(NetworkType networkType, int index) throws Exception {
         return key.derivePublicAddress(networkType, index);
     }
 
@@ -86,42 +86,36 @@ public final class Wallet {
         return myAddresses.keySet().stream().map(index -> {
             try {
                 return publicAddress(networkType, index);
-            } catch (WalletKey.Failure e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
     }
 
-    public void changePassword(char[] currentPassword, char[] newPassword) throws Exception {
-        try {
-            key = key.changedPassword(currentPassword, newPassword);
-            detailsIv = AESEncryption.generateNonce12();
-            detailsSecretKey = AESEncryption.generateSecretKey(newPassword, detailsIv);
-        } catch (WalletKey.Failure e) {
-            throw new Exception("Password failed " + Utils.formatDateTimeString(LocalDateTime.now()));
-        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-            throw new RuntimeException(e);
-        }
+    public void changePassword(SecretString currentPassword, SecretString newPassword) throws Exception {
+
+        key = key.changedPassword(currentPassword, newPassword);
+        detailsIv = AESEncryption.generateNonce12();
+        detailsSecretKey = AESEncryption.generateSecretKey(newPassword.getData(), detailsIv);
+    
         saveToFile();
     }
 
     /**
      * creates a new wallet with local key and master address and saves it
      */
-    public static Wallet create(Path path, Mnemonic mnemonic, String name, char[] password, boolean nonstandardDerivation) {
+    public static Wallet create(Path path, Mnemonic mnemonic, String name, SecretString password, boolean nonstandardDerivation) throws Exception {
         byte[] detailsIv = AESEncryption.generateNonce12();
         SecretKey detailsSecretKey;
-        try {
-            detailsSecretKey = AESEncryption.generateSecretKey(password, detailsIv);
-        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-            throw new RuntimeException(e);
-        }
+   
+        detailsSecretKey = AESEncryption.generateSecretKey(password.getData(), detailsIv);
+      
         Wallet wallet = new Wallet(path, WalletKey.Local.create(nonstandardDerivation, mnemonic, password), name, Map.of(0, "Master"), detailsIv, detailsSecretKey);
         wallet.saveToFile();
         return wallet;
     }
 
-    public static Wallet create(Path path, Mnemonic mnemonic, String name, char[] password) {
+    public static Wallet create(Path path, Mnemonic mnemonic, String name, SecretString password) throws Exception{
         return create(path, mnemonic, name, password, false);
     }
 
@@ -172,7 +166,7 @@ public final class Wallet {
         }
     }
 
-    private static Wallet deserializeDecryptedLegacy(long formatVersion, byte[] bytes, Path path, char[] password) throws UnsupportedOperationException, IOException {
+    private static Wallet deserializeDecryptedLegacy(long formatVersion, byte[] bytes, Path path, SecretString password) throws Exception {
         try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes))) {
             if (formatVersion == 0) {
                 String name = in.readUTF();
@@ -248,34 +242,30 @@ public final class Wallet {
         }
     }
 
-    public static Wallet deserializeEncrypted(byte[] bytes, Path path, char[] password) throws UnsupportedOperationException, IOException, Exception {
-        try {
-            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes))) {
-                if (in.readInt() == MAGIC_NUMBER) {
-                    return deserializeNew(in.readLong(), in, path, password);
-                }
+    public static Wallet deserializeEncrypted(byte[] bytes, Path path, SecretString password) throws Exception {
+ 
+        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes))) {
+            if (in.readInt() == MAGIC_NUMBER) {
+                return deserializeNew(in.readLong(), in, path, password.getData());
             }
-            // old format (version 0)
-            ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            // skip nonce length field which is always 12 (int)
-            buffer.position(4);
-            byte[] decrypted = AESEncryption.decryptData(password, buffer);
-            try (ObjectInputStream old = new ObjectInputStream(new ByteArrayInputStream(decrypted))) {
-                long formatVersion = old.readLong();
-                return deserializeDecryptedLegacy(formatVersion, old.readAllBytes(), path, password);
-            } catch (StreamCorruptedException | EOFException e) {
-                throw new IllegalArgumentException("Invalid wallet data");
-            }
-        } catch (AEADBadTagException e) {
-            throw new Exception("Password exception");
-        } catch (GeneralSecurityException e) {
-            throw new RuntimeException(e);
         }
+        // old format (version 0)
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        // skip nonce length field which is always 12 (int)
+        buffer.position(4);
+        byte[] decrypted = AESEncryption.decryptData(password.getData(), buffer);
+        try (ObjectInputStream old = new ObjectInputStream(new ByteArrayInputStream(decrypted))) {
+            long formatVersion = old.readLong();
+            return deserializeDecryptedLegacy(formatVersion, old.readAllBytes(), path, password);
+        } catch (StreamCorruptedException | EOFException e) {
+            throw new IllegalArgumentException("Invalid wallet data");
+        }
+        
     }
 
-    public static Wallet load(Path path, String password) throws Exception {
+    public static Wallet load(Path path, SecretString password) throws Exception {
         try {
-            Wallet wallet = deserializeEncrypted(Files.readAllBytes(path), path, password.toCharArray());
+            Wallet wallet = deserializeEncrypted(Files.readAllBytes(path), path, password);
             wallet.saveToFile();
             return wallet;
         } catch (IOException e) {

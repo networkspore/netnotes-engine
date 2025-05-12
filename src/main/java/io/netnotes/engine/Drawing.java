@@ -6,12 +6,23 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
+
+import javax.swing.ImageIcon;
+
+import javafx.concurrent.Task;
+import javafx.concurrent.WorkerStateEvent;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
+import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelReader;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
+import scorex.util.encode.Base16;
+import javafx.event.EventHandler;
 
 
 public class Drawing {
@@ -1039,5 +1050,52 @@ public class Drawing {
         }
     
         return new Dimension(new_width, new_height);
+    }
+
+    public static Future<?> convertHexStringToImg(String hex, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws NullPointerException{
+                if(hex != null && execService != null){
+                    byte[] bytes = Base16.decode(hex).getOrElse(null);
+                    if(bytes != null){
+                        return new Image( new ByteArrayInputStream(bytes));
+                    }
+                }
+                throw new NullPointerException();
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        return execService.submit(task);
+    }
+
+    public static Future<?> convertImgToHexString(Image img, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+ 
+         Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws NullPointerException{
+                if(img != null && execService != null){
+                    int w = (int) img.getWidth();
+                    int h = (int) img.getHeight();
+                    if(w > 0 && h > 0){
+                        byte[] buf = new byte[w * h * 4];
+                        img.getPixelReader().getPixels(0, 0, w, h, PixelFormat.getByteBgraInstance(), buf, 0, w * 4);
+                        
+                        return Base16.encode(buf);
+                    }
+                }
+                throw new NullPointerException();
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        return execService.submit(task);
     }
 }

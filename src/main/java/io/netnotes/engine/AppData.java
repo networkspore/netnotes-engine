@@ -69,7 +69,7 @@ public class AppData {
 
 
 
-    public AppData(String password, ExecutorService execService, ScheduledExecutorService schedualedExecService)throws NoSuchAlgorithmException, InvalidKeySpecException, IOException{
+    public AppData(char[] password, ExecutorService execService, ScheduledExecutorService schedualedExecService)throws NoSuchAlgorithmException, InvalidKeySpecException, IOException{
         m_execService = execService;
         m_schedualedExecutor = schedualedExecService;
         URL classLocation = Utils.getLocation(AppData.class);
@@ -144,14 +144,14 @@ public class AppData {
     }
 
   
-     public void createKey(String password) throws NoSuchAlgorithmException, InvalidKeySpecException {
+     public void createKey(char[] password) throws NoSuchAlgorithmException, InvalidKeySpecException {
 
 
         m_secretKey = new SecretKeySpec(Utils.createKeyBytes(password), "AES");
 
     }
 
-    public Future<?> createKey(String password, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
+    public Future<?> createKey(char[] password, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
         
         Task<Object> task = new Task<Object>() {
             @Override

@@ -14,13 +14,14 @@ import org.ergoplatform.appkit.RestApiErgoClient;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.netnotes.engine.networks.ergo.ErgoNetworkUrl;
+
+import io.netnotes.engine.Drawing;
 import io.netnotes.engine.NamedNodeUrl;
 import io.netnotes.engine.Network;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.Utils;
-
+import io.netnotes.engine.apps.ergoDex.ErgoDex;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent; 
@@ -28,8 +29,6 @@ import javafx.event.EventHandler;
 import javafx.scene.image.Image;
 
 public class ErgoNodeData extends Network implements NoteInterface {
-
-
 
     public final static String PUBLIC = "PUBLIC";
     public final static String PRIVATE = "PRIVATE";
@@ -257,44 +256,48 @@ public class ErgoNodeData extends Network implements NoteInterface {
         getExecutorService().submit(task);
     }
 
+    public ErgoNetworkData getErgoNetworkData(){
+        return m_ergoNodesList.getErgoNetworkData();
+    }
+
 
     public Future<?> getStatus(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-    
+   
+        return getErgoNetworkData().getErgoExplorers().sendNote(NoteConstants.getCmdObject("getStatus"), onStatus->{
+            Object statusObj = onStatus.getSource().getValue();
+            if(statusObj != null && statusObj instanceof JsonObject){
+                JsonObject json = (JsonObject) statusObj;
 
+                JsonElement networkStateElement = json.get("networkState");
 
-        Object obj = getErgoNodesList().getErgoNetworkData().getErgoExplorers().sendNote(NoteConstants.getCmdObject("getDefaultInterface"));
+                JsonObject networkStateObject = networkStateElement != null && networkStateElement.isJsonObject() ? networkStateElement.getAsJsonObject() : null;
 
-        if(obj != null && obj instanceof NoteInterface){
+                JsonElement networkHeightElement = networkStateObject != null ? networkStateObject.get("height") : null;
+                
+                JsonElement explorerUrlElement = json.get("ergoNetworkUrl");
+
+                JsonObject explorerUrlJson = explorerUrlElement != null && explorerUrlElement.isJsonObject() ? explorerUrlElement.getAsJsonObject() : null;
+                
+                if(explorerUrlJson != null){
+                    try {
+                        ErgoNetworkUrl ergoExplorerUrl = new ErgoNetworkUrl( explorerUrlJson);
+                        updateParameters(ergoExplorerUrl, networkHeightElement != null ? networkHeightElement.getAsInt() : -1, onSucceeded, onFailed);
+                        
+                    } catch (Exception e) {
+                        Utils.returnException(e, getExecutorService(), onFailed);
+                    }
+                }else{
+                    Utils.returnException("Explorer status unavailable", getExecutorService(), onFailed);
+                }
             
-            NoteInterface explorerInterface = (NoteInterface) obj;
+            }
+
+            
+
+            
+        }, onFailed);
+
            
-            return explorerInterface.sendNote(NoteConstants.getCmdObject("getNetworkState"), (onState)->{
-                Object heightValueObj = onState.getSource().getValue();
-
-                JsonObject stateValueJson = heightValueObj != null && heightValueObj instanceof JsonObject ? (JsonObject) heightValueObj : null;
-
-                JsonElement networkHeightElement = stateValueJson != null ? stateValueJson.get("height") : null;
-                
-                JsonObject explorerObject = explorerInterface.getJsonObject();
-
-                ErgoNetworkUrl ergoExplorerUrl = null;
-                try {
-                    ergoExplorerUrl = new ErgoNetworkUrl( explorerObject.get("ergoNetworkUrl").getAsJsonObject());
-                } catch (Exception e) {
-                    
-                }
-                if(ergoExplorerUrl != null){
-
-                    updateParameters(ergoExplorerUrl, networkHeightElement != null ? networkHeightElement.getAsInt() : -1, onSucceeded, onFailed);
-                }
-
-                
-            }, onFailed);
-
-        
-        }
-
-        return null;
 
     }
 
@@ -310,34 +313,37 @@ public class ErgoNodeData extends Network implements NoteInterface {
                 switch(subject){
                     case "getStatus":
                         return getStatus(onSucceeded, onFailed);
-    
+                    case "getNetworkObject":
+                        return getNetworkObject(onSucceeded, onFailed);
                 }
         }
         return null;
     }
 
+    public ExecutorService getExecService(){
+        return getNetworksData().getExecService();
+    }
 
-
-    
-    @Override
-    public Object sendNote(JsonObject note){
-        if(note != null){
-            JsonElement cmdElement = note.get(NoteConstants.CMD);
-
-            if(cmdElement != null && cmdElement.isJsonPrimitive()){
-                String cmd = cmdElement.getAsString();
-                switch(cmd){
-                   
-                }
-            }
-        }
-        
+    public String getWebsite(){
         return null;
     }
 
+    public String getApiUrl(){
+        NamedNodeUrl namedNode = m_namedNodeUrlProperty.get();
+        return namedNode != null ? namedNode.getUrlString() : null;
+    }
 
+    public Future<?> getNetworkObject(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+         JsonObject returnObject = getJsonObject();
+        returnObject.addProperty("apiUrl", getApiUrl());
+        returnObject.addProperty("website", getWebsite());
+        returnObject.addProperty("description", getDescription());
+        return Drawing.convertImgToHexString(getAppIcon(), getExecService(), onImgHex->{
+            returnObject.addProperty("appIcon",(String) onImgHex.getSource().getValue());
+            Utils.returnObject(returnObject, getExecService(), onSucceeded);
+        }, onFailed);
 
-
+    }
 
 
 }

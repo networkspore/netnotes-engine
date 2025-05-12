@@ -1,4 +1,4 @@
-package io.netnotes.engine.networks.ergo;
+package io.netnotes.engine.apps.ergoFileWallet;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -13,6 +13,7 @@ import io.netnotes.engine.PriceCurrency;
 import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
+import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.beans.binding.Binding;
@@ -382,7 +383,7 @@ public class ErgoWalletAmountSendBox extends HBox implements AmountBoxInterface 
             m_fieldBox = null;
         }
     }
-    private final int quoteDecimalScale = NoteConstants.MIN_NETWORK_FEE.scale();
+    private final int quoteDecimalScale = ErgoConstants.MIN_NETWORK_FEE.scale();
     public void addQuoteAmountBox(){
         if(m_quoteAmountBox == null){
             m_quoteAmountField = new TextField();

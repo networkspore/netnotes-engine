@@ -13,10 +13,11 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.HostServicesInterface;
 import io.netnotes.engine.JsonParametersBox;
-import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
+import io.netnotes.engine.apps.ergoFileWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
 import io.netnotes.engine.networks.ergo.ErgoTransactionPartner.PartnerType;
 import io.netnotes.engine.networks.ergo.ErgoTransactionView.TransactionStatus;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -168,7 +169,7 @@ public class ErgoTransactionViewRow extends VBox{
                    
             MenuItem saveApiUrl = new MenuItem("🢃  Download JSON…");
             saveApiUrl.setOnAction(e->{
-                Image walletImage = new Image(ErgoConstants.ERGO_WALLETS_ICON);
+                Image walletImage = new Image(ErgoWallets.ICON);
                 FileChooser saveChooser = new FileChooser();
                 saveChooser.setTitle("🢃  Download (*.json)");
                 saveChooser.getExtensionFilters().addAll(jsonFilter);
@@ -427,11 +428,11 @@ public class ErgoTransactionViewRow extends VBox{
     }
 
     private ExecutorService getExecService(){
-        return m_walletControl.getErgoNetworkInterface().getNetworksData().getExecService();
+        return m_walletControl.getNetworksData().getExecService();
     }
 
     private HostServicesInterface getHostServices(){
-        return m_walletControl.getErgoNetworkInterface().getNetworksData().getHostServices();
+        return m_walletControl.getNetworksData().getHostServices();
     }
 
     private void addBodyBoxToLayout(){

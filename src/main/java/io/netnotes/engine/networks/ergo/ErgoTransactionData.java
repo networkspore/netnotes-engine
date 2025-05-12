@@ -8,6 +8,7 @@ import io.netnotes.engine.NamedNodeUrl;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
+import io.netnotes.engine.apps.ergoFileWallet.AddressData;
 
 import com.satergo.Wallet;
 
@@ -116,7 +117,7 @@ public class ErgoTransactionData {
     }
 
  
-    public ErgoTransactionData(JsonObject ergoTxDataObject, NetworkType networkType, JsonObject defaultNode, JsonObject defaultExplorer) throws Exception{
+    public ErgoTransactionData(JsonObject ergoTxDataObject, NetworkType networkType) throws Exception{
    
         if(!NoteConstants.checkNetworkType(ergoTxDataObject, networkType)){
             throw new Exception("Network type must be " + networkType);
@@ -161,7 +162,7 @@ public class ErgoTransactionData {
         }
 
      
-        NamedNodeUrl namedNodeUrl = NoteConstants.getNamedNodeUrlFromDataObject(ergoTxDataObject, defaultNode);
+        NamedNodeUrl namedNodeUrl = NoteConstants.getNamedNodeUrlFromDataObject(ergoTxDataObject);
 
         if(namedNodeUrl == null){
             throw new Exception("Node unavailable");
@@ -174,7 +175,7 @@ public class ErgoTransactionData {
         m_namedNodeUrl = namedNodeUrl;
 
 
-        ErgoNetworkUrl explorerNetworkUrl = NoteConstants.getExplorerUrl(ergoTxDataObject, defaultExplorer);
+        ErgoNetworkUrl explorerNetworkUrl = NoteConstants.getExplorerUrl(ergoTxDataObject);
 
         if(explorerNetworkUrl == null){
             throw new Exception("Explorer url not provided");

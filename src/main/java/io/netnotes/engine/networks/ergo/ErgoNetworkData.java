@@ -6,8 +6,8 @@ import org.ergoplatform.appkit.NetworkType;
 
 import com.google.gson.JsonObject;
 import io.netnotes.engine.NetworksData;
-import io.netnotes.engine.NoteMsgInterface;
 import io.netnotes.engine.apps.ergoDex.ErgoDex;
+import io.netnotes.engine.apps.ergoMarkets.ErgoMarkets;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.beans.property.SimpleLongProperty;
@@ -21,7 +21,6 @@ public class ErgoNetworkData {
 
     private ErgoNetwork m_ergoNetwork;
 
-    private ErgoWallets m_ergoWallets = null ;
     private ErgoNodes m_ergoNodes = null;
     private ErgoExplorers m_ergoExplorers = null;
     private ErgoMarkets m_ergoMarkets = null;
@@ -65,10 +64,6 @@ public class ErgoNetworkData {
     public String getId(){
         return m_id;
     }
-    
-    public ErgoWallets getErgoWallets(){
-        return m_ergoWallets;
-    }
 
     public ErgoNodes getErgoNodes(){
         return m_ergoNodes;
@@ -84,40 +79,13 @@ public class ErgoNetworkData {
         return m_ergoMarkets;
     }
 
-    private NoteMsgInterface m_networksDataMsgInterface = null;
 
     public void installNetworks() {
      
-        m_ergoWallets = new ErgoWallets(this, m_ergoNetwork);
+
         m_ergoExplorers = new ErgoExplorers(this, m_ergoNetwork); 
         m_ergoNodes = new ErgoNodes(this, m_ergoNetwork);
-        m_ergoMarkets = new ErgoMarkets(this, m_ergoNetwork);
-        
-        m_networksDataMsgInterface = new NoteMsgInterface() {
 
-            @Override
-            public String getId() {
-                return getLocationId();
-            }
-
-            @Override
-            public void sendMessage(int code, long timestamp, String networkId, String msg) {
-                switch(networkId){
-                    case NetworksData.APPS:
-                        m_ergoMarkets.sendMessage(code, timestamp, networkId, msg);
-                    break;
-                }
-                
-            }
-
-            @Override
-            public void sendMessage(int code, long timestamp, String networkId, Number number) {
-                        
-            }
-            
-        };   
-
-        getNetworksData().addMsgListener(m_networksDataMsgInterface);
     }
 
     public NetworksData getNetworksData(){
@@ -139,10 +107,7 @@ public class ErgoNetworkData {
 
 
     public void shutdown(){
-        if(m_networksDataMsgInterface != null){
-            getNetworksData().removeMsgListener(m_networksDataMsgInterface);
-            m_networksDataMsgInterface = null;
-        }
+      
     }
 
 

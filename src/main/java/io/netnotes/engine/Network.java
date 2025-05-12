@@ -51,18 +51,11 @@ public class Network  {
         m_networksData = networksData;
     }
 
-    public Network(Image icon, String name, String id, NoteInterface noteInterface) {
-        this(icon, name, id, noteInterface.getNetworksData());
-    }
-
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         return null;
     }
 
-    public Object sendNote(JsonObject note){
-        return null;
-    }
 
     public Button getButton(double size){
         if(m_appBtn != null){
@@ -108,49 +101,12 @@ public class Network  {
        
         return new NoteInterface() {
             
-            public String getName(){
-                return Network.this.getName();
-            }
-
             public String getNetworkId(){
                 return Network.this.getNetworkId();
             }
 
-            public Image getAppIcon(){
-                return Network.this.getAppIcon();
-            }
-
             public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
                 return Network.this.sendNote(note, onSucceeded, onFailed);
-            }
-
-            public Object sendNote(JsonObject note){
-                return Network.this.sendNote(note);
-            }
-
-            public JsonObject getJsonObject(){
-                return Network.this.getJsonObject();
-            }
-
-            public TabInterface getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject,  Button networkBtn){
-                return Network.this.getTab(appStage, heightObject, widthObject, networkBtn);
-            }
-
-
-
-
-            public NetworksData getNetworksData(){
-                return Network.this.getNetworksData();
-            }
-
-            public NoteInterface getParentInterface(){
-                return null;
-            }
-
-            public void shutdown(){}
-
-            public SimpleObjectProperty<LocalDateTime> shutdownNowProperty(){
-                return null;
             }
 
             public void addMsgListener(NoteMsgInterface listener){
@@ -163,16 +119,6 @@ public class Network  {
                 return Network.this.removeMsgListener(listener);
             }
 
-            public int getConnectionStatus(){
-                return Network.this.getConnectionStatus();
-            }
-
-            public void setConnectionStatus(int status){}
-
-
-            public String getDescription(){
-                return Network.this.getDescription();
-            }
         };
     }
 
@@ -216,6 +162,7 @@ public class Network  {
     public int getConnectionStatus(){
         return m_connectionStatus;
     }
+
 
     protected void stop(){
         

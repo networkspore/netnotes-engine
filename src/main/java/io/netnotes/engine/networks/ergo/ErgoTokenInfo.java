@@ -1,9 +1,9 @@
-package io.netnotes.engine;
+package io.netnotes.engine.networks.ergo;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-public class TokenInfo {
+public class ErgoTokenInfo {
     private String m_boxId = "";
     private long m_emissionAmount = 0;
     private String m_description = "";
@@ -40,7 +40,7 @@ public class TokenInfo {
         return m_tokenId;
     }
 
-    public TokenInfo(JsonObject json) throws NullPointerException{
+    public ErgoTokenInfo(JsonObject json) throws NullPointerException{
         JsonElement idElement = json.get("id");
         JsonElement boxIdElement = json.get("boxId");
         JsonElement emissionAmountElement = json.get("emissionAmount");
@@ -63,7 +63,7 @@ public class TokenInfo {
         }
     }
 
-    public TokenInfo(String id, String boxId, long emissionAmount, String name, String decription, String type, int decimals){
+    public ErgoTokenInfo(String id, String boxId, long emissionAmount, String name, String decription, String type, int decimals){
         m_tokenId = id;
         m_boxId = boxId;
         m_emissionAmount = emissionAmount;

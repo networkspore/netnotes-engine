@@ -1,4 +1,4 @@
-package io.netnotes.engine.networks.ergo;
+package io.netnotes.engine.apps.ergoFileWallet;
 
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
@@ -24,17 +24,21 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import io.netnotes.engine.networks.ergo.AddressInformation;
 import io.netnotes.engine.networks.ergo.ErgoAmount;
 import io.netnotes.engine.networks.ergo.ErgoBoxInfo;
+import io.netnotes.engine.networks.ergo.ErgoConstants;
+import io.netnotes.engine.networks.ergo.ErgoNetwork;
 import io.netnotes.engine.networks.ergo.ErgoTransactionView;
 import io.netnotes.engine.networks.ergo.ErgoTxInfo;
 import io.netnotes.engine.networks.ergo.ErgoTransactionView.TransactionStatus;
-
+import io.netnotes.engine.ErgoMarketControl;
 import io.netnotes.engine.Network;
 import io.netnotes.engine.NoteConstants;
+import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceCurrency;
 import io.netnotes.engine.PriceQuote;
@@ -42,8 +46,6 @@ import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
 
 import com.satergo.Wallet;
-import com.satergo.WalletKey;
-import com.satergo.WalletKey.Failure;
 import com.satergo.ergo.ErgoInterface;
 
 import javafx.beans.property.SimpleObjectProperty;
@@ -59,6 +61,7 @@ import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.math.BigDecimal;
 
+import org.ergoplatform.sdk.SecretString;
 import org.ergoplatform.appkit.Address;
 import org.ergoplatform.appkit.BlockHeader;
 import org.ergoplatform.appkit.BoxOperations;
@@ -86,8 +89,9 @@ public class AddressData extends Network {
     private AddressesData m_addressesData = null;
     private AtomicBoolean m_isAquired = new AtomicBoolean(false);
     
+    
     public AddressData(String name, int index, String addressString, NetworkType networktype, ErgoWalletData walletData) {
-        super(null, name, addressString, walletData);
+        super(null, name, addressString, walletData.getNetworksData());
         //m_wallet = wallet;
         m_walletData = walletData;
         
@@ -95,6 +99,12 @@ public class AddressData extends Network {
         m_networkType = networktype;
         m_addressString = addressString;
    
+    }
+
+
+
+    protected String getLocationId(){
+        return m_addressesData.getLocationId();
     }
 
     public JsonObject getAddressJson(){
@@ -117,67 +127,72 @@ public class AddressData extends Network {
         m_addressesData = addressesData;
     }
 
-    public BigDecimal totalQuote(){
-        return m_totalQuote;
-    }
 
-    public BigDecimal totalErg(){
-        return m_totalErg;
+    public NoteInterface getErgoNetworkInterface(){
+        return m_addressesData.getWalletData().getErgoNetworkInterface();
     }
 
     public void updateBalance() {
-       
-        JsonObject note = NoteConstants.getCmdObject("getBalance");
-        note.addProperty("address", m_addressString);
-    
-        getErgoNetworkData().getErgoExplorers().sendNote(note, success -> {
-            Object sourceObject = success.getSource().getValue();
 
-            if (sourceObject != null) {
-                JsonObject jsonObject = (JsonObject) sourceObject;
-                JsonObject balance = parseBalance(jsonObject);
-              
-                setBalance(balance);
-              
-            }},
-        failed -> {
+        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
 
-            try {
-                Files.writeString(AppConstants.LOG_FILE.toPath(), "AddressData, Explorer failed update: " + failed.getSource().getException().toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException e) {
-                
-                
-            }
-        });
+        if(ergoNetworkInterface != null){
+            JsonObject note = NoteConstants.getCmdObject("getBalance",  ErgoConstants.EXPLORER_NETWORK, getLocationId());
+            note.addProperty("address", m_addressString);
+        
+            ergoNetworkInterface.sendNote(note, success -> {
+                Object sourceObject = success.getSource().getValue();
+                JsonObject jsonObject = sourceObject != null && sourceObject instanceof JsonObject ? (JsonObject) sourceObject : null;
+                if (jsonObject != null) {
+                    parseBalance(jsonObject, onParsed->{
+                        Object parsedObject = onParsed.getSource().getValue();
+                        
+                        setBalance(parsedObject != null && parsedObject instanceof JsonObject ? (JsonObject) parsedObject : jsonObject);
+                    });
+                }
+            }, failed -> {
+                try {
+                    Files.writeString(AppConstants.LOG_FILE.toPath(), "AddressData, Explorer failed update: " + failed.getSource().getException().toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                } catch (IOException e) {
+                }
+            });
+        }
     }
 
      public Future<?> getTransactions(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
-        JsonObject txNote = NoteConstants.getCmdObject("getTransactionsByAddress");
-        txNote.addProperty("address", m_addressString);
+        
+        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
 
-        JsonElement startIndexElement = note.get("startIndex");
-        JsonElement limitElement = note.get("limit");
-        JsonElement conciseElement = note.get("concise");
-        JsonElement fromHeightElement = note.get("fromHeight");
-        JsonElement toHeightElement = note.get("toHeight");
+        if(ergoNetworkInterface != null){
+            JsonObject txNote = NoteConstants.getCmdObject("getTransactionsByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
+            txNote.addProperty("address", m_addressString);
 
-        if(startIndexElement != null){
-            txNote.add("startIndex", startIndexElement);
-        }
-        if(limitElement != null){
-            txNote.add("limit",limitElement);
-        }
-        if(conciseElement != null){
-            txNote.add("concise", conciseElement);
-        }
-        if(fromHeightElement != null){
-            txNote.add("fromHeight", fromHeightElement);
-        }
-        if(toHeightElement != null){
-            txNote.add("toHeight", toHeightElement);
-        }
+            JsonElement startIndexElement = note.get("startIndex");
+            JsonElement limitElement = note.get("limit");
+            JsonElement conciseElement = note.get("concise");
+            JsonElement fromHeightElement = note.get("fromHeight");
+            JsonElement toHeightElement = note.get("toHeight");
 
-        return getErgoNetworkData().getErgoExplorers().sendNote(txNote, onSucceeded, onFailed);
+            if(startIndexElement != null){
+                txNote.add("startIndex", startIndexElement);
+            }
+            if(limitElement != null){
+                txNote.add("limit",limitElement);
+            }
+            if(conciseElement != null){
+                txNote.add("concise", conciseElement);
+            }
+            if(fromHeightElement != null){
+                txNote.add("fromHeight", fromHeightElement);
+            }
+            if(toHeightElement != null){
+                txNote.add("toHeight", toHeightElement);
+            }
+
+            return ergoNetworkInterface.sendNote(txNote, onSucceeded, onFailed);
+        }else{
+            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
+        }
 
     }
 
@@ -185,10 +200,16 @@ public class AddressData extends Network {
 
 
     public Future<?> getUnspentBoxes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
-        JsonObject note = NoteConstants.getCmdObject("getUnspentByAddress");
-        note.addProperty("value", m_addressString);
-    
-        return getErgoNetworkData().getErgoExplorers().sendNote(note, onSucceeded,onFailed);
+        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
+
+        if(ergoNetworkInterface != null){
+            JsonObject note = NoteConstants.getCmdObject("getUnspentByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
+            note.addProperty("value", m_addressString);
+        
+            return ergoNetworkInterface.sendNote(note, onSucceeded,onFailed);
+        }else{
+            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
+        }
     }
     
 
@@ -207,11 +228,7 @@ public class AddressData extends Network {
         }
     }*/
 
-    public ErgoNetworkData getErgoNetworkData(){
-        
-        return m_walletData.getErgoWallets().getErgoNetworkData();
-    }
-   
+
 
 
     /*public void openWatchedTxs(JsonArray txsJsonArray){
@@ -296,9 +313,38 @@ public class AddressData extends Network {
             m_watchedTransactions.add(transaction);
             transaction.addUpdateListener((obs,oldval,newval)->{
             
-                saveAddresInfo();
-            });
-            if(save){
+            txNote.addProperty("address", m_addressString);
+
+            JsonElement startIndexElement = note.get("startIndex");
+            JsonElement limitElement = note.get("limit");
+            JsonElement conciseElement = note.get("concise");
+            JsonElement fromHeightElement = note.get("fromHeight");
+            JsonElement toHeightElement = note.get("toHeight");
+
+            if(startIndexElement != null){
+                txNote.add("startIndex", startIndexElement);
+            }
+            if(limitElement != null){
+                txNote.add("limit",limitElement);
+            }
+            if(conciseElement != null){
+                txNote.add("concise", conciseElement);
+            }
+            if(fromHeightElement != null){
+                txNote.add("fromHeight", fromHeightElement);
+            }
+            if(toHeightElement != null){
+                txNote.add("toHeight", toHeightElement);
+            }
+
+            return getErgoNetworkData().getErgoExplorers().sendNote(txNote, onTxViews->{
+                Object obj = onTxViews.getSource().getValue();
+                if(obj != null && obj instanceof JsonObject){
+                    parseTxViews((JsonObject) obj, onSucceeded, onFailed);
+                }else{
+                    Utils.returnException("Returned null", getExecService(), onFailed);
+                }
+            }, onFailed);
                 saveAddresInfo();
             }
         }
@@ -441,7 +487,6 @@ public class AddressData extends Network {
 
 
 
-
     public void updateTransactions(ErgoExplorerData explorerData){
         
         try {
@@ -480,107 +525,211 @@ public class AddressData extends Network {
         
     }*/
 
-    private BigDecimal m_totalQuote = BigDecimal.ZERO;
-    private BigDecimal m_totalErg = BigDecimal.ZERO;
+    public ErgoMarketControl getErgoMarketControl(){
+        return m_addressesData.getErgoMarketControl();
+    }
 
-    private JsonObject parseBalance(JsonObject balanceJson ){
-        m_totalQuote = BigDecimal.ZERO;
-        m_totalErg = BigDecimal.ZERO;
-        if(m_addressesData != null && balanceJson != null){
-            JsonElement confirmedElement = balanceJson.get("confirmed");
+    private void checkErgoQuote(boolean isErgoMarket, JsonObject confirmedObject, EventHandler<WorkerStateEvent> onFinished){
+        if(isErgoMarket){
             
-            boolean isErgoMarket = m_addressesData.isErgoMarket();
-            boolean isTokenMarket = m_addressesData.isTokenMarket();
-
-            if(confirmedElement != null && (isErgoMarket || isTokenMarket)){
-            
-
-                JsonObject confirmedObject = confirmedElement != null && confirmedElement.isJsonObject() ? confirmedElement.getAsJsonObject() : null;
-                
-                if(confirmedObject != null){
-                    balanceJson.remove("confirmed");
-
-                    PriceQuote ergoQuote = isErgoMarket ? m_addressesData.getErgoQuote() : null;
-                    if(ergoQuote != null){
-                        confirmedObject.add("ergoQuote", ergoQuote.getJsonObject());
-                        
-                        JsonElement nanoErgElement = confirmedObject.get("nanoErgs");
-                        long nanoErg = nanoErgElement != null && nanoErgElement.isJsonPrimitive() ? nanoErgElement.getAsLong() : 0;
-                        ErgoAmount ergoAmount =  new ErgoAmount(nanoErg, m_networkType);
+            getErgoMarketControl().getErgoUSDQuote(onQuote->{
+                Object obj = onQuote.getSource().getValue();
+                JsonObject quoteJson = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
+                PriceQuote ergoQuote = quoteJson != null ? new PriceQuote(quoteJson) : null;
+                if(ergoQuote != null){
+                    confirmedObject.add("ergoQuote", quoteJson);
                     
-                        BigDecimal ergoQuoteAmount = ergoQuote.getQuote().multiply(ergoAmount.getBigDecimalAmount());    
-                        
-                        confirmedObject.addProperty("ergoQuoteAmount", ergoQuoteAmount);
-                        m_totalErg = m_totalErg.add(ergoAmount.getBigDecimalAmount());    
-                        m_totalQuote = m_totalQuote.add(ergoQuoteAmount);
-                        
-                    }
+                    JsonElement nanoErgElement = confirmedObject.get("nanoErgs");
+                    long nanoErg = nanoErgElement != null && nanoErgElement.isJsonPrimitive() ? nanoErgElement.getAsLong() : 0;
+                    ErgoAmount ergoAmount =  new ErgoAmount(nanoErg, m_networkType);
+                
+                    BigDecimal ergoQuoteAmount = ergoQuote.getQuote().multiply(ergoAmount.getBigDecimalAmount());    
+                    
+                    confirmedObject.addProperty("ergoQuoteAmount", ergoQuoteAmount);
 
+                    confirmedObject.addProperty("totalQuote", ergoQuoteAmount);
+                    confirmedObject.addProperty("totalErg", ergoAmount.getBigDecimalAmount());
 
-                    JsonElement tokensElement = confirmedObject != null ? confirmedObject.get("tokens") : null;
+                }
 
-                    JsonArray confirmedTokenArray = tokensElement != null && tokensElement.isJsonArray() ? tokensElement.getAsJsonArray() : null;
-                    int tokenSize = confirmedTokenArray != null ? confirmedTokenArray.size() : 0;
-                    if(confirmedTokenArray != null && tokenSize > 0 && isTokenMarket){
-                        confirmedObject.remove("tokens");
-                        
-                        JsonArray udpatedTokenArray = new JsonArray();
+                Utils.returnObject(confirmedObject, getExecService(), onFinished);
+            }, onQuoteFailed->{
+                Utils.returnObject(confirmedObject, getExecService(), onFinished);
+            });
 
-                        for (int i = 0; i < tokenSize ; i++) {
-                            JsonElement tokenElement = confirmedTokenArray.get(i);
+        }else{
+            Utils.returnObject(confirmedObject, getExecService(), onFinished);
+        }
+    }
 
-                            JsonObject tokenObject = tokenElement.getAsJsonObject();
+    private void checkTokenQuotes(boolean isTokenMarket,JsonObject balanceJson, JsonObject confirmedObject, PriceQuote ergoQuote, EventHandler<WorkerStateEvent> onSucceeded){
+        
+        JsonElement tokensElement = isTokenMarket ? confirmedObject.get("tokens") : null;
 
-                            JsonElement tokenIdElement = tokenObject.get("tokenId");
-                            JsonElement amountElement = tokenObject.get("amount");
-                            JsonElement decimalsElement = tokenObject.get("decimals");
-                            JsonElement nameElement = tokenObject.get("name");
-                            JsonElement tokenTypeElement = tokenObject.get("tokenType");
+        JsonArray confirmedTokenArray = tokensElement != null && tokensElement.isJsonArray() ? tokensElement.getAsJsonArray() : null;
+        int tokenSize = confirmedTokenArray != null ? confirmedTokenArray.size() : 0;
+        if(confirmedTokenArray != null && tokenSize > 0){
+            confirmedObject.remove("tokens");
+            
+            
+            PriceAmount[] amountArray = new PriceAmount[tokenSize];
+            JsonArray tokenIds = new JsonArray();
+            for (int i = 0; i < tokenSize ; i++) {
+                JsonElement tokenElement = confirmedTokenArray.get(i);
 
-                            String tokenId = tokenIdElement.getAsString();
-                            long amount = amountElement.getAsLong();
-                            int decimals = decimalsElement.getAsInt();
-                            String name = nameElement.getAsString();
-                            String tokenType = tokenTypeElement.getAsString();
-                            
-                            PriceAmount tokenAmount = new PriceAmount(amount, new PriceCurrency(tokenId, name, decimals, tokenType, m_networkType.toString()));
-                            PriceQuote tokenQuote = m_addressesData.getTokenQuoteInErg(tokenId);
-                            
-                            if(tokenQuote != null){
-                                
-                                tokenObject.add("tokenQuote", tokenQuote.getJsonObject());
-                                BigDecimal tokenQuoteErgAmount =  tokenQuote.getQuote().multiply(tokenAmount.getBigDecimalAmount());
+                JsonObject tokenObject = tokenElement.getAsJsonObject();
 
-                                m_totalErg = m_totalErg.add(tokenQuoteErgAmount);    
-                                tokenObject.addProperty("tokenQuoteErgAmount", tokenQuoteErgAmount);
-                            
-                                if(ergoQuote != null){
-                                    
-                                    BigDecimal tokenQuoteAmount = ergoQuote.getQuote().multiply(tokenQuoteErgAmount);
-                                    m_totalQuote = m_totalQuote.add(tokenQuoteAmount);
+                JsonElement tokenIdElement = tokenObject.get("tokenId");
+                JsonElement amountElement = tokenObject.get("amount");
+                JsonElement decimalsElement = tokenObject.get("decimals");
+                JsonElement nameElement = tokenObject.get("name");
+                JsonElement tokenTypeElement = tokenObject.get("tokenType");
 
-                                    tokenObject.addProperty("tokenQuoteAmount", tokenQuoteAmount);
-                                    
-                                }
+                String tokenId = tokenIdElement.getAsString();
+                long amount = amountElement.getAsLong();
+                int decimals = decimalsElement.getAsInt();
+                String name = nameElement.getAsString();
+                String tokenType = tokenTypeElement.getAsString();
+                
+                amountArray[i] = new PriceAmount(amount, new PriceCurrency(tokenId, name, decimals, tokenType, m_networkType.toString()));
+            
+                tokenIds.add(new JsonPrimitive(tokenId));
+            }
+            
+            getErgoMarketControl().getTokenArrayQuotesInErg(tokenIds, onTokenQuotes->{
+                Object quotesObject = onTokenQuotes.getSource().getValue();
+                JsonObject quotesJson = quotesObject != null && quotesObject instanceof JsonObject ? (JsonObject) quotesObject : null;
+                JsonElement quotesArrayElement = quotesJson != null ? quotesJson.get("quotes") : null;
+                JsonArray quotesArray = quotesArrayElement != null && quotesArrayElement.isJsonArray() ? quotesArrayElement.getAsJsonArray() : null;
 
-                            }
-
-                            udpatedTokenArray.add(tokenObject);
-
-                        }
-
-                        confirmedObject.add("tokens", udpatedTokenArray);
-    
-                    }
-                    confirmedObject.addProperty("totalQuote", m_totalQuote);
-                    confirmedObject.addProperty("totalErg", m_totalErg);
-
+                if(quotesArray != null && quotesArray.size() > 0){
+                    matchTokenQuotes(balanceJson, confirmedObject, quotesArray,amountArray, ergoQuote, onSucceeded);
+                }else{
+                    confirmedObject.add("tokens", confirmedTokenArray);
                     balanceJson.add("confirmed", confirmedObject);
+                    Utils.returnObject(balanceJson, getExecService(), onSucceeded);
                 }
                 
-            }     
+            }, onQuotesFailed->{
+                
+                confirmedObject.add("tokens", confirmedTokenArray);
+                balanceJson.add("confirmed", confirmedObject);
+
+                Utils.returnObject(balanceJson, getExecService(), onSucceeded);
+            });
+        
+        }else{
+
+            balanceJson.add("confirmed", confirmedObject);
+
+            Utils.returnObject(balanceJson, getExecService(), onSucceeded);
+        }
+    }
+
+    private void parseBalance(JsonObject balanceJson, EventHandler<WorkerStateEvent> onSucceeded){
+
+        if(m_addressesData != null && balanceJson != null){
+
+            boolean isErgoMarket = getErgoMarketControl().isMarketAvailable();
+            boolean isTokenMarket = getErgoMarketControl().isTokenMarketAvailable();
+
+            JsonElement confirmedElement = (isErgoMarket || isTokenMarket) ? balanceJson.remove("confirmed") : null;
+              
+            JsonObject confirmedObject = confirmedElement != null && confirmedElement.isJsonObject() ? confirmedElement.getAsJsonObject() : null;
+                
+            if(confirmedObject != null){
+                JsonObject removedJson = balanceJson;
+                checkErgoQuote(isErgoMarket, confirmedObject, (onErgoQuoteChecked)->{
+                    Object checkedErgoQuoteObj = onErgoQuoteChecked.getSource().getValue();
+                    JsonObject checkedErgoQuoteJson = checkedErgoQuoteObj != null && checkedErgoQuoteObj instanceof JsonObject ? (JsonObject) checkedErgoQuoteObj : null;
+                    JsonElement ergoQuoteElement = checkedErgoQuoteJson.get("ergoQuote");
+                    JsonObject ergoQuoteJson = ergoQuoteElement != null && ergoQuoteElement.isJsonObject() ? ergoQuoteElement.getAsJsonObject() : null;
+                    checkTokenQuotes(isTokenMarket, removedJson, checkedErgoQuoteJson, ergoQuoteJson != null ? new PriceQuote(ergoQuoteJson) : null, onSucceeded);
+                });
+            }else{
+                Utils.returnObject(balanceJson, getExecService(), onSucceeded);
+            }
         }   
-        return balanceJson;
+    }
+
+
+
+    private Future<?> matchTokenQuotes(JsonObject balanceJson, JsonObject confirmedObject, JsonArray quotesArray, PriceAmount[] amountArray, PriceQuote ergoQuote, EventHandler<WorkerStateEvent> onComplete){
+        
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() {
+                JsonElement totalErgElement = confirmedObject.remove("totalErg");
+                JsonElement totalQuoteElement = confirmedObject.remove("totalQuote");
+
+                BigDecimal totalErg = totalErgElement != null ? totalErgElement.getAsBigDecimal() : BigDecimal.ZERO;
+                BigDecimal totalQuote = totalQuoteElement != null ? totalQuoteElement.getAsBigDecimal() : BigDecimal.ZERO;
+
+                JsonArray jsonArray = new JsonArray();
+                PriceQuote[] priceQuotes = new PriceQuote[quotesArray.size()];
+                for(int i = 0; i < quotesArray.size() ; i ++){
+                    JsonElement quoteElement = quotesArray.get(i);
+                    if(quoteElement != null && !quoteElement.isJsonNull() && quoteElement.isJsonObject()){
+                        priceQuotes[i] = new PriceQuote(quoteElement.getAsJsonObject());
+                        
+                        
+                    }else{
+                        priceQuotes[i] = null;
+                    }
+                }
+                SimpleObjectProperty<BigDecimal> totalErgSum = new SimpleObjectProperty<>(totalErg);
+                SimpleObjectProperty<BigDecimal> totalQuoteSum = new SimpleObjectProperty<>(totalQuote);
+
+                for(int i = 0; i < amountArray.length ; i++){
+                    PriceAmount tokenAmount = amountArray[i];
+                    String amountTokenId = tokenAmount.getTokenId();
+                    JsonObject tokenObject = tokenAmount.getBalanceObject();
+
+                    PriceQuote tokenQuote = findQuoteByBaseId(amountTokenId, priceQuotes);
+                    if(tokenQuote != null){
+
+                        tokenObject.add("tokenQuote", tokenQuote.getJsonObject());
+                        BigDecimal tokenQuoteErgAmount =  tokenQuote.getQuote().multiply(tokenAmount.getBigDecimalAmount());
+
+                        totalErgSum.set(totalErgSum.get().add(tokenQuoteErgAmount));    
+                        tokenObject.addProperty("tokenQuoteErgAmount", tokenQuoteErgAmount);
+                    
+                        if(ergoQuote != null){
+                            
+                            BigDecimal tokenQuoteAmount = ergoQuote.getQuote().multiply(tokenQuoteErgAmount);
+                            totalQuoteSum.set(totalQuoteSum.get().add(tokenQuoteAmount));
+
+                            tokenObject.addProperty("tokenQuoteAmount", tokenQuoteAmount);
+                            
+                        }
+
+                    }
+                    jsonArray.add(tokenObject);
+                }
+              
+                confirmedObject.add("tokens", jsonArray);
+                confirmedObject.addProperty("totalErg", totalErgSum.get());
+                confirmedObject.addProperty("totalQuote", totalQuoteSum.get());
+                
+                balanceJson.add("confirmed", confirmedObject);
+                return balanceJson;
+            }
+        };
+
+        task.setOnSucceeded(onComplete);
+
+        return getExecService().submit(task);
+    }
+
+    public static PriceQuote findQuoteByBaseId(String tokenId, PriceQuote[] quotes){
+        for(int i = 0; i < quotes.length ; i++){
+            PriceQuote quote = quotes[i];
+            if(quote != null && tokenId.equals(quote.getBaseId())){
+                return quote;
+            }
+        }
+        return null;
     }
 
 
@@ -599,7 +748,7 @@ public class AddressData extends Network {
 
         }*/
         
-        m_walletData.sendMessage(NoteConstants.UPDATED,timeStamp ,m_addressString,(String) null); 
+        m_walletData.sendMessage(NoteConstants.UPDATED,timeStamp ,m_addressString, m_balanceString); 
 
 
     }
@@ -620,53 +769,63 @@ public class AddressData extends Network {
 
 
     public Future<?> getAddressTxInfoFile( EventHandler<WorkerStateEvent> onSucceeded){
-        return getNetworksData().getIdDataFile(getAddressString(), "txInfo" , NoteConstants.WALLET_NETWORK, ErgoNetwork.NETWORK_ID, onSucceeded);
+        return getNetworksData().getIdDataFile(getAddressString(), "txInfo" , ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, onSucceeded);
     }
 
     public File getAddressTxViewFile() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, InterruptedException, IOException{
-        return getNetworksData().getIdDataFileBlocking(getAddressString(), "txView" , NoteConstants.WALLET_NETWORK, ErgoNetwork.NETWORK_ID);
+        return getNetworksData().getIdDataFileBlocking(getAddressString(), "txView" , ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID);
      }
  
 
     private ExecutorService getExecService(){
-        return getErgoNetworkData().getNetworksData().getExecService();
+        return getNetworksData().getExecService();
     }
 
     
     public Future<?> getTransactionViews(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
-        JsonObject txNote = NoteConstants.getCmdObject("getTransactionViewsByAddress");
-        txNote.addProperty("address", m_addressString);
+        
+        
+        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
 
-        JsonElement startIndexElement = note.get("startIndex");
-        JsonElement limitElement = note.get("limit");
-        JsonElement conciseElement = note.get("concise");
-        JsonElement fromHeightElement = note.get("fromHeight");
-        JsonElement toHeightElement = note.get("toHeight");
+        if(ergoNetworkInterface != null){
+            JsonObject txNote = NoteConstants.getCmdObject("getTransactionViewsByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
 
-        if(startIndexElement != null){
-            txNote.add("startIndex", startIndexElement);
-        }
-        if(limitElement != null){
-            txNote.add("limit",limitElement);
-        }
-        if(conciseElement != null){
-            txNote.add("concise", conciseElement);
-        }
-        if(fromHeightElement != null){
-            txNote.add("fromHeight", fromHeightElement);
-        }
-        if(toHeightElement != null){
-            txNote.add("toHeight", toHeightElement);
-        }
 
-        return getErgoNetworkData().getErgoExplorers().sendNote(txNote, onTxViews->{
-            Object obj = onTxViews.getSource().getValue();
-            if(obj != null && obj instanceof JsonObject){
-                parseTxViews((JsonObject) obj, onSucceeded, onFailed);
-            }else{
-                Utils.returnException("Returned null", getExecService(), onFailed);
+            txNote.addProperty("address", m_addressString);
+
+            JsonElement startIndexElement = note.get("startIndex");
+            JsonElement limitElement = note.get("limit");
+            JsonElement conciseElement = note.get("concise");
+            JsonElement fromHeightElement = note.get("fromHeight");
+            JsonElement toHeightElement = note.get("toHeight");
+
+            if(startIndexElement != null){
+                txNote.add("startIndex", startIndexElement);
             }
-        }, onFailed);
+            if(limitElement != null){
+                txNote.add("limit",limitElement);
+            }
+            if(conciseElement != null){
+                txNote.add("concise", conciseElement);
+            }
+            if(fromHeightElement != null){
+                txNote.add("fromHeight", fromHeightElement);
+            }
+            if(toHeightElement != null){
+                txNote.add("toHeight", toHeightElement);
+            }
+
+            return ergoNetworkInterface.sendNote(txNote, onTxViews->{
+                Object obj = onTxViews.getSource().getValue();
+                if(obj != null && obj instanceof JsonObject){
+                    parseTxViews((JsonObject) obj, onSucceeded, onFailed);
+                }else{
+                    Utils.returnException("Returned null", getExecService(), onFailed);
+                }
+            }, onFailed);
+        }else{
+            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
+        }
 
     }
 
@@ -936,7 +1095,7 @@ public class AddressData extends Network {
     }
 
     private void saveTxInfoData(JsonObject txInfoData){
-        getNetworksData().save(getAddressString(), "txInfo" , NoteConstants.WALLET_NETWORK, ErgoNetwork.NETWORK_ID, txInfoData);
+        getNetworksData().save(getAddressString(), "txInfo" , ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, txInfoData);
     }
 
     private Future<?> readUpdateTxInfo(JsonReader reader, JsonWriter writer,String txId, ErgoBoxInfo boxInfo, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
@@ -996,10 +1155,10 @@ public class AddressData extends Network {
     }
 
     private InputBox[] getRefundBoxesToSpend(Wallet wallet, InputBox refundBox, NetworkType networkType, BlockchainContext ctx){
-        if(refundBox.getValue() < NoteConstants.MIN_NANO_ERGS){
+        if(refundBox.getValue() < ErgoConstants.MIN_NANO_ERGS){
            
             List<InputBox> boxesToSpend = BoxOperations.createForSenders(wallet.addressStream(networkType).toList(), ctx)
-                    .withFeeAmount(NoteConstants.MIN_NANO_ERGS - refundBox.getValue())
+                    .withFeeAmount(ErgoConstants.MIN_NANO_ERGS - refundBox.getValue())
                     .loadTop();
                     boxesToSpend.add(refundBox);
             return boxesToSpend.toArray(new InputBox[boxesToSpend.size()]);
@@ -1033,7 +1192,7 @@ public class AddressData extends Network {
                 if(address.toString().equals(addressString)){
                    resultAddress.set(address);
                 }
-            } catch (Failure e) {
+            } catch (Exception e) {
        
             }
         });
@@ -1050,7 +1209,7 @@ public class AddressData extends Network {
         NetworkType networkType,
         String parentTxId,
         String boxId,
-        String pass,
+        SecretString pass,
         String locationId,
         EventHandler<WorkerStateEvent> onSucceeded,
         EventHandler<WorkerStateEvent> onFailed)
@@ -1065,7 +1224,7 @@ public class AddressData extends Network {
                     InputBox[] inputBoxes =  getRefundBoxesToSpend(wallet, boxToCancel, networkType, ctx);
                     UnsignedTransactionBuilder txBuilder = ctx.newTxBuilder();
                     OutBoxBuilder newBoxBuilder = txBuilder.outBoxBuilder();
-                    newBoxBuilder.value(boxToCancel.getValue() - NoteConstants.MIN_NANO_ERGS);
+                    newBoxBuilder.value(boxToCancel.getValue() - ErgoConstants.MIN_NANO_ERGS);
                     int tokenSize = boxToCancel.getTokens().size();
                     if (tokenSize > 0) {
                         newBoxBuilder.tokens(boxToCancel.getTokens().toArray(new ErgoToken[tokenSize]));
@@ -1076,7 +1235,7 @@ public class AddressData extends Network {
                     OutBox outBox = newBoxBuilder.build();
                     return txBuilder
                     .addInputs(inputBoxes).addOutputs(outBox)
-                    .fee(NoteConstants.MIN_NANO_ERGS)
+                    .fee(ErgoConstants.MIN_NANO_ERGS)
                     .sendChangeTo(address)
                     .build();
                 });
@@ -1084,7 +1243,7 @@ public class AddressData extends Network {
                 String txId = wallet.transact(ergoClient, ergoClient.execute(ctx -> {
                     try {
                         return wallet.key().signWithPassword(pass, ctx, unsignedTx, wallet.myAddresses.keySet());
-                    } catch (WalletKey.Failure ex) {
+                    } catch (Exception ex) {
 
                         return null;
                     }
@@ -1125,7 +1284,7 @@ public class AddressData extends Network {
         long amountToSpendNanoErgs,
         long feeAmountNanoErgs,
         PriceAmount[] priceAmounts,
-        String pass,
+        SecretString pass,
         EventHandler<WorkerStateEvent> onSucceeded,
         EventHandler<WorkerStateEvent> onFailed)
     {
@@ -1153,7 +1312,7 @@ public class AddressData extends Network {
                 String txId = wallet.transact(ergoClient, ergoClient.execute(ctx -> {
                     try {
                         return wallet.key().signWithPassword(pass, ctx, unsignedTx, wallet.myAddresses.keySet());
-                    } catch (WalletKey.Failure ex) {
+                    } catch (Exception ex) {
 
                         return null;
                     }

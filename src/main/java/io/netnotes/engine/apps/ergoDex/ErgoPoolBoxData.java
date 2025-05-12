@@ -10,6 +10,7 @@ import io.netnotes.engine.networks.ergo.ErgoAmount;
 import io.netnotes.engine.networks.ergo.ErgoBox;
 import io.netnotes.engine.networks.ergo.ErgoBoxAsset;
 import io.netnotes.engine.networks.ergo.ErgoBoxRegister;
+import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.PriceAmount;
@@ -126,7 +127,7 @@ public class ErgoPoolBoxData{
             JsonObject cmdObject = NoteConstants.getCmdObject("getUnspentByTokenId");
             cmdObject.addProperty("tokenId", poolId);
             cmdObject.addProperty("locationId", locationId);
-            cmdObject.addProperty("networkId", NoteConstants.EXPLORER_NETWORK);
+            cmdObject.addProperty("networkId", ErgoConstants.EXPLORER_NETWORK);
             cmdObject.addProperty("offset", 0);
             cmdObject.addProperty("limit", 1);
 

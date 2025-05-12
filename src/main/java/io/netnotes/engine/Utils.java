@@ -118,19 +118,29 @@ public class Utils {
     public static final int DEFAULT_BUFFER_SIZE = 2048;
 
     public final static String[] getAsciiStringArray(){
-        String[] charStrings = new String[255];
+        String[] charStrings = new String[128];
 
-        for(int i = 0; i < 255; i++){
+        for(int i = 0; i < 128; i++){
             charStrings[i] = Character.toString ((char) i);
         }
 
         return charStrings;
     }
 
+    public final static char[] getAsciiCharArray(){
+        char[] chars = new char[128];
+
+        for(int i = 0; i < 128; i++){
+            chars[i] = (char) i;
+        }
+
+        return chars;
+    }
+
     // Security.addProvider(new Blake2bProvider());
     public final static String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36";
 
-    public static String getBcryptHashString(String password) {
+    public static String getBcryptHashString(char[] password) {
         SecureRandom sr;
 
         try {
@@ -140,11 +150,11 @@ public class Utils {
             sr = new SecureRandom();
         }
 
-        return BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hashToString(15, password.toCharArray());
+        return BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hashToString(15, password);
     }
 
-    public static boolean verifyBCryptPassword(String password, String hash) {
-        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.toCharArray(), hash.getBytes());
+    public static boolean verifyBCryptPassword(char[] password, String hash) {
+        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password, hash.getBytes());
 
         return result.verified;
     }
@@ -691,7 +701,7 @@ public class Utils {
 
 
 
-    public static void checkDrive(File file, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+    public static Future<?> checkDrive(File file, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         Task<Boolean> task = new Task<Boolean>() {
             @Override
@@ -706,7 +716,7 @@ public class Utils {
 
         task.setOnSucceeded(onSucceeded);
 
-        execService.submit(task);
+        return execService.submit(task);
     }
 
     public static Future<?> returnException(String errorString, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed) {
@@ -1480,7 +1490,14 @@ public class Utils {
     }
 
 
+    public static void fillCharArray(char[] charArray, char[] chars) throws NoSuchAlgorithmException{
+        if(charArray != null && charArray.length > 0 && chars != null && chars.length > 0){
 
+        for(int i = 0; i < charArray.length ; i++){
+            charArray[i] = chars[getRandomInt(0, chars.length)];
+        }
+        }
+    }
 
 
 
@@ -1664,15 +1681,15 @@ public class Utils {
         return execService.submit(task);
     }
 
-    public static byte[] createKeyBytes(String password) throws NoSuchAlgorithmException, InvalidKeySpecException  {
+    public static byte[] createKeyBytes(char[] password) throws NoSuchAlgorithmException, InvalidKeySpecException  {
 
-        byte[] bytes = password.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = new String(password).getBytes(StandardCharsets.UTF_8);
 
     
 
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
 
-        KeySpec spec = new PBEKeySpec(password.toCharArray(), bytes, 65536, 256);
+        KeySpec spec = new PBEKeySpec(password, bytes, 65536, 256);
         SecretKey tmp = factory.generateSecret(spec);
         return tmp.getEncoded();
 
@@ -2785,6 +2802,60 @@ public class Utils {
           return false;
     }*/
      
+    
+    public static Future<?> sendTermSig(String jarName, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded,EventHandler<WorkerStateEvent> onFailed) {
+        
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws Exception {
+                String execString = "kill $(ps -ef | grep -v grep | grep " + jarName + " | awk '{print $2}')";
+
+                String[] cmd = new String[]{ "bash", "-c", execString};
+    
+                Process proc = Runtime.getRuntime().exec(cmd);
+    
+                BufferedReader stdErr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
+                //String wmicerr = null;
+    
+    
+                BufferedReader wmicStdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+    
+               // String wmicInput = null;
+                boolean gotInput = false;
+    
+                while ((wmicStdInput.readLine()) != null) {
+                
+                
+                    gotInput = true;
+                }
+                String errStr = "";
+                while ((errStr = stdErr.readLine()) != null) {
+    
+                 
+                    gotInput = false;
+                }
+    
+                proc.waitFor();
+    
+     
+                if(gotInput){
+                    return true;
+                }else{
+                    throw new Exception("\nsig term err: " + errStr + "\n'" + execString + "'");
+                }
+                
+
+                
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        return execService.submit(task);
+    }
 
     public static boolean sendTermSig(String jarName) {
         try {

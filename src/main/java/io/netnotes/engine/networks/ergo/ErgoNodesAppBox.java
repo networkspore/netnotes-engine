@@ -7,6 +7,9 @@ import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+
 import org.apache.commons.io.FilenameUtils;
 import org.ergoplatform.appkit.NetworkType;
 
@@ -21,6 +24,7 @@ import io.netnotes.engine.BufferedButton;
 import io.netnotes.engine.GitHubAPI;
 import io.netnotes.engine.JsonParametersBox;
 import io.netnotes.engine.NamedNodeUrl;
+import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
@@ -77,27 +81,28 @@ public class ErgoNodesAppBox extends AppBox {
 
     private Stage m_appStage;
     private SimpleObjectProperty<AppBox> m_currentBox = new SimpleObjectProperty<>();
-    private NoteInterface m_ergoNetworkInterface;
+    private NoteInterface m_ergoNetworkInterface = null;
     private VBox m_mainBox;
 
     private SimpleBooleanProperty m_showNodes = new SimpleBooleanProperty(false);
 
     private String m_locationId = null;
 
-    private SimpleObjectProperty<NoteInterface> m_nodeInterface = new SimpleObjectProperty<>();
+    private SimpleStringProperty m_defaultNodeId = new SimpleStringProperty(null);
     private NoteMsgInterface m_nodeListener = null;
 
     private ErgoNodeClientControl m_nodeControlBox = null;
 
     private String m_nodeListenerId = null;
+    private NetworksData m_networksData = null; 
 
     public void sendMessage(int code, long timestamp, String networkId, String msg){
-        if(networkId != null && networkId.equals(NoteConstants.NODE_NETWORK)){
+        if(networkId != null && networkId.equals(ErgoConstants.NODE_NETWORK)){
 
             switch(code){
      
                 case NoteConstants.LIST_DEFAULT_CHANGED:
-                    updateDefaultNoteInterface();
+                    updateDefaultNodeId();
                 break;
               
             }
@@ -112,17 +117,14 @@ public class ErgoNodesAppBox extends AppBox {
         }
     }
 
-    public String getClientImg(String clientType){
-        return clientType != null && clientType.equals(ErgoConstants.LOCAL_NODE) ?  "🖳 " : "🖧 ";
-    }
 
 
-    public ErgoNodesAppBox(Stage appStage, String locationId, NoteInterface ergoNetworkInterface){
+    public ErgoNodesAppBox(Stage appStage, String locationId, NetworksData networksData, NoteInterface ergoNetworkInterface){
         super();
         m_ergoNetworkInterface = ergoNetworkInterface;
         m_appStage = appStage;
         m_locationId = locationId;
-
+        m_networksData = networksData;
         
         final String selectString = "[select]";
 
@@ -146,7 +148,7 @@ public class ErgoNodesAppBox extends AppBox {
         Button toggleShowNodes = new Button(m_showNodes.get() ? "⏷" : "⏵");
         toggleShowNodes.setId("caretBtn");
         toggleShowNodes.setOnAction(e->{
-            if(m_nodeInterface.get() == null){
+            if(m_defaultNodeId.get() == null){
                 m_showNodes.set(false);
             }else{
                 m_showNodes.set(!m_showNodes.get());
@@ -170,7 +172,7 @@ public class ErgoNodesAppBox extends AppBox {
 
         disableNodeBtn.setOnAction(e -> {
 
-            clearDefault();
+            clearDefault(onSucceeded->{}, onFailed->{});
        
         });
 
@@ -222,59 +224,54 @@ public class ErgoNodesAppBox extends AppBox {
         nodeMenuBtn.showingProperty().addListener((obs,oldval,newval)->{
             if(newval){
                 nodeMenuBtn.getItems().clear();
+                nodeMenuBtn.getItems().add(new MenuItem("Getting nodes..."));
 
                 JsonObject note = NoteConstants.getCmdObject("getNodes");
-                note.addProperty("networkId", NoteConstants.NODE_NETWORK);
+                note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
                 note.addProperty("locationId", m_locationId);
 
-                JsonArray nodesArray = (JsonArray) ergoNetworkInterface.sendNote(note);
-
-
-                if (nodesArray != null && nodesArray.size() > 0) {
+                ergoNetworkInterface.sendNote(note, onNodes ->{
+                    Object onNodesObject = onNodes.getSource().getValue();
+                    JsonArray nodesArray = onNodesObject != null && onNodesObject instanceof JsonArray ? (JsonArray) onNodesObject : null;
+                    if( nodesArray != null && nodesArray.size() > 0){
                 
-                    for (JsonElement element : nodesArray) {
-                        if (element != null && element instanceof JsonObject) {
-                            JsonObject json = element.getAsJsonObject();
+                        for (JsonElement element : nodesArray) {
+                            if (element != null && element instanceof JsonObject) {
+                                JsonObject json = element.getAsJsonObject();
 
-                            String name = json.get("name").getAsString();
-                            String id = json.get("id").getAsString();
-                            String clientType = json.get("clientType").getAsString();
-                            JsonElement namedNodeElement = json.get("namedNode");
-                            NamedNodeUrl namedNode = null;
-                            
-                            String nodeImg = getClientImg(clientType);
-
-                            try {
-                                namedNode = namedNodeElement != null && namedNodeElement.isJsonObject() ? new NamedNodeUrl(namedNodeElement.getAsJsonObject()) : null;
-                            } catch (Exception e1) {
-                                try {
-                                    Files.writeString(AppConstants.LOG_FILE.toPath(), "\nNode App Box received null node.", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                                } catch (IOException e2) {
+                                String name = json.get("name").getAsString();
+                                String id = json.get("id").getAsString();
+                                String clientType = json.get("clientType").getAsString();
+                                JsonElement namedNodeElement = json.get("namedNode");
                         
+                                String nodeImg = ErgoConstants.getClientImg(clientType);
+
+                                try {
+                                    NamedNodeUrl namedNode = namedNodeElement != null && namedNodeElement.isJsonObject() ? new NamedNodeUrl(namedNodeElement.getAsJsonObject()) : null;
+                                    MenuItem nodeItem = new MenuItem(String.format("%-50s", nodeImg + " " + name + " - " + namedNode.getUrlString()));
+
+                                    nodeItem.setOnAction(action -> {
+                                        nodeMenuBtn.hide();
+                                        if(m_defaultNodeId.get() == null || (m_defaultNodeId.get() != null && !m_defaultNodeId.get().equals(id))){
+                                            setDefault(id, onSucceeded->{}, onFailed->{});
+                                            m_showNodes.set(true);
+                                        }
+
+                                    });
+
+                                    nodeMenuBtn.getItems().add(nodeItem);
+                                } catch (Exception e1) {
+                                    
                                 }
                             }
-
-                            if(namedNode != null){
-
-                                MenuItem nodeItem = new MenuItem(String.format("%-50s", nodeImg + " " + name + " - " + namedNode.getUrlString()));
-
-                                nodeItem.setOnAction(action -> {
-
-                                    if(m_nodeInterface.get() == null || (m_nodeInterface.get() != null && !m_nodeInterface.get().getNetworkId().equals(id))){
-                                        setDefault(id);
-                                        m_showNodes.set(true);
-                                    }
-
-                                });
-
-                                nodeMenuBtn.getItems().add(nodeItem);
-
-                            }
                         }
+                
+                    }else{
 
-                    
                     }
-                }
+                }, onNodesFailed->{});
+
+                
             }
 
             /*
@@ -381,53 +378,63 @@ public class ErgoNodesAppBox extends AppBox {
             toggleShowNodes.setText(isShow ? "⏷" : "⏵");
 
             if (isShow) {
-                if (m_nodeControlBox == null && m_nodeInterface.get() != null) {
-                    NoteInterface noteInterface = m_nodeInterface.get();
+                if (m_nodeControlBox == null && m_defaultNodeId.get() != null) {
+                   getNetworkObject(onNetworkObject->{
+                        Object resultObj = onNetworkObject.getSource().getValue();    
+                        JsonObject nodeObject = resultObj != null && resultObj instanceof JsonObject ? (JsonObject) resultObj : null;
+                        JsonElement namedNodeElement = nodeObject != null ? nodeObject.get("namedNode") : null;
 
-                    JsonObject json = noteInterface.getJsonObject();
-                    JsonElement namedNodeElement = json.get("namedNode");
-                    JsonElement clientTypeElement = json.get("clientType");
-            
-                    String clientType = clientTypeElement != null ? clientTypeElement.getAsString() : null;
-            
-                    if(namedNodeElement != null && namedNodeElement.isJsonObject() && clientType != null){
-                        try {
-                            NamedNodeUrl namedNodeUrl = new NamedNodeUrl(namedNodeElement.getAsJsonObject());
-                       
-                            switch(clientType){
-                                case ErgoConstants.LOCAL_NODE:
-                                               
-                                  
-                                    m_nodeControlBox = new ErgoNodeLocalControl(noteInterface, namedNodeUrl, clientType, m_nodeListenerId); 
-                                break;
-                                default:
-                                    m_nodeControlBox = new ErgoNodeClientControl(noteInterface, namedNodeUrl,clientType, m_nodeListenerId);
-                         
-                            }
-
-                            m_nodeControlBox.setPadding(new Insets(0,0,0,5));
-                            HBox.setHgrow(m_nodeControlBox, Priority.ALWAYS);
-                            nodeBodyPaddingBox.getChildren().add(m_nodeControlBox);
-                        } catch (Exception e) {
-                                    
+                        if(namedNodeElement != null && !namedNodeElement.isJsonNull() && namedNodeElement.isJsonObject()){
+                            JsonElement clientTypeElement = nodeObject.get("clientType");
+                    
+                            String clientType = clientTypeElement != null && !clientTypeElement.isJsonNull() ? clientTypeElement.getAsString() : ErgoConstants.REMOTE_NODE;
+                    
                             try {
-                                Files.writeString(AppConstants.LOG_FILE.toPath(),  e.toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                            } catch (IOException e1) {
-
+                                NamedNodeUrl namedNodeUrl = new NamedNodeUrl(namedNodeElement.getAsJsonObject());
+                            
+                                switch(clientType){
+                                    case ErgoConstants.LOCAL_NODE:
+                                                    
+                                        
+                                        m_nodeControlBox = new ErgoNodeLocalControl(namedNodeUrl, clientType, m_nodeListenerId); 
+                                    break;
+                                    default:
+                                        m_nodeControlBox = new ErgoNodeClientControl(namedNodeUrl, clientType, m_nodeListenerId);
+                                
+                                }
+    
+                                m_nodeControlBox.setPadding(new Insets(0,0,0,5));
+                                HBox.setHgrow(m_nodeControlBox, Priority.ALWAYS);
+                                nodeBodyPaddingBox.getChildren().add(m_nodeControlBox);
+                            } catch (Exception e) {
+                                        
+                                try {
+                                    Files.writeString(AppConstants.LOG_FILE.toPath(),  e.toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                                } catch (IOException e1) {
+    
+                                }
+                                if(m_nodeControlBox != null){
+                                    m_nodeControlBox.shutdown();
+                                    nodeBodyPaddingBox.getChildren().clear();
+                                    m_nodeControlBox = null;
+                                }
                             }
+                            
+                        }else{
                             if(m_nodeControlBox != null){
                                 m_nodeControlBox.shutdown();
                                 nodeBodyPaddingBox.getChildren().clear();
                                 m_nodeControlBox = null;
                             }
                         }
-                    }else{
+                    }, onFailed->{
                         if(m_nodeControlBox != null){
                             m_nodeControlBox.shutdown();
                             nodeBodyPaddingBox.getChildren().clear();
                             m_nodeControlBox = null;
                         }
-                    }
+                    });
+                   
                     
                     
                 }
@@ -451,60 +458,20 @@ public class ErgoNodesAppBox extends AppBox {
                
         
         
-        m_nodeInterface.addListener((obs,oldval,newval)->{
+        m_defaultNodeId.addListener((obs,oldval,newval)->{
             
-            if(oldval != null){
-                m_showNodes.set(false);
-                if(m_nodeListener != null){
-                    oldval.removeMsgListener(m_nodeListener);
-                    m_nodeListener = null;
-                }
-            }
-
             if(newval != null){
-                m_nodeListenerId = FriendlyId.createFriendlyId();
-                m_nodeListener = new NoteMsgInterface() {
-                   
-                    @Override
-                    public String getId() {
-                        return m_nodeListenerId;
-                    }
-                    @Override
-                    public void sendMessage(int code, long timestamp,String networkId, Number num) {
-                        if(m_nodeControlBox != null){
-                            m_nodeControlBox.sendMessage(code, timestamp,networkId, num);
-                        }
-                    }
-                    @Override
-                    public void sendMessage(int code, long timestamp,String networkId, String msg) {
-                        
-                        if(m_currentBox.get() != null){
-                            
-                            m_currentBox.get().sendMessage(code, timestamp, networkId, msg);
-                            
-                        }
-                        if(m_nodeControlBox != null){
-                            
-                            m_nodeControlBox.sendMessage(code, timestamp, networkId, msg);
-                            
-                           
-                        }                           
-                    }
-                    
-                };
-
-                newval.addMsgListener(m_nodeListener);
-
                 if(!nodeFieldBox.getChildren().contains(disableNodeBtn)){
                     nodeFieldBox.getChildren().add(disableNodeBtn);
                 }
             }else{
+                nodeMenuBtn.setText(selectString);
                 if(nodeFieldBox.getChildren().contains(disableNodeBtn)){
                     nodeFieldBox.getChildren().remove(disableNodeBtn);
                 }
             }
-
-            nodeMenuBtn.setText(newval != null ? newval.getName() : selectString);
+            updateShowNodes.run();
+           
         });
         
 
@@ -523,39 +490,71 @@ public class ErgoNodesAppBox extends AppBox {
         });
 
 
-        updateDefaultNoteInterface();
+        updateDefaultNodeId();
 
   
         getChildren().addAll(m_mainBox);
         setPadding(new Insets(0,0,5,0));
     }
 
-    public void clearDefault(){
+    public NetworksData getNetworksData(){
+        return m_networksData;
+    }
+
+    public ExecutorService getExecService(){
+        return getNetworksData().getExecService();
+    }
+
+    public Future<?> getNetworkObject(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        String nodeId = m_defaultNodeId.get();
+        if(nodeId != null){
+            JsonObject note = NoteConstants.getCmdObject("getNetworkObject");
+            note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("id", nodeId);
+
+            return m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
+        }
+        return null;
+    }
+
+    public void clearDefault(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject setDefaultObject = NoteConstants.getCmdObject("clearDefault");
-        setDefaultObject.addProperty("networkId", NoteConstants.NODE_NETWORK);
+        setDefaultObject.addProperty("networkId", ErgoConstants.NODE_NETWORK);
         setDefaultObject.addProperty("locationId", m_locationId);
-        m_ergoNetworkInterface.sendNote(setDefaultObject);
+        m_ergoNetworkInterface.sendNote(setDefaultObject, onSucceeded, onFailed);
       
     }
 
-    public void setDefault(String id){
+    public void setDefault(String id, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
         JsonObject setDefaultObject = NoteConstants.getCmdObject("setDefault");
-        setDefaultObject.addProperty("networkId", NoteConstants.NODE_NETWORK);
+        setDefaultObject.addProperty("networkId", ErgoConstants.NODE_NETWORK);
         setDefaultObject.addProperty("locationId", m_locationId);
         setDefaultObject.addProperty("id", id);
-        m_ergoNetworkInterface.sendNote(setDefaultObject);
+        m_ergoNetworkInterface.sendNote(setDefaultObject, onSucceeded, onFailed);
     
     }
 
-    public void updateDefaultNoteInterface(){
+    public void updateDefaultNodeId(){
         
-        JsonObject note = NoteConstants.getCmdObject("getDefaultInterface");
-        note.addProperty("networkId", NoteConstants.NODE_NETWORK);
+        JsonObject note = NoteConstants.getCmdObject("getDefaultNodeId");
+        note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
         note.addProperty("locationId", m_locationId);
-        NoteInterface noteInterface = (NoteInterface) m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note, onSucceeded->{
+            Object defaultIdObj = onSucceeded.getSource().getValue();
+            if(defaultIdObj != null && defaultIdObj instanceof JsonObject){
+                JsonObject defaultJson = (JsonObject) defaultIdObj;
+                JsonElement defaultNodeIdElement = defaultJson.get("defaultNodeId");
+                m_defaultNodeId.set(defaultNodeIdElement != null && !defaultNodeIdElement.isJsonNull() ? defaultNodeIdElement.getAsString() : null);
+            }else{
+                m_defaultNodeId.set(null);
+            }         
+        }, onFailed->{
+            m_defaultNodeId.set(null);
+        });
       
-        m_nodeInterface.set(noteInterface);
+        
         
     }
 
@@ -913,22 +912,24 @@ public class ErgoNodesAppBox extends AppBox {
                                 NamedNodeUrl namedNodeUrl = new NamedNodeUrl(nodeId, nameString, hostString, portNumber, apiKeyString, networkType);
 
                                 JsonObject note = NoteConstants.getCmdObject("addRemoteNode");
-                                note.addProperty("networkId", NoteConstants.NODE_NETWORK);
+                                note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
                                 note.addProperty("locationId", m_locationId);
 
                                 note.add("data", namedNodeUrl.getJsonObject());
 
-                                Object result = m_ergoNetworkInterface.sendNote(note);
+                                m_ergoNetworkInterface.sendNote(note, onSucceeded->{
+                                    Object result = onSucceeded.getSource().getValue();
+                                    if (result != null && result instanceof String) {
+                                
+                                        setDefault((String) result, onDefault->{}, onDefaultFailed->{});
 
-                                if (result != null && result instanceof String) {
-                               
-                                    setDefault((String) result);
+                                    }else{
+                                        errorTooltip.setText("Error: Unable to add node");
+                                        showErrorText.run();
+                                    }
+                                }, onFailed->{
 
-                                }else{
-                                    errorTooltip.setText("Error: Unable to add node");
-                                    showErrorText.run();
-                                }
-                            
+                                });
                                 
                             }
                             
@@ -977,65 +978,70 @@ public class ErgoNodesAppBox extends AppBox {
 
         public InstallNodeBox() {
         
-            JsonObject appDirResult = (JsonObject) m_ergoNetworkInterface.sendNote(getAppDirNote());
-            m_appDirString = appDirResult != null ? appDirResult.get("appDir").getAsString() + "/" + DEFAULT_NODE_FOLDER_NAME : AppData.HOME_DIRECTORY.getAbsolutePath() + "/" + DEFAULT_NODE_FOLDER_NAME;
+            getAppDir(onSucceeded->{
+                Object succeessObject = onSucceeded.getSource().getValue();
+                if(succeessObject != null && succeessObject instanceof JsonObject){
+                    JsonObject appDirResult = (JsonObject) succeessObject;
+                    m_appDirString = appDirResult != null ? appDirResult.get("appDir").getAsString() + "/" + DEFAULT_NODE_FOLDER_NAME : AppData.HOME_DIRECTORY.getAbsolutePath() + "/" + DEFAULT_NODE_FOLDER_NAME;
+                    
+
+                    Button backButton = new Button("🠜");
+                    backButton.setId("lblBtn");
+
+                    backButton.setOnAction(e -> {
+                        if(currentBox.get() == null){
+                            m_currentBox.set(null);
+                        }else{
+                            currentBox.set(null);
+                        }
+                    });
+
+                    Label headingText = new Label("Install Node");
+                    headingText.setFont(Stages.txtFont);
+                    headingText.setPadding(new Insets(0,0,0,15));
+                // TextField apiKeyField, SimpleObjectProperty<File> configFileOption, SimpleObjectProperty<File> directoryRoot, TextField directoryNameField,
+                    //Button nextBtn, MenuButton configModeBtn,
+
+                    HBox headingBox = new HBox(backButton, headingText);
+                    headingBox.setAlignment(Pos.CENTER_LEFT);
+                    HBox.setHgrow(headingBox, Priority.ALWAYS);
+                    headingBox.setPadding(new Insets(10, 15, 0, 15));
             
+                    VBox headerBox = new VBox(headingBox);
+                    headerBox.setPadding(new Insets(0, 5, 0, 0));
 
-            Button backButton = new Button("🠜");
-            backButton.setId("lblBtn");
+                    Region hBar = new Region();
+                    hBar.setPrefWidth(400);
+                    hBar.setMinHeight(2);
+                    hBar.setId("hGradient");
 
-            backButton.setOnAction(e -> {
-                if(currentBox.get() == null){
-                    m_currentBox.set(null);
-                }else{
-                    currentBox.set(null);
+                    HBox gBox = new HBox(hBar);
+                    gBox.setAlignment(Pos.CENTER);
+                    gBox.setPadding(new Insets(15, 0, 0, 0));
+
+                    
+                    init();
+
+                    VBox bodyPaddingBox = new VBox(defaultBodyBox);
+                    bodyPaddingBox.setPadding(new Insets(10, 20, 10, 20));
+
+                    getChildren().addAll(headerBox, gBox, bodyPaddingBox);
+
+                    pt.setOnFinished(ptE -> {
+                        errorTooltip.hide();
+                    });
+
+                    currentBox.addListener((obs,oldval,newval)->{
+                        bodyPaddingBox.getChildren().clear();
+
+                        if(newval == null){
+                            bodyPaddingBox.getChildren().add(defaultBodyBox);
+                        }else{
+                            bodyPaddingBox.getChildren().add(newval);
+                        }
+                    });
                 }
-            });
-
-            Label headingText = new Label("Install Node");
-            headingText.setFont(Stages.txtFont);
-            headingText.setPadding(new Insets(0,0,0,15));
-           // TextField apiKeyField, SimpleObjectProperty<File> configFileOption, SimpleObjectProperty<File> directoryRoot, TextField directoryNameField,
-            //Button nextBtn, MenuButton configModeBtn,
-
-            HBox headingBox = new HBox(backButton, headingText);
-            headingBox.setAlignment(Pos.CENTER_LEFT);
-            HBox.setHgrow(headingBox, Priority.ALWAYS);
-            headingBox.setPadding(new Insets(10, 15, 0, 15));
-     
-            VBox headerBox = new VBox(headingBox);
-            headerBox.setPadding(new Insets(0, 5, 0, 0));
-
-            Region hBar = new Region();
-            hBar.setPrefWidth(400);
-            hBar.setMinHeight(2);
-            hBar.setId("hGradient");
-
-            HBox gBox = new HBox(hBar);
-            gBox.setAlignment(Pos.CENTER);
-            gBox.setPadding(new Insets(15, 0, 0, 0));
-
-            
-            init();
-
-            VBox bodyPaddingBox = new VBox(defaultBodyBox);
-            bodyPaddingBox.setPadding(new Insets(10, 20, 10, 20));
-
-            getChildren().addAll(headerBox, gBox, bodyPaddingBox);
-
-            pt.setOnFinished(ptE -> {
-                errorTooltip.hide();
-            });
-
-            currentBox.addListener((obs,oldval,newval)->{
-                bodyPaddingBox.getChildren().clear();
-
-                if(newval == null){
-                    bodyPaddingBox.getChildren().add(defaultBodyBox);
-                }else{
-                    bodyPaddingBox.getChildren().add(newval);
-                }
-            });
+            }, onFailed->{});
         }
 
         private void showErrorTip(Node ownerNode){
@@ -1050,12 +1056,11 @@ public class ErgoNodesAppBox extends AppBox {
             pt.play();
         }
 
-        private JsonObject getAppDirNote(){
-
+        private Future<?> getAppDir(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
             JsonObject appDirNote = NoteConstants.getCmdObject("getAppDir");
-            appDirNote.addProperty("networkId", NoteConstants.ERGO_NETWORK_ID);
+            appDirNote.addProperty("networkId", ErgoConstants.NODE_NETWORK);
             appDirNote.addProperty("locationId", m_locationId);
-            return appDirNote;
+            return m_ergoNetworkInterface.sendNote(appDirNote, onSucceeded, onFailed);
         }
 
         private SimpleLongProperty m_requiredSpaceLong = new SimpleLongProperty( ErgoConstants.REQUIRED_SPACE);
@@ -1516,7 +1521,7 @@ public class ErgoNodesAppBox extends AppBox {
                 Runnable getLatestUrl = () -> {
                     GitHubAPI gitHubAPI = new GitHubAPI("ergoplatform", "ergo");
 
-                    gitHubAPI.getAssetsLatestRelease(m_ergoNetworkInterface.getNetworksData().getExecService(), (onSucceded)->{
+                    gitHubAPI.getAssetsLatestRelease(getExecService(), (onSucceded)->{
                         Object assetsObject = onSucceded.getSource().getValue();
                         if(assetsObject != null && assetsObject instanceof GitHubAsset[] && ((GitHubAsset[]) assetsObject).length > 0){
                             GitHubAsset[] assets = (GitHubAsset[]) assetsObject;
@@ -1711,27 +1716,35 @@ public class ErgoNodesAppBox extends AppBox {
 
                     NamedNodeUrl namedNode = new NamedNodeUrl("",nodeName,"127.0.0.1", ErgoConstants.MAINNET_PORT, apiKey, NetworkType.MAINNET);
             
-                    JsonObject resultObj = addLocalNode(installDir, namedNode,!isGetLatestApp, appFile, configFileName, configString);
+                    addLocalNode(installDir, namedNode,!isGetLatestApp, appFile, configFileName, configString, onLocalNodeAdded->{
+                        Object obj = onLocalNodeAdded.getSource().getValue();
+                        JsonObject resultObj = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
+                        if(resultObj != null){
+                            JsonElement resultObjIdElement = resultObj.get("id");
+                            String id  = resultObjIdElement != null ?resultObjIdElement.getAsString() : null;
+                            
+                            setDefault(id, onSuceeded->{   
+            
+                            }, onFailed->{});
+                            m_currentBox.set(null);
+                        }else{
+                            installBtn.setDisable(false);
+                        
+                            errorTooltip.setText( "Failed to add node");
+                            showErrorTip(installBtn);
+                        }
+                        
+                    },onLocalNodeFailed->{
+                        Throwable throwable = onLocalNodeFailed.getSource().getException();
+                        String msg = throwable != null ? throwable.getMessage() : "Failed to add node";
+                        installBtn.setDisable(false);
+                        
+                        errorTooltip.setText(msg);
+                        showErrorTip(installBtn);
+                    });
        
                     
 
-                    JsonElement codeElement = resultObj.get("code");
-                    int code = codeElement != null ? codeElement.getAsInt() : NoteConstants.ERROR;
-
-                    if(code == NoteConstants.SUCCESS){
-                        JsonElement resultObjIdElement = resultObj.get("id");
-                        String id  = resultObjIdElement != null ?resultObjIdElement.getAsString() : null;
-                        
-                        setDefault(id);
-                        m_currentBox.set(null);
-                        m_showNodes.set(true);
-                    }else{
-                        installBtn.setDisable(false);
-                        JsonElement msgElement = resultObj.get("msg");
-                        String msg = msgElement != null ? msgElement.getAsString() : "Unknown error message";
-                        errorTooltip.setText(msg);
-                        showErrorTip(installBtn);
-                    }
                         
                       
 
@@ -1747,10 +1760,10 @@ public class ErgoNodesAppBox extends AppBox {
 
 
 
-    private JsonObject addLocalNode(File dir, NamedNodeUrl namedNode, boolean isAppFile, File appFile, String configFileName, String configString){
+    private Future<?> addLocalNode(File dir, NamedNodeUrl namedNode, boolean isAppFile, File appFile, String configFileName, String configString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
         JsonObject note = NoteConstants.getCmdObject("addLocalNode");
-        note.addProperty("networkId", NoteConstants.NODE_NETWORK);
+        note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
         note.addProperty("locationId", m_locationId);
 
         JsonObject json = new JsonObject();
@@ -1770,7 +1783,7 @@ public class ErgoNodesAppBox extends AppBox {
         json.addProperty("appDir", dir.getAbsolutePath());
         note.add("data", json);
 
-        return (JsonObject) m_ergoNetworkInterface.sendNote(note);
+        return m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
 
     }
 
@@ -1799,7 +1812,7 @@ public class ErgoNodesAppBox extends AppBox {
         private Insets topPad;
 
         private JsonArray removeIds;
-        private JsonArray nodeArray;
+
 
         public RemoveNodesBox(){
 
@@ -1903,21 +1916,33 @@ public class ErgoNodesAppBox extends AppBox {
                     pt.play();
                 }else{
 
-                    JsonObject note = NoteConstants.getCmdObject("removeNodes");
-                    note.addProperty("locationId", m_locationId);
-                    note.addProperty("networkId", NoteConstants.NODE_NETWORK);
-                    note.add("ids", removeIds);
+                    removeNodes(removeIds, onRemoved->{
+                        
+                        Object sourceObject = onRemoved.getSource().getValue();
                     
-                    Object sourceObject = m_ergoNetworkInterface.sendNote(note);
-                 
-                    if(sourceObject != null){
-                        JsonObject json = (JsonObject) sourceObject;
+                        if(sourceObject != null && sourceObject instanceof JsonObject){
+                            JsonObject json = (JsonObject) sourceObject;
 
-                        JsonElement idsElement = json.get("ids");
-                        if(idsElement == null){
-        
+                            JsonElement idsElement = json.get("ids");
+                            if(idsElement == null){
+            
+                                Point2D p = this.nextBtn.localToScene(0.0, 0.0);
+                                tooltip.setText("Unable to remove nodes");
+                                tooltip.show(this.nextBtn,
+                                        p.getX() + this.nextBtn.getScene().getX()
+                                                + this.nextBtn.getScene().getWindow().getX() - 60,
+                                        (p.getY() + this.nextBtn.getScene().getY()
+                                                + this.nextBtn.getScene().getWindow().getY()) - 40);
+                                PauseTransition pt = new PauseTransition(Duration.millis(1600));
+                                pt.setOnFinished(ptE -> {
+                                    tooltip.hide();
+                                });
+                                pt.play();
+                            }
+
+                        }else{
                             Point2D p = this.nextBtn.localToScene(0.0, 0.0);
-                            tooltip.setText("Unable to remove nodes");
+                            tooltip.setText("Unable to process command");
                             tooltip.show(this.nextBtn,
                                     p.getX() + this.nextBtn.getScene().getX()
                                             + this.nextBtn.getScene().getWindow().getX() - 60,
@@ -1930,22 +1955,7 @@ public class ErgoNodesAppBox extends AppBox {
                             pt.play();
                         }
 
-                    }else{
-                        Point2D p = this.nextBtn.localToScene(0.0, 0.0);
-                        tooltip.setText("Unable to process command");
-                        tooltip.show(this.nextBtn,
-                                p.getX() + this.nextBtn.getScene().getX()
-                                        + this.nextBtn.getScene().getWindow().getX() - 60,
-                                (p.getY() + this.nextBtn.getScene().getY()
-                                        + this.nextBtn.getScene().getWindow().getY()) - 40);
-                        PauseTransition pt = new PauseTransition(Duration.millis(1600));
-                        pt.setOnFinished(ptE -> {
-                            tooltip.hide();
-                        });
-                        pt.play();
-                    }
-
-                
+                    }, onFailed->{});
     
                    
                 }
@@ -1959,136 +1969,153 @@ public class ErgoNodesAppBox extends AppBox {
 
         }
 
+        public void removeNodes(JsonArray removeIds, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+            JsonObject note = NoteConstants.getCmdObject("removeNodes");
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
+            note.add("ids", removeIds);
+            m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
+        }
         
         @Override
         public void sendMessage(int code, long timestamp,String networkId, String msg){
             
 
-            if(networkId != null && networkId.equals(NoteConstants.NODE_NETWORK)){
+            if(networkId != null && networkId.equals(ErgoConstants.NODE_NETWORK)){
                 update();
             }
         }
-     
-        public void update(){
+
+        public Future<?> getNodes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
             JsonObject note = NoteConstants.getCmdObject("getNodes");
-            note.addProperty("networkId", NoteConstants.NODE_NETWORK);
+            note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
             note.addProperty("locationId", m_locationId);
 
-            this.nodeArray = (JsonArray) m_ergoNetworkInterface.sendNote(note);
+            return m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
+        }
+     
+        public void update(){
+            getNodes(onNodes->{
+                Object onNodesObj = onNodes.getSource().getValue();
 
-            this.listBox.getChildren().clear();
+                JsonArray nodeArray = onNodesObj != null && onNodesObj instanceof JsonArray ? (JsonArray) onNodesObj : null;
+          
 
-            if (this.nodeArray != null) {
+                this.listBox.getChildren().clear();
 
-                for (JsonElement jsonElement : this.nodeArray) {
-        
-                    JsonObject json = jsonElement != null && jsonElement.isJsonObject() ? jsonElement.getAsJsonObject() : null;
+                if (nodeArray != null) {
 
-                    JsonElement idElement = json != null ? json.get("id") : null;
-                    JsonElement nameElement = json != null ? json.get("name") : null;
-                    JsonElement clientTypeElement = json != null ? json.get("clientType") : null;
-                    JsonElement namedNodeElement = json != null ? json.get("namedNode") : null;
+                    for (JsonElement jsonElement : nodeArray) {
+            
+                        JsonObject json = jsonElement != null && jsonElement.isJsonObject() ? jsonElement.getAsJsonObject() : null;
 
-
-                    String id = idElement != null ? idElement.getAsString() : "";
-                    String name = nameElement != null ? nameElement.getAsString() : "Unknown";
-                    String clientType = clientTypeElement != null ? clientTypeElement.getAsString() : "Unknown";
+                        JsonElement idElement = json != null ? json.get("id") : null;
+                        JsonElement nameElement = json != null ? json.get("name") : null;
+                        JsonElement clientTypeElement = json != null ? json.get("clientType") : null;
+                        JsonElement namedNodeElement = json != null ? json.get("namedNode") : null;
 
 
-                   
-                    NamedNodeUrl namedNodeUrl = null;
+                        String id = idElement != null ? idElement.getAsString() : "";
+                        String name = nameElement != null ? nameElement.getAsString() : "Unknown";
+                        String clientType = clientTypeElement != null ? clientTypeElement.getAsString() : "Unknown";
+
+
                     
-                    try{
-                        namedNodeUrl = namedNodeElement != null ? new NamedNodeUrl(namedNodeElement.getAsJsonObject()) : null;
-                    }catch(Exception e){
+                        NamedNodeUrl namedNodeUrl = null;
+                        
+                        try{
+                            namedNodeUrl = namedNodeElement != null ? new NamedNodeUrl(namedNodeElement.getAsJsonObject()) : null;
+                        }catch(Exception e){
 
-                    }
-
-                    Label nameText = new Label(  getClientImg(clientType) + " " + name + " - " + (namedNodeUrl != null ? namedNodeUrl.getIP() +":" + namedNodeUrl.getPort() : "Null"));
-                    nameText.setId("itemLbl");
-                    nameText.setPadding(new Insets(0,0,0,7));
-
-        
-       
-
-                    Runnable removeItemFromRemoveIds = () ->{
-                        for(int i =0; i < this.removeIds.size() ; i++){
-                            JsonElement element = this.removeIds.get(i);
-                            JsonObject obj = element.getAsJsonObject();
-                            String checkId = obj.get("id").getAsString();
-                            if(checkId.equals(id)){
-                                this.removeIds.remove(i);
-                            }
                         }
-                    };
-                    
-                    Label selectedBox = new Label();
-                    selectedBox.setId("clearBox");
-                    
-                 
 
-                    HBox checkBoxBox = new HBox(selectedBox);
-                    checkBoxBox.setPadding(new Insets(0,0,0,5));
+                        Label nameText = new Label(  ErgoConstants.getClientImg(clientType) + " " + name + " - " + (namedNodeUrl != null ? namedNodeUrl.getIP() +":" + namedNodeUrl.getPort() : "Null"));
+                        nameText.setId("itemLbl");
+                        nameText.setPadding(new Insets(0,0,0,7));
 
-                    HBox nodeItem = new HBox(checkBoxBox, nameText);
-                    nodeItem.setAlignment(Pos.CENTER_LEFT);
-                    nodeItem.setMinHeight(25);
-                    HBox.setHgrow(nodeItem, Priority.ALWAYS);
-                    nodeItem.setId("rowBtn");
-                    nodeItem.setPadding(new Insets(2,5,5,0));
+            
+        
 
-                    Runnable toggleCheck = ()->{
-                        if(selectedBox.getText().equals("")){
-                 
-                            nodeItem.setId("rowBtnSelected");
-                            
-                            
+                        Runnable removeItemFromRemoveIds = () ->{
                             for(int i =0; i < this.removeIds.size() ; i++){
                                 JsonElement element = this.removeIds.get(i);
                                 JsonObject obj = element.getAsJsonObject();
                                 String checkId = obj.get("id").getAsString();
                                 if(checkId.equals(id)){
-                          
                                     this.removeIds.remove(i);
                                 }
                             }
-                            JsonObject removeJson = NoteConstants.getJsonObject("id", id);
+                        };
                         
-                            if(clientType.equals(ErgoConstants.LOCAL_NODE)){
-                                Alert deleteAlert = new Alert(AlertType.NONE, "Delete all node files and folders?", ButtonType.YES, ButtonType.NO);
-                                deleteAlert.setHeaderText("Delete Node");
-                                deleteAlert.setTitle("Delete Node");
+                        Label selectedBox = new Label();
+                        selectedBox.setId("clearBox");
+                        
+                    
 
-                                Optional<ButtonType> result = deleteAlert.showAndWait();
-                                if(result.isPresent() && result.get() == ButtonType.YES){
-                                    selectedBox.setText("🗑");
-                                    removeJson.addProperty("isDelete", true);            
+                        HBox checkBoxBox = new HBox(selectedBox);
+                        checkBoxBox.setPadding(new Insets(0,0,0,5));
+
+                        HBox nodeItem = new HBox(checkBoxBox, nameText);
+                        nodeItem.setAlignment(Pos.CENTER_LEFT);
+                        nodeItem.setMinHeight(25);
+                        HBox.setHgrow(nodeItem, Priority.ALWAYS);
+                        nodeItem.setId("rowBtn");
+                        nodeItem.setPadding(new Insets(2,5,5,0));
+
+                        Runnable toggleCheck = ()->{
+                            if(selectedBox.getText().equals("")){
+                    
+                                nodeItem.setId("rowBtnSelected");
+                                
+                                
+                                for(int i =0; i < this.removeIds.size() ; i++){
+                                    JsonElement element = this.removeIds.get(i);
+                                    JsonObject obj = element.getAsJsonObject();
+                                    String checkId = obj.get("id").getAsString();
+                                    if(checkId.equals(id)){
+                            
+                                        this.removeIds.remove(i);
+                                    }
+                                }
+                                JsonObject removeJson = NoteConstants.getJsonObject("id", id);
+                            
+                                if(clientType.equals(ErgoConstants.LOCAL_NODE)){
+                                    Alert deleteAlert = new Alert(AlertType.NONE, "Delete all node files and folders?", ButtonType.YES, ButtonType.NO);
+                                    deleteAlert.setHeaderText("Delete Node");
+                                    deleteAlert.setTitle("Delete Node");
+
+                                    Optional<ButtonType> result = deleteAlert.showAndWait();
+                                    if(result.isPresent() && result.get() == ButtonType.YES){
+                                        selectedBox.setText("🗑");
+                                        removeJson.addProperty("isDelete", true);            
+                                    }else{
+                                        selectedBox.setText("✗");
+                                    }
                                 }else{
                                     selectedBox.setText("✗");
                                 }
+                                this.removeIds.add(removeJson);
+
+
                             }else{
-                                selectedBox.setText("✗");
+                                selectedBox.setText("");
+                                nodeItem.setId("rowBtn");
+                                removeItemFromRemoveIds.run();
                             }
-                            this.removeIds.add(removeJson);
+                        
+                        };
+                        
+                        nodeItem.addEventFilter(MouseEvent.MOUSE_CLICKED, e->toggleCheck.run());
 
-
-                        }else{
-                            selectedBox.setText("");
-                            nodeItem.setId("rowBtn");
-                            removeItemFromRemoveIds.run();
-                        }
-                    
-                    };
-                    
-                    nodeItem.addEventFilter(MouseEvent.MOUSE_CLICKED, e->toggleCheck.run());
-
-                    listBox.getChildren().add(nodeItem);
-                    
+                        listBox.getChildren().add(nodeItem);
+                        
+                    }
                 }
+            }, onNodesFailed->{
                 
-            }
-            this.nodeArray = null;
+            });
+       
         }
 
         @Override
@@ -2141,30 +2168,22 @@ public class ErgoNodesAppBox extends AppBox {
         private TextField nodeNameField = new TextField();
      
 
-        private void getConfigData() throws Exception {
+        private void getConfigData()  {
             
-            NoteInterface noteInterface = m_nodeInterface.get();
-
-            if(noteInterface != null){
-                JsonObject json = noteInterface.getJsonObject();
-
-                if(json != null){
-                 //   m_configData.set(new ErgoNodeConfigData(json));
-                }
-            }
+        
 
         }
 
         private void updateConfigData(JsonObject data, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-            NoteInterface noteInterface = m_nodeInterface.get();
-            
-            JsonObject json = NoteConstants.getCmdObject("updateConfigData");
-            json.addProperty("networkId", NoteConstants.NODE_NETWORK);
-            json.addProperty("configId", m_configId);
-            json.addProperty("id", m_nodeInterface.get().getNetworkId());
-            json.add("data", data);
-            noteInterface.sendNote(json, onSucceeded, onFailed);
-
+            String nodeId = m_defaultNodeId.get();
+            if(nodeId != null){
+                JsonObject json = NoteConstants.getCmdObject("updateConfigData");
+                json.addProperty("networkId", ErgoConstants.NODE_NETWORK);
+                json.addProperty("configId", m_configId);
+                json.addProperty("id", nodeId);
+                json.add("data", data);
+                m_ergoNetworkInterface.sendNote(json, onSucceeded, onFailed);
+            }
         }
 
         
@@ -2325,8 +2344,8 @@ public class ErgoNodesAppBox extends AppBox {
     
 public class ErgoNodeClientControl extends AppBox{
 
-    private String m_accessId;
-    private NoteInterface m_nodeInterface;
+
+
     private Tooltip m_nodeControlIndicatorTooltip = new Tooltip();
     private Label m_nodeControlIndicator = new Label("⬤");
     private Text m_nodeControlClientTypeText = new Text("");
@@ -2354,9 +2373,6 @@ public class ErgoNodeClientControl extends AppBox{
     }
 
 
-    public String getAccessId() {
-        return m_accessId;
-    }
 
 
     public VBox getTopPropertiesBox() {
@@ -2365,10 +2381,6 @@ public class ErgoNodeClientControl extends AppBox{
 
 
 
-
-    public NoteInterface getNodeInterface() {
-        return m_nodeInterface;
-    }
 
 
 
@@ -2435,33 +2447,28 @@ public class ErgoNodeClientControl extends AppBox{
         }
     }
 
-    
- 
 
     public void getStatus(){
-        JsonObject json = m_nodeInterface.getJsonObject();
-        JsonElement namedNodeElement = json.get("namedNode");
-
-        NamedNodeUrl namedNode = null;
-        try {
-            namedNode = namedNodeElement != null && namedNodeElement.isJsonObject() ? (new NamedNodeUrl(namedNodeElement.getAsJsonObject())) : null;
-        } catch (Exception e) {
-
-        }
-        
-        m_nodeControlLabelField.setText(namedNode != null ? namedNode.getUrlString() : "Setup required");
-
-        m_nodeControlIndicator.setId("lblGrey");
-
         JsonObject note = NoteConstants.getCmdObject("getStatus");
-        note.addProperty("accessId", m_accessId);
+        note.addProperty("locationId", m_locationId); 
+        note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
 
         //m_nodeInterface
-        m_nodeInterface.sendNote(note, (onSucceeded)->{
-            Object obj = onSucceeded.getSource().getValue();
- 
-            if(obj != null && obj instanceof  JsonObject ){
-                JsonObject statusObject = (JsonObject) obj;
+        m_ergoNetworkInterface.sendNote(note, (onSucceeded)->{
+            Object onStatusObj = onSucceeded.getSource().getValue();
+            JsonObject statusObject = onStatusObj != null && onStatusObj instanceof JsonObject ? (JsonObject) onStatusObj : null;
+            JsonElement namedNodeElement = statusObject != null ? statusObject.get("namedNode") : null;
+            NamedNodeUrl namedNode = null;
+            try {
+                namedNode = namedNodeElement != null && !namedNodeElement.isJsonNull() && namedNodeElement.isJsonObject() ? (new NamedNodeUrl(namedNodeElement.getAsJsonObject())) : null;
+            } catch (Exception e) {
+
+            }
+            if(namedNode != null){
+               
+                m_nodeControlLabelField.setText(namedNode != null ? namedNode.getUrlString() : "Setup required");
+                m_nodeControlIndicator.setId("lblGrey");
+
                 JsonElement syncedElement = statusObject.get("synced");
                 boolean synced = syncedElement != null ? syncedElement.getAsBoolean() : false;
                 if(m_paramsBox != null){
@@ -2472,7 +2479,7 @@ public class ErgoNodeClientControl extends AppBox{
                 m_nodeControlIndicatorTooltip.setText(synced ? "Synced" : "Unsynced");
                 m_nodeControlIndicator.setId(synced ? "lblGreen" : "lblGrey");
                 m_nodeControlLabelField.setId("smallPrimaryColor");
-                
+                    
             }else{
                 m_showSubControl.set(false);
 
@@ -2480,6 +2487,7 @@ public class ErgoNodeClientControl extends AppBox{
                 m_nodeControlIndicator.setId("lblBlack");
                 m_nodeControlLabelField.setId("smallSecondaryColor");
             }
+            
         }, (onFailed)->{
             m_showSubControl.set(false);
             m_nodeControlIndicator.setId("lblBlack");
@@ -2491,26 +2499,13 @@ public class ErgoNodeClientControl extends AppBox{
 
     
 
-    public NamedNodeUrl getNamedNodeUrl() {
-        JsonElement namedNodeElement = m_nodeInterface.getJsonObject().get("namedNode");
-        
-        try {
-            return namedNodeElement != null ? new NamedNodeUrl(namedNodeElement.getAsJsonObject()) : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-
-    public ErgoNodeClientControl(NoteInterface noteInterface, NamedNodeUrl namedNodeUrl, String clientType, String accessId){
+    public ErgoNodeClientControl( NamedNodeUrl namedNodeUrl, String clientType, String accessId){
         super();
         m_connectBtnTooltip = new Tooltip("Refresh");
         m_connectBtnTooltip.setShowDelay(Duration.millis(100));
 
       
 
-        m_accessId = accessId;
-        m_nodeInterface = noteInterface;
         m_nodeControlShowBtn.setId("caretBtn");
         m_nodeControlShowBtn.setMinWidth(25);
         
@@ -2623,8 +2618,8 @@ public class ErgoNodeLocalControl extends ErgoNodeClientControl {
         return m_progressBar;
     }
 
-    public ErgoNodeLocalControl(NoteInterface noteInterface, NamedNodeUrl nodeUrl, String clientType, String accessId){
-        super(noteInterface, nodeUrl,clientType, accessId);
+    public ErgoNodeLocalControl(NamedNodeUrl nodeUrl, String clientType, String accessId){
+        super( nodeUrl,clientType, accessId);
 
         getConnectBtn().setText(Stages.PLAY);
         getConnectBtn().setOnMouseClicked(e->{
@@ -2640,7 +2635,7 @@ public class ErgoNodeLocalControl extends ErgoNodeClientControl {
         m_updateTooltip.setShowDelay(Duration.millis(100));
 
         m_updateBtn = new BufferedButton(AppConstants.CLOUD_ICON, Stages.MENU_BAR_IMAGE_WIDTH);
-        m_updateBtn.setOnAction(e->updateApp());
+        m_updateBtn.setOnAction(e->updateApp(onSucceeded->{}, onFailed->{}));
         m_updateBtn.setTooltip(m_updateTooltip);
 
         getStatusPaddingBox().getChildren().add(m_updateBtn);
@@ -2648,40 +2643,60 @@ public class ErgoNodeLocalControl extends ErgoNodeClientControl {
         getChildren().add(1, m_topPropertiesBox);
     }
 
-    public void updateApp(){
-        JsonObject note = NoteConstants.getCmdObject("updateApp");
-        note.addProperty("accessId", getAccessId());
-        getNodeInterface().sendNote(note);
+    public void updateApp(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        String nodeId = m_defaultNodeId.get();
+        if(nodeId != null){
+            JsonObject note = NoteConstants.getCmdObject("updateApp");
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
+            note.addProperty("id", nodeId);
+            
+            m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
+        }
     }
 
+    public Future<?> getStatus(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        String nodeId = m_defaultNodeId.get();
+        if(nodeId != null){
+            JsonObject note = NoteConstants.getCmdObject("getStatus");
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("id", nodeId);
+            note.addProperty("networkId", ErgoConstants.NODE_NETWORK);
+
+            return m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
+        }else{
+            return Utils.returnException("No node selected", getExecService(), onFailed);
+        }
+    }
 
     @Override
     public void getStatus(){
-        JsonObject note = NoteConstants.getCmdObject("getStatus");
-        note.addProperty("accessId", getAccessId());
+      
+            getStatus(onSucceeded->{
+                Object obj = onSucceeded.getSource().getValue();
+                if(obj != null && obj instanceof  JsonObject ){
 
+                    updateStatus((JsonObject) obj);
+                        
+                }else{
 
-        Object obj = getNodeInterface().sendNote(note);
-        
-     
+                    getShowSubControl().set(false);
 
-        if(obj != null && obj instanceof  JsonObject ){
-            JsonObject statusObject = (JsonObject) obj;
-           
-            updateStatus(statusObject);
+                    getNodeControlIndicatorTooltip().setText("Unavailable");
+                    getNodeControlIndicator().setId("lblBlack");
+                    getNodeControlLabelField().setId("smallSecondaryColor");
+                    updateParamsBox(null);
+                }
+            }, onFailed->{
+                getShowSubControl().set(false);
+
+                getNodeControlIndicatorTooltip().setText("Unavailable");
+                getNodeControlIndicator().setId("lblBlack");
+                getNodeControlLabelField().setId("smallSecondaryColor");
+                updateParamsBox(null);
+            });
             
           
-        }else{
-
-            getShowSubControl().set(false);
-
-            getNodeControlIndicatorTooltip().setText("Unavailable");
-            getNodeControlIndicator().setId("lblBlack");
-            getNodeControlLabelField().setId("smallSecondaryColor");
-            updateParamsBox(null);
-        }
-
-
     }
 
     public void updateParamsBox(JsonObject json){
@@ -2850,16 +2865,25 @@ public class ErgoNodeLocalControl extends ErgoNodeClientControl {
     }
 
     public void run(){
-        JsonObject note = NoteConstants.getCmdObject("run");
-        note.addProperty("accessId", getAccessId());
-        getNodeInterface().sendNote(note);
-      
+        String nodeId = m_defaultNodeId.get();
+        if(nodeId != null){
+            JsonObject note = NoteConstants.getCmdObject("run");
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("networkId",ErgoConstants.NODE_NETWORK);
+            note.addProperty("id", nodeId);
+            m_ergoNetworkInterface.sendNote(note, onSuceeded->{}, onFailed->{});
+        }
     }
 
     public void terminate(){
-        JsonObject note = NoteConstants.getCmdObject("terminate");
-        note.addProperty("accessId", getAccessId());
-        getNodeInterface().sendNote(note);
+        String nodeId = m_defaultNodeId.get();
+        if(nodeId != null){
+            JsonObject note = NoteConstants.getCmdObject("terminate");
+            note.addProperty("locationId", m_locationId);
+            note.addProperty("networkId",ErgoConstants.NODE_NETWORK);
+            note.addProperty("id", nodeId);
+            m_ergoNetworkInterface.sendNote(note, onSuceeded->{}, onFailed->{});
+        }
     }
 
     

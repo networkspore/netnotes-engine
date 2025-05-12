@@ -50,16 +50,16 @@ public class ErgoInputData{
         
         m_nanoErgs = NoteConstants.getErgAmountFromDataObject(inputDataObject);
 
-        if(m_nanoErgs < NoteConstants.MIN_NANO_ERGS){
-            throw new Exception("Input must be greater than " + NoteConstants.MIN_NETWORK_FEE + " ERG");
+        if(m_nanoErgs < ErgoConstants.MIN_NANO_ERGS){
+            throw new Exception("Input must be greater than " + ErgoConstants.MIN_NETWORK_FEE + " ERG");
         }
     
         m_tokens = NoteConstants.getTokensFromDataObject(inputDataObject);
 
         m_feeNanoErgs = NoteConstants.getFeeAmountFromDataObject(inputDataObject);
 
-        if(m_feeNanoErgs != -1 && m_feeNanoErgs < NoteConstants.MIN_NANO_ERGS){
-            throw new Exception("Fee must be greater than " + NoteConstants.MIN_NETWORK_FEE + " ERG\n(Babblefees not supported yet)");
+        if(m_feeNanoErgs != -1 && m_feeNanoErgs < ErgoConstants.MIN_NANO_ERGS){
+            throw new Exception("Fee must be greater than " + ErgoConstants.MIN_NETWORK_FEE + " ERG\n(Babblefees not supported yet)");
         }
 
     }
@@ -161,7 +161,7 @@ public class ErgoInputData{
         JsonObject json = NoteConstants.createWalletAddressObject(m_addressInformation.getAddressString(), m_name, m_walletType);
         NoteConstants.addNanoErgAmountToDataObject(m_nanoErgs, json);
         NoteConstants.addTokensToDataObject(m_tokens, json);
-        NoteConstants.addFeeAmountToDataObject(m_feeNanoErgs, json);
+        NoteConstants.addFeeAmountToDataObject(m_feeNanoErgs,ErgoConstants.MIN_NANO_ERGS, json);
         addRolesToObject(json);
         return json;
     }

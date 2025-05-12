@@ -23,6 +23,7 @@ import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
+import io.netnotes.engine.networks.ergo.ErgoTokenInfo;
 
 public class PriceCurrency {
 
@@ -357,11 +358,11 @@ public class PriceCurrency {
 
     public void setTokenInfo(JsonObject tokenInfoJson){
         if(tokenInfoJson != null){
-            setTokenInfo(new TokenInfo(tokenInfoJson));
+            setTokenInfo(new ErgoTokenInfo(tokenInfoJson));
         }
     }
 
-    public void setTokenInfo(TokenInfo info){
+    public void setTokenInfo(ErgoTokenInfo info){
         if(info.getTokenId().equals(m_tokenId)){
             m_boxId = info.getBoxId();
             m_emissionAmount = info.getEmissionAmount();
@@ -371,8 +372,8 @@ public class PriceCurrency {
         }
     }
 
-    public TokenInfo getTokenInfo(){
-        return new TokenInfo(m_tokenId, m_boxId, m_emissionAmount, m_name, m_description, m_tokenType, m_fractionalPrecision);
+    public ErgoTokenInfo getTokenInfo(){
+        return new ErgoTokenInfo(m_tokenId, m_boxId, m_emissionAmount, m_name, m_description, m_tokenType, m_fractionalPrecision);
     }
 
     public PriceCurrency(JsonReader reader) throws IOException{

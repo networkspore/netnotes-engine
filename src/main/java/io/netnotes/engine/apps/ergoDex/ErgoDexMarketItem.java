@@ -1101,7 +1101,7 @@ public class ErgoDexMarketItem {
     }
 
     public NoteInterface getCurrentNetwork(){
-        return  getNetworksData().getNetwork(ErgoNetwork.NETWORK_ID);
+        return  getNetworksData().getNetworkInterface(ErgoNetwork.NETWORK_ID);
     }
 
 

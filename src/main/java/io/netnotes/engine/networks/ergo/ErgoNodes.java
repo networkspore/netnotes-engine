@@ -60,42 +60,6 @@ public class ErgoNodes {
 
 
 
-    public Object sendNote(JsonObject note){
-        
-        if(m_ergoNodesList != null){
-            JsonElement cmdElement = note.get(NoteConstants.CMD);
-
-            switch (cmdElement.getAsString()) {
-                case "getNodes":
-                    return m_ergoNodesList.getNodes(note);
-                case "addRemoteNode":
-                    return m_ergoNodesList.addRemoteNode(note);
-                case "getRemoteNodes":
-                    return m_ergoNodesList.getRemoteNodes(note);
-                case "getLocalNodes":
-                    return m_ergoNodesList.getLocalNodes(note);
-                case "getDefault":
-                    return m_ergoNodesList.getDefault();
-                case "setDefault":
-                    return m_ergoNodesList.setDefault(note);
-                case "clearDefault":
-                    return m_ergoNodesList.clearDefault();
-                case "getDefaultInterface":
-                    return m_ergoNodesList.getDefaultInterface(note);
-                case "getNoteInterface":
-                    return m_ergoNodesList.getNoteInterface(note);
-                case "removeNodes":
-                    return m_ergoNodesList.removeNodes(note);
-                case "addLocalNode":
-                    return m_ergoNodesList.addLocalNode(note);
-
-            }
-             
-        }
-        return null;
-    }
-  
-
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         JsonElement cmdElement = note != null ? note.get(NoteConstants.CMD) : null;
@@ -103,8 +67,28 @@ public class ErgoNodes {
         
         if(cmdElement != null){
 
-            switch(cmdElement.getAsString()){
-                
+
+            switch (cmdElement.getAsString()) {
+                case "getNodes":
+                    return m_ergoNodesList.getNodes(onSucceeded);
+                case "addRemoteNode":
+                    return m_ergoNodesList.addRemoteNode(note, onSucceeded, onFailed);
+                case "getRemoteNodes":
+                    return m_ergoNodesList.getRemoteNodes(note, onSucceeded);
+                case "getLocalNodes":
+                    return m_ergoNodesList.getLocalNodes(note, onSucceeded);
+                case "getDefaultJson":
+                    return m_ergoNodesList.getDefaultJson(onSucceeded);
+                case "setDefault":
+                    return m_ergoNodesList.setDefault(note, onSucceeded, onFailed);
+                case "clearDefault":
+                    return m_ergoNodesList.clearDefault(onSucceeded);
+                case "getDefaultNodeId":
+                    return m_ergoNodesList.getDefaultNodeId(onSucceeded);
+                case "removeNodes":
+                    return m_ergoNodesList.removeNodes(note, onSucceeded, onFailed);
+                case "addLocalNode":
+                    return m_ergoNodesList.addLocalNode(note, onSucceeded, onFailed);
                 default: 
                     String id = idElement != null ? idElement.getAsString() : m_ergoNodesList.getDefaultNodeId();
                 
@@ -291,6 +275,6 @@ public class ErgoNodes {
     }
 
     public NetworkInformation getNetworkInformation(){
-        return new NetworkInformation(NoteConstants.NODE_NETWORK, NAME, getAppIconString(), getSmallAppIconString(), DESCRIPTION);
+        return new NetworkInformation(ErgoConstants.NODE_NETWORK, NAME, getAppIconString(), getSmallAppIconString(), DESCRIPTION);
     }
 }

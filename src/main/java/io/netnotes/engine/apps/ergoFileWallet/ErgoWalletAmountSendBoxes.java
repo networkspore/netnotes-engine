@@ -1,4 +1,4 @@
-package io.netnotes.engine.networks.ergo;
+package io.netnotes.engine.apps.ergoFileWallet;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.AmountBoxInterface;
@@ -6,7 +6,8 @@ import io.netnotes.engine.AmountBoxes;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceCurrency;
 import io.netnotes.engine.PriceQuote;
-
+import io.netnotes.engine.networks.ergo.ErgoAmount;
+import io.netnotes.engine.networks.ergo.ErgoCurrency;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;

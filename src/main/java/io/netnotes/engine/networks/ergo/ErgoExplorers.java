@@ -1,5 +1,6 @@
 package io.netnotes.engine.networks.ergo;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import com.google.gson.JsonElement;
@@ -63,31 +64,10 @@ public class ErgoExplorers  {
     }
 
 
-    public Object sendNote(JsonObject note){
 
-        JsonElement cmdElement = note.get(NoteConstants.CMD);
-       
-        switch(cmdElement.getAsString()){
-            case "getExplorerById":
-                return m_explorerList.getExplorerById(note);
-            case "getExplorers":
-                return m_explorerList.getExplorers();
-            case "getDefault":
-                return m_explorerList.getDefault(note);
-            case "getDefaultInterface":
-                return m_explorerList.getDefaultInterface();
-            case "setDefault":
-                return m_explorerList.setDefault(note);
-            case "clearDefault":
-                return m_explorerList.clearDefault(note);
-        }
-            
-        
-
-        return null;
+    public ExecutorService getExecService(){
+        return getNetworksData().getExecService();
     }
-
-
   
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
@@ -97,13 +77,23 @@ public class ErgoExplorers  {
         if(cmdElement != null){
             String id = idElement != null ? idElement.getAsString() : m_explorerList.getDefaultExplorerId();
          
-            
-            ErgoExplorerData explorerData = m_explorerList.getErgoExplorerData(id);
-        
-            if(explorerData != null){
-                
-                return explorerData.sendNote(note, onSucceeded, onFailed);
+            switch(cmdElement.getAsString()){
+                case "getExplorerById":
+                    return m_explorerList.getExplorerById(note, onSucceeded, onFailed);
+                case "getExplorers":
+                    return m_explorerList.getExplorers(onSucceeded);
+                case "getDefaultJson":
+                    return m_explorerList.getDefaultJson(onSucceeded);
+                case "setDefault":
+                    return m_explorerList.setDefault(note, onSucceeded, onFailed);
+                case "clearDefault":
+                    return m_explorerList.clearDefault(note, onSucceeded);
+                default:
+                    ErgoExplorerData explorerData = m_explorerList.getErgoExplorerData(id);
+                    return explorerData.sendNote(note, onSucceeded, onFailed);
             }
+                    
+            
         }
 
         return null;
@@ -119,7 +109,7 @@ public class ErgoExplorers  {
     }
 
     public void getData(String subId, String id, String urlString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
-        m_ergoNetwork.getNetworksData().getData(subId, id, NoteConstants.EXPLORER_NETWORK , NoteConstants.ERGO_NETWORK_ID, (onFinished)->{
+        m_ergoNetwork.getNetworksData().getData(subId, id, ErgoConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID, (onFinished)->{
             Object obj = onFinished.getSource().getValue();
             JsonObject existingData = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
 
@@ -134,7 +124,7 @@ public class ErgoExplorers  {
                     if(sourceObject != null && sourceObject instanceof JsonObject){
                         
                             JsonObject json = (JsonObject) sourceObject;
-                            getNetworksData().save(subId, id, NoteConstants.EXPLORER_NETWORK , NoteConstants.ERGO_NETWORK_ID, json);
+                            getNetworksData().save(subId, id, ErgoConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID, json);
                             Utils.returnObject(sourceObject,getNetworksData().getExecService(), onSucceeded, onFailed);
                     
                     }else{

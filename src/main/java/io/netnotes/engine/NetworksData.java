@@ -61,6 +61,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -70,7 +71,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.PasswordField;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
@@ -103,6 +103,8 @@ public class NetworksData {
     
     public final static NetworkInformation NO_NETWORK = new NetworkInformation("NO_NETWORK", "(none)",NetworkConstants.NETWORK_ICON256, NetworkConstants.NETWORK_ICON, "No network selected" );
     
+    public static final String UNKNOWN_LOCATION = "Unknown";
+
     private SimpleStringProperty m_currentNetworkId = new SimpleStringProperty(null);
     
    // private Tooltip m_networkToolTip = new Tooltip("Network");
@@ -524,9 +526,26 @@ public class NetworksData {
         return m_appData;
     }
 
-    public boolean verifyAppPassword(String password){
-        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.toCharArray(), getAppData().getAppKeyBytes());
-        return result.verified;
+    public Future<?> verifyAppPassword(char[] chars, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        byte[] appKeyBytes = getAppData().getAppKeyBytes();
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws Exception {
+
+                BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(chars, appKeyBytes);
+                if(result.verified){
+                    return true;
+                }else{
+                    throw new Exception("Unverified");
+                }
+            }
+        };
+
+        task.setOnSucceeded(onSucceeded);
+        task.setOnFailed(onFailed);
+
+        return getExecService().submit(task);
     }
 
     private void openJson(JsonObject networksObject) {
@@ -539,12 +558,12 @@ public class NetworksData {
             for(JsonElement element : adapterArray){
                 if(element != null && element.isJsonObject()){
                     JsonObject jsonObject = element.getAsJsonObject();
-                    JsonElement networkIdElement = jsonObject.get("adapterId");
+                    JsonElement networkIdElement = jsonObject.get("networkId");
 
                     if (networkIdElement != null) {
-                        String adapterId = networkIdElement.getAsString();
+                        String networkId = networkIdElement.getAsString();
 
-                        Adapter adapter = createAdapter(adapterId);
+                        Adapter adapter = createAdapter(networkId);
                         if(adapter != null){
                             addAdapter(adapter, false);
                         }
@@ -578,7 +597,7 @@ public class NetworksData {
             }
             String currentNetworkString = currentNetworkIdElement != null && currentNetworkIdElement.isJsonPrimitive() ? currentNetworkIdElement.getAsString() : null; 
           
-            if(currentNetworkString != null && getNetwork(currentNetworkString) != null){
+            if(currentNetworkString != null && getNetworkInterface(currentNetworkString) != null){
                 
                 m_currentNetworkId.set(currentNetworkString); 
             }else{
@@ -699,7 +718,7 @@ public class NetworksData {
 
     private Network createNetwork(String networkId){
         
-        if(getNetwork(networkId) == null){
+        if(getNetworkInterface(networkId) == null){
             String locationId = FriendlyId.createFriendlyId();
             Network network = m_appInterface.createNetwork(networkId, locationId);
             
@@ -865,7 +884,7 @@ public class NetworksData {
 
         String networkId = network.getNetworkId();
 
-        if (getNetwork(networkId) == null) {
+        if (getNetworkInterface(networkId) == null) {
                
         
             m_networks.put(network.getNetworkId(), network);
@@ -926,9 +945,8 @@ public class NetworksData {
     public String getLocationString(String locationId){
         
         String locationString = locationId != null ? m_locationsIds.get(locationId) : null;
-        return  locationString != null ?  locationString : "Unknown";
+        return  locationString != null ?  locationString : UNKNOWN_LOCATION;
     }
-
 
     private boolean removeNetwork(String networkId, boolean isSave){       
     
@@ -1068,13 +1086,16 @@ public class NetworksData {
 
 
     public NoteInterface getApp(String networkId) {
-        Network network = getAppNetwork(networkId);
-        return network != null ? network.getNoteInterface() : null;
+        if(networkId != null){
+            Network network = getAppNetwork(networkId);
+            return network != null ? network.getNoteInterface() : null;
+        }
+        return null;
     }
 
 
     private void installNetwork(String networkId){
-        if(getNetwork(networkId) == null && isNetworkSupported(networkId)){
+        if(getNetworkInterface(networkId) == null && isNetworkSupported(networkId)){
            
             addNetwork(createNetwork(networkId), true);
            
@@ -1242,34 +1263,34 @@ public class NetworksData {
         });
     }*/
 
-    private Network getNetworkNetwork(String networkId) {
+    private Network getNetwork(String networkId) {
         if (networkId != null) {
             return m_networks.get(networkId);
         }
         return null;
     }
 
-    private Adapter getAdapter(String adapterId) {
-        if (adapterId != null) {
-            return m_adapters.get(adapterId);
+    private Adapter getAdapter(String networkId) {
+        if (networkId != null) {
+            return m_adapters.get(networkId);
         }
         return null;
     }
 
-    public NoteInterface getNetwork(String networkId) {
+    public NoteInterface getNetworkInterface(String networkId) {
         if (networkId != null) {
    
-            Network network = getNetworkNetwork(networkId);
+            Network network = getNetwork(networkId);
 
             return network != null ? network.getNoteInterface() : null;
         }
         return null;
     }
 
-    public AdapterNoteInterface getAdapterInterface(String adapterId) {
-        if (adapterId != null) {
+    public AdapterNoteInterface getAdapterInterface(String networkId) {
+        if (networkId != null) {
    
-            Adapter adapter = getAdapter(adapterId);
+            Adapter adapter = getAdapter(networkId);
 
             return adapter != null ? adapter.getNoteAdapterInterface() : null;
         }
@@ -1281,7 +1302,7 @@ public class NetworksData {
 
        
         
-        NoteInterface noteInterface = getNetwork(networkId);
+        Network noteInterface = getNetwork(networkId);
       
         if(noteInterface != null){
             return noteInterface.getTab(m_appStage, m_staticContentHeight, m_staticContentWidth, m_networkBtn);
@@ -1309,7 +1330,7 @@ public class NetworksData {
             
             Network app = entry.getValue();
 
-            jsonArray.add(app.getNoteInterface().getJsonObject());
+            jsonArray.add(app.getJsonObject());
         }
 
 
@@ -1323,7 +1344,21 @@ public class NetworksData {
             
             Network network = entry.getValue();
 
-            jsonArray.add(network.getNoteInterface().getJsonObject());
+            jsonArray.add(network.getJsonObject());
+        }
+
+
+        return jsonArray;
+    }
+
+    public JsonArray getAdaptersArray(){
+        JsonArray jsonArray = new JsonArray();
+
+        for (Map.Entry<String, Adapter> entry : m_adapters.entrySet()) {
+            
+            Adapter adapter = entry.getValue();
+
+            jsonArray.add(adapter.getJsonObject());
         }
 
 
@@ -1336,12 +1371,14 @@ public class NetworksData {
         JsonObject fileObject = new JsonObject();
         JsonArray appsArray = getAppsArray();
         JsonArray networksArray = getNetworksArray();
+        JsonArray adaptersArray = getAdaptersArray();
 
         if(m_currentNetworkId.get() != null){
             fileObject.addProperty("currentNetworkId", m_currentNetworkId.get());
         }
         fileObject.add("netArray", networksArray);
         fileObject.add("apps", appsArray);
+        fileObject.add("adapters", adaptersArray);
         fileObject.add("stage", getStageJson());
         return fileObject;
     }
@@ -1385,15 +1422,15 @@ public class NetworksData {
             return;
         }
       
-        NoteInterface noteInterface = getNetwork(networkId);
+        Network network = getNetwork(networkId);
         
-        if(noteInterface != null){
+        if(network != null){
             if(currentTab != null){
                 currentTab.setStatus(NoteConstants.STATUS_MINIMIZED);
             }
          
 
-            TabInterface tab = noteInterface != null ? noteInterface.getTab(m_appStage, m_staticContentHeight, m_staticContentWidth, m_networkBtn) : null;
+            TabInterface tab = network != null ? network.getTab(m_appStage, m_staticContentHeight, m_staticContentWidth, m_networkBtn) : null;
     
             
             m_currentMenuTab.set(tab);
@@ -1452,7 +1489,6 @@ public class NetworksData {
 
             }
         }
-
 
         return list;
     }
@@ -1717,12 +1753,12 @@ public class NetworksData {
     }
 
 
-    private Future<?> updateAppKey(String newPassword, EventHandler<WorkerStateEvent> onFinished){
+    private Future<?> updateAppKey(char[] newPassword, EventHandler<WorkerStateEvent> onFinished){
 
         Task<Object> task = new Task<Object>() {
             @Override
             public Object call() throws InterruptedException, IOException, NoSuchAlgorithmException, InvalidKeySpecException{
-                if(newPassword.length() > 0){ 
+                if(newPassword.length > 0){ 
                     m_dataSemaphore.acquire();
                     SecretKey oldAppKey = getAppKey();
                     String hash = Utils.getBcryptHashString(newPassword);
@@ -1857,9 +1893,9 @@ public class NetworksData {
     }
 
 
-    public void getData(String version, String id, String scope, String type, EventHandler<WorkerStateEvent> onComplete){
+    public Future<?> getData(String version, String id, String scope, String type, EventHandler<WorkerStateEvent> onComplete){
         if(id != null && version != null && scope != null && type != null){ 
-            getIdDataFile(version,id,scope,type,(onDataFile)->{
+            return getIdDataFile(version,id,scope,type,(onDataFile)->{
             
                 Object dataObject = onDataFile.getSource().getValue();
                 if(dataObject != null && dataObject instanceof File){
@@ -1893,7 +1929,7 @@ public class NetworksData {
             });
            
         }
-
+        return null;
     }
 
 
@@ -2060,84 +2096,15 @@ public class NetworksData {
         
     }
 
-    public void verifyAppKey( String networkName, String cmd, String details, String location, long timeStamp, Runnable runnable){
-        int lblCol = 80;
-        int rowHeight = 22;
-        //String title = "Remove wallet - Ergo Network";
-        String timeStampString = Utils.formatDateTimeString(Utils.milliToLocalTime(timeStamp));
-        
-        String title = "Netnotes - Authorization - " + networkName + " - " + cmd;
+    public void verifyAppKey( String networkName, JsonObject note, String locationString, long timeStamp, Runnable onVerified){
+        double lblCol = 170;
+        double rowHeight = 22;
 
-        Label networkLbl = new Label("Network:");
-        networkLbl.setMinWidth(lblCol);
-        networkLbl.setFont(Stages.txtFont);
+        if(note.get("timeStamp") == null && note.get("timestamp") == null){
+            note.addProperty("timeStamp", timeStamp);
+        }
 
-        TextField networkField = new TextField(networkName);
-        networkField.setEditable(false);
-        networkField.setFont(Stages.txtFont);
-        HBox.setHgrow(networkField, Priority.ALWAYS);
-        
-
-        HBox networkBox = new HBox(networkLbl, networkField);
-        HBox.setHgrow(networkBox, Priority.ALWAYS);
-        networkBox.setAlignment(Pos.CENTER_LEFT);
-        networkBox.setMinHeight(rowHeight);
-
-        Label cmdLbl = new Label("Command:");
-        cmdLbl.setMinWidth(lblCol);
-        cmdLbl.setFont(Stages.txtFont);
-
-        TextField cmdField = new TextField(cmd);
-        cmdField.setEditable(false);
-        HBox.setHgrow(cmdField, Priority.ALWAYS);
-        cmdField.setFont(Stages.txtFont);
-
-        HBox cmdBox = new HBox(cmdLbl, cmdField);
-        HBox.setHgrow(cmdBox,Priority.ALWAYS);
-        cmdBox.setAlignment(Pos.CENTER_LEFT);
-        cmdBox.setMinHeight(rowHeight);
-
-        
-        TextArea textArea = new TextArea(details);
-        textArea.setFont(Stages.txtFont);
-        HBox.setHgrow(textArea, Priority.ALWAYS);
-        textArea.setPrefRowCount(4);
-        textArea.setEditable(false);
-        textArea.setWrapText(false);
-
-        HBox infoBox = new HBox(textArea);
-        HBox.setHgrow(infoBox, Priority.ALWAYS);
-        VBox.setVgrow(infoBox,Priority.ALWAYS);
-        infoBox.setPadding(new Insets(5,0,0,lblCol));
-
-
-        Label locationLbl = new Label("Location:");
-        locationLbl.setMinWidth(lblCol);
-        locationLbl.setFont(Stages.txtFont);
-
-        TextField locationField = new TextField(location);
-        locationField.setEditable(false);
-        HBox.setHgrow(locationField, Priority.ALWAYS);
-        locationField.setFont(Stages.txtFont);
-
-        HBox locationBox = new HBox(locationLbl, locationField);
-        HBox.setHgrow(locationBox,Priority.ALWAYS);
-        locationBox.setAlignment(Pos.CENTER_LEFT);
-        locationBox.setMinHeight(rowHeight);
-
-        Label timeLbl = new Label("Time");
-        timeLbl.setMinWidth(lblCol);
-        timeLbl.setFont(Stages.txtFont);
-
-        TextField timeField = new TextField(timeStampString);
-        timeField.setEditable(false);
-        HBox.setHgrow(timeField, Priority.ALWAYS);
-        timeField.setFont(Stages.txtFont);
-
-        HBox timeBox = new HBox(timeLbl, timeField);
-        HBox.setHgrow(timeBox,Priority.ALWAYS);
-        timeBox.setAlignment(Pos.CENTER_LEFT);
-        timeBox.setMinHeight(rowHeight);
+        String title = "Netnotes - " +networkName + " - Authorize: " + locationString;
 
         Stage passwordStage = new Stage();
         passwordStage.getIcons().add(Stages.logo);
@@ -2147,74 +2114,33 @@ public class NetworksData {
 
         Button closeBtn = new Button();
 
-        HBox titleBox = Stages.createTopBar(Stages.icon, title, closeBtn, passwordStage);
-
-        ImageView btnImageView = new ImageView(Stages.logo);
-        btnImageView.setPreserveRatio(true);
-        btnImageView.setFitHeight(75);
-        
-
-        Label textField = new Label("Authorization Required");
-        textField.setFont(Stages.mainFont);
-        textField.setPadding(new Insets(20,0,20,15));
-        
-
-        VBox imageBox = new VBox(btnImageView, textField);
-        imageBox.setAlignment(Pos.CENTER);
-        imageBox.setPadding(new Insets(10,0,10,0));
-
-        Text passwordTxt = new Text("Enter password:");
-        passwordTxt.setFill(Stages.txtColor);
-        passwordTxt.setFont(Stages.txtFont);
 
         PasswordField passwordField = new PasswordField();
         passwordField.setFont(Stages.txtFont);
         passwordField.setId("passField");
-
         HBox.setHgrow(passwordField, Priority.ALWAYS);
 
-        HBox passwordBox = new HBox(passwordTxt, passwordField);
-        passwordBox.setAlignment(Pos.CENTER_LEFT);
-        passwordBox.setPadding(new Insets(10, 0, 0, 0));
 
-
-        VBox.setMargin(passwordBox, new Insets(5, 10, 15, 20));
-
-
-
-        VBox bodyBox = new VBox(networkBox,cmdBox, infoBox, locationBox, timeBox);
-        VBox.setVgrow(bodyBox,Priority.ALWAYS);
-        bodyBox.setPadding(new Insets(0,20, 0, 20));
-
-        VBox layoutVBox = new VBox(titleBox, imageBox,bodyBox, passwordBox);
-        VBox.setVgrow(layoutVBox, Priority.ALWAYS);
-
-        Scene passwordScene = new Scene(layoutVBox, 800, 600);
+        Scene passwordScene = Stages.getAuthorizationScene(passwordStage, title, closeBtn, passwordField, note, locationString, rowHeight, lblCol);
         passwordScene.setFill(null);
         passwordScene.getStylesheets().add("/css/startWindow.css");
+
         passwordStage.setScene(passwordScene);
-
-        Stage statusStage = Stages.getStatusStage("Verifying", "Verifying...");
-
         passwordField.setOnAction(e -> {
+            Stage statusStage = Stages.getStatusStage("Verifying", "Verifying...");
 
-            String pass = passwordField.getText();
-            if (pass.length() < 6) {
+            if ( passwordField.getText().length() < 6) {
                 passwordField.setText("");
             } else {
                 statusStage.show();
-                FxTimer.runLater(Duration.ofMillis(100), ()->{
-
-                    boolean verified = verifyAppPassword(pass);
-                        
-                    Platform.runLater(() -> passwordField.setText(""));
+                char[] pass = passwordField.getText().toCharArray();
+                passwordField.setText("");
+                verifyAppPassword(pass, onSucceeded->{
                     statusStage.close();
-                    if (verified) {
-                        passwordStage.close();
-
-                        runnable.run();
-
-                    }
+                    passwordStage.close();
+                    onVerified.run();
+                }, onFailed->{
+                    statusStage.close();
                 });
             }
         
@@ -2222,7 +2148,6 @@ public class NetworksData {
 
         closeBtn.setOnAction(e -> {
             passwordStage.close();
-
         });
 
         passwordScene.focusOwnerProperty().addListener((obs, oldval, newVal) -> {
@@ -2237,119 +2162,6 @@ public class NetworksData {
         
             passwordField.requestFocus();}
         );
-    }
-
-    
-    public static void verifyInfo( String title, String details, long timeStamp, Runnable yes, Runnable no){
-        int lblCol = 80;
-        int rowHeight = 22;
-        //String title = "Remove wallet - Ergo Network";
-        String timeStampString = Utils.formatDateTimeString(Utils.milliToLocalTime(timeStamp));
-        
-        title = "Netnotes - Security - " + title;
-
- 
-
-        TextField cmdField = new TextField(title);
-        cmdField.setEditable(false);
-        HBox.setHgrow(cmdField, Priority.ALWAYS);
-        cmdField.setFont(Stages.txtFont);
-
-        HBox cmdBox = new HBox(cmdField);
-        HBox.setHgrow(cmdBox,Priority.ALWAYS);
-        cmdBox.setAlignment(Pos.CENTER_LEFT);
-        cmdBox.setMinHeight(rowHeight);
-
-        
-        TextArea textArea = new TextArea(details);
-        textArea.setFont(Stages.txtFont);
-        HBox.setHgrow(textArea, Priority.ALWAYS);
-        textArea.setPrefRowCount(4);
-        textArea.setEditable(false);
-        textArea.setWrapText(false);
-
-        HBox infoBox = new HBox(textArea);
-        HBox.setHgrow(infoBox, Priority.ALWAYS);
-        VBox.setVgrow(infoBox,Priority.ALWAYS);
-        infoBox.setPadding(new Insets(5,0,0,lblCol));
-
-
-   
-        Label timeLbl = new Label("Time");
-        timeLbl.setMinWidth(lblCol);
-        timeLbl.setFont(Stages.txtFont);
-
-        TextField timeField = new TextField(timeStampString);
-        timeField.setEditable(false);
-        HBox.setHgrow(timeField, Priority.ALWAYS);
-        timeField.setFont(Stages.txtFont);
-
-        HBox timeBox = new HBox(timeLbl, timeField);
-        HBox.setHgrow(timeBox,Priority.ALWAYS);
-        timeBox.setAlignment(Pos.CENTER_LEFT);
-        timeBox.setMinHeight(rowHeight);
-
-        Stage passwordStage = new Stage();
-        passwordStage.getIcons().add(Stages.logo);
-        passwordStage.setResizable(false);
-        passwordStage.initStyle(StageStyle.UNDECORATED);
-        passwordStage.setTitle(title);
-
-        Button closeBtn = new Button();
-
-        HBox titleBox = Stages.createTopBar(Stages.icon, title, closeBtn, passwordStage);
-
-        ImageView btnImageView = new ImageView(Stages.logo);
-        btnImageView.setPreserveRatio(true);
-        btnImageView.setFitHeight(75);
-        
-
-        Label textField = new Label("Accept");
-        textField.setFont(Stages.mainFont);
-        textField.setPadding(new Insets(20,0,20,15));
-        
-
-        VBox imageBox = new VBox(btnImageView, textField);
-        imageBox.setAlignment(Pos.CENTER);
-        imageBox.setPadding(new Insets(10,0,10,0));
-
-        Button yesBtn = new Button("Yes");
-        yesBtn.setOnAction(e->yes.run());
-
-        Region spacerRegion = new Region();
-        spacerRegion.setMinWidth(20);
-
-        Button noBtn = new Button("No");
-        noBtn.setOnAction(e->no.run());
-
-
-        HBox acceptBtnBox = new HBox(yesBtn, noBtn);
-        acceptBtnBox.setAlignment(Pos.CENTER_LEFT);
-        acceptBtnBox.setPadding(new Insets(10, 0, 10, 0));
-
-        VBox bodyBox = new VBox(cmdBox, infoBox, timeBox);
-        VBox.setVgrow(bodyBox,Priority.ALWAYS);
-        bodyBox.setPadding(new Insets(0,20, 0, 20));
-
-        VBox layoutVBox = new VBox(titleBox, imageBox,bodyBox, acceptBtnBox);
-        VBox.setVgrow(layoutVBox, Priority.ALWAYS);
-
-        Scene passwordScene = new Scene(layoutVBox, 800, 600);
-        passwordScene.setFill(null);
-        passwordScene.getStylesheets().add("/css/startWindow.css");
-        passwordStage.setScene(passwordScene);
-
-
-
-        closeBtn.setOnAction(e -> {
-            passwordStage.close();
-
-        });
-
-
-        passwordStage.show();
- 
-   
     }
 
    
@@ -2418,20 +2230,15 @@ public class NetworksData {
                 } else {
           
                     statusStage.show();
-                    String txt = passwordField.getText();
-                    
-                    FxTimer.runLater(Duration.ofMillis(100), () -> {
-                        boolean verified = verifyAppPassword(txt);
-                       
-                        Platform.runLater(() -> passwordField.setText(""));
+                    char[] chars = passwordField.getText().toCharArray();
+                    passwordField.setText("");
+
+                    verifyAppPassword(chars, onVerified->{
                         statusStage.close();
-                        if (verified) {
-                            passwordStage.close();
-
-                            runnable.run();
-
-                        }
-
+                        passwordStage.close();
+                        runnable.run();
+                    }, onFailed->{
+                        statusStage.close();
                     });
                 }
             }
@@ -2439,7 +2246,7 @@ public class NetworksData {
 
         closeBtn.setOnAction(e -> {
             passwordStage.close();
-
+            closing.run();
         });
 
         passwordScene.focusOwnerProperty().addListener((obs, oldval, newVal) -> {
@@ -2447,7 +2254,8 @@ public class NetworksData {
                 Platform.runLater(() -> passwordField.requestFocus());
             }
         });
-             passwordStage.show();
+        
+        passwordStage.show();
             
         Platform.runLater(() ->{
 
@@ -2914,7 +2722,7 @@ public class NetworksData {
 
                     for(int i = 0; i < supportedNetworks.length; i++){
                         NetworkInformation networkInformation = supportedNetworks[i];
-                        if(getNetwork(networkInformation.getNetworkId()) == null){
+                        if(getNetworkInterface(networkInformation.getNetworkId()) == null){
                             ImageView intallItemImgView = new ImageView();
                             intallItemImgView.setPreserveRatio(true);
                             intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
@@ -3660,7 +3468,7 @@ public class NetworksData {
           
         
             m_networkBtn.setOnAction(e->{
-                Network currentNetwork = getNetworkNetwork(m_currentNetworkId.get());
+                Network currentNetwork = getNetwork(m_currentNetworkId.get());
 
                 if(currentNetwork != null){
                     openNetwork(currentNetwork.getNetworkId());
@@ -3671,7 +3479,7 @@ public class NetworksData {
             });
 
             Runnable updateCurrentNetwork = ()->{
-                Network currentNetwork = getNetworkNetwork(m_currentNetworkId.get());
+                Network currentNetwork = getNetwork(m_currentNetworkId.get());
         
 
                 if(currentNetwork != null){
@@ -3832,7 +3640,6 @@ public class NetworksData {
         private String m_status = NoteConstants.STATUS_STOPPED;
         private Stage m_updateStage = null;
         private Stage m_verifyStage = null;
-        private Button m_closeBtn;
         private Future<?> m_updateFuture = null;
         public String getStatus(){
             return m_status;
@@ -3876,36 +3683,53 @@ public class NetworksData {
             passwordBtn.setOnAction(e -> {
                 if(m_updateStage == null && m_verifyStage == null){
                     m_verifyStage = verifyAppKey(()->{
-                        m_updateStage = Stages.createPassword("Netnotes - Password", Stages.logo, Stages.logo, m_closeBtn, getExecService(), (onSuccess) -> {
+                        Button closeBtn = new Button();
+                        String title = "Netnotes - Password";
+                        m_updateStage = new Stage();
+                        m_updateStage.getIcons().add(Stages.logo);
+                        m_updateStage.initStyle(StageStyle.UNDECORATED);
+                        m_updateStage.setTitle(title);
+                
+                       Stages.createPassword(m_updateStage, title, Stages.logo, Stages.logo, closeBtn, getExecService(), (onSuccess) -> {
                             if(m_updateFuture == null){
                                 Object sourceObject = onSuccess.getSource().getValue();
             
-                                if (sourceObject != null && sourceObject instanceof String) {
-                                    String newPassword = (String) sourceObject;
+                                if (sourceObject != null && sourceObject instanceof char[]) {
+                                    char[] chars = (char[]) sourceObject;
             
-                                    if (!newPassword.equals("")) {
+                                    if (chars.length > 0) {
             
                                         Stage statusStage = Stages.getStatusStage("Netnotes - Updating Password...", "Updating Password...");
                                         statusStage.show();
                                         
-                                        m_updateFuture = updateAppKey(newPassword, onFinished ->{
+                                        m_updateFuture = updateAppKey(chars, onFinished ->{
                                             Object finishedObject = onFinished.getSource().getValue();
                                             statusStage.close();
                                             m_updateFuture = null;
                                             if(finishedObject != null && finishedObject instanceof Boolean && (Boolean) finishedObject){
-                                                m_closeBtn.fire();
+                                                closeBtn.fire();
                                             }
                                         });
                                             
-                                    } 
+                                    }else{
+                                        closeBtn.fire();
+                                    }
+                                }else{
+                                    closeBtn.fire();
                                 }
                             }
                     
-                        },()->{
-                        
-                            m_updateStage = null;
                         });
                         m_updateStage.show();
+                        m_updateStage.setOnCloseRequest(onCloseEvent->{
+                            m_updateStage = null;
+                        });
+                        closeBtn.setOnAction(closeAction ->{
+                            if(m_updateStage != null){
+                                m_updateStage.close();
+                                m_updateStage = null;
+                            }
+                        });
                     },()->{
                         m_verifyStage = null;
                     });

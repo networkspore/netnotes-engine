@@ -1,17 +1,22 @@
 package io.netnotes.engine.networks.ergo;
 
 
+import javafx.concurrent.WorkerStateEvent;
+import java.util.concurrent.Future;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.AppBox;
 import io.netnotes.engine.JsonParametersBox;
+import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
 import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
+import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.beans.binding.Binding;
@@ -22,11 +27,14 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Alert;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
@@ -35,6 +43,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
+import javafx.event.EventHandler;
 
 public class ErgoMarketAppBox extends AppBox {
     private final String selectString = "[disabled]";
@@ -62,13 +71,14 @@ public class ErgoMarketAppBox extends AppBox {
     private String m_statusMsg = "Unavailable";
     private SimpleBooleanProperty m_showTickerBody = new SimpleBooleanProperty(false);
     private ImageView m_menuBtnImgView;
+    private NetworksData m_networksData;
 
-    public ErgoMarketAppBox(Stage appStage, String locationId, NoteInterface ergoNetworkInterface){
+    public ErgoMarketAppBox(Stage appStage, String locationId, NetworksData networksData, NoteInterface ergoNetworkInterface){
         super();
         m_ergoNetworkInterface = ergoNetworkInterface;
         m_appStage = appStage;
         m_locationId = locationId;
-
+        m_networksData = networksData;
     
         ImageView logoIconView = new ImageView(new Image(ErgoConstants.ERGO_MARKETS_ICON));
         logoIconView.setPreserveRatio(true);
@@ -300,23 +310,44 @@ public class ErgoMarketAppBox extends AppBox {
 
         Runnable setMarketInfo = ()->{
             NoteInterface marketInterface = m_selectedMarket.get();
-            JsonObject marketJson = m_selectedMarket.get() != null ? marketInterface.getJsonObject() : null;
-            
-            if(marketJson != null){
-                marketJson.remove("name");
-                marketJson.remove("networkId");
-                marketInfoParamBox.update(  marketJson);
-                if (!m_ergoMarketsFieldBox.getChildren().contains(m_disableBtn)) {
-                    m_ergoMarketsFieldBox.getChildren().add(m_disableBtn);
+            marketInterface.sendNote(NoteConstants.getCmdObject("getNetworkObject"), (onNetworkObject)->{
+                Object obj = onNetworkObject.getSource().getValue();
+                if(obj != null && obj instanceof JsonObject){
+                    JsonObject marketJson = (JsonObject) obj;
+                    marketJson.remove("name");
+                    marketJson.remove("networkId");
+                    NoteConstants.getAppIconFromNetworkObject(marketJson, getNetworksData().getExecService(), onImage ->{
+                        Object imageObj = onImage.getSource().getValue();
+                        if(imageObj != null && imageObj instanceof Image){
+                            m_menuBtnImgView.setImage((Image)imageObj);
+                        }else{
+                            m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                        }
+                    }, onFailed->{
+                        m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                    });
+                    
+
+                    marketInfoParamBox.update(  marketJson);
+                    if (!m_ergoMarketsFieldBox.getChildren().contains(m_disableBtn)) {
+                        m_ergoMarketsFieldBox.getChildren().add(m_disableBtn);
+                    }
+                }else{
+                    m_ergoMarketsMenuBtn.setText(selectString);
+                    m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                    marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
+                    if (m_ergoMarketsFieldBox.getChildren().contains(m_disableBtn)) {
+                        m_ergoMarketsFieldBox.getChildren().remove(m_disableBtn);
+                    }
                 }
-            }else{
+            },(onObjectFailed)->{
+                m_ergoMarketsMenuBtn.setText(selectString);
+                m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
                 marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
                 if (m_ergoMarketsFieldBox.getChildren().contains(m_disableBtn)) {
                     m_ergoMarketsFieldBox.getChildren().remove(m_disableBtn);
                 }
-            }
-            m_ergoMarketsMenuBtn.setText(marketInterface != null ?marketInterface.getName() : selectString);
-            m_menuBtnImgView.setImage(marketInterface != null ? marketInterface.getAppIcon() : null);
+            });
         };
         setMarketInfo.run();
       
@@ -363,7 +394,14 @@ public class ErgoMarketAppBox extends AppBox {
 
         m_disableBtn.setOnMouseClicked(e -> {
             m_showBody.set(false);
-            clearDefault();
+            clearDefault((onDefault)->{}, onFailed->{
+                Throwable exThrowable = onFailed.getSource().getException();
+                String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send disable message";
+
+                Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                a.setHeaderText("Error");
+                a.show();
+            });
         });
 
         m_mainBox = new VBox(layoutBox);
@@ -380,93 +418,135 @@ public class ErgoMarketAppBox extends AppBox {
 
         });
 
-        getDefaultMarket();
+        getDefaultMarketIds();
 
 
         getChildren().addAll(m_mainBox);
         setPadding(new Insets(0,0,5,0));
     }
 
-    public void setDefaultMarket(String id){
+    public void setDefaultMarket(String id, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("setDefaultMarket");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
+
         note.addProperty("locationId", m_locationId);
         note.addProperty("id", id);
         
-        m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
     }
 
-    public void clearDefault(){
+    public void clearDefault(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("clearDefaultMarket");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
+
         note.addProperty("locationId", m_locationId);
-        m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
     }
 
-    public void getDefaultMarket(){
+    public NetworksData getNetworksData(){
+        return m_networksData;
+    }
+
+    public Future<?> getDefaultMarketIds(){
         
-        JsonObject note = NoteConstants.getCmdObject("getDefaultMarketInterface");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
+        JsonObject note = NoteConstants.getCmdObject("getDefaultMarketIds");
         note.addProperty("locationId", m_locationId);
-        Object obj = m_ergoNetworkInterface.sendNote(note);
-        NoteInterface noteInterface =obj != null && obj instanceof NoteInterface ? (NoteInterface) obj : null;
-        m_selectedMarket.set(noteInterface);
+        return m_ergoNetworkInterface.sendNote(note, onSucceeded->{
+            Object obj = onSucceeded.getSource().getValue();
+            
+            JsonObject json = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
+            if(json != null){
+                JsonElement marketIdElement =  json.get("marketId");
+
+                m_selectedMarket.set(marketIdElement != null && !marketIdElement.isJsonNull() ? getNetworksData().getApp(marketIdElement.getAsString()) : null);
+            
+            }else{
+              
+                m_selectedMarket.set(null);
+            }
+        }, onFailed->{
+            
+            m_selectedMarket.set(null);
+        });
+
         
     }
 
 
-    public void updateMarkets(){
+    public Future<?> updateMarkets(){
        
         JsonObject note = NoteConstants.getCmdObject("getMarkets");
-        note.addProperty("networkId", NoteConstants.MARKET_NETWORK);
         note.addProperty("locationId", m_locationId);
 
-        Object objResult = m_ergoNetworkInterface.sendNote(note);
+        return m_ergoNetworkInterface.sendNote(note, onMarkets->{
+            Object objResult = onMarkets.getSource().getValue();
 
-        m_ergoMarketsMenuBtn.getItems().clear();
+            m_ergoMarketsMenuBtn.getItems().clear();
 
-        if (objResult != null && objResult instanceof JsonArray) {
+            if (objResult != null && objResult instanceof JsonArray) {
 
-            JsonArray explorersArray = (JsonArray) objResult;
+                JsonArray explorersArray = (JsonArray) objResult;
 
-            for (JsonElement element : explorersArray) {
-                
-                JsonObject json = element.getAsJsonObject();
+                for (JsonElement element : explorersArray) {
+                    
+                    JsonObject json = element.getAsJsonObject();
 
-                String name = json.get("name").getAsString();
-                String id = json.get("networkId").getAsString();
+                    String name = json.get("name").getAsString();
+                    String id = json.get("networkId").getAsString();
 
-                MenuItem menuItems = new MenuItem(String.format("%-20s", " " + name));
-                menuItems.setOnAction(action -> {
+                    MenuItem menuItems = new MenuItem(String.format("%-20s", " " + name));
+                    menuItems.setOnAction(action -> {
+                        m_ergoMarketsMenuBtn.hide();
+                        setDefaultMarket(id,(onDefault)->{}, onFailed->{
+                            Throwable exThrowable = onFailed.getSource().getException();
+                            String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send message";
+            
+                            Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                            a.setHeaderText("Error");
+                            a.show();
+                        });
+                    });
+                    m_ergoMarketsMenuBtn.getItems().add(menuItems);
+                }
+                MenuItem disableItem = new MenuItem(String.format("%-20s", " " + "[disabled]"));
+                disableItem.setOnAction(action -> {
                     m_ergoMarketsMenuBtn.hide();
-                    setDefaultMarket(id);
+                    clearDefault((onDefault)->{}, onFailed->{
+                        Throwable exThrowable = onFailed.getSource().getException();
+                        String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to send message";
+        
+                        Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+                        a.setHeaderText("Error");
+                        a.show();
+                    });
                 });
-                m_ergoMarketsMenuBtn.getItems().add(menuItems);
-      
-   
+                m_ergoMarketsMenuBtn.getItems().add(disableItem);
+            }else{
+                MenuItem explorerItem = new MenuItem(String.format("%-50s", " Unable to find available markets."));
+                m_ergoMarketsMenuBtn.getItems().add(explorerItem);
             }
-            MenuItem disableItem = new MenuItem(String.format("%-20s", " " + "[disabled]"));
-            disableItem.setOnAction(action -> {
-                m_ergoMarketsMenuBtn.hide();
-                clearDefault();
-            });
-            m_ergoMarketsMenuBtn.getItems().add(disableItem);
-        }else{
+        }, onMarketsFailed->{
+            Throwable exThrowable = onMarketsFailed.getSource().getException();
+            String msg = exThrowable != null ? exThrowable.getMessage() : "Unable to get markets";
+
+            Alert a = new Alert(AlertType.NONE, msg, ButtonType.OK);
+            a.setHeaderText("Error");
+            a.show();
+            m_ergoMarketsMenuBtn.getItems().clear();
             MenuItem explorerItem = new MenuItem(String.format("%-50s", " Unable to find available markets."));
             m_ergoMarketsMenuBtn.getItems().add(explorerItem);
-        }
+        });
+       
 
     }
 
     @Override
     public void sendMessage(int code, long timestamp,String networkId, String msg){
         
-        if(networkId != null && networkId.equals(NoteConstants.MARKET_NETWORK)){
+        if(networkId != null){
 
             switch(code){
                 
                 case NoteConstants.LIST_DEFAULT_CHANGED:
-                    getDefaultMarket(); 
+                    getDefaultMarketIds();
                 break;
               
             }
@@ -532,9 +612,9 @@ public class ErgoMarketAppBox extends AppBox {
 
             };
     
-            if(exchangeInterface.getConnectionStatus() == NoteConstants.STARTED){
-                getQuote();
-            }
+     
+            getQuote();
+            
 
             exchangeInterface.addMsgListener(m_marketMsgInterface);
 
@@ -549,20 +629,27 @@ public class ErgoMarketAppBox extends AppBox {
         }
     }
 
-    public void getQuote(){
+    public Future<?> getQuote(){
         NoteInterface exchangeInterface = m_selectedMarket.get();
      
         if(exchangeInterface != null){
             JsonObject note = NoteConstants.getCmdObject("getErgoUSDQuote");
             note.addProperty("locationId", m_locationId);
 
-            Object result =  exchangeInterface.sendNote(note);
-            if(result != null && result instanceof PriceQuote){
-                PriceQuote priceQuote = (PriceQuote) result;
-                
-                m_tickerPriceQuote.set(priceQuote);
-            }
+            return exchangeInterface.sendNote(note, onQuote->{
+                Object result = onQuote.getSource().getValue();
+                if(result != null && result instanceof JsonObject){
+                    JsonObject priceQuoteJson = (JsonObject) result;
+                    m_tickerPriceQuote.set(new PriceQuote(priceQuoteJson));
+                }
+            
+            }, onQuoteFailed->{
+                m_tickerPriceQuote.set(null);
+            });
+            
         }
+        m_tickerPriceQuote.set(null);
+        return null;
     }
 
     @Override

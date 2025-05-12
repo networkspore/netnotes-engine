@@ -34,14 +34,14 @@ public class JsonParametersBox extends AppBox{
     private SimpleBooleanProperty m_isOpen = new SimpleBooleanProperty(false);
 
     public JsonParametersBox( JsonObject json){
-        this(json, (int) DEFAULT_COL_WIDTH);
+        this(json, DEFAULT_COL_WIDTH);
     }
 
     public JsonParametersBox( JsonArray jsonArray){
-        this(jsonArray, (int) DEFAULT_COL_WIDTH);
+        this(jsonArray, DEFAULT_COL_WIDTH);
     }
 
-    public JsonParametersBox( JsonObject json, int colWidth){
+    public JsonParametersBox( JsonObject json, double colWidth){
         super();
         
         m_colWidth = new SimpleDoubleProperty(colWidth);
@@ -49,7 +49,7 @@ public class JsonParametersBox extends AppBox{
         setRows(json);
     } 
 
-    public JsonParametersBox(JsonArray jsonArray, int colWidth){
+    public JsonParametersBox(JsonArray jsonArray, double colWidth){
         super();
         m_colWidth = new SimpleDoubleProperty(colWidth);
         setRows(jsonArray);

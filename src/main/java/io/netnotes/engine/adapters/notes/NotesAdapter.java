@@ -57,6 +57,7 @@ public class NotesAdapter extends Adapter {
 
     public NotesAdapter(NetworksData networksData){
         super(new Image(ICON_URL), NAME, NETWORK_ID, networksData);
+        setDescpription(DESCRIPTION);
         getNetworksData().getData("data", ".", NETWORK_ID, NetworksData.ADAPTERS, (onComplete)->{
             Object obj = onComplete.getSource().getValue();
             openJson(obj != null && obj instanceof JsonObject ? (JsonObject) obj : null);
@@ -161,12 +162,18 @@ public class NotesAdapter extends Adapter {
 
     @Override
     public void shutdown(){
+        stop();
+    }
+    
+    @Override
+    public void stop(){
         if(m_noteWatcher != null){
             m_noteWatcher.shutdown();
             m_noteWatcher = null;
         }
-        stop();
+        super.stop();
     }
+
 
     private void inputNotes(String[] notes){
         for(String note : notes){
@@ -175,11 +182,14 @@ public class NotesAdapter extends Adapter {
     }
 
     private void inputNote(String note){
-        if(NoteConstants.isBase16(note)){
-            String nameMsg = Base16.decode(note.toUpperCase()).getOrElse(null);
+      
+        try {
+            String nameMsg = Base16.decode(note).getOrElse(null);
+            Files.writeString(AppConstants.LOG_FILE.toPath(), nameMsg + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception e) {
             try {
-                Files.writeString(AppConstants.LOG_FILE.toPath(), nameMsg + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException e) {
+                Files.writeString(AppConstants.LOG_FILE.toPath(), "intputNoteError: " + e.toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException e1) {
 
             }
         }

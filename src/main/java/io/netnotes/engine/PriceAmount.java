@@ -418,5 +418,23 @@ public class PriceAmount  {
         return json;
     }
 
+    public String getTokenType(){
+        return m_currency.getTokenType();
+    }
+
+    public JsonObject getBalanceObject(){
+
+        JsonObject json = new JsonObject();
+
+        json.addProperty("tokenId", getTokenId());
+        json.addProperty("amount",  getLongAmount());
+        json.addProperty("decimals", getDecimals());
+        json.addProperty("name", getName());
+        json.addProperty("tokenType", getTokenType());
+
+        return json;
+
+    }
+
 
 }

@@ -1,4 +1,4 @@
-package io.netnotes.engine.networks.ergo;
+package io.netnotes.engine.apps.ergoFileWallet;
 
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.value.ChangeListener;
@@ -12,6 +12,8 @@ import io.netnotes.engine.AmountBoxes;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceCurrency;
 import io.netnotes.engine.PriceQuote;
+import io.netnotes.engine.networks.ergo.ErgoAmount;
+import io.netnotes.engine.networks.ergo.ErgoCurrency;
 
 import java.math.BigDecimal;
 import org.ergoplatform.appkit.NetworkType;

@@ -9,6 +9,10 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ExecutorService;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.javafxsvg.SvgImageLoaderFactory;
 import javafx.animation.PauseTransition;
@@ -30,6 +34,7 @@ import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
@@ -49,8 +54,11 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.stage.FileChooser;
+import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+
+import org.ergoplatform.sdk.SecretString;
 
 public class Stages {
     public static Font openSansTxt;
@@ -69,6 +77,7 @@ public class Stages {
 
     public final static String ASSETS_DIRECTORY = "/assets";
     public final static String FONTS_DIRECTORY = "/fonts";
+    public final static String DEFAULT_CSS = "/css/startWindow.css";
 
     public static final String WAITING_IMG = ASSETS_DIRECTORY + "/spinning.gif";
     public static final String OPEN_IMG = ASSETS_DIRECTORY + "/open-outline-white-20.png";
@@ -424,6 +433,73 @@ public class Stages {
         });
 
         HBox newTopBar = new HBox(barIconView, newTitleLbl, spacer, minimizeBtn, closeBtn);
+        newTopBar.setAlignment(Pos.CENTER_LEFT);
+        newTopBar.setPadding(new Insets(7, 8, 5, 10));
+        newTopBar.setId("topBar");
+
+        Delta dragDelta = new Delta();
+
+        newTopBar.setOnMousePressed(new EventHandler<MouseEvent>() {
+            @Override
+            public void handle(MouseEvent mouseEvent) {
+                // record a delta distance for the drag and drop operation.
+                dragDelta.x = theStage.getX() - mouseEvent.getScreenX();
+                dragDelta.y = theStage.getY() - mouseEvent.getScreenY();
+            }
+        });
+        newTopBar.setOnMouseDragged(new EventHandler<MouseEvent>() {
+            @Override
+            public void handle(MouseEvent mouseEvent) {
+                theStage.setX(mouseEvent.getScreenX() + dragDelta.x);
+                theStage.setY(mouseEvent.getScreenY() + dragDelta.y);
+            }
+        });
+
+        return newTopBar;
+    }
+
+
+    public static HBox createTopBar(Button extraBtn, Image iconImage, String titleString,  Button closeBtn, Stage theStage) {
+
+        ImageView barIconView = new ImageView(iconImage);
+        barIconView.setFitWidth(20);
+        barIconView.setPreserveRatio(true);
+
+        // Rectangle2D logoRect = new Rectangle2D(30,30,30,30);
+        Region spacer = new Region();
+
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Label newTitleLbl = new Label(titleString);
+        newTitleLbl.setFont(titleFont);
+        newTitleLbl.setTextFill(txtColor);
+        newTitleLbl.setPadding(new Insets(0, 0, 0, 10));
+
+        //  HBox.setHgrow(titleLbl2, Priority.ALWAYS);
+        ImageView closeImage = highlightedImageView(closeImg);
+        closeImage.setFitHeight(20);
+        closeImage.setFitWidth(20);
+        closeImage.setPreserveRatio(true);
+
+
+        closeBtn.setGraphic(closeImage);
+        closeBtn.setPadding(new Insets(0, 5, 0, 3));
+        closeBtn.setId("closeBtn");
+
+        ImageView minimizeImage = highlightedImageView(minimizeImg);
+        minimizeImage.setFitHeight(20);
+        minimizeImage.setFitWidth(20);
+        minimizeImage.setPreserveRatio(true);
+
+        Button minimizeBtn = new Button();
+        minimizeBtn.setId("toolBtn");
+        minimizeBtn.setGraphic(minimizeImage);
+        minimizeBtn.setPadding(new Insets(0, 2, 1, 2));
+        minimizeBtn.setOnAction(minEvent -> {
+            theStage.setIconified(true);
+        });
+
+        HBox newTopBar = new HBox(barIconView, newTitleLbl, spacer, extraBtn,  minimizeBtn, closeBtn);
         newTopBar.setAlignment(Pos.CENTER_LEFT);
         newTopBar.setPadding(new Insets(7, 8, 5, 10));
         newTopBar.setId("topBar");
@@ -931,162 +1007,8 @@ public class Stages {
     }
 
     
-    public static Stage createPassword(String topTitle, Image windowLogo, Image mainLogo, Button closeBtn, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, Runnable onClosing) {
-        Stage passwordStage = new Stage();
-        passwordStage.initStyle(StageStyle.UNDECORATED);
-       
-        passwordStage.getIcons().add(windowLogo);
-        passwordStage.setTitle(topTitle);
 
-      
-        HBox titleBox = Stages.createTopBar(Stages.icon, topTitle, closeBtn, passwordStage);
-
-        Button imageBtn = Stages.createImageButton(mainLogo, "Create Password");
-        imageBtn.setGraphicTextGap(20);
-        HBox imageBox = new HBox(imageBtn);
-        imageBox.setAlignment(Pos.CENTER);
-
-        Text passwordTxt = new Text("Enter password:");
-        passwordTxt.setFill(Stages.txtColor);
-        passwordTxt.setFont(Stages.txtFont);
-
-        PasswordField passwordField = new PasswordField();
-
-        passwordField.setFont(Stages.txtFont);
-        passwordField.setId("passField");
-        HBox.setHgrow(passwordField, Priority.ALWAYS);
-
-        PasswordField createPassField2 = new PasswordField();
-        HBox.setHgrow(createPassField2, Priority.ALWAYS);
-        createPassField2.setId("passField");
-
-        Button enterButton = new Button("[enter]");
-        enterButton.setId("toolBtn");
-
-        HBox passwordBox = new HBox(passwordTxt, passwordField);
-        passwordBox.setAlignment(Pos.CENTER_LEFT);
-        passwordBox.setPadding(new Insets(0,10,0,0));
-
-        Button clickRegion = new Button();
-        clickRegion.setMaxWidth(Double.MAX_VALUE);
-        clickRegion.setId("transparentColor");
-        clickRegion.setPrefHeight(Double.MAX_VALUE);
-
-        clickRegion.setOnAction(e -> {
-            passwordField.requestFocus();
-        });
-
-        VBox bodyBox = new VBox(passwordBox, clickRegion);
-        VBox.setMargin(bodyBox, new Insets(5, 10, 0, 20));
-        VBox.setVgrow(bodyBox, Priority.ALWAYS);
-
-        Platform.runLater(() -> passwordField.requestFocus());
-
-        VBox passwordVBox = new VBox(titleBox, imageBox, bodyBox);
-
-        Scene passwordScene = new Scene(passwordVBox, Stages.STAGE_WIDTH, Stages.STAGE_HEIGHT);
-        passwordScene.setFill(null);
-        passwordScene.getStylesheets().add("/css/startWindow.css");
-        passwordStage.setScene(passwordScene);
-
-        closeBtn.setOnAction(e -> {
-            passwordField.setText("");
-            passwordStage.close();
-        });
-
-        passwordField.textProperty().addListener((obs,oldval,newval)->{
-            if(passwordField.getPromptText().length() > 0){
-                passwordField.setPromptText("");
-            }
-            if(newval.length() > 0){
-                if(!passwordBox.getChildren().contains(enterButton)){
-                    passwordBox.getChildren().add(enterButton);
-                }
-            }else{
-                if(passwordBox.getChildren().contains(enterButton)){
-                    passwordBox.getChildren().remove(enterButton);
-                }
-            }
-        });
-
-        Text reenterTxt = new Text("Confirm password:");
-        reenterTxt.setFill(Stages.txtColor);
-        reenterTxt.setFont(Stages.txtFont);
-
-        Button enter2 = new Button("[enter]");
-        enter2.setId("toolBtn");
-
-        HBox secondPassBox = new HBox(reenterTxt, createPassField2);
-        secondPassBox.setAlignment(Pos.CENTER_LEFT);
-        secondPassBox.setPadding(new Insets(0,10,0,0));
-
-        createPassField2.textProperty().addListener((obs,oldval,newval)->{
-            if(newval.length() > 0){
-                if(!secondPassBox.getChildren().contains(enter2)){
-                    secondPassBox.getChildren().add(enter2);
-                }
-            }else{
-                if(secondPassBox.getChildren().contains(enter2)){
-                    secondPassBox.getChildren().remove(enter2);
-                }
-            }
-        });
-
-        
-
-        enterButton.setOnAction(e1 -> {
-
-       
-            // createPassField.setText("");
-
-            bodyBox.getChildren().removeAll(passwordBox, clickRegion);
-
- 
-            
-
-            Platform.runLater(() -> createPassField2.requestFocus());
-
-     
-
-            bodyBox.getChildren().addAll(secondPassBox, clickRegion);
-
-            clickRegion.setOnAction(regionEvent -> {
-                createPassField2.requestFocus();
-            });
-
-           
-
-        });
-     
-        passwordField.setOnAction(e->enterButton.fire());
-        
-        enter2.setOnAction(e->{
-            String passStr = passwordField.getText();
-
-            if (passStr.equals(createPassField2.getText())) {
-
-                Utils.returnObject(passStr,execService, onSucceeded, e2 -> {
-                    closeBtn.fire();
-                });
-            } else {
-                bodyBox.getChildren().clear();
-                createPassField2.setText("");
-                passwordField.setText("");
-                passwordField.setPromptText("(password mis-match)");
-    
-                bodyBox.getChildren().addAll(passwordBox, clickRegion);
-    
-            }
-        });
-        
-        createPassField2.setOnAction((e)->enter2.fire());
-
-        passwordStage.setOnCloseRequest(e->onClosing.run());
-
-        return passwordStage;
-    }
-
-    public static void createPassword(Stage passwordStage, String topTitle, Image windowLogo, Image mainLogo, Button closeBtn, EventHandler<WorkerStateEvent> onSucceeded, ExecutorService execService) {
+    public static void createPassword(Stage passwordStage, String topTitle, Image windowLogo, Image mainLogo, Button closeBtn, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
         
         passwordStage.setTitle(topTitle);
 
@@ -1203,12 +1125,9 @@ public class Stages {
         
 
         enter2.setOnAction(e->{
-            String passStr = passwordField.getText();
-            if (passStr.equals(createPassField2.getText())) {
+            if (passwordField.getText().equals(createPassField2.getText())) {
 
-                Utils.returnObject(passStr,execService, onSucceeded, e1 -> {
-                    closeBtn.fire();
-                });
+                Utils.returnObject(passwordField.getText().toCharArray(),execService, onSucceeded);
             } else {
                 bodyBox.getChildren().clear();
                 createPassField2.setText("");
@@ -1240,6 +1159,175 @@ public class Stages {
             enter2.fire();
         });
         
+    }
+
+
+    public static Scene createPasswordScene(Image mainLogo, HBox topBar, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
+        
+        HBox titleBox = topBar;
+
+        Button imageBtn = createImageButton(mainLogo, "Password");
+        imageBtn.setGraphicTextGap(20);
+        HBox imageBox = new HBox(imageBtn);
+        imageBox.setAlignment(Pos.CENTER);
+
+        Text passwordTxt = new Text("Create password:");
+        passwordTxt.setFill(Stages.txtColor);
+        passwordTxt.setFont(Stages.txtFont);
+
+        PasswordField passwordField = new PasswordField();
+
+        passwordField.setFont(Stages.txtFont);
+        passwordField.setId("passField");
+        HBox.setHgrow(passwordField, Priority.ALWAYS);
+
+        PasswordField createPassField2 = new PasswordField();
+        HBox.setHgrow(createPassField2, Priority.ALWAYS);
+        createPassField2.setId("passField");
+
+        Button enterButton = new Button("[enter]");
+        enterButton.setId("toolBtn");
+
+        HBox passwordBox = new HBox(passwordTxt, passwordField);
+        passwordBox.setAlignment(Pos.CENTER_LEFT);
+        passwordBox.setPadding(new Insets(0, 10,0,0));
+
+
+
+        VBox bodyBox = new VBox(passwordBox);
+        VBox.setMargin(bodyBox, new Insets(5, 10, 0, 20));
+        VBox.setVgrow(bodyBox, Priority.ALWAYS);
+
+        Platform.runLater(() -> passwordField.requestFocus());
+
+        VBox passwordVBox = new VBox(titleBox, imageBox, bodyBox);
+
+        Scene passwordScene = new Scene(passwordVBox, STAGE_WIDTH, STAGE_HEIGHT);
+        passwordScene.setFill(null);
+        passwordScene.getStylesheets().add(DEFAULT_CSS);
+   
+        Text reenterTxt = new Text("Confirm password:");
+        reenterTxt.setFill(Stages.txtColor);
+        reenterTxt.setFont(Stages.txtFont);
+
+  
+
+        Button enter2 = new Button("[enter]");
+        enter2.setId("toolBtn");
+
+        HBox secondPassBox = new HBox(reenterTxt, createPassField2);
+        secondPassBox.setAlignment(Pos.CENTER_LEFT);
+        secondPassBox.setPadding(new Insets(0,10,0,0));
+
+
+
+        passwordField.setOnKeyPressed(e->{
+            if(passwordField.getPromptText().length() > 0){
+                passwordField.setPromptText("");
+            }
+        });
+
+        passwordField.textProperty().addListener((obs,oldval,newval) -> {
+            
+            if(passwordField.getText().length() == 0){
+                if(passwordBox.getChildren().contains(enterButton)){
+                    passwordBox.getChildren().remove(enterButton);
+                }
+            }else{
+                if(!passwordBox.getChildren().contains(enterButton)){
+                    passwordBox.getChildren().add(enterButton);
+                }
+            }
+        });
+
+        createPassField2.textProperty().addListener((obs,oldval,newval)->{
+            if(createPassField2.getText().length() == 0){
+                if(secondPassBox.getChildren().contains(enter2)){
+                    secondPassBox.getChildren().remove(enter2);
+                }
+            }else{
+                if(!secondPassBox.getChildren().contains(enter2)){
+                    secondPassBox.getChildren().add(enter2);
+                }
+            }
+        });
+
+        passwordField.setOnAction(e->enterButton.fire());
+        
+        Tooltip errorToolTip = new Tooltip();
+        
+
+        enter2.setOnAction(e->{
+            if (passwordField.getText().equals(createPassField2.getText())) {
+        
+                SecretString pass = SecretString.create( passwordField.getText());
+                passwordField.setText("&(*^^%(&^%^&##@@%");
+                createPassField2.setText("&(*^^%(&^%^&($(@#_))");
+                passwordField.setText("");
+                createPassField2.setText("");
+
+                Utils.returnObject(pass, execService, onSucceeded);
+            } else {
+                bodyBox.getChildren().clear();
+                createPassField2.setText("");
+                passwordField.setText("");
+                
+                
+    
+                bodyBox.getChildren().add(passwordBox);
+                passwordField.requestFocus();
+
+                Point2D p = passwordBox.localToScene(0.0, 0.0);
+                
+                errorToolTip.setText("Password mis-match");
+                errorToolTip.show(
+                    passwordBox,  
+                    p.getX() + passwordBox.getScene().getX() + passwordBox.getScene().getWindow().getX() + passwordBox.getLayoutBounds().getWidth()-150, 
+                    (p.getY()+ passwordBox.getScene().getY() + passwordBox.getScene().getWindow().getY())-passwordBox.getLayoutBounds().getHeight()
+                );
+                
+                PauseTransition pt = new PauseTransition(javafx.util.Duration.millis(1600));
+                pt.setOnFinished(ptE->{
+                    errorToolTip.hide();
+                });
+                pt.play();
+            }
+        });
+
+        enterButton.setOnAction(e->{
+
+            if(passwordField.getText().length() > 3){
+
+                bodyBox.getChildren().remove(passwordBox);
+
+
+                bodyBox.getChildren().add(secondPassBox);
+
+                createPassField2.requestFocus();
+            }else{
+                Point2D p = passwordBox.localToScene(0.0, 0.0);
+       
+                errorToolTip.setText("Password too short");
+                errorToolTip.show(
+                    passwordBox,  
+                    p.getX() + passwordBox.getScene().getX() + passwordBox.getScene().getWindow().getX() + passwordBox.getLayoutBounds().getWidth()-150, 
+                    (p.getY()+ passwordBox.getScene().getY() + passwordBox.getScene().getWindow().getY())-passwordBox.getLayoutBounds().getHeight()
+                );
+                
+                PauseTransition pt = new PauseTransition(javafx.util.Duration.millis(1600));
+                pt.setOnFinished(ptE->{
+                    errorToolTip.hide();
+                });
+                pt.play();
+            }
+            
+        });
+
+        createPassField2.setOnAction(e->{
+            enter2.fire();
+        });
+        
+        return passwordScene;
     }
 
     public static void enterPassword(String title, AppData appData, Stage appStage, EventHandler<ActionEvent> closeEvent, EventHandler<ActionEvent> enterEvent){
@@ -1377,10 +1465,9 @@ public class Stages {
     }
 
 
-    public static String confirmPassword(String topTitle,Image windowLogo, Image smallLogo, String windowSubTitle, String information) {
+    public static void enterPassword(String topTitle,Image windowLogo, Image smallLogo, String windowSubTitle, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
 
         
-
         Stage passwordStage = new Stage();
 
         passwordStage.setTitle(topTitle);
@@ -1436,26 +1523,19 @@ public class Stages {
         closeBtn.setOnAction(e -> {
             passwordBox.getChildren().remove(passwordField);
             passwordField.setDisable(true);
+            passwordField.setText("");
             passwordStage.close();
         });
 
-        passwordField.setOnKeyPressed(e -> {
-
-            KeyCode keyCode = e.getCode();
-            if (keyCode == KeyCode.ENTER) {
-
-                if (passwordField.getText().length() < 6) {
-                    passwordField.setText("");
-                } else {
-
-                    passwordStage.close();
-                }
+        passwordField.setOnAction(e -> {
+            if(passwordField.getText().length() > 0){
+                Utils.returnObject(SecretString.create( passwordField.getText()), execService, onSucceeded);
+                passwordStage.close();
             }
         });
 
-        passwordStage.showAndWait();
+        passwordStage.show();
 
-        return passwordField.getText().equals("") ? null : passwordField.getText();
     }
 
     public void createAutorunKeyDialog(Stage appStage,EventHandler<ActionEvent> closeEvent, boolean isNewKey, Runnable newKey, Runnable disableAutorun){
@@ -1480,6 +1560,113 @@ public class Stages {
             }
         });
       
+    }
+
+    public static Scene getAuthorizationScene(Stage txStage,  String title, Button closeBtn, PasswordField passwordField, JsonObject dataObject, String locationString, double rowHeight, double lblCol){
+
+        JsonParametersBox parametersBox = new JsonParametersBox(dataObject, lblCol);
+        parametersBox.openAll();
+
+
+        Label locationLbl = new Label("Location:");
+        locationLbl.setMinWidth(lblCol);
+        locationLbl.setFont(Stages.txtFont);
+
+        TextField locationField = new TextField(locationString);
+        locationField.setEditable(false);
+        HBox.setHgrow(locationField, Priority.ALWAYS);
+        locationField.setFont(Stages.txtFont);
+
+        HBox locationBox = new HBox(locationLbl, locationField);
+        HBox.setHgrow(locationBox,Priority.ALWAYS);
+        locationBox.setAlignment(Pos.CENTER_LEFT);
+        locationBox.setMinHeight(rowHeight);
+
+
+        HBox titleBox = Stages.createTopBar(Stages.icon, title, closeBtn, txStage);
+
+        ImageView btnImageView = new ImageView(Stages.logo);
+        btnImageView.setPreserveRatio(true);
+        btnImageView.setFitHeight(75);
+        
+
+        Label textField = new Label("Authorization Required");
+        textField.setFont(Stages.mainFont);
+        textField.setPadding(new Insets(20,0,20,15));
+        
+
+        VBox imageBox = new VBox(btnImageView, textField);
+        imageBox.setAlignment(Pos.CENTER);
+        imageBox.setPadding(new Insets(10,0,10,0));
+
+        Text passwordTxt = new Text("Enter password:");
+        passwordTxt.setFill(Stages.txtColor);
+        passwordTxt.setFont(Stages.txtFont);
+
+        passwordField.setFont(Stages.txtFont);
+        passwordField.setId("passField");
+
+        HBox.setHgrow(passwordField, Priority.ALWAYS);
+
+        HBox passwordBox = new HBox(passwordTxt, passwordField);
+        passwordBox.setAlignment(Pos.CENTER_LEFT);
+        passwordBox.setPadding( new Insets(5, 10, 15, 20));
+
+
+
+        ScrollPane bodyScroll = new ScrollPane(parametersBox);
+
+
+        VBox bodyBox = new VBox(locationBox, bodyScroll);
+        HBox.setHgrow(bodyBox,Priority.ALWAYS);
+        VBox.setVgrow(bodyBox,Priority.ALWAYS);
+        bodyBox.setPadding(new Insets(0,20, 0, 20));
+
+        Button exportBtn = new Button("🖫 Export JSON…");
+        exportBtn.setOnAction(onSave->{
+            ExtensionFilter txtFilter = new FileChooser.ExtensionFilter("JSON (application/json)", "*.json");
+            FileChooser saveChooser = new FileChooser();
+            saveChooser.setTitle("🖫 Export JSON…");
+            saveChooser.getExtensionFilters().addAll(txtFilter);
+            saveChooser.setSelectedExtensionFilter(txtFilter);
+            File saveFile = saveChooser.showSaveDialog(txStage);
+            if(saveFile != null){
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                
+                try {
+                    Files.writeString(saveFile.toPath(), gson.toJson(dataObject));
+                } catch (IOException e1) {
+                    Alert alert = new Alert(AlertType.NONE, e1.toString(), ButtonType.OK);
+                    alert.setTitle("Error");
+                    alert.setHeaderText("Error");
+                    alert.initOwner(txStage);
+                    alert.show();
+                }
+            }
+        });
+
+        HBox exportBtnBox = new HBox(exportBtn);
+        exportBtnBox.setAlignment(Pos.CENTER_RIGHT);
+        exportBtnBox.setPadding(new Insets(15,15,15,0));
+
+        VBox layoutVBox = new VBox(titleBox, imageBox,bodyBox, exportBtnBox, passwordBox);
+        VBox.setVgrow(layoutVBox, Priority.ALWAYS);
+
+        bodyScroll.prefViewportWidthProperty().bind(bodyBox.widthProperty().subtract(1));
+        bodyScroll.prefViewportHeightProperty().bind(bodyBox.heightProperty().subtract(10));
+
+        parametersBox.setPrefWidth(bodyBox.widthProperty().get() -1);
+        bodyScroll.prefViewportWidthProperty().addListener((obs,oldval,newval)->{
+            parametersBox.setPrefWidth(newval.doubleValue()-50);
+        });
+
+
+
+        Scene passwordScene = new Scene(layoutVBox, 830, 600);
+        passwordScene.setFill(null);
+        passwordScene.getStylesheets().add("/css/startWindow.css");
+  
+        return passwordScene;
     }
 
     /*private void addAppToTray() {

@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -13,9 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -27,6 +24,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.AppBox;
 import io.netnotes.engine.BufferedButton;
+import io.netnotes.engine.Drawing;
 import io.netnotes.engine.networks.NetworkConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
 import io.netnotes.engine.networks.ergo.ErgoNetwork;
@@ -36,6 +34,7 @@ import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
+import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
@@ -137,10 +136,10 @@ public class ErgoDex extends Network implements NoteInterface {
 
     private int m_n2tItems = 0;
 
-    private ScheduledExecutorService m_schedualedExecutor = Executors.newScheduledThreadPool(1);
     private ScheduledFuture<?> m_scheduledFuture = null;
 
-
+    private ArrayList<String> m_authorizedLocations = new ArrayList<>();
+    
     private String m_locationId;
 
     public ErgoDex(NetworksData networksData, String locationId) {
@@ -242,54 +241,17 @@ public class ErgoDex extends Network implements NoteInterface {
        
         return new NoteInterface() {
             
-            public String getName(){
-                return NAME;
-            }
+         
 
             public String getNetworkId(){
                 return NETWORK_ID;
             }
 
-            public Image getAppIcon(){
-                return ErgoDex.this.getAppIcon();
-            }
-
-
-
+    
             public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
                 return ErgoDex.this.sendNote(note, onSucceeded, onFailed);
             }
 
-            public Object sendNote(JsonObject note){
-                return ErgoDex.this.sendNote(note);
-            }
-
-            public JsonObject getJsonObject(){
-                JsonObject spectrumObject = ErgoDex.this.getJsonObject();
-                spectrumObject.addProperty("apiUrl", API_URL);
-                spectrumObject.addProperty("website", WEB_URL);
-                spectrumObject.addProperty("description", DESCRIPTION);
-                return spectrumObject;
-            }
-
-            public TabInterface getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject,  Button networkBtn){
-                return ErgoDex.this.getTab(appStage, heightObject, widthObject, networkBtn);
-            }
-
-            public NetworksData getNetworksData(){
-                return ErgoDex.this.getNetworksData();
-            }
-
-            public NoteInterface getParentInterface(){
-                return getParentInterface();
-            }
-
-    
-            public void shutdown(){}
-
-            public SimpleObjectProperty<LocalDateTime> shutdownNowProperty(){
-                return null;
-            }
 
             public void addMsgListener(NoteMsgInterface listener){
                 if(listener != null && listener.getId() != null){
@@ -300,19 +262,8 @@ public class ErgoDex extends Network implements NoteInterface {
                 
                 return ErgoDex.this.removeMsgListener(listener);
             }
-
-            public int getConnectionStatus(){
-                return ErgoDex.this.getConnectionStatus();
-            }
-
-            public void setConnectionStatus(int status){
-
-            }
-
-
-            public String getDescription(){
-                return ErgoDex.this.getDescription();
-            }
+            
+         
         };
     }
 
@@ -338,7 +289,7 @@ public class ErgoDex extends Network implements NoteInterface {
         private String noNetworkImgString = NetworkConstants.NETWORK_ICON;
 
         private boolean m_isErgoNetwork = true;
-        
+
         private SimpleObjectProperty<NoteInterface> m_ergoNetworkInterface = new SimpleObjectProperty<>(null);
         private NoteMsgInterface m_networksDataMsgInterface;
 
@@ -384,6 +335,8 @@ public class ErgoDex extends Network implements NoteInterface {
             });
 
         }
+
+        
 
         public void layoutTab(){
            
@@ -452,13 +405,45 @@ public class ErgoDex extends Network implements NoteInterface {
 
             networkMenuBtn.setTooltip(networkTip);
 
+            Runnable setUnavailableNetworkText = ()->{
+                networkTip.setText("(Unavailable)");
+            };
+            Runnable setUnknownNetworkIcon = ()->{
+                networkMenuBtnImageView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+            };
+            
             m_ergoNetworkInterface.addListener((obs,oldval,newval)->{
                 if(newval != null){
-                    networkMenuBtnImageView.setImage(newval.getAppIcon());
-                    networkTip.setText(newval.getName());
+                    NoteConstants.getNetworkObject(newval, m_locationId, getExecService(), (onNetworkObject)->{
+                        Object obj = onNetworkObject.getSource().getValue();
+                        if(obj != null && obj instanceof JsonObject){
+                            JsonObject networkObject = (JsonObject) obj;
+                            
+                            NoteConstants.getAppIconFromNetworkObject(networkObject, getExecService(), onImage->{
+                                Object imgObj = onImage.getSource().getValue();
+                                if(imgObj != null && imgObj instanceof Image){
+                                    networkMenuBtnImageView.setImage((Image) imgObj);
+                                }else{
+                                    setUnknownNetworkIcon.run();
+                                }
+                            }, onImageFailed->{
+                                setUnknownNetworkIcon.run();
+                            });
+
+                            networkTip.setText(NoteConstants.getNameFromNetworkObject(networkObject));
+                        }else{
+                            setUnavailableNetworkText.run();
+                            setUnknownNetworkIcon.run();
+                        }
+
+                    }, onFailed->{
+                        setUnavailableNetworkText.run();
+                        setUnknownNetworkIcon.run();
+                    });
+                   
                 }else{
-                    networkMenuBtnImageView.setImage(new Image(noNetworkImgString));
-                    networkTip.setText("Ergo Network: Unavailable");
+                    setUnavailableNetworkText.run();
+                    setUnknownNetworkIcon.run();
                 }
             });
 
@@ -722,7 +707,7 @@ public class ErgoDex extends Network implements NoteInterface {
         }
 
         private NoteInterface getErgoNetworkInterface(){
-            return getNetworksData().getNetwork(ErgoNetwork.NETWORK_ID);
+            return getNetworksData().getNetworkInterface(ErgoNetwork.NETWORK_ID);
         }
 
         public void updateErgoNetworkInterface(){
@@ -866,6 +851,57 @@ public class ErgoDex extends Network implements NoteInterface {
       
     }
 
+    public Future<?> getNetworkObject(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        JsonObject spectrumObject = ErgoDex.this.getJsonObject();
+        spectrumObject.addProperty("apiUrl", API_URL);
+        spectrumObject.addProperty("website", WEB_URL);
+        spectrumObject.addProperty("description", DESCRIPTION);
+        return Drawing.convertImgToHexString(getAppIcon(), getExecService(), onImgHex->{
+            spectrumObject.addProperty("appIcon",(String) onImgHex.getSource().getValue());
+            Utils.returnObject(spectrumObject, getExecService(), onSucceeded);
+        }, onFailed);
+    }
+
+    public Future<?> getConnectionStatus(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getConnectionStatus(), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getQuote(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getQuote(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getTokenQuoteInErg(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getTokenQuoteInErg(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getTokenArrayQuotesInErg(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getTokenArrayQuotesInErg(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getErgoUSDQuote(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        JsonObject json = getErgoUSDQuote();
+        if(json != null){
+            return Utils.returnObject(json, getExecService(), onSucceeded, onFailed);
+        }else{
+            return Utils.returnException("Quote not found",getExecService(), onFailed);
+        }
+    }
+
+    public Future<?> getQuoteById(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getQuoteById(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getQuoteBySymbol(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getQuoteBySymbol(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getAvailableQuotes(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getAvailableQuotes(note), getExecService(), onSucceeded, onFailed);
+    }
+
+    public Future<?> getAvailableQuotesInErg(JsonObject note,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return Utils.returnObject(getAvailableQuotesInErg(note), getExecService(), onSucceeded, onFailed);
+    }
 
     @Override
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
@@ -881,8 +917,28 @@ public class ErgoDex extends Network implements NoteInterface {
               
                 note.remove("locationString");
                 note.addProperty("locationString", locationString);
-               
+
                 switch(cmd){
+                    case "getNetworkObject":
+                        return getNetworkObject(note, onSucceeded, onFailed);
+                    case "getStatus":
+                        return getConnectionStatus(note, onSucceeded, onFailed);
+                    case "getQuote":
+                        return getQuote(note, onSucceeded, onFailed);
+                    case "getTokenQuoteInErg":
+                        return getTokenQuoteInErg(note, onSucceeded, onFailed);
+                    case "getTokenArrayQuotesInErg":
+                        return getTokenArrayQuotesInErg(note, onSucceeded, onFailed);
+                    case "getErgoUSDQuote":
+                        return getErgoUSDQuote(note, onSucceeded, onFailed);
+                    case "getQuoteById":
+                        return getQuoteById(note, onSucceeded, onFailed);
+                    case "getQuoteBySymbol":
+                        return getQuoteBySymbol(note, onSucceeded, onFailed);
+                    case "getAvailableQuotes":
+                        return getAvailableQuotes(note, onSucceeded, onFailed);
+                    case "getAvailableQuotesInErg":
+                        return getAvailableQuotesInErg(note, onSucceeded, onFailed);
                     case "getPoolSlippage":
                         return getPoolSlippage(note, onSucceeded, onFailed);
                     
@@ -1499,16 +1555,16 @@ public class ErgoDex extends Network implements NoteInterface {
             };
 
             Runnable submitExec = ()->executor.submit(exec);
-
-            m_scheduledFuture = m_schedualedExecutor.scheduleAtFixedRate(submitExec, 0, 7000, TimeUnit.MILLISECONDS);
-
+            if(m_scheduledFuture == null || (m_scheduledFuture != null && (m_scheduledFuture.isCancelled() || m_scheduledFuture.isDone()))){
+                m_scheduledFuture = getNetworksData().getSchedualedExecService().scheduleAtFixedRate(submitExec, 0, 7000, TimeUnit.MILLISECONDS);
+            }
 
        
            
         }
     }
 
-    private ArrayList<String> m_authorizedLocations = new ArrayList<>();
+
 
     private boolean isLocationAuthorized(String locationString){
         
@@ -1516,47 +1572,7 @@ public class ErgoDex extends Network implements NoteInterface {
     }
     
   
-    @Override
-    public Object sendNote(JsonObject note){
-    
-        JsonElement subjectElement = note.get(NoteConstants.CMD);
-        JsonElement locationIdElement = note.get("locationId");
 
-        String cmd = subjectElement != null && subjectElement.isJsonPrimitive() ? subjectElement.getAsString() : null;
-        String locationId = locationIdElement != null && !locationIdElement.isJsonNull() && locationIdElement.isJsonPrimitive() ? locationIdElement.getAsString() : null;
-
-        if(cmd != null && locationId != null){
-            
-            String locationString = getNetworksData().getLocationString(locationId);
-            
-            if(isLocationAuthorized(locationString)){
-            
-                note.remove("locationString");
-                note.addProperty("locationString", locationString);
-                switch(cmd){
-                    case "getStatus":
-                        return getConnectionStatus();
-                    case "getQuote":
-                        return getQuote(note);
-                    case "getTokenQuoteInErg":
-                        return getTokenQuoteInErg(note);
-                    case "getErgoUSDQuote":
-                        return getErgoUSDQuote();
-                    case "getQuoteById":
-                        return getQuoteById(note);
-                    case "getQuoteBySymbol":
-                        return getQuoteBySymbol(note);
-                    case "getAvailableQuotes":
-                        return getAvailableQuotes(note);
-                    case "getAvailableQuotesInErg":
-                        return getAvailableQuotesInErg(note);
-                }
-            }
-        }
-        
-    
-        return null;
-    }
 
 
     private List<ErgoDexMarketData> m_searchList ;
@@ -1591,7 +1607,7 @@ public class ErgoDex extends Network implements NoteInterface {
         return null;
     }
 
-    private Object getQuote(JsonObject json){
+    private JsonObject getQuote(JsonObject json){
         JsonElement baseTypeElement = json.get("baseType");
         JsonElement quoteTypeElement = json.get("quoteType");
         JsonElement baseElement = json.get("base");
@@ -1626,7 +1642,7 @@ public class ErgoDex extends Network implements NoteInterface {
                     m_quoteOptional = m_searchList.stream().filter(item -> item.getQuoteSymbol().contains(quoteString)).findFirst();
                     if(m_quoteOptional.isPresent()){
                       
-                        return m_quoteOptional.get().getPriceQuote();
+                        return m_quoteOptional.get().getPriceQuote().getJsonObject();
                     }
                 break;
                 case "firstId":
@@ -1635,7 +1651,7 @@ public class ErgoDex extends Network implements NoteInterface {
                     
                     if(m_quoteOptional.isPresent()){
                      
-                        return m_quoteOptional.get().getPriceQuote();
+                        return m_quoteOptional.get().getPriceQuote().getJsonObject();
                     }
                 break;
             }
@@ -1644,19 +1660,15 @@ public class ErgoDex extends Network implements NoteInterface {
         return null;
     }
 
-    private Object getErgoUSDQuote(){
+    private JsonObject getErgoUSDQuote(){
         ErgoDexMarketData marketData = findMarketDataById(ErgoCurrency.TOKEN_ID, SIGUSD_ID);
         if(marketData != null){
-            return marketData.getPriceQuote();
+            return marketData.getPriceQuote().getJsonObject();
         }
         return null;
     }
 
-    private Object getTokenQuoteInErg(JsonObject note){
-       
-        
-        JsonElement idElement = note != null ? note.get("tokenId") : null;
-        String tokenId = idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive() ? idElement.getAsString() : null;
+    private PriceQuote getTokenQuoteInErg(String tokenId){
         if(tokenId != null){
             ErgoDexMarketData data = findMarketDataById(ErgoCurrency.TOKEN_ID, tokenId);
             if(data != null){
@@ -1665,8 +1677,39 @@ public class ErgoDex extends Network implements NoteInterface {
         }
         return null;
     }
+
+    private JsonObject getTokenQuoteInErg(JsonObject note){
+        JsonElement idElement = note != null ? note.get("tokenId") : null;
+        String tokenId = idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive() ? idElement.getAsString() : null;
+        if(tokenId != null){
+            PriceQuote quote = getTokenQuoteInErg(tokenId);
+            return quote != null ? quote.getJsonObject() : null;
+        }
+        return null;
+    }
+
+    private JsonObject getTokenArrayQuotesInErg(JsonObject note){
+        JsonElement idsElement = note != null ? note.get("tokenIds") : null;
+        JsonArray idsArray = idsElement != null && !idsElement.isJsonNull() && idsElement.isJsonArray() ? idsElement.getAsJsonArray() : null;
+        if(idsArray != null){
+            JsonObject json = new JsonObject();
+            JsonArray quotesArray = new JsonArray();
+            for(JsonElement idElement : idsArray){
+                if(idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive()){
+                    String tokenId = idElement.getAsString();
+                    PriceQuote quote = getTokenQuoteInErg(tokenId);
+                    if(quote != null){
+                        quotesArray.add(quote.getJsonObject());
+                    }
+                }
+            }
+            json.add("quotes", quotesArray);
+            return json;
+        }
+        return null;
+    }
     
-    private Object getQuoteById(JsonObject note){
+    private JsonObject getQuoteById(JsonObject note){
         JsonElement baseIdElement = note != null ? note.get("baseId") : null;
         JsonElement quoteIdElement = note != null ? note.get("quoteId") : null;
 
@@ -1674,12 +1717,12 @@ public class ErgoDex extends Network implements NoteInterface {
         String quoteId = quoteIdElement != null && !quoteIdElement.isJsonNull() && quoteIdElement.isJsonPrimitive() ? quoteIdElement.getAsString() : null;
 
         if(quoteId != null){
-            return findMarketDataById(baseId, quoteId).getPriceQuote();
+            return findMarketDataById(baseId, quoteId).getPriceQuote().getJsonObject();
         }
         return null;
     }
 
-    private Object getQuoteBySymbol(JsonObject note){
+    private JsonObject getQuoteBySymbol(JsonObject note){
         JsonElement baseSymbolElement = note != null ? note.get("baseSymbol") : null;
         JsonElement quoteSymbolElement = note != null ? note.get("quoteSymbol") : null;
 
@@ -1687,7 +1730,7 @@ public class ErgoDex extends Network implements NoteInterface {
         String quoteSymbol = quoteSymbolElement != null && !quoteSymbolElement.isJsonNull() && quoteSymbolElement.isJsonPrimitive() ? quoteSymbolElement.getAsString() : null;
 
         if(baseSymbol != null && quoteSymbol != null){
-            return findMarketDataBySymbol(baseSymbol, quoteSymbol).getPriceQuote();
+            return findMarketDataBySymbol(baseSymbol, quoteSymbol).getPriceQuote().getJsonObject();
         }
         return null;
     }

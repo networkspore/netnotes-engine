@@ -2,32 +2,28 @@ package com.satergo;
 
 
 import io.netnotes.engine.Stages;
-import io.netnotes.engine.networks.ergo.ErgoConstants;
+import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
 
 import com.satergo.ergo.ErgoInterface;
 import com.satergo.extra.AESEncryption;
 
 import javafx.scene.image.Image;
-
+import javafx.concurrent.Task;
+import javafx.concurrent.WorkerStateEvent;
+import javafx.event.EventHandler;
 import org.ergoplatform.ErgoAddressEncoder;
 import org.ergoplatform.P2PKAddress;
 import org.ergoplatform.appkit.*;
+import org.ergoplatform.sdk.SecretString;
 import org.ergoplatform.sdk.wallet.secrets.DerivationPath;
 import org.ergoplatform.sdk.wallet.secrets.ExtendedPublicKey;
 import org.ergoplatform.sdk.wallet.secrets.ExtendedSecretKey;
 
-import javax.crypto.AEADBadTagException;
 import javax.crypto.SecretKey;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
-import java.security.NoSuchAlgorithmException;
-import java.security.spec.InvalidKeySpecException;
-import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
 /**
@@ -40,8 +36,6 @@ import java.util.function.Supplier;
  */
 public abstract class WalletKey {
 
-    public static class Failure extends Exception {
-    }
 
     private static final HashMap<Integer, Type<?>> types = new HashMap<>();
 
@@ -139,15 +133,16 @@ public abstract class WalletKey {
     public void initCaches(ByteBuffer data) {
     }
 
-    public abstract SignedTransaction sign( BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Failure;
 
-    public abstract SignedTransaction signWithPassword(String password, BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Failure;
+    public abstract SignedTransaction signWithPassword(SecretString password, BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Exception;
 
-    public abstract Address derivePublicAddress(NetworkType networkType, int index) throws Failure;
+    public abstract Address derivePublicAddress(NetworkType networkType, int index) throws Exception;
 
-    public abstract void viewWalletMnemonic(String password) throws Failure;
+    public abstract void viewWalletMnemonic(SecretString pass) throws Exception;
 
-    public abstract WalletKey changedPassword(char[] currentPassword, char[] newPassword) throws Failure; // it would be cool to call this "recrypt" :)
+    public abstract WalletKey changedPassword(SecretString currentPassword, SecretString newPassword) throws Exception;
+
+    public abstract void getMnemonic(ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed);
 
     public byte[] copyIv() {
         return Arrays.copyOf(encrypted, 12);
@@ -160,17 +155,13 @@ public abstract class WalletKey {
     /**
      * The key is encrypted and embedded into the wallet file The default
      * behavior of this class is: - keep extended public key in memory for
-     * address derivations (as such, never throws Failure for
+     * address derivations (as such, never throws Exception for
      * derivePublicAddress) - ask user for password when needed - keep the
      * secret key cached in memory for 1 minute since last use
      */
     public static class Local extends WalletKey {
 
         private static final int ID = 0;
-
-        public enum Caching {
-            PERMANENT, OFF, TIMED
-        }
 
         /**
          * Non-standard (legacy incorrect address derivation implementation in
@@ -179,7 +170,6 @@ public abstract class WalletKey {
         private boolean nonstandard;
 
         private ExtendedPublicKey parentExtPubKey;
-        private SecretKey cachedKey;
 
         private Local() {
             super(Type.LOCAL);
@@ -202,103 +192,75 @@ public abstract class WalletKey {
             parentExtPubKey = ((ExtendedSecretKey) rootSecret.derive(DerivationPath.fromEncoded("m/44'/429'/0'/0").get())).publicKey();
         }
 
-        public static Local create(boolean nonstandard, Mnemonic mnemonic, char[] password) {
-            try {
-                checkFormat(mnemonic);
-                Local key = new Local();
-                key.nonstandard = nonstandard;
-                byte[] iv = AESEncryption.generateNonce12();
-                // StandardCharsets.UTF_8.encode(CharBuffer.wrap(mnemonic.getPhrase().getData())) is not used because
-                // for some reason it adds multiple null characters at the end
-                byte[] mnPhraseBytes = mnemonic.getPhrase().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
-                byte[] mnPasswordBytes = mnemonic.getPassword().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
-                ByteBuffer buffer = ByteBuffer.allocate(2 + 1 + 2 + mnPhraseBytes.length + 2 + mnPasswordBytes.length)
-                        .putShort((short) ID)
-                        .put((byte) (nonstandard ? 1 : 0))
-                        .putShort((short) mnPhraseBytes.length)
-                        .put(mnPhraseBytes)
-                        .putShort((short) mnPasswordBytes.length)
-                        .put(mnPasswordBytes);
-                key.initEncryptedData(AESEncryption.encryptData(iv, AESEncryption.generateSecretKey(password, iv), buffer.array()));
-                key.initParentExtPubKey(mnemonic);
-                return key;
-            } catch (GeneralSecurityException e) {
-                throw new RuntimeException(e);
-            }
+        public static Local create(boolean nonstandard, Mnemonic mnemonic, SecretString password) throws Exception {
+
+            checkFormat(mnemonic);
+            Local key = new Local();
+            key.nonstandard = nonstandard;
+            byte[] iv = AESEncryption.generateNonce12();
+            // StandardCharsets.UTF_8.encode(CharBuffer.wrap(mnemonic.getPhrase().getData())) is not used because
+            // for some reason it adds multiple null characters at the end
+            byte[] mnPhraseBytes = mnemonic.getPhrase().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
+            byte[] mnPasswordBytes = mnemonic.getPassword().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
+            ByteBuffer buffer = ByteBuffer.allocate(2 + 1 + 2 + mnPhraseBytes.length + 2 + mnPasswordBytes.length)
+                    .putShort((short) ID)
+                    .put((byte) (nonstandard ? 1 : 0))
+                    .putShort((short) mnPhraseBytes.length)
+                    .put(mnPhraseBytes)
+                    .putShort((short) mnPasswordBytes.length)
+                    .put(mnPasswordBytes);
+            key.initEncryptedData(AESEncryption.encryptData(iv, AESEncryption.generateSecretKey(password.getData(), iv), buffer.array()));
+            key.initParentExtPubKey(mnemonic);
+            return key;
+           
         }
 
-        private Mnemonic getMnemonic(Supplier<String> passwordSupplier) throws Failure {
-            SecretKey secretKey;
-            if (cachedKey == null) {
-                String password = passwordSupplier.get();
-                if (password == null) {
-                    throw new Failure();
-                }
-                try {
-                    secretKey = AESEncryption.generateSecretKey(password.toCharArray(), copyIv());
-                } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-                    throw new RuntimeException(e);
-                }
-            } else {
-                secretKey = cachedKey;
-            }
-            try {
-                byte[] decrypted = AESEncryption.decryptData(secretKey, ByteBuffer.wrap(encrypted()));
-                ByteBuffer buffer = ByteBuffer.wrap(decrypted).position(3);
-                if (caching != Caching.OFF) {
-                    this.cachedKey = secretKey;
-                    if (caching == Caching.TIMED) {
-                        restartCacheTimeout();
-                    }
-                }
-                return readMnemonic(buffer);
-            } catch (AEADBadTagException e) {
-
-                throw new Failure();
-            } catch (GeneralSecurityException e) {
-                throw new RuntimeException(e);
-            }
+        private Mnemonic getMnemonic(SecretString password) throws Exception {
+         
+            SecretKey secretKey = AESEncryption.generateSecretKey(password.getData(), copyIv());
+            byte[] decrypted = AESEncryption.decryptData(secretKey, ByteBuffer.wrap(encrypted()));
+            ByteBuffer buffer = ByteBuffer.wrap(decrypted).position(3);
+            return readMnemonic(buffer);
+           
         }
-        private Mnemonic getMnemonic(String password) throws Failure {
-            SecretKey secretKey;
-            if (cachedKey == null) {
-              
-                if (password == null) {
-                    throw new Failure();
-                }
-                try {
-                    secretKey = AESEncryption.generateSecretKey(password.toCharArray(), copyIv());
-                } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-                    throw new RuntimeException(e);
-                }
-            } else {
-                secretKey = cachedKey;
-            }
-            try {
-                byte[] decrypted = AESEncryption.decryptData(secretKey, ByteBuffer.wrap(encrypted()));
-                ByteBuffer buffer = ByteBuffer.wrap(decrypted).position(3);
-                if (caching != Caching.OFF) {
-                    this.cachedKey = secretKey;
-                    if (caching == Caching.TIMED) {
-                        restartCacheTimeout();
-                    }
-                }
-                return readMnemonic(buffer);
-            } catch (AEADBadTagException e) {
 
-                throw new Failure();
-            } catch (GeneralSecurityException e) {
-                throw new RuntimeException(e);
-            }
-        }
+
         @Override
-        public void viewWalletMnemonic(String password) throws Failure{
-            Mnemonic mnemonic = getMnemonic(password);
-            Stages.showMagnifyingStage("Mnemonic Recovery - Wallet" , mnemonic.getPhrase().toStringUnsecure());
+        public void viewWalletMnemonic(SecretString pass) throws Exception {
+
+                    Mnemonic mnemonic = getMnemonic(pass);
+                    Stages.showMagnifyingStage("Mnemonic Recovery - Wallet" , mnemonic.getPhrase().toStringUnsecure());
+
+           
         }
 
-        private Mnemonic getMnemonic() throws Failure {
-            return getMnemonic(() -> Stages.confirmPassword("Ergo - Wallet password",new Image(ErgoConstants.ERGO_WALLETS_ICON), new Image (ErgoConstants.ERGO_WALLETS_ICON), "Wallet password", null));
+        @Override
+        public void getMnemonic(ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed) {
+            Stages.enterPassword(
+                "Ergo - Wallet password",
+                new Image(ErgoWallets.getAppIconString()),
+                new Image (ErgoWallets.ICON), 
+                "Wallet password", 
+                execService, onPass->{
+                Object obj = onPass.getSource().getValue();
+                if(obj != null && obj instanceof SecretString){
+                    
+                    Task<Object> task = new Task<Object>() {
+
+                        public Object call() throws Exception {
+
+                            return  getMnemonic((SecretString) obj);
+                        }
+                    };
+
+                    task.setOnFailed(onFailed);
+
+                    task.setOnSucceeded(onMnemonic);
+
+                    execService.submit(task);
+                }
+
+                });
         }
 
         private static Mnemonic readMnemonic(ByteBuffer data) {
@@ -311,30 +273,9 @@ public abstract class WalletKey {
             return Mnemonic.create(mnPhraseChars, mnPasswordChars);
         }
 
-        private ScheduledExecutorService scheduler;
-        private Caching caching = Caching.TIMED;
-        private final Duration cacheDuration = Duration.ofMinutes(1);
-
-        public void setCaching(Caching caching) {
-            if (this.caching == caching) {
-                return;
-            }
-            if (caching == Caching.OFF || caching == Caching.TIMED) {
-                if (scheduler != null) {
-                    scheduler.shutdown();
-                }
-                cachedKey = null;
-            }
-            this.caching = caching;
-        }
-
+ 
         @Override
-        public SignedTransaction sign(BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Failure {
-            return ErgoInterface.newWithMnemonicProver(ctx, nonstandard, getMnemonic(), addressIndexes).sign(unsignedTx);
-        }
-
-        @Override
-        public SignedTransaction signWithPassword(String password, BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Failure {
+        public SignedTransaction signWithPassword(SecretString password, BlockchainContext ctx, UnsignedTransaction unsignedTx, Collection<Integer> addressIndexes) throws Exception {
             return ErgoInterface.newWithMnemonicProver(ctx, nonstandard, getMnemonic(password), addressIndexes).sign(unsignedTx);
         }
 
@@ -344,16 +285,10 @@ public abstract class WalletKey {
         }
 
         @Override
-        public WalletKey changedPassword(char[] currentPassword, char[] newPassword) throws Failure {
-            return create(nonstandard, getMnemonic(() -> new String(currentPassword)), newPassword);
+        public WalletKey changedPassword(SecretString currentPassword, SecretString newPassword) throws Exception {
+            return create(nonstandard, getMnemonic(currentPassword), newPassword);
         }
 
-        private void restartCacheTimeout() {
-            if (scheduler != null) {
-                scheduler.shutdown();
-            }
-            scheduler = Executors.newSingleThreadScheduledExecutor();
-            scheduler.schedule(() -> cachedKey = null, cacheDuration.toMillis(), TimeUnit.MILLISECONDS);
-        }
+  
     }
 }

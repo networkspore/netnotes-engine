@@ -7,12 +7,14 @@ import org.ergoplatform.appkit.Constants;
 import org.ergoplatform.sdk.ErgoId;
 import org.ergoplatform.sdk.ErgoToken;
 
-import java.io.File;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 import org.ergoplatform.appkit.Address;
 
@@ -29,13 +31,15 @@ import io.netnotes.engine.networks.ergo.ErgoNetworkUrl;
 import io.netnotes.notes.ParamTypes;
 import scorex.util.encode.Base16;
 
+import javafx.concurrent.WorkerStateEvent;
+import javafx.event.EventHandler;
+
 public class NoteConstants {
     public final static String WALLET_ADDRESS_PK = "walletAddressPK";
     public final static String WALLET_ADDRESS_PROP_BYTES = "walletAddressPropBytes";
     public final static String CURRENT_WALLET_FILE = "wallet file";
         
-    public final static BigDecimal MIN_NETWORK_FEE = BigDecimal.valueOf(0.001);
-    public final static long MIN_NANO_ERGS = 1000000L;
+
     public final static long POLLING_TIME = 7000;
     public final static long QUOTE_TIMEOUT = POLLING_TIME*2;
     
@@ -44,6 +48,7 @@ public class NoteConstants {
     public static final int SUCCESS = 1;
     public static final int ERROR = 2;
 
+    public static final int DISABLED = -1;
     public static final int STARTING = 3;
     public static final int STARTED = 4;
 
@@ -57,6 +62,7 @@ public class NoteConstants {
     public static final int UPDATED = 11;
     public static final int INFO = 12;
     public static final int CANCEL = 13;
+    public static final int READY = 14;
 
     
     public static final int LIST_CHANGED = 20;
@@ -68,22 +74,44 @@ public class NoteConstants {
 
     public static final String STATIC_TYPE = "STATIC";
     public static final String STATUS_MINIMIZED = "Minimized";
+    public static final String STATUS_UPDATED = "Updated";
     public static final String STATUS_STOPPED = "Stopped";
     public static final String STATUS_STARTED = "Started";
     public static final String STATUS_STARTING = "Starting";
     public static final String STATUS_UNAVAILABLE = "Unavailable";
     public static final String STATUS_AVAILABLE = "Available";
     public static final String STATUS_ERROR = "Error";
-
+    public static final String STATUS_SHUTTING_DOWN = "Shutting Down";
+    public static final String STATUS_SHUTDOWN = "Shutdown";
+    public static final String STATUS_READY = "Ready";
+    public static final String STATUS_TIMED_OUT = "Timed Out";
+    public static final String STATUS_DISABLED = "Disabled";
+    public static final String STATUS_UNKNOWN = "Unknown";
 
     public static final String CMD = "cmd";
 
-    public final static String ERGO_NETWORK_ID = "ERGO_NETWORK";
-    public static final String WALLET_NETWORK = "WALLET_NETWORK";
-    public static final String NODE_NETWORK = "NODE_NETWORK";
-    public static final String EXPLORER_NETWORK = "EXPLORER_NETWORK";
-    public static final String MARKET_NETWORK = "MARKET_NETWORK";
-    public static final String TOKEN_MARKET_NETWORK = "TOKEN_MARKET_NETWORK";
+    public static String getStatusCodeMsg(int status){
+        switch(status){
+            case NoteConstants.READY:
+                return STATUS_READY;
+            case NoteConstants.WARNING:
+                return STATUS_TIMED_OUT;
+            case NoteConstants.STARTING:
+                return STATUS_STARTING;
+            case NoteConstants.DISABLED:
+                return STATUS_DISABLED;
+            case NoteConstants.STOPPING:
+                return STATUS_SHUTTING_DOWN;
+            case NoteConstants.SHUTDOWN:
+                return STATUS_SHUTDOWN;
+            case NoteConstants.STOPPED:
+                return STATUS_STOPPED;
+            case NoteConstants.STARTED:
+                return STATUS_STARTED;
+            default:
+                return STATUS_UNKNOWN;
+        }
+    }
 
     public static JsonObject getLongConstant(String propertyName, long value){
         JsonObject json = new JsonObject();
@@ -385,12 +413,12 @@ public class NoteConstants {
 
 
 
-        public static boolean addFeeAmountToDataObject(long nanoErgs, JsonObject dataObject){
+        public static boolean addFeeAmountToDataObject(long nanoErgs, long minAmount, JsonObject dataObject){
             
             JsonObject nanoErgsObject = createNanoErgsObject(nanoErgs);
             nanoErgsObject.addProperty("ergs", PriceAmount.calculateLongToBigDecimal(nanoErgs, ErgoCurrency.DECIMALS));
             dataObject.add("feeAmount", nanoErgsObject);
-            return nanoErgs >= MIN_NANO_ERGS;
+            return nanoErgs >= minAmount;
         }
 
 
@@ -433,7 +461,7 @@ public class NoteConstants {
             return ergoObject;
         }
 
-        public static boolean addFeeAmountToDataObject(PriceAmount ergoAmount, JsonObject dataObject){
+        public static boolean addFeeAmountToDataObject(PriceAmount ergoAmount, long minAmount, JsonObject dataObject){
             if(!ergoAmount.getTokenId().equals(ErgoCurrency.TOKEN_ID)){
                 return false;
             }
@@ -441,7 +469,7 @@ public class NoteConstants {
             JsonObject nanoErgsObject = createNanoErgsObject(nanoErgs);
             nanoErgsObject.addProperty("ergs", ergoAmount.getBigDecimalAmount());
             dataObject.add("feeAmount", nanoErgsObject);
-            return nanoErgs >= MIN_NANO_ERGS;
+            return nanoErgs >= minAmount;
         }
 
         public static void addRegistersToDataObject(JsonObject dataObject, JsonObject... registers){
@@ -454,16 +482,16 @@ public class NoteConstants {
 
 
         
-        public static void addNodeUrlToDataObject(JsonObject dataObject, NoteInterface nodeInterface){
-            JsonObject nodeInterfaceObject = nodeInterface.getJsonObject();
-            dataObject.add("node", nodeInterfaceObject);
+        public static void addNodeUrlToDataObject(JsonObject dataObject, JsonObject nodeJson){
+       
+            dataObject.add("node", nodeJson);
         }
 
-        public static NamedNodeUrl getNamedNodeUrlFromDataObject(JsonObject dataObject, JsonObject defaultNode){
+        public static NamedNodeUrl getNamedNodeUrlFromDataObject(JsonObject dataObject){
 
             JsonElement nodeElement = dataObject.get("node");
 
-            JsonObject nodeObject = nodeElement != null && nodeElement.isJsonObject() ? nodeElement.getAsJsonObject() : defaultNode;
+            JsonObject nodeObject = nodeElement != null && nodeElement.isJsonObject() ? nodeElement.getAsJsonObject() :null;
             
             if(nodeObject != null){
                 JsonElement namedNodeElement = nodeObject.get("namedNode");
@@ -484,10 +512,10 @@ public class NoteConstants {
         }
 
         
-        public static ErgoNetworkUrl getExplorerUrl(JsonObject dataObject, JsonObject defaultExplorer){
+        public static ErgoNetworkUrl getExplorerUrl(JsonObject dataObject){
             JsonElement explorerElement = dataObject.get("explorer");
 
-            JsonObject explorerObject = explorerElement != null && explorerElement.isJsonObject() ? explorerElement.getAsJsonObject() : defaultExplorer;
+            JsonObject explorerObject = explorerElement != null && explorerElement.isJsonObject() ? explorerElement.getAsJsonObject() : null;
             
             if(explorerObject != null){
         
@@ -621,6 +649,11 @@ public class NoteConstants {
             JsonObject ergoObject = new JsonObject();
             ergoObject.addProperty("networkType", networkType.toString());
             return ergoObject;
+        }
+
+        public static NetworkType getNetworkTypeFromJson(JsonObject json){
+            JsonElement networkTypeElement = json.get("networkType");
+            return networkTypeElement != null && networkTypeElement.isJsonNull() &&  networkTypeElement.getAsString().toUpperCase().equals(NetworkType.TESTNET.toString().toUpperCase())  ? NetworkType.TESTNET  : NetworkType.MAINNET;
         }
 
         public static void addNetworkTypeToDataObject(NetworkType networkType, JsonObject dataObject){
@@ -1079,4 +1112,84 @@ public class NoteConstants {
         return null;
     }
 
+    public static Future<?> getAppIconFromNetworkObject(JsonObject json, ExecutorService execService, EventHandler<WorkerStateEvent> onImage, EventHandler<WorkerStateEvent> onFailed){
+        if(json != null){
+            JsonElement nameElement = json.get("appIcon");
+            
+            String imgStr = nameElement != null && nameElement.isJsonPrimitive() ? nameElement.getAsString() : null;
+            
+            if(imgStr != null){
+                return Drawing.convertHexStringToImg(imgStr, execService, onImage, onFailed);
+            }
+        }
+        return null;
+    }
+
+    public static String getJsonName(JsonObject obj){
+        if(obj != null){
+            JsonElement nameElement = obj.get("name");
+            if(nameElement != null && !nameElement.isJsonNull() && nameElement.isJsonPrimitive()){
+                return nameElement.getAsString();
+            }
+        }
+        return null;
+    }
+
+    public static String getJsonId(JsonObject obj){
+        if(obj != null){
+            JsonElement idElement = obj.get("id");
+            if(idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive()){
+                return idElement.getAsString();
+            }
+        }
+        return null;
+    }
+
+
+    public static JsonObject getCmdObject(String cmd, String locationId){        
+        JsonObject note = NoteConstants.getCmdObject(cmd);
+        note.addProperty("locationId", locationId);
+        return note;
+    }
+
+    public static JsonObject getCmdObject(String cmd, String networkId, String locationId){        
+        JsonObject note = NoteConstants.getCmdObject(cmd);
+        note.addProperty("locationId", locationId);
+        note.addProperty("networkId", networkId);
+        return note;
+    }
+
+    public static Future<?> getNetworkObject(NoteInterface networkInteface, String locationId, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    
+        if(networkInteface != null){
+            JsonObject note = NoteConstants.getCmdObject("getNetworkObject", locationId);
+            return networkInteface.sendNote(note, onSucceeded, onFailed);
+        }else{
+            return Utils.returnException("Network disabled", execService, onFailed);
+        }
+    }
+
+    public static String getNameFromNetworkObject(JsonObject json){
+      
+        JsonElement nameElement = json != null ? json.get("name") : null;
+        
+        return nameElement != null && !nameElement.isJsonNull() && nameElement.isJsonPrimitive() ? nameElement.getAsString() : "(Unknown)";
+    
+    }
+
+
+    public static Future<?> getInterfaceNetworkObjects(Iterator<NoteInterface> it, JsonArray jsonArray, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded,  EventHandler<WorkerStateEvent> onFailed ){
+        if(it.hasNext()){
+            NoteInterface noteInterface = it.next();
+            return noteInterface.sendNote(NoteConstants.getCmdObject("getNetworkObject"),(onNetworkObject)->{
+                Object obj = onNetworkObject.getSource().getValue();
+                if(obj != null && obj instanceof JsonObject){
+                    jsonArray.add((JsonObject) obj);
+                    getInterfaceNetworkObjects(it, jsonArray, execService, onSucceeded, onFailed);
+                }
+            } , onFailed);
+        }else{
+            return Utils.returnObject(jsonArray, execService, onSucceeded);
+        }
+    }
 }

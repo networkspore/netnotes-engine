@@ -50,31 +50,37 @@ public class Adapter  {
 
  
 
-    public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed) {
+    public Future<?> sendNote(String adapterId, String NetworkId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed) {
 
         return null;
     }
 
     public AdapterNoteInterface getNoteAdapterInterface(){
         return new AdapterNoteInterface() {
+
+            @Override
+            public String getNetworkId() {
+                return Adapter.this.getNetworkId();
+            }
+
             @Override
             public String getAdapterId() {
                 return Adapter.this.getAdapterId();
             }
             
             @Override
-            public Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply,
+            public Future<?> sendNote(String adapterId, String networkId, String note, EventHandler<WorkerStateEvent> onReply,
                     EventHandler<WorkerStateEvent> onFailed) {
-                return Adapter.this.sendNote(adapterId, note, onReply, onFailed);
+                return Adapter.this.sendNote(adapterId, networkId, note, onReply, onFailed);
             }
 
             @Override
             public int getConnectionStatus() {
-                return m_connectionStatus;
+                return Adapter.this.getConnectionStatus();
             }
 
             public String getName(){
-                return m_name;
+                return Adapter.this.getName();
             }
 
             @Override
@@ -84,20 +90,20 @@ public class Adapter  {
 
             @Override
             public void addMsgListener(AdapterMsgInterface listener) {
-                m_msgListeners.add(listener);
+                Adapter.this.addMsgListener(listener);
             }
 
             @Override
             public boolean removeMsgListener(AdapterMsgInterface listener) {
-                boolean removed = m_msgListeners.remove(listener);
-
-                return removed;
+                return Adapter.this.removeMsgListener(listener);
             }
 
             @Override
             public boolean isEnabled() {
-               return m_isEnabled;
+               return Adapter.this.isEnabled();
             }
+
+            
         };
     }
 
@@ -107,6 +113,11 @@ public class Adapter  {
 
     protected void setIsEnabled(boolean isEnabled){
         m_isEnabled = isEnabled;
+        if(isEnabled && m_msgListeners.size() > 0){
+            start();
+        }else if(!isEnabled && getConnectionStatus() == NoteConstants.STARTED){
+            stop();
+        }
     }
 
     public Button getButton(double size){
@@ -227,10 +238,6 @@ public class Adapter  {
     }
 
 
-
-    public void setNetworkId(String id) {
-        m_networkId = id;
-    }
 
     public String getNetworkId() {
         return m_networkId;

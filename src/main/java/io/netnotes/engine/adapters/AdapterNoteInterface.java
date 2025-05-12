@@ -7,9 +7,11 @@ import javafx.event.EventHandler;
 
 public interface AdapterNoteInterface {
 
+    String getNetworkId();
+
     String getAdapterId();
 
-    Future<?> sendNote(String adapterId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed);
+    Future<?> sendNote(String adapterId, String networkId, String note, EventHandler<WorkerStateEvent> onReply, EventHandler<WorkerStateEvent> onFailed);
 
     int getConnectionStatus();
 

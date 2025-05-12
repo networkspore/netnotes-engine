@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.networks.ergo.ErgoBox;
+import io.netnotes.engine.networks.ergo.ErgoNetwork;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
@@ -24,6 +25,8 @@ import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.TimeSpan;
+import io.netnotes.engine.apps.ergoFileWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
 import io.netnotes.friendly_id.FriendlyId;
 import com.google.gson.JsonArray;
 
@@ -67,6 +70,7 @@ public class ErgoDexDataList  {
 
     private ArrayList<ErgoDexMarketItem> m_marketsList = new ArrayList<ErgoDexMarketItem>();
 
+    private ErgoWalletControl m_walletControl;
 
     private SimpleStringProperty m_statusMsg = new SimpleStringProperty("Starting...");
 
@@ -118,6 +122,8 @@ public class ErgoDexDataList  {
         m_ergoNetworkInterfaceProperty = networkInterface;
         m_gridWidth = new SimpleDoubleProperty();
 
+        m_walletControl =  new ErgoWalletControl("ErgoDexDataList", ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, ErgoDex.NETWORK_TYPE, getLocationId(), getNetworksData());
+
         m_gridWidth.bind(gridWidth.subtract(22));
 
         m_gridHeight = gridHeight;
@@ -148,10 +154,13 @@ public class ErgoDexDataList  {
         addDexistener();
 
         
+        
         m_isNetworkEnabled.bind(Bindings.createObjectBinding(()->m_ergoNetworkInterfaceProperty.get() != null, m_ergoNetworkInterfaceProperty));
     }
 
-
+    public ErgoWalletControl getErgoWalletControl(){
+        return m_walletControl;
+    }
 
 
 
@@ -694,30 +703,27 @@ public class ErgoDexDataList  {
         return execService.submit(task);
     }*/
 
-    public PriceQuote getTokenQuoteInErg(String tokenId){
+    public Future<?> getTokenQuoteInErg(String tokenId, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("getTokenQuoteInErg");
         note.addProperty("locationId", getLocationId());
         note.addProperty("tokenId", tokenId);
-        Object obj = getErgoDex().sendNote(note);
-        return obj != null && obj instanceof PriceQuote ? (PriceQuote) obj : null;
+        return getErgoDex().sendNote(note, onSucceeded, onFailed);
     }
 
-    public PriceQuote getErgoQuoteInToken(String quoteId){
+    public Future<?> getErgoQuoteInToken(String quoteId, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("getQuoteById");
         note.addProperty("locationId", getLocationId());
         note.addProperty("quoteId", quoteId);
-        Object obj = getErgoDex().sendNote(note);
-        return obj != null && obj instanceof PriceQuote ? (PriceQuote) obj : null;
+        return getErgoDex().sendNote(note, onSucceeded, onFailed);  
     }
 
     
-    public PriceQuote getQuoteById(String baseId, String quoteId){
+    public Future<?> getQuoteById(String baseId, String quoteId, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject note = NoteConstants.getCmdObject("getQuoteById");
         note.addProperty("locationId", getLocationId());
         note.addProperty("baseId", baseId);
         note.addProperty("quoteId", quoteId);
-        Object obj = getErgoDex().sendNote(note);
-        return obj != null && obj instanceof PriceQuote ? (PriceQuote) obj : null;
+        return getErgoDex().sendNote(note, onSucceeded, onFailed);
     }
 
     /*
@@ -765,6 +771,7 @@ public class ErgoDexDataList  {
 
         m_ergodex.removeMsgListener(m_spectrumMsgInterface);
         m_spectrumMsgInterface = null;
+        m_walletControl.shutdown();
 
     }
     

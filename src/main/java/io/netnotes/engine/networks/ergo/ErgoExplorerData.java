@@ -19,25 +19,20 @@ import org.ergoplatform.appkit.NetworkType;
 
 import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
+
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteInterface;
-import io.netnotes.engine.NoteMsgInterface;
-import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
-import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
-import javafx.scene.control.Button;
-import javafx.scene.image.Image;
-import javafx.stage.Stage;
 
 public class ErgoExplorerData {
      public final static String TESTNET_STRING = NetworkType.TESTNET.toString();
@@ -181,8 +176,24 @@ public class ErgoExplorerData {
           }
      
           
-          return null;
+          return Utils.returnException("Explorer url is invalid", getExecService(), onFailed);
      }
+
+     public Future<?> getStatus( EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+
+          return getNetworkState(null, (onNetworkState)->{
+               Object sourceObject = onNetworkState.getSource().getValue();
+               if(sourceObject != null && sourceObject instanceof JsonObject){
+                    JsonObject networkStateObject = (JsonObject) sourceObject;
+                    JsonObject json = getJsonObject();
+                    json.add("networkState", networkStateObject);
+               }else{
+                    Utils.returnException("NetworkState returned null", getExecService(), onFailed);
+               }
+          }, onFailed);
+     
+     }
+
 
 
 
@@ -193,12 +204,16 @@ public class ErgoExplorerData {
                String cmd = cmdElement.getAsString();
               
                switch(cmd){
+                    case "getStatus":
+                         return getStatus(onSucceeded, onFailed);
                     case "getBalance":
                          return getBalance(note, onSucceeded, onFailed);
                     case "getTokenInfo":
                          return getTokenInfo(note, onSucceeded, onFailed);
                     case "getNetworkState":
                          return getNetworkState(note, onSucceeded, onFailed);
+                    case "getNetworkObject":
+                         return getNetworkObject(note, onSucceeded, onFailed);
                     case "getTransactionById":
                          return getTransactionById(note, onSucceeded, onFailed);
                     case "getTransactionsByAddress":
@@ -226,6 +241,25 @@ public class ErgoExplorerData {
                 
     }
 
+    public String getApiUrl(){
+
+          return m_ergoNetworkUrlProperty != null ? m_ergoNetworkUrlProperty.getUrlString() : "";
+
+    }
+
+    public String getWebsiteUrl(){
+          return m_websiteUrlProperty != null ? m_websiteUrlProperty.getUrlString() : "";
+    }
+    
+    public Future<?> getNetworkObject(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        JsonObject explorerObject = new JsonObject();
+        explorerObject.addProperty("apiUrl", getApiUrl());
+        explorerObject.addProperty("website", getWebsiteUrl());
+        explorerObject.addProperty("name", getName());
+        explorerObject.addProperty("id", getId());
+        explorerObject.addProperty("description", ErgoExplorers.DESCRIPTION);
+        return Utils.returnObject(explorerObject, getExecService(), onSucceeded);
+    }
     
     public Future<?> getBy(JsonObject json, String cmd, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
      JsonElement byElement = json != null ? json.get("value") : null;
@@ -286,128 +320,9 @@ public Future<?> getByUrlPostFix(String urlPostfix, String value, int offset, in
 }
 
 
-     /*public Object sendNote(JsonObject note){
-          JsonElement subjectElement = note.get(NoteConstants.CMD);
-          JsonElement networkIdElement = note.get("networkId");
-        
-          if (subjectElement != null && subjectElement.isJsonPrimitive() && networkIdElement != null && networkIdElement.isJsonPrimitive()) {
-               String networkId = networkIdElement.getAsString();
-          
-               if(networkId.equals(m_explorerList.getErgoNetworkData().getId())){
-                    String subject = subjectElement.getAsString();
-
-                    switch(subject){
-                         case "getAddresses":
-                         
-                         
-                         case "getBalance":
-                         
-                    }
-                    
-               
-               }
-          }
-          return null;
-     }*/
-
-     public Object sendNote(JsonObject note){
-          JsonElement subjectElement = note.get(NoteConstants.CMD);
-        
-          if (subjectElement != null && subjectElement.isJsonPrimitive()) {
-               
-          
-               String subject = subjectElement.getAsString();
-
-               switch(subject){
-                    case "getWebsiteTxLink":
-                         return getWebsiteTxLink(note);
-                    default:    
-               }
-                    
-               
-               
-          }
-          return null;
-     }
 
 
 
-    public NoteInterface getNoteInterface(){
-     
-          return new NoteInterface() {
-               
-               public String getName(){
-                    return ErgoExplorerData.this.getName();
-               }
-
-               public String getNetworkId(){
-                    return ErgoExplorerData.this.getId();
-               }
-
-               public Image getAppIcon(){
-                    return ErgoExplorerData.this.getImgUrl() != null ? new Image(ErgoExplorerData.this.getImgUrl()) : null;
-               }
-
-           
-
-               public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-                   return ErgoExplorerData.this.sendNote(note, onSucceeded, onFailed);
-               }
-
-               public Object sendNote(JsonObject note){
-                    return ErgoExplorerData.this.sendNote(note);
-               }
-
-               public JsonObject getJsonObject(){
-                    return ErgoExplorerData.this.getJsonObject();
-               }
-
-               
-
-               public TabInterface getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject,  Button networkBtn){
-                    return null;
-               }
-         
-
-
-               public NetworksData getNetworksData(){
-                    return null;
-               }
-
-               public NoteInterface getParentInterface(){
-                    return null;
-               }
-
-     
-               public void shutdown(){}
-
-               public SimpleObjectProperty<LocalDateTime> shutdownNowProperty(){
-                    return null;
-               }
-
-
-               public void addMsgListener(NoteMsgInterface listener){
-                   
-               }
-
-               public boolean removeMsgListener(NoteMsgInterface listener){
-                    return false;
-               }
-
-               public int getConnectionStatus(){
-                    return NoteConstants.STARTED;    
-               }
-
-               public void setConnectionStatus(int status){
-
-               }
-
-
-               public String getDescription(){
-                    return m_explorerList.getErgoExplorer().getDescription();
-               }
-          };
-    }
      private Future<?> getBalance(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
           JsonElement addressElement = note.get("address");
 
@@ -450,7 +365,7 @@ public Future<?> getByUrlPostFix(String urlPostfix, String value, int offset, in
 
      public JsonObject getBalanceTokenInfoBlocking(JsonObject balance) throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, InterruptedException, IOException{
           if(balance != null){
-               JsonObject cachedTokenInfo = getNetworksData().getDataBlocking("array", "tokenInfo", NoteConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID);
+               JsonObject cachedTokenInfo = getNetworksData().getDataBlocking("array", "tokenInfo", ErgoConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID);
      
                JsonObject infoObject = cachedTokenInfo;
                JsonObject balanceJson = balance;
@@ -502,7 +417,7 @@ public Future<?> getByUrlPostFix(String urlPostfix, String value, int offset, in
                          if(tokenInfoArray.size() > tokenInfoArraySize){
                               JsonObject tokenInfoObject = new JsonObject();
                               tokenInfoObject.add("array", tokenInfoArray);
-                              getNetworksData().save("array", "tokenInfo", NoteConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID, tokenInfoObject);
+                              getNetworksData().save("array", "tokenInfo", ErgoConstants.EXPLORER_NETWORK , ErgoNetwork.NETWORK_ID, tokenInfoObject);
                            
                          }
                             

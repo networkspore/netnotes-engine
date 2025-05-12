@@ -21,6 +21,7 @@ import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
+import javafx.concurrent.WorkerStateEvent;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -52,10 +53,10 @@ public class ErgoExplorersAppBox extends AppBox {
     private NoteInterface m_ergoNetworkInterface;
     private VBox m_mainBox;
     private SimpleBooleanProperty m_showExplorers = new SimpleBooleanProperty(false);
-    private SimpleObjectProperty<NoteInterface> m_defaultExplorer = new SimpleObjectProperty<>(null);
+    private SimpleObjectProperty<JsonObject> m_defaultExplorer = new SimpleObjectProperty<>(null);
     private String m_locationId = null;
 
-    private ContextMenu m_explorerMenu = new ContextMenu();
+  
     private HBox m_explorerFieldBox;
     private Button m_toggleExplorersBtn;
     private VBox m_explorerBodyPaddingBox = null;
@@ -120,7 +121,7 @@ public class ErgoExplorersAppBox extends AppBox {
     private TextField m_pageLimitField = null;
     private ChangeListener<String> m_pageLimitFieldListener = null;
     private ChangeListener<String> m_pageOffsetFieldListener = null;
-
+    private MenuButton openMenuBtn = null;
 
     public ErgoExplorersAppBox(Stage appStage, String locationId, NoteInterface ergoNetworkInterface){
         super();
@@ -160,9 +161,9 @@ public class ErgoExplorersAppBox extends AppBox {
         explorerTopLabel.setFill(Stages.txtColor);
 
 
-        MenuButton openMenuBtn = new MenuButton("⏷");
+        openMenuBtn = new MenuButton();
         openMenuBtn.setId("arrowMenuButton");
-
+        openMenuBtn.setOnShowing(e->updateExplorerMenu());
 
         m_explorerFieldBox = new HBox(openMenuBtn);
         HBox.setHgrow(m_explorerFieldBox, Priority.ALWAYS);
@@ -188,8 +189,9 @@ public class ErgoExplorersAppBox extends AppBox {
 
 
         Binding<String> explorerNameBinding = Bindings.createObjectBinding(()->{
-            NoteInterface defaultExplorer = m_defaultExplorer.get();
-            return defaultExplorer != null ? defaultExplorer.getName() : selectString;
+            String name = NoteConstants.getJsonName(m_defaultExplorer.get());
+
+            return name != null ? name : selectString;
         }, m_defaultExplorer);
 
         openMenuBtn.textProperty().bind(explorerNameBinding);
@@ -207,9 +209,9 @@ public class ErgoExplorersAppBox extends AppBox {
 
         m_showExplorers.addListener((obs, oldval, newval) -> updateShowExplorers());
 
-        m_defaultExplorer.addListener((obs,oldval,newval)->setExplorerInfo());
+        m_defaultExplorer.addListener((obs,oldval,newval)->setExplorerInfo(newval));
 
-        setExplorerInfo();
+        setExplorerInfo(m_defaultExplorer.get());
         updateShowExplorers();
 
         m_mainBox = new VBox(explorerLayoutBox);
@@ -226,7 +228,7 @@ public class ErgoExplorersAppBox extends AppBox {
 
         });
 
-        getDefaultExplorer();
+        updateDefaultExplorer();
 
 
         getChildren().addAll(m_mainBox);
@@ -246,6 +248,7 @@ public class ErgoExplorersAppBox extends AppBox {
     
     }
     
+
 
     public void addSearchBox(){
         if(m_searchText == null){
@@ -621,12 +624,14 @@ public class ErgoExplorersAppBox extends AppBox {
 
 
     public void search(String cmd, String value){
-        NoteInterface explorerInterface = m_defaultExplorer.get();
-        if(explorerInterface != null){
-            JsonObject note = NoteConstants.getCmdObject(cmd);
+        NoteInterface networkInterface = m_ergoNetworkInterface;
+        String id = NoteConstants.getJsonId(m_defaultExplorer.get());
+        if(networkInterface != null && id != null){
+            JsonObject note = NoteConstants.getCmdObject(cmd, ErgoConstants.EXPLORER_NETWORK, m_locationId);
             note.addProperty("value", value);
+            note.addProperty("id", id);
             updateSearchResults(null, NoteConstants.getJsonObject("status", "Searching..."));
-            explorerInterface.sendNote(note, (onSucceeded)->{
+            networkInterface.sendNote(note, (onSucceeded)->{
                 Object sourceObject = onSucceeded.getSource().getValue();
                 if(sourceObject != null){
                     updateSearchResults(cmd, (JsonObject) sourceObject);
@@ -643,14 +648,17 @@ public class ErgoExplorersAppBox extends AppBox {
     }
 
     public void searchByPage(String cmd, String value){
-        NoteInterface explorerInterface = m_defaultExplorer.get();
-        if(explorerInterface != null && m_pageOffsetTextField != null){
+        NoteInterface networkInterface = m_ergoNetworkInterface;
+        String id = NoteConstants.getJsonId(m_defaultExplorer.get());
+
+        if(networkInterface != null && m_pageOffsetTextField != null && id != null){
             int offset = m_pageOffsetTextField.getText() != "" ? Utils.getIntFromField(m_pageOffsetTextField) : -1;
       
             String sortMethod = m_searchSortMethod;
             
             int limit = m_pageLimitField.getText() != "" ? Utils.getIntFromField(m_pageLimitField) : -1;
-            JsonObject note = NoteConstants.getCmdObject(cmd);
+            JsonObject note = NoteConstants.getCmdObject(cmd, ErgoConstants.EXPLORER_NETWORK, m_locationId);
+            note.addProperty("id", id);
             note.addProperty("value", value);
             if(offset != -1){
                 note.addProperty("offset", offset);
@@ -663,7 +671,7 @@ public class ErgoExplorersAppBox extends AppBox {
             }
 
             updateSearchResults(null, NoteConstants.getJsonObject("status", "Searching..."));
-            explorerInterface.sendNote(note, (onSucceeded)->{
+            networkInterface.sendNote(note, (onSucceeded)->{
                 Object sourceObject = onSucceeded.getSource().getValue();
                 if(sourceObject != null){
                     updateSearchResults(cmd, (JsonObject) sourceObject);
@@ -782,7 +790,7 @@ public class ErgoExplorersAppBox extends AppBox {
         
         
         if(m_explorerParameterBox == null){
-            m_explorerParameterBox = new JsonParametersBox(getExplorerInfo(), Stages.COL_WIDTH);
+            m_explorerParameterBox = new JsonParametersBox(getExplorerInfo(m_defaultExplorer.get()), Stages.COL_WIDTH);
             m_explorerBodyPaddingBox.getChildren().add(m_explorerParameterBox);
             
         }
@@ -801,106 +809,102 @@ public class ErgoExplorersAppBox extends AppBox {
         }
     }
 
-    public JsonObject getDefaultJsonObject(){
-        NoteInterface noteInterface = m_defaultExplorer.get();
-        return noteInterface != null ? noteInterface.getJsonObject() : null;
-    }
 
-    public void setExplorerInfo(){
+
+    public void setExplorerInfo(JsonObject json){
         if(m_explorerParameterBox != null){        
-            m_explorerParameterBox.update(getExplorerInfo());   
+            m_explorerParameterBox.update(getExplorerInfo(json));   
         }
     }
 
-    public JsonObject getExplorerInfo(){
-        JsonObject defaultJson = getDefaultJsonObject();
+    public JsonObject getExplorerInfo(JsonObject defaultJson){
         if(defaultJson != null){
             JsonObject infoJson = new JsonObject();
-            infoJson.add("info", getDefaultJsonObject());
+            infoJson.add("info", defaultJson);
             return infoJson;
         }else{
             return NoteConstants.getJsonObject("info", "(disabled)");
         }
     }
 
-    public void setDefaultExplorer(String id){
-        JsonObject note = NoteConstants.getCmdObject("setDefault");
-        note.addProperty("networkId", NoteConstants.EXPLORER_NETWORK);
-        note.addProperty("locationId", m_locationId);
+    public void setDefaultExplorer(String id, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        JsonObject note = NoteConstants.getCmdObject("setDefault", ErgoConstants.EXPLORER_NETWORK, m_locationId);
         note.addProperty("id", id);
         
-        m_ergoNetworkInterface.sendNote(note);
+        m_ergoNetworkInterface.sendNote(note, onSucceeded, onFailed);
     }
 
-    public void getDefaultExplorer(){
-        JsonObject getDefaultObject = NoteConstants.getCmdObject("getDefault");
-        getDefaultObject.addProperty("networkId", NoteConstants.EXPLORER_NETWORK);
-        getDefaultObject.addProperty("locationId", m_locationId);
-        Object obj = m_ergoNetworkInterface.sendNote(getDefaultObject);
-       
-        if(obj != null && obj instanceof NoteInterface){
-            m_defaultExplorer.set((NoteInterface) obj);
-        }else{
+    public void updateDefaultExplorer(){
+        JsonObject getDefaultObject = NoteConstants.getCmdObject("getDefaultJson",  ErgoConstants.EXPLORER_NETWORK, m_locationId);
+
+        m_ergoNetworkInterface.sendNote(getDefaultObject, onSucceeded->{
+            Object obj = onSucceeded.getSource().getValue();
+            if(obj != null && obj instanceof JsonObject){
+                m_defaultExplorer.set((JsonObject) obj);
+            }else{
+                m_defaultExplorer.set(null);
+                m_showExplorers.set(false);
+            }
+        }, onFailed->{
+            m_defaultExplorer.set(null);
             m_showExplorers.set(false);
-        }
+        });
+       
        
         
     }
 
     public void updateExplorerMenu(){
-       
-        JsonObject note = NoteConstants.getCmdObject("getExplorers");
-        note.addProperty("networkId", NoteConstants.EXPLORER_NETWORK);
-        note.addProperty("locationId", m_locationId);
+        openMenuBtn.getItems().clear();
+        openMenuBtn.getItems().add(new MenuItem("Getting explorers..."));
+        JsonObject note = NoteConstants.getCmdObject("getExplorers", ErgoConstants.EXPLORER_NETWORK, m_locationId);
 
-        Object objResult = m_ergoNetworkInterface.sendNote(note);
+        
+        m_ergoNetworkInterface.sendNote(note, onSucceeded->{
+            Object objResult = onSucceeded.getSource().getValue();
+            openMenuBtn.getItems().clear();
+            if (objResult != null && objResult instanceof JsonArray) {
 
-        m_explorerMenu.getItems().clear();
-
-        if (objResult != null && objResult instanceof JsonArray) {
-
-            JsonArray explorersArray = (JsonArray) objResult;
-
-            for (JsonElement element : explorersArray) {
-                
-                JsonObject json = element.getAsJsonObject();
-
-                String name = json.get("name").getAsString();
-                String id = json.get("id").getAsString();
-
-                MenuItem explorerItem = new MenuItem(String.format("%-50s", " " + name));
-
-                explorerItem.setOnAction(action -> {
-                    setDefaultExplorer(id);
-                });
-
-                m_explorerMenu.getItems().add(explorerItem);
-                
+                JsonArray explorersArray = (JsonArray) objResult;
+    
+                for (JsonElement element : explorersArray) {
+                    
+                    JsonObject json = element.getAsJsonObject();
+    
+                    String name = json.get("name").getAsString();
+    
+                    MenuItem explorerItem = new MenuItem(String.format("%-50s", " " + name));
+    
+                    explorerItem.setOnAction(action -> {
+                        m_defaultExplorer.set(json);
+                    });
+    
+                    openMenuBtn.getItems().add(explorerItem);
+                    
+                }
+           
+           
+            }else{
+                MenuItem explorerItem = new MenuItem(String.format("%-50s", " Error: Unable to get available explorers."));
+                openMenuBtn.getItems().add(explorerItem);
             }
-       
-       
-        }else{
-            MenuItem explorerItem = new MenuItem(String.format("%-50s", " Error: Unable to get available explorers."));
-            m_explorerMenu.getItems().add(explorerItem);
-        }
-        Point2D p = m_explorerFieldBox.localToScene(0.0, 0.0);
-        m_explorerMenu.setPrefWidth(m_explorerFieldBox.getLayoutBounds().getWidth());
+        }, onFailed->{
 
-        m_explorerMenu.show(m_explorerFieldBox,
-                5 + p.getX() + m_explorerFieldBox.getScene().getX() + m_explorerFieldBox.getScene().getWindow().getX(),
-                (p.getY() + m_explorerFieldBox.getScene().getY() + m_explorerFieldBox.getScene().getWindow().getY())
-                        + m_explorerFieldBox.getLayoutBounds().getHeight() - 1);
+        });
+
+
+       
     }
 
     @Override
     public void sendMessage(int code, long timestamp,String networkId, String msg){
         
-        if(networkId != null && networkId.equals(NoteConstants.EXPLORER_NETWORK)){
+        if(networkId != null && networkId.equals(ErgoConstants.EXPLORER_NETWORK)){
 
             switch(code){
                 
                 case NoteConstants.LIST_DEFAULT_CHANGED:
-                    getDefaultExplorer();
+                    updateDefaultExplorer();
                 break;
               
             }

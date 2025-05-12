@@ -11,6 +11,8 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 
 import com.google.gson.JsonObject;
+
+import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.PriceAmount;
@@ -137,7 +139,7 @@ public class ErgoDexFees {
     }
 
     public void setNetworkFee(BigDecimal fee){
-        if(fee != null && fee.compareTo(NoteConstants.MIN_NETWORK_FEE) > -1){
+        if(fee != null && fee.compareTo(ErgoConstants.MIN_NETWORK_FEE) > -1){
             m_networkFee.set(fee);
         }else{
             m_networkFee.set(DEFAULT_NETWORK_FEE);
