@@ -34,6 +34,8 @@ import javax.crypto.ShortBufferException;
 import org.apache.commons.io.FileUtils;
 import org.reactfx.util.FxTimer;
 
+import org.ergoplatform.sdk.SecretString;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -1753,15 +1755,15 @@ public class NetworksData {
     }
 
 
-    private Future<?> updateAppKey(char[] newPassword, EventHandler<WorkerStateEvent> onFinished){
+    private Future<?> updateAppKey(SecretString newPassword, EventHandler<WorkerStateEvent> onFinished){
 
         Task<Object> task = new Task<Object>() {
             @Override
             public Object call() throws InterruptedException, IOException, NoSuchAlgorithmException, InvalidKeySpecException{
-                if(newPassword.length > 0){ 
+                if(newPassword.getData().length > 0){ 
                     m_dataSemaphore.acquire();
                     SecretKey oldAppKey = getAppKey();
-                    String hash = Utils.getBcryptHashString(newPassword);
+                    String hash = Utils.getBcryptHashString(newPassword.getData());
                     getAppData().setAppKey(hash);
                     getAppData().createKey(newPassword);
                     
@@ -3694,15 +3696,15 @@ public class NetworksData {
                             if(m_updateFuture == null){
                                 Object sourceObject = onSuccess.getSource().getValue();
             
-                                if (sourceObject != null && sourceObject instanceof char[]) {
-                                    char[] chars = (char[]) sourceObject;
+                                if (sourceObject != null && sourceObject instanceof SecretString) {
+                                    SecretString pass = (SecretString) sourceObject;
             
-                                    if (chars.length > 0) {
+                                    if (pass.getData().length > 0) {
             
                                         Stage statusStage = Stages.getStatusStage("Netnotes - Updating Password...", "Updating Password...");
                                         statusStage.show();
                                         
-                                        m_updateFuture = updateAppKey(chars, onFinished ->{
+                                        m_updateFuture = updateAppKey(pass, onFinished ->{
                                             Object finishedObject = onFinished.getSource().getValue();
                                             statusStage.close();
                                             m_updateFuture = null;

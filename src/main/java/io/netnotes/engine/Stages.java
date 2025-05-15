@@ -1061,6 +1061,7 @@ public class Stages {
 
         closeBtn.setOnAction(e -> {
             passwordField.setText("");
+            createPassField2.setText("");
             passwordStage.close();
         });
 
@@ -1130,7 +1131,9 @@ public class Stages {
         enter2.setOnAction(e->{
             if (passwordField.getText().equals(createPassField2.getText())) {
 
-                Utils.returnObject(passwordField.getText().toCharArray(),execService, onSucceeded);
+                Utils.returnObject(SecretString.create(passwordField.getText()),execService, onSucceeded);
+                createPassField2.setText("");
+                passwordField.setText("");
             } else {
                 bodyBox.getChildren().clear();
                 createPassField2.setText("");
@@ -1262,14 +1265,9 @@ public class Stages {
 
         enter2.setOnAction(e->{
             if (passwordField.getText().equals(createPassField2.getText())) {
-        
-                SecretString pass = SecretString.create( passwordField.getText());
-                passwordField.setText("&(*^^%(&^%^&##@@%");
-                createPassField2.setText("&(*^^%(&^%^&($(@#_))");
+                Utils.returnObject(SecretString.create( passwordField.getText()), execService, onSucceeded);
                 passwordField.setText("");
                 createPassField2.setText("");
-
-                Utils.returnObject(pass, execService, onSucceeded);
             } else {
                 bodyBox.getChildren().clear();
                 createPassField2.setText("");

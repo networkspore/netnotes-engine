@@ -97,6 +97,7 @@ import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.input.ReaderInputStream;
+import org.ergoplatform.sdk.SecretString;
 
 import java.io.FilenameFilter;
 import at.favre.lib.crypto.bcrypt.BCrypt;
@@ -116,15 +117,26 @@ import com.google.gson.GsonBuilder;
 public class Utils {
     public static final KeyCombination keyCombCtrZ = new KeyCodeCombination(KeyCode.Z, KeyCombination.SHORTCUT_DOWN);
     public static final int DEFAULT_BUFFER_SIZE = 2048;
+    public static final int PRINTABLE_CHAR_RANGE_START = 32;
+    public static final int PRINTABLE_CHAR_RANGE_END = 127;
+    
 
-    public final static String[] getAsciiStringArray(){
-        String[] charStrings = new String[128];
+    public static char[] getPrintableCharArray(){
+        return getCharRange(PRINTABLE_CHAR_RANGE_START, PRINTABLE_CHAR_RANGE_END);
+    }
 
-        for(int i = 0; i < 128; i++){
-            charStrings[i] = Character.toString ((char) i);
+
+    public static char[] getCharRange(int rangeStart, int rangeEnd){
+        char[] chars = new char[rangeEnd - rangeStart];
+        int j = 0;
+        int i = 32;
+        while(i < 127){
+            chars[j] = (char) i;
+            j++;
+            i++;
         }
 
-        return charStrings;
+        return chars;
     }
 
     public final static char[] getAsciiCharArray(){
@@ -141,14 +153,8 @@ public class Utils {
     public final static String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36";
 
     public static String getBcryptHashString(char[] password) {
-        SecureRandom sr;
-
-        try {
-            sr = SecureRandom.getInstanceStrong();
-        } catch (NoSuchAlgorithmException e) {
-
-            sr = new SecureRandom();
-        }
+        SecureRandom sr = new SecureRandom();
+    
 
         return BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hashToString(15, password);
     }
@@ -1323,15 +1329,6 @@ public class Utils {
         }
     }
 
-    public static byte[] charsToBytes(char[] chars) {
-
-        CharBuffer charBuffer = CharBuffer.wrap(chars);
-        ByteBuffer byteBuffer = Charset.forName("UTF-8").encode(charBuffer);
-        byte[] bytes = Arrays.copyOfRange(byteBuffer.array(),
-                byteBuffer.position(), byteBuffer.limit());
-        Arrays.fill(byteBuffer.array(), (byte) 0); // clear sensitive data
-        return bytes;
-    }
 
     public static boolean checkJar(File jarFile) {
         boolean isJar = false;
@@ -1488,21 +1485,30 @@ public class Utils {
         return execService.submit(task);
     }
 
+    public static String getRandomString(int length){
+        char[] chars = new char[length];
+        fillCharArray(chars);
+        return new String(chars);
+    
+    }
 
-    public static void fillCharArray(char[] charArray, char[] chars) throws NoSuchAlgorithmException{
+    public static void fillCharArray(char[] charArray) {
+        fillCharArray(charArray, getPrintableCharArray());
+    }
+
+    public static void fillCharArray(char[] charArray, char[] chars){
         if(charArray != null && charArray.length > 0 && chars != null && chars.length > 0){
 
-        for(int i = 0; i < charArray.length ; i++){
-            charArray[i] = chars[getRandomInt(0, chars.length)];
-        }
+            for(int i = 0; i < charArray.length ; i++){
+                charArray[i] = chars[getRandomInt(0, chars.length)];
+            }
         }
     }
 
 
 
-    public static int getRandomInt(int min, int max) throws NoSuchAlgorithmException {
-        SecureRandom secureRandom = SecureRandom.getInstanceStrong();
-
+    public static int getRandomInt(int min, int max) {
+        SecureRandom secureRandom = new SecureRandom();
         return secureRandom.nextInt(min, max);
     }
 
@@ -1606,7 +1612,7 @@ public class Utils {
         long contentLength = -1;
 
                  
-        SecureRandom secureRandom = SecureRandom.getInstanceStrong();
+        SecureRandom secureRandom = new SecureRandom();
         byte[] iV = new byte[12];
         secureRandom.nextBytes(iV);
         
@@ -1680,15 +1686,17 @@ public class Utils {
         return execService.submit(task);
     }
 
-    public static byte[] createKeyBytes(char[] password) throws NoSuchAlgorithmException, InvalidKeySpecException  {
+    public static byte[] charsToBytes(char[] chars){
+        CharBuffer charBuffer = CharBuffer.wrap(chars);
+        ByteBuffer byteBuffer = StandardCharsets.UTF_8.encode(charBuffer);
+        byte[] bytes = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
+        byteBuffer.clear();
+        return bytes;
+    }
 
-        byte[] bytes = new String(password).getBytes(StandardCharsets.UTF_8);
-
-    
-
+    public static byte[] createKeyBytes(SecretString password) throws InvalidKeySpecException, NoSuchAlgorithmException  {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-
-        KeySpec spec = new PBEKeySpec(password, bytes, 65536, 256);
+        KeySpec spec = new PBEKeySpec(password.getData(), charsToBytes(password.getData()), 65536, 256);
         SecretKey tmp = factory.generateSecret(spec);
         return tmp.getEncoded();
 
@@ -2085,7 +2093,7 @@ public class Utils {
             @Override
             public Object call() throws IOException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, InvalidAlgorithmParameterException, IllegalBlockSizeException, BadPaddingException {
                 
-                SecureRandom secureRandom = SecureRandom.getInstanceStrong();
+                SecureRandom secureRandom = new SecureRandom();
                 byte[] iV = new byte[12];
                 secureRandom.nextBytes(iV);
                 
@@ -2170,7 +2178,7 @@ public class Utils {
     }
     
     public static byte[] getIV() throws NoSuchAlgorithmException{
-        SecureRandom secureRandom = SecureRandom.getInstanceStrong();
+        SecureRandom secureRandom = new SecureRandom();
         byte[] iV = new byte[12];
         secureRandom.nextBytes(iV);
         return iV;

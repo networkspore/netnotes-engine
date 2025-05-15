@@ -30,6 +30,8 @@ import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 
+import org.ergoplatform.sdk.SecretString;
+
 public class AppData {
    // private static File logFile = new File("netnotes-log.txt");
     public static final String SETTINGS_FILE_NAME = "settings.conf";
@@ -69,7 +71,7 @@ public class AppData {
 
 
 
-    public AppData(char[] password, ExecutorService execService, ScheduledExecutorService schedualedExecService)throws NoSuchAlgorithmException, InvalidKeySpecException, IOException{
+    public AppData(SecretString password, ExecutorService execService, ScheduledExecutorService schedualedExecService)throws NoSuchAlgorithmException, InvalidKeySpecException, IOException{
         m_execService = execService;
         m_schedualedExecutor = schedualedExecService;
         URL classLocation = Utils.getLocation(AppData.class);
@@ -79,7 +81,7 @@ public class AppData {
         m_settingsFile = new File(m_appDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
 
 
-        m_appKey = Utils.getBcryptHashString(password);
+        m_appKey = Utils.getBcryptHashString(password.getData());
    
         
         
@@ -144,14 +146,13 @@ public class AppData {
     }
 
   
-     public void createKey(char[] password) throws NoSuchAlgorithmException, InvalidKeySpecException {
-
+     public void createKey(SecretString password) throws InvalidKeySpecException, NoSuchAlgorithmException {
 
         m_secretKey = new SecretKeySpec(Utils.createKeyBytes(password), "AES");
 
     }
 
-    public Future<?> createKey(char[] password, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
+    public Future<?> createKey(SecretString password, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
         
         Task<Object> task = new Task<Object>() {
             @Override
