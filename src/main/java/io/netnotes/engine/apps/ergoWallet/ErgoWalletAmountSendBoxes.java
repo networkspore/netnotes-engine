@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoFileWallet;
+package io.netnotes.engine.apps.ergoWallet;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.AmountBoxInterface;

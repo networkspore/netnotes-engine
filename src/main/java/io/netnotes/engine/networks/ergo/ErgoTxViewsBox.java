@@ -8,7 +8,7 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.JsonParametersBox;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
 import javafx.scene.layout.Region;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.scene.control.Button;

@@ -38,9 +38,13 @@ import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
+import io.netnotes.engine.NetworksData.ManageAppsTab;
 import io.netnotes.engine.NetworksData.ManageNetworksTab;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.apps.TimeSpan;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletMenu;
+import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
 import javafx.beans.binding.Binding;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -286,12 +290,8 @@ public class ErgoDex extends Network implements NoteInterface {
     private class ErgoDexTab extends AppBox implements TabInterface{
         private Button m_menuBtn;
         private ErgoDexDataList m_dexDataList = null;
-        private String noNetworkImgString = NetworkConstants.NETWORK_ICON;
-
-        private boolean m_isErgoNetwork = true;
-
-        private SimpleObjectProperty<NoteInterface> m_ergoNetworkInterface = new SimpleObjectProperty<>(null);
-        private NoteMsgInterface m_networksDataMsgInterface;
+    
+      
 
         private SimpleObjectProperty<TimeSpan> m_itemTimeSpan = new SimpleObjectProperty<TimeSpan>(new TimeSpan("1day"));
         private SimpleBooleanProperty m_isInvert = new SimpleBooleanProperty(false);
@@ -307,6 +307,8 @@ public class ErgoDex extends Network implements NoteInterface {
         private SimpleDoubleProperty m_heightObject;
         private ScrollPane gridSscrollPane;
 
+        private ErgoWalletMenu m_ergoWalletMenu; 
+
         public ErgoDexTab(Stage appStage,  SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button menuBtn){
             super(getNetworkId());
             
@@ -317,6 +319,8 @@ public class ErgoDex extends Network implements NoteInterface {
             
             m_tabWidth = widthObject;
             m_heightObject = heightObject;
+
+            m_ergoWalletMenu = new ErgoWalletMenu(new ErgoWalletControl(NETWORK_ID, ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, NETWORK_TYPE, m_locationId, getNetworksData()));
 
  
             m_gridHeight = new SimpleDoubleProperty(heightObject.get() - 100);
@@ -340,126 +344,8 @@ public class ErgoDex extends Network implements NoteInterface {
 
         public void layoutTab(){
            
-            m_dexDataList = new ErgoDexDataList(m_locationId, m_appStage, ErgoDex.this, m_isInvert, m_tabWidth, m_gridHeight, m_lastUpdatedField,  m_itemTimeSpan, m_ergoNetworkInterface,  gridSscrollPane);
+            m_dexDataList = new ErgoDexDataList(m_ergoWalletMenu, m_locationId, m_appStage, ErgoDex.this, m_isInvert, m_tabWidth, m_gridHeight, m_lastUpdatedField, m_itemTimeSpan, gridSscrollPane);
 
-
-            ImageView networkMenuBtnImageView = new ImageView(new Image(noNetworkImgString));
-            networkMenuBtnImageView.setPreserveRatio(true);
-            networkMenuBtnImageView.setFitWidth(30);
-
-            MenuButton networkMenuBtn = new MenuButton();
-            networkMenuBtn.setGraphic(networkMenuBtnImageView);
-            networkMenuBtn.setPadding(new Insets(0, 3, 0, 0));
-
-            networkMenuBtn.showingProperty().addListener((obs,oldval,newval)->{
-                networkMenuBtn.getItems().clear();
-                if(newval){
-                    if(getErgoNetworkInterface() != null){
-                        MenuItem openNetworkItem = new MenuItem("Open…");
-                        openNetworkItem.setOnAction(e->{
-                            networkMenuBtn.hide();
-                            getNetworksData().openNetwork(ErgoNetwork.NETWORK_ID);
-                        });
-                        networkMenuBtn.getItems().add(openNetworkItem);
-                    }else{
-                        MenuItem manageNetworkItem = new MenuItem("Manage networks…");
-                        manageNetworkItem.setOnAction(e->{
-                            networkMenuBtn.hide();
-                            getNetworksData().openStatic(ManageNetworksTab.NAME);
-                        });
-                        networkMenuBtn.getItems().add(manageNetworkItem);
-                    }
-
-                    SeparatorMenuItem separatorMenuItem = new SeparatorMenuItem();
-                    
-                    networkMenuBtn.getItems().add(separatorMenuItem);
-
-                    if(isErgoNetwork()){
-                        MenuItem disableNetworkItem = new MenuItem("[disable access]");
-                        disableNetworkItem.setOnAction(e->{
-                            setErgoNetworkEnabled(false);
-                        });
-                        networkMenuBtn.getItems().add(disableNetworkItem);
-                    }else{
-                        MenuItem enableNetworkItem = new MenuItem("[enable access]");
-                        enableNetworkItem.setOnAction(e->{
-                            setErgoNetworkEnabled(true);
-                            if(getErgoNetworkInterface() == null){
-                                networkMenuBtn.hide();
-                                getNetworksData().openStatic(ManageNetworksTab.NAME);
-                            }
-                        });
-
-                        networkMenuBtn.getItems().add(enableNetworkItem);
-                    }
-                
-    
-                    
-                
-                }
-            });
-            
-            Tooltip networkTip = new Tooltip("Network: (select)");
-            networkTip.setShowDelay(new javafx.util.Duration(50));
-            networkTip.setFont(Stages.txtFont);
-
-            networkMenuBtn.setTooltip(networkTip);
-
-            Runnable setUnavailableNetworkText = ()->{
-                networkTip.setText("(Unavailable)");
-            };
-            Runnable setUnknownNetworkIcon = ()->{
-                networkMenuBtnImageView.setImage(new Image(AppConstants.UNKNOWN_ICON));
-            };
-            
-            m_ergoNetworkInterface.addListener((obs,oldval,newval)->{
-                if(newval != null){
-                    NoteConstants.getNetworkObject(newval, m_locationId, getExecService(), (onNetworkObject)->{
-                        Object obj = onNetworkObject.getSource().getValue();
-                        if(obj != null && obj instanceof JsonObject){
-                            JsonObject networkObject = (JsonObject) obj;
-                            
-                            NoteConstants.getAppIconFromNetworkObject(networkObject, getExecService(), onImage->{
-                                Object imgObj = onImage.getSource().getValue();
-                                if(imgObj != null && imgObj instanceof Image){
-                                    networkMenuBtnImageView.setImage((Image) imgObj);
-                                }else{
-                                    setUnknownNetworkIcon.run();
-                                }
-                            }, onImageFailed->{
-                                setUnknownNetworkIcon.run();
-                            });
-
-                            networkTip.setText(NoteConstants.getNameFromNetworkObject(networkObject));
-                        }else{
-                            setUnavailableNetworkText.run();
-                            setUnknownNetworkIcon.run();
-                        }
-
-                    }, onFailed->{
-                        setUnavailableNetworkText.run();
-                        setUnknownNetworkIcon.run();
-                    });
-                   
-                }else{
-                    setUnavailableNetworkText.run();
-                    setUnknownNetworkIcon.run();
-                }
-            });
-
-
-            addNetworksDataListener();
-
-
-
-
-         
-
-
-
-        
-
-         
 
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -569,7 +455,7 @@ public class ErgoDex extends Network implements NoteInterface {
         
 
 
-            VBox networkMenuBtnBox = new VBox( networkMenuBtn);
+            VBox networkMenuBtnBox = new VBox( m_ergoWalletMenu);
 
 
     
@@ -696,59 +582,7 @@ public class ErgoDex extends Network implements NoteInterface {
 
           
         }
-        private boolean isErgoNetwork(){
-            return m_isErgoNetwork;
-        }
-        private void setErgoNetworkEnabled(boolean isEnabled){
-            m_isErgoNetwork = isEnabled;
-            save();
-            
-            updateErgoNetworkInterface();
-        }
-
-        private NoteInterface getErgoNetworkInterface(){
-            return getNetworksData().getNetworkInterface(ErgoNetwork.NETWORK_ID);
-        }
-
-        public void updateErgoNetworkInterface(){
-            if(isErgoNetwork()){
-                m_ergoNetworkInterface.set(getErgoNetworkInterface());
-            }else{
-                m_ergoNetworkInterface.set(null);
-            }
-        }
-
-        public void addNetworksDataListener(){
-            m_networksDataMsgInterface = new NoteMsgInterface() {
-
-                @Override
-                public String getId() {
-                    
-                    return m_locationId;
-                }
-
-                @Override
-                public void sendMessage(int code, long timestamp, String networkId, String msg) {
-                    switch(networkId){
-                        case NetworksData.NETWORKS:
-                            updateErgoNetworkInterface();
-                        break;
-                    }
-                }
-
-                @Override
-                public void sendMessage(int code, long timestamp, String networkId, Number number) {
-                    
-                }
-                
-            };
-
-            updateErgoNetworkInterface();
-
-            getNetworksData().addMsgListener(m_networksDataMsgInterface);
-        }
-        
-
+   
         @Override
         public String getName() {  
             return ErgoDex.this.getName();
@@ -785,12 +619,6 @@ public class ErgoDex extends Network implements NoteInterface {
         @Override
         public void shutdown() {
             
-            if(m_networksDataMsgInterface != null){
-                getNetworksData().removeMsgListener(m_networksDataMsgInterface);
-                m_networksDataMsgInterface = null;
-            }
-
-            m_ergoNetworkInterface.set(null);
 
             m_dexDataList.shutdown();
 
@@ -811,16 +639,12 @@ public class ErgoDex extends Network implements NoteInterface {
         public void openJson(JsonObject json){
 
             JsonElement itemTimeSpanElement = json != null ? json.get("itemTimeSpan") : null;
-            JsonElement isErgoNetworkElement = json != null ? json.get("isErgoNetwork") : null;
             JsonElement isInvertElement = json != null ? json.get("isInvert") : null;
             TimeSpan timeSpan = itemTimeSpanElement != null && itemTimeSpanElement.isJsonObject() ? new TimeSpan(itemTimeSpanElement.getAsJsonObject()) : new TimeSpan("1day");
-            
-            boolean isErgoNetwork = isErgoNetworkElement != null ? isErgoNetworkElement.getAsBoolean() : true;
             boolean isInvert = isInvertElement != null ? isInvertElement.getAsBoolean() : false;
 
             m_isInvert.set(isInvert);
             m_itemTimeSpan.set(timeSpan);
-            m_isErgoNetwork = isErgoNetwork;
         }
 
         public JsonObject getJsonObject(){
@@ -828,7 +652,6 @@ public class ErgoDex extends Network implements NoteInterface {
 
             JsonObject json = new JsonObject();
             json.add("itemTimeSpan", itemTimeSpan.getJsonObject());
-            json.addProperty("isErgoNetworkEnabled", isErgoNetwork());
             json.addProperty("isInvert", m_isInvert.get());
             return json;
         }

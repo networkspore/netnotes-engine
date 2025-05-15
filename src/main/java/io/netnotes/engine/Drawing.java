@@ -10,9 +10,6 @@ import java.io.ByteArrayInputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-
-import javax.swing.ImageIcon;
-
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.embed.swing.SwingFXUtils;
@@ -1056,12 +1053,12 @@ public class Drawing {
         Task<Object> task = new Task<Object>() {
             @Override
             public Object call() throws NullPointerException{
-                if(hex != null && execService != null){
-                    byte[] bytes = Base16.decode(hex).getOrElse(null);
-                    if(bytes != null){
-                        return new Image( new ByteArrayInputStream(bytes));
-                    }
+                byte[] bytes = hex != null && execService != null ? Base16.decode(hex).getOrElse(null) : null;
+
+                if(bytes != null){
+                    return new Image( new ByteArrayInputStream(bytes));
                 }
+                
                 throw new NullPointerException();
             }
         };

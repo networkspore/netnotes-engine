@@ -9,32 +9,28 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.netnotes.engine.networks.ergo.ErgoBox;
 import io.netnotes.engine.networks.ergo.ErgoNetwork;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
-import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.TimeSpan;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWalletControl;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletMenu;
+import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
 import io.netnotes.friendly_id.FriendlyId;
-import com.google.gson.JsonArray;
 
 import org.reactfx.util.FxTimer;
 import org.reactfx.util.Timer;
 
-import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -70,7 +66,7 @@ public class ErgoDexDataList  {
 
     private ArrayList<ErgoDexMarketItem> m_marketsList = new ArrayList<ErgoDexMarketItem>();
 
-    private ErgoWalletControl m_walletControl;
+    private final ErgoWalletMenu m_walletMenu;
 
     private SimpleStringProperty m_statusMsg = new SimpleStringProperty("Starting...");
 
@@ -102,27 +98,27 @@ public class ErgoDexDataList  {
 
     private NoteMsgInterface m_spectrumMsgInterface = null;
     private Stage m_appStage;
-    private SimpleObjectProperty<NoteInterface> m_ergoNetworkInterfaceProperty = new SimpleObjectProperty<>(null);
+
+
     private ScrollPane m_scrollPane;
     private TextField m_updatedField;
     private VBox m_layoutBox;
     private double m_defaultCharSize;
     private VBox m_loadingBox;
-    private SimpleBooleanProperty m_isNetworkEnabled = new SimpleBooleanProperty(false);
-    
-    public ErgoDexDataList(String locationId,Stage appStage, ErgoDex ergoDex, SimpleBooleanProperty isInvert, SimpleDoubleProperty gridWidth, SimpleDoubleProperty gridHeight, TextField updatedField,  SimpleObjectProperty<TimeSpan> timeSpanObject, SimpleObjectProperty<NoteInterface> networkInterface, ScrollPane scrollPane) {
-        m_currentBox = new SimpleObjectProperty<>(null);
 
+
+
+    public ErgoDexDataList(ErgoWalletMenu walletMenu, String locationId,Stage appStage, ErgoDex ergoDex, SimpleBooleanProperty isInvert, SimpleDoubleProperty gridWidth, SimpleDoubleProperty gridHeight, TextField updatedField,  SimpleObjectProperty<TimeSpan> timeSpanObject, ScrollPane scrollPane) {
+        m_currentBox = new SimpleObjectProperty<>(null);
         m_locationId = locationId;
         m_ergodex = ergoDex;
         m_appStage = appStage;
         m_isInvert = isInvert;
         m_scrollPane = scrollPane;
         m_updatedField = updatedField;
-        m_ergoNetworkInterfaceProperty = networkInterface;
         m_gridWidth = new SimpleDoubleProperty();
 
-        m_walletControl =  new ErgoWalletControl("ErgoDexDataList", ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, ErgoDex.NETWORK_TYPE, getLocationId(), getNetworksData());
+        m_walletMenu = walletMenu;
 
         m_gridWidth.bind(gridWidth.subtract(22));
 
@@ -151,17 +147,15 @@ public class ErgoDexDataList  {
             updateGrid();
             
         });
+
         addDexistener();
 
         
-        
-        m_isNetworkEnabled.bind(Bindings.createObjectBinding(()->m_ergoNetworkInterfaceProperty.get() != null, m_ergoNetworkInterfaceProperty));
     }
 
-    public ErgoWalletControl getErgoWalletControl(){
-        return m_walletControl;
+    public ErgoWalletMenu getErgoWalletMenu(){
+        return m_walletMenu;
     }
-
 
 
     public void setLoadingBox(){
@@ -251,18 +245,8 @@ public class ErgoDexDataList  {
         return m_scrollPane;
     }
 
-    public SimpleObjectProperty<NoteInterface> ergoInterfaceProperty(){
-        return m_ergoNetworkInterfaceProperty;
-    }
 
-    public boolean isNetworkEnabled(){
-        return m_isNetworkEnabled.get();
-    }
 
-    public ReadOnlyBooleanProperty isNetworkEnabledProperty(){
-        return m_isNetworkEnabled;
-    }
-    
     public Stage appStage(){
         return m_appStage;
     }
@@ -760,7 +744,7 @@ public class ErgoDexDataList  {
  
 
     public void shutdown(){
- 
+        m_walletMenu.shutdown();
         m_connectionStatus = NoteConstants.STOPPED;
 
         m_marketsList.forEach((item)->{
@@ -771,7 +755,6 @@ public class ErgoDexDataList  {
 
         m_ergodex.removeMsgListener(m_spectrumMsgInterface);
         m_spectrumMsgInterface = null;
-        m_walletControl.shutdown();
 
     }
     

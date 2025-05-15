@@ -22,8 +22,9 @@ import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.apps.ControlInterface;
 import io.netnotes.engine.apps.RangeBar;
 import io.netnotes.engine.apps.TimeSpan;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWalletControl;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoWallet.ErgoWalletMenu;
+import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.animation.PauseTransition;
@@ -907,7 +908,6 @@ public class ErgoDexChartTab extends ContentTab {
 
         private VBox m_swapScrollContentBox;
         private ScrollPane m_swapBoxScroll;
-        private ErgoDexWalletBox m_dexWallet = null;
         private DexOrderBook m_dexOrderBox = null;
      
 
@@ -946,7 +946,6 @@ public class ErgoDexChartTab extends ContentTab {
             m_baseCurrencyImage = m_marketData.getBaseCurrency().getBackgroundIcon(BG_ICON_HEIGHT);
             m_quoteCurrencyImage = m_marketData.getQuoteCurrency().getBackgroundIcon(BG_ICON_HEIGHT);
             
-            m_dexWallet = new ErgoDexWalletBox();
             m_txInfoBox = new DexSwapInfoBox();
  
 
@@ -1210,12 +1209,9 @@ public class ErgoDexChartTab extends ContentTab {
                 long dexFee = ErgoCurrency.getNanoErgsFromErgs(dexFeeBigDecimal);
             
                 String tokenId = isAmountErg ? volumeCurrency.getTokenId() : amountCurrency.getTokenId();
-
-                NoteInterface ergoInterface = getErgoInterface();
-
            
             
-                String errorString = m_txInfoBox.getExecuteErrorString(ergoInterface, amount, amountCurrency, volumeCurrency, networkFeeBigDecimal, dexFeeBigDecimal);
+                String errorString = m_txInfoBox.getExecuteErrorString(amount, amountCurrency, volumeCurrency, networkFeeBigDecimal, dexFeeBigDecimal);
                 if(errorString != null){
                     showError(errorString);
                     return;
@@ -1226,7 +1222,7 @@ public class ErgoDexChartTab extends ContentTab {
 
         
 
-                executeSwap(ergoInterface, isAmountErg, tokenId, outputTokens, baseAmount, pricePerToken, dexFee, feePerToken, nanoErgs, networkFeeNanoErgs, (onComplete)->{
+                executeSwap(isAmountErg, tokenId, outputTokens, baseAmount, pricePerToken, dexFee, feePerToken, nanoErgs, networkFeeNanoErgs, (onComplete)->{
                     Object sourceValue = onComplete.getSource().getValue();
                     if(sourceValue != null && sourceValue instanceof JsonObject){
                         Utils.logJson("**Executed Swap**", (JsonObject)sourceValue );
@@ -1291,7 +1287,7 @@ public class ErgoDexChartTab extends ContentTab {
 
             m_swapBoxScroll.prefViewportWidthProperty().bind(widthProperty().subtract(1)); 
             m_dexOrderBox = new DexOrderBook();
-            m_swapScrollContentBox.getChildren().addAll( m_dexWallet, m_dexOrderBox);
+            m_swapScrollContentBox.getChildren().addAll(  m_dexOrderBox);
    
             heightProperty().addListener((obs,oldval,newval)->{
                 double height = newval.doubleValue();
@@ -1337,9 +1333,6 @@ public class ErgoDexChartTab extends ContentTab {
             isInvertProperty().addListener((obs, oldval, newval)->{
                
                 update();
-                if(m_dexWallet != null){
-                    m_dexWallet.updateBalance();
-                }
             });
            
     
@@ -1358,7 +1351,7 @@ public class ErgoDexChartTab extends ContentTab {
             });
 
             m_amountField.setText(m_txInfoBox.getAmount().toPlainString());
-            m_dexWallet.walletUpdatedProperty().addListener((obs,oldVal,newval)->m_txInfoBox.checkSwap());
+            m_dataList.getErgoWalletMenu().walletUpdatedProperty().addListener((obs,oldVal,newval)->m_txInfoBox.checkSwap());
             update();
         }
 
@@ -1385,10 +1378,6 @@ public class ErgoDexChartTab extends ContentTab {
       
         
 
-        public boolean isNetworkEnabled(){
-            return m_dataList.isNetworkEnabled();
-        }
-        
         public PriceCurrency getAmountCurrency(){
             boolean isInvert = isInvertProperty().get();
             boolean isSell = isSellProperty().get();
@@ -1460,15 +1449,18 @@ public class ErgoDexChartTab extends ContentTab {
             return getNetworksData().getExecService();
         }
 
-        public NoteInterface getErgoInterface(){
-            return m_dataList.ergoInterfaceProperty().get();
+        public ErgoWalletMenu getErgoWalletMenu(){
+            return m_dataList.getErgoWalletMenu();
         }
 
+        public ErgoWalletControl getErgoWalletControl(){
+            return getErgoWalletMenu().getErgoWalletControl();
+        }
 
-        public Future<?> executeSwap(NoteInterface ergoInterface, boolean isAmountErg, String tokenId,  PriceAmount[] outputTokens, long amount, long pricePerToken, long dexFee, long feePerToken, long nanoErgs, long networkFee, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onError){
+        public Future<?> executeSwap(boolean isAmountErg, String tokenId,  PriceAmount[] outputTokens, long amount, long pricePerToken, long dexFee, long feePerToken, long nanoErgs, long networkFee, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onError){
            
 
-            String walletAddress = m_dexWallet.getErgoWalletControl().getCurrentAddress();
+            String walletAddress = getErgoWalletControl().getCurrentAddress();
 
             if(walletAddress == null){
                 return Utils.returnException("Wallet is locked", getExecService(), onError);
@@ -1505,7 +1497,7 @@ public class ErgoDexChartTab extends ContentTab {
             }
             if(outputData != null){ 
 
-                return m_dexWallet.getErgoWalletControl().executeSimpleTransaction(nanoErgs, networkFee, outputTokens, outputData,  onComplete, onError);
+                return getErgoWalletControl().executeSimpleTransaction(nanoErgs, networkFee, outputTokens, outputData,  onComplete, onError);
             }else{
                 return Utils.returnException("This swap has not been enabled yet", getExecService(), onError);
             }
@@ -1532,538 +1524,7 @@ public class ErgoDexChartTab extends ContentTab {
         }
 
 
-        public class ErgoDexWalletBox extends VBox {
-
-            private final String emptyAddressString = "[ click to unlock ]";;
-            private final String walletBtnDefaultString = "[ select wallet ]";
-            private SimpleObjectProperty<PriceAmount> m_ergoAmountProperty = new SimpleObjectProperty<>(null);
-            private PriceAmount m_baseAmount = null;
-            private PriceAmount m_quoteAmount = null;
-
-            private MenuButton m_openWalletBtn;
-            private HBox m_walletFieldBox;
-    
-            private Button m_clearWalletBtn;
-    
- 
-            private MenuButton m_walletAdrMenu = null;
-            private Button m_walletAdrUnlockBtn;
-            private HBox m_walletAdrFieldBox;
-            private Button m_walletCloseBtn;
-            private HBox m_walletAdrBox;
-            private VBox m_walletBodyVBox;
-            private HBox m_assetsVBox;
-            private ImageView m_quoteImgView;
-            private ImageView m_baseImgView;
-            private TextField baseAmountField;
-            private TextField quoteAmountField;
-            
-            
-            private SimpleObjectProperty<LocalDateTime> m_walletUpdated = new SimpleObjectProperty<>(null);
-
-            public ErgoWalletControl getErgoWalletControl(){
-                return m_dataList.getErgoWalletControl();
-            }
-    
-            private NoteInterface getErgoNetworkInterface(){
-                return m_dataList.ergoInterfaceProperty().get();
-            }
-
-            public ReadOnlyObjectProperty<PriceAmount> ergoAmountProperty(){
-                return m_ergoAmountProperty;
-            }
-
-            public PriceAmount getBaseAmount(){
-                return m_baseAmount;
-            }
-
-            public PriceAmount getQuoteAmount(){
-                return m_quoteAmount;
-            }
-
-    
-            public String getLocationId(){
-                return m_dataList.getLocationId();
-            }
-    
-            public ErgoDexWalletBox(){
-                int padding = 7;
-                Insets rowPadding = new Insets(5,0,5,0);
-                Insets rowSpacing = new Insets(0,0,7,0);
-                double btnWidth = 257;
-               
-                
-
-                Text headingText = new Text("Ergo Wallet ");
-                headingText.setFont(Stages.txtFont);
-                headingText.setFill(Stages.txtColor);
-
-                headingText.setMouseTransparent(true);
-
-                HBox headingTextBox = new HBox(headingText);
-                HBox.setHgrow(headingTextBox, Priority.ALWAYS);
-                headingTextBox.setAlignment(Pos.CENTER_LEFT);
-
-                TextField ergoAmountHeadingField = new TextField();
-                
-                ergoAmountHeadingField.textProperty().bind(Bindings.createObjectBinding(()->{
-                    String walletName = getErgoWalletControl().getWalletName();
-                    PriceAmount ergoAmount =  m_ergoAmountProperty.get();
-                    boolean isNetwork = isNetworkEnabled();
-                    return ergoAmount != null ? ergoAmount.getAmountString() : walletName != null ? "🔒 Locked" : isNetwork ? "🚫" : "⛔" ;
-                }, m_ergoAmountProperty, getErgoWalletControl().walletObjectProperty(), m_dataList.isNetworkEnabledProperty()));
-                
-                ergoAmountHeadingField.prefWidthProperty().bind(Bindings.createObjectBinding(()->{
-                    double w = Utils.computeTextWidth(Stages.txtFont, ergoAmountHeadingField.textProperty().get()) + 20;
-                    return w < 30 ? 30 : (w > 200 ? 200 : w);
-                }, ergoAmountHeadingField.textProperty()));
-                
-
-                Text ergText= new Text("");
-                ergText.setFont(Stages.openSansTxt);
-                ergText.setFill(Stages.txtColor);
-                ergText.textProperty().bind(Bindings.createObjectBinding(()->{
-                    PriceAmount ergoAmount =  m_ergoAmountProperty.get();
-                    return ergoAmount != null ? ErgoCurrency.FONT_SYMBOL + " " : "";
-                }, m_ergoAmountProperty));
-
-                HBox ergoAmountHeadingFieldBox = new HBox(ergoAmountHeadingField);
-                ergoAmountHeadingFieldBox.setPadding(new Insets(2, 0,0,0));
-
-                HBox ergoAmountLabelBox = new HBox(ergoAmountHeadingFieldBox, ergText);
-                ergoAmountLabelBox.setAlignment(Pos.CENTER_LEFT);
-                ergoAmountLabelBox.setId("darkBox");
-                ergoAmountLabelBox.setPadding(new Insets(2,0,2,0));
-
-                Button showWalletBtn = new Button();
-
-                showWalletBtn.setPadding(new Insets(0,7,0,0));
-                showWalletBtn.setMouseTransparent(true);
-                showWalletBtn.textProperty().bind(Bindings.createObjectBinding(()->{
-                    return m_showWallet.get() ? "⏷" : "⏵";
-                },m_showWallet));
-
-
-
-                HBox headingBox = new HBox(showWalletBtn, headingTextBox, ergoAmountLabelBox);
-                headingBox.setId("headingBox");
-                headingBox.setPadding(new Insets(7));
-                headingBox.setOnMouseClicked(e->setShowWallet(!getShowWallet()));
-                headingBox.setAlignment(Pos.CENTER_LEFT);
-
-                getChildren().add(headingBox);
-               
-               
-                m_openWalletBtn = new MenuButton(walletBtnDefaultString);
-               
-                m_openWalletBtn.setId("arrowMenuButton");
-                m_openWalletBtn.showingProperty().addListener((obs,oldval,newval)->{
-                    if(newval){
-                        updateWalletsMenu();
-                    }
-                });
- 
-                m_clearWalletBtn = new Button("☓");
-                m_clearWalletBtn.setId("lblBtn");
-                m_clearWalletBtn.setOnAction(e -> getErgoWalletControl().clearWallet());
-
-
-                m_walletFieldBox = new HBox(m_openWalletBtn);
-                m_walletFieldBox.setAlignment(Pos.CENTER_LEFT);
-                m_walletFieldBox.setMaxHeight(18);
-                m_walletFieldBox.setId("darkBox");
-                m_walletFieldBox.setPadding(rowPadding);
-
-                m_openWalletBtn.setPrefWidth(btnWidth);
-
-                
-
-                HBox clearWalletBtnBox = new HBox();
-                VBox.setVgrow(clearWalletBtnBox, Priority.ALWAYS);
-                clearWalletBtnBox.setId("darkBox");
-                clearWalletBtnBox.setAlignment(Pos.CENTER);
-    
-                HBox selectWalletRowBox = new HBox( m_walletFieldBox, clearWalletBtnBox);
-                selectWalletRowBox.setAlignment(Pos.CENTER);
-                selectWalletRowBox.setPadding(new Insets(7,0,7,0));
-
-                m_walletBodyVBox = new VBox(selectWalletRowBox);
-                m_walletBodyVBox.setId("bodyBox");
-                m_walletBodyVBox.setPadding(new Insets(padding));
-
-    
-               
-    
-                m_walletAdrUnlockBtn = new Button(emptyAddressString);
-                m_walletAdrUnlockBtn.setId("rowBtn");
-                m_walletAdrUnlockBtn.setPadding(new Insets(0, 0, 0, 10));
-                m_walletAdrUnlockBtn.setAlignment(Pos.CENTER);
-                m_walletAdrUnlockBtn.setPrefWidth(btnWidth + 20);
-                m_walletAdrUnlockBtn.setOnAction(e->{
-                    if(getErgoWalletControl().getWalletId() != null){
-                        getErgoWalletControl().connectToWallet();
-                    }
-                });
-
-                m_walletAdrMenu = new MenuButton("");
-                m_walletAdrMenu.setId("arrowMenuButton");
-                m_walletAdrMenu.setPadding(rowPadding);
-                m_walletAdrMenu.setPrefWidth(btnWidth);
-                m_walletAdrMenu.getItems().add(new MenuItem("- disabled -"));
-                m_walletAdrMenu.showingProperty().addListener((obs,oldval,newval)->{
-            
-                    if(newval){
-                        if(getErgoWalletControl().currentAddressProperty().get() != null){
-                            updateAddressesMenu();
-                        }
-                    }
-                });
-    
-
-                m_walletAdrFieldBox = new HBox(m_walletAdrUnlockBtn);
-                HBox.setHgrow(m_walletAdrFieldBox, Priority.ALWAYS);
-                m_walletAdrFieldBox.setId("darkBox");
-                m_walletAdrFieldBox.setPadding(rowPadding);
-                m_walletAdrFieldBox.setAlignment(Pos.CENTER);
-
-
-
-                HBox closeBtnBox = new HBox();
-                VBox.setVgrow(closeBtnBox,Priority.ALWAYS);
-                closeBtnBox.setId("darkBox");
-                closeBtnBox.setAlignment(Pos.CENTER);
-
-                m_walletAdrBox = new HBox( m_walletAdrFieldBox, closeBtnBox);
-                HBox.setHgrow(m_walletAdrBox, Priority.ALWAYS);
-                m_walletAdrBox.setAlignment(Pos.CENTER_LEFT);
-                m_walletAdrBox.setPadding(rowSpacing);
-    
-               
-                
-                m_walletCloseBtn = new Button("☓");
-                m_walletCloseBtn.setId("lblBtn");
-                m_walletCloseBtn.setOnAction(e -> {
-                    getErgoWalletControl().disconnectWallet();
-                });
-
-
-                baseAmountField = new TextField();
-                HBox.setHgrow(baseAmountField, Priority.ALWAYS);
-                baseAmountField.setId("itemLbl");
-                baseAmountField.setEditable(false);
-                baseAmountField.setAlignment(Pos.CENTER_RIGHT);
-            
-            
-                m_baseImgView = new ImageView();
-
-            
-        
-                StackPane baseAmountFieldBox = new StackPane(m_baseImgView, baseAmountField);
-                baseAmountFieldBox.setId("darkBox");
-                baseAmountFieldBox.setPadding(new Insets(0,3,0,0));
-                baseAmountFieldBox.setAlignment(Pos.CENTER_LEFT);
-                HBox.setHgrow(baseAmountFieldBox, Priority.ALWAYS);
-        
-                HBox baseAmountBox = new HBox(baseAmountFieldBox);
-                baseAmountBox.setAlignment(Pos.CENTER_LEFT);
-                HBox.setHgrow(baseAmountBox, Priority.ALWAYS);
-
-
-                quoteAmountField = new TextField();
-                HBox.setHgrow(quoteAmountField, Priority.ALWAYS);
-                quoteAmountField.setId("itemLbl");
-                quoteAmountField.setEditable(false);
-                quoteAmountField.setAlignment(Pos.CENTER_RIGHT);
-
       
-                
-        
-                m_quoteImgView = new ImageView();
-                m_quoteImgView.setPreserveRatio(true);
-            
-        
-                StackPane quoteAmountFieldBox = new StackPane(m_quoteImgView, quoteAmountField);
-                quoteAmountFieldBox.setId("darkBox");
-                quoteAmountFieldBox.setPadding(new Insets(0,3,0,0));
-                quoteAmountFieldBox.setAlignment(Pos.CENTER_LEFT);
-                HBox.setHgrow(quoteAmountFieldBox, Priority.ALWAYS);
-        
-                HBox quoteAmountBox = new HBox(quoteAmountFieldBox);
-                quoteAmountBox.setAlignment(Pos.CENTER_LEFT);
-                HBox.setHgrow(quoteAmountBox, Priority.ALWAYS);
-
-            
-                m_assetsVBox = new HBox();
-                Region assetSpacer = new Region();
-                assetSpacer.setMinWidth(5);
-                
-               
-                m_assetsVBox.getChildren().addAll(baseAmountBox, assetSpacer, quoteAmountBox);
-                
-
-                getErgoWalletControl().walletObjectProperty().addListener((obs, oldVal, newVal) -> {
-
-                    if(newVal != null){
-                        m_openWalletBtn.setText(getErgoWalletControl().getWalletName());
-                        m_openWalletBtn.setPrefWidth(btnWidth);
-              
-                        if(!  clearWalletBtnBox.getChildren().contains(m_clearWalletBtn)){
-                            clearWalletBtnBox.getChildren().add(m_clearWalletBtn);
-                        }
-                        if(!m_walletBodyVBox.getChildren().contains(m_walletAdrBox)){
-                            m_walletBodyVBox.getChildren().add(1, m_walletAdrBox);
-                        }
-                    }else{
-                        m_openWalletBtn.setText(walletBtnDefaultString);
-                        m_openWalletBtn.setPrefWidth(btnWidth + 30);
-                        if( clearWalletBtnBox.getChildren().contains(m_clearWalletBtn)){
-                            clearWalletBtnBox.getChildren().remove(m_clearWalletBtn);
-                        }
-                        if(m_walletBodyVBox.getChildren().contains(m_walletAdrBox)){
-                            m_walletBodyVBox.getChildren().remove(m_walletAdrBox);
-                        }
-                    }
-            
-                });
-
-                getErgoWalletControl().balanceProperty().addListener((obs,oldval,newval)->updateBalance());
-    
-                getErgoWalletControl().currentAddressProperty().addListener((obs,oldval,newval)->{
-                    if(newval != null){
-                      
-
-                        if(m_walletAdrFieldBox.getChildren().contains(m_walletAdrUnlockBtn)){
-                            m_walletAdrFieldBox.getChildren().remove(m_walletAdrUnlockBtn);
-                        }
-                        if(!m_walletAdrFieldBox.getChildren().contains(m_walletAdrMenu)){
-                            
-                            m_walletAdrFieldBox.getChildren().add(0, m_walletAdrMenu);
-                        }
-                        if(!m_walletBodyVBox.getChildren().contains(m_assetsVBox)){
-                            m_walletBodyVBox.getChildren().add(m_assetsVBox);
-                        }
-
-                        if(!closeBtnBox.getChildren().contains(m_walletCloseBtn)){
-                            closeBtnBox.getChildren().add(m_walletCloseBtn);
-                        }
-
-                        
-                        m_walletAdrMenu.setText(Utils.formatAddressString(newval, btnWidth, m_dataList.defaultCharacterSize()));
-                     
-                    }else{
-                    
-                        m_walletAdrMenu.setText("");
-
-                        if(m_walletAdrFieldBox.getChildren().contains(m_walletAdrMenu)){
-                            
-                            m_walletAdrFieldBox.getChildren().remove(m_walletAdrMenu);
-                        }
-
-                        if(!m_walletAdrFieldBox.getChildren().contains(m_walletAdrUnlockBtn)){
-                            m_walletAdrFieldBox.getChildren().add(m_walletAdrUnlockBtn);
-                        }
-                      
-
-                        if(m_walletBodyVBox.getChildren().contains(m_assetsVBox)){
-                            m_walletBodyVBox.getChildren().remove(m_assetsVBox);
-                        }  
-
-                        if(closeBtnBox.getChildren().contains(m_walletCloseBtn)){
-                            closeBtnBox.getChildren().remove(m_walletCloseBtn);
-                        }
-                    }
-                });
-
- 
-                if(getShowWallet()){
-                    getChildren().add(m_walletBodyVBox);
-                }
-
-                m_showWallet.addListener((obs,oldval,newval)->{
-                    if(newval){
-                        if(!getChildren().contains(m_walletBodyVBox)){
-                            getChildren().add(m_walletBodyVBox);
-                        }
-                    }else{
-                        if(getChildren().contains(m_walletBodyVBox)){
-                            getChildren().remove(m_walletBodyVBox);
-                        }
-                    }
-                });
-
-                update();
-                
-            }
-
-            public ReadOnlyObjectProperty<LocalDateTime> walletUpdatedProperty(){
-                return m_walletUpdated;
-            }
-
-            public void update(){
-
-                m_baseImgView.setImage(isInvert() ? m_quoteCurrencyImage : m_baseCurrencyImage);
-                m_quoteImgView.setImage(isInvert() ? m_baseCurrencyImage : m_quoteCurrencyImage);
-
-                PriceAmount baseAmount = m_baseAmount;
-                baseAmountField.setText(baseAmount != null ? baseAmount.amountProperty().get() + "" : "⸻");
-
-                PriceAmount quoteAmount = m_quoteAmount;
-                quoteAmountField.setText(quoteAmount != null ? quoteAmount.amountProperty().get() + "" : "⸻");
-                m_walletUpdated.set(LocalDateTime.now());
-            }
-
-            public void updateBalance(){
-                JsonObject balanceObject = getErgoWalletControl().balanceProperty().get();
-                boolean isInverted = isInvert();
-                if(balanceObject != null){
-                   
-                    
-                    PriceAmount baseAmount = getBalancePriceAmountByTokenId(isInverted ?  m_marketData.getQuoteId() :  m_marketData.getBaseId());
-                    baseAmount = baseAmount == null ?  new PriceAmount(0, isInverted ? m_marketData.getQuoteCurrency() : m_marketData.getBaseCurrency())  : baseAmount;
-
-                    m_baseAmount = baseAmount;
-                    
-                    PriceAmount quoteAmount = getBalancePriceAmountByTokenId(isInverted ? m_marketData.getBaseId() : m_marketData.getQuoteId());
-            
-                    quoteAmount = quoteAmount == null ?  new PriceAmount(0, isInverted ?  m_marketData.getBaseCurrency() : m_marketData.getQuoteCurrency())  : quoteAmount;
-
-                    m_quoteAmount = quoteAmount;
-
-                    m_ergoAmountProperty.set(getBalancePriceAmountByTokenId(ErgoCurrency.TOKEN_ID));
-                 
-                }else{
-                   
-                    m_baseAmount = null;
-                    m_quoteAmount = null;
-
-                    m_ergoAmountProperty.set(null);
-                }
-               
-                update();
-            }
-
-            public PriceAmount getAvailablePriceAmountByTokenId(String tokenId){
-                if(m_baseAmount != null && m_baseAmount.getTokenId().equals(tokenId)){
-                    return m_baseAmount;
-                }else if(m_quoteAmount != null && m_quoteAmount.getTokenId().equals(tokenId)){
-                    return m_quoteAmount;
-                }
-                return null;
-            }
-            
-            public PriceAmount getBalancePriceAmountByTokenId(String tokenId){
-                JsonObject balanceObject = getErgoWalletControl().balanceProperty().get();
-
-                ArrayList<PriceAmount> priceAmountList = NoteConstants.getBalanceList(balanceObject,true, ErgoDex.NETWORK_TYPE);
-                    
-                    
-                return NoteConstants.getPriceAmountFromList(priceAmountList, tokenId);
-              
-            }
-    
-       
-            public void updateWalletsMenu(){
-       
-      
-
-                    getErgoWalletControl().getWallets((onWallets)->{
-                        m_openWalletBtn.getItems().clear();
-                        Object onWalletsObject = onWallets.getSource().getValue();
-
-                        JsonArray walletIds = onWalletsObject != null && onWalletsObject instanceof JsonArray ? (JsonArray) onWalletsObject : null;
-                        if (walletIds != null) {
-
-
-                            if (walletIds != null) {
-                                for (JsonElement element : walletIds) {
-                                    if (element != null && element instanceof JsonObject) {
-                                        JsonObject json = element.getAsJsonObject();
-            
-                                        String name = json.get("name").getAsString();
-                                        //String id = json.get("id").getAsString();
-            
-                                        MenuItem walletItem = new MenuItem(String.format("%-50s", " " + name));
-            
-                                        walletItem.setOnAction(action -> {
-                                            getErgoWalletControl().setWalletObject(json);
-                                            getErgoWalletControl().connectToWallet();
-                                        });
-            
-                                        m_openWalletBtn.getItems().add(walletItem);
-                                    }
-                                }
-                            }
-                            
-        
-         
-                            MenuItem disableWallet = new MenuItem("[ disable ]");
-                            disableWallet.setOnAction(e->{
-                                getErgoWalletControl().clearWallet();
-                            });
-        
-                            SeparatorMenuItem separatorItem = new SeparatorMenuItem();
-        
-                            MenuItem openErgoNetworkItem = new MenuItem("Manage wallets…");
-                            openErgoNetworkItem.setOnAction(e->{
-                                m_openWalletBtn.hide();
-                                getNetworksData().openNetwork(ErgoConstants.ERGO_NETWORK_ID);
-                            });
-        
-                            m_openWalletBtn.getItems().addAll(disableWallet, separatorItem, openErgoNetworkItem);
-        
-                  
-                        }
-                    }, onFailed->{});
-
-                 
-            }
-         
-
-            public void updateAddressesMenu(){
-                
-                m_walletAdrMenu.getItems().clear();
-                m_walletAdrMenu.getItems().add(new MenuItem("Getting addresses..."));
-   
-                
-                getErgoWalletControl().getAddresses((onSucceeded)->{
-                    Object obj = onSucceeded.getSource().getValue();
-                    m_walletAdrMenu.getItems().clear();
-                    JsonArray jsonArray = obj != null & obj instanceof JsonArray ? (JsonArray) obj : null;
-                    if(jsonArray != null){
-                        for (int i = 0; i < jsonArray.size(); i++) {
-                            JsonElement element = jsonArray.get(i);
-                            if (element != null && element.isJsonObject()) {
-
-                                JsonObject jsonObj = element.getAsJsonObject();
-                                String address = jsonObj.get("address").getAsString();
-                                String name = jsonObj.get("name").getAsString();
-
-                                MenuItem addressMenuItem = new MenuItem(name + ": " + address);
-                                addressMenuItem.setOnAction(e1 -> {
-                                    getErgoWalletControl().setCurrentAddress(address);
-                                });
-
-                                m_walletAdrMenu.getItems().add(addressMenuItem);
-                            }
-                        }
-
-                    }else{
-                        m_walletAdrMenu.getItems().clear();
-                        m_walletAdrMenu.getItems().add(new MenuItem("Error: (no addresses)"));
-                    }
-                }, onFailed->{
-                    Throwable throwable = onFailed.getSource().getException();
-                    String msg = throwable != null && throwable.getMessage().length() > 0 ? throwable.getMessage() : "(failed)";
-                    m_walletAdrMenu.getItems().clear();
-                    m_walletAdrMenu.getItems().add(new MenuItem("Error: (" + msg + ")"));
-                });
-                
-                
-            }
-
-    
-            
-        }
         
         public class DexSwapInfoBox extends VBox{
             public final static BigDecimal DEFAULT_MIN_DEX_FEE = ErgoConstants.MIN_NETWORK_FEE.multiply(BigDecimal.valueOf(3));
@@ -2343,17 +1804,17 @@ public class ErgoDexChartTab extends ContentTab {
             }
     
             public void checkSwap(){
-                NoteInterface ergoInterface = getErgoInterface();
+              
                 PriceCurrency amountCurrency = getAmountCurrency();
                 PriceCurrency volumeCurrency = getVolumeCurrency();
       
                 BigDecimal amount = getAmount();
                 BigDecimal dexFee = getDexFee();
                 BigDecimal networkFee = getNetworkFee();
-                boolean isUnlocked = m_dexWallet.getErgoWalletControl().isUnlocked();
+                boolean isUnlocked = getErgoWalletControl().isUnlocked();
     
                 if(isUnlocked){
-                    String err = getExecuteErrorString(ergoInterface, amount, amountCurrency, volumeCurrency, networkFee, dexFee);
+                    String err = getExecuteErrorString( amount, amountCurrency, volumeCurrency, networkFee, dexFee);
                     if(err != null){
                         m_amountField.setId("swapFieldUnavailable");
                         m_volumeField.setId("swapFieldUnavailable");
@@ -2377,7 +1838,7 @@ public class ErgoDexChartTab extends ContentTab {
                 return !amountCurrency.getTokenId().equals(ergoCurrencyId) && !volumeCurrency.getTokenId().equals(ergoCurrencyId);
             }
 
-            public String getExecuteErrorString(NoteInterface ergoInterface, BigDecimal amount, PriceCurrency amountCurrency, PriceCurrency volumeCurrency, BigDecimal networkFee, BigDecimal dexFee){
+            public String getExecuteErrorString(BigDecimal amount, PriceCurrency amountCurrency, PriceCurrency volumeCurrency, BigDecimal networkFee, BigDecimal dexFee){
                 String amountTokenId = amountCurrency.getTokenId();
                 String amountSymbol = amountCurrency.getSymbol();
     
@@ -2388,13 +1849,12 @@ public class ErgoDexChartTab extends ContentTab {
 
 
     
-                PriceAmount ergoAmountBalance = m_dexWallet.ergoAmountProperty().get();
-                boolean isUnlocked = m_dexWallet.getErgoWalletControl().isUnlocked();
-                boolean isNetwork = ergoInterface != null;
+                PriceAmount ergoAmountBalance = getErgoWalletMenu().getBalancePriceAmountByTokenId(ErgoCurrency.TOKEN_ID);
+                boolean isUnlocked = getErgoWalletControl().isUnlocked();
     
-                if(!isUnlocked || ergoAmountBalance == null){
+                if(!isUnlocked ){
     
-                    return !isNetwork ? "Ergo network disabled" :  (!isUnlocked ? "Wallet is locked" :"Wallet balance unavailable");
+                    return "Wallet is not unlocked";
                 }
     
                 if( dexFee == null){
@@ -2405,7 +1865,7 @@ public class ErgoDexChartTab extends ContentTab {
                     return "Dex fee must be more than 1 nanoERG per token";
                 }
     
-                PriceAmount amountBalance = m_dexWallet.getAvailablePriceAmountByTokenId(amountTokenId);
+                PriceAmount amountBalance = getErgoWalletMenu().getBalancePriceAmountByTokenId(amountTokenId);
     
                 if(amountBalance == null){
                     return "Wallet does not contain " + amountCurrency.getSymbol();
@@ -2420,7 +1880,7 @@ public class ErgoDexChartTab extends ContentTab {
                 String feeCurrencyId = ErgoCurrency.TOKEN_ID;
                 String feeCurrencySymbol = ErgoCurrency.SYMBOL;
                 
-                PriceAmount feeCurrencyBalance = m_dexWallet.getBalancePriceAmountByTokenId(feeCurrencyId);
+                PriceAmount feeCurrencyBalance = getErgoWalletMenu().getBalancePriceAmountByTokenId(feeCurrencyId);
                 
                 BigDecimal minHouseingAmount = ErgoConstants.MIN_NETWORK_FEE;
     
@@ -2808,7 +2268,7 @@ public class ErgoDexChartTab extends ContentTab {
                 }, m_lastPriceProperty);
 
                 lastPriceField.textProperty().bind(lastPriceFieldTextBinding);
-                m_remainingSpace.bind(m_swapBoxScroll.prefViewportHeightProperty().subtract(lastPriceFieldBox.heightProperty()).subtract(m_dexWallet.heightProperty()).subtract(30));
+                m_remainingSpace.bind(m_swapBoxScroll.prefViewportHeightProperty().subtract(lastPriceFieldBox.heightProperty()).subtract(30));
 
                 DexOrderBook.this.getChildren().addAll(m_buyScroll, lastPriceFieldBox, m_sellScroll);
 

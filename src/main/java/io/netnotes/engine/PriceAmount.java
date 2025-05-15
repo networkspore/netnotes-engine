@@ -3,6 +3,7 @@ package io.netnotes.engine;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 
 import org.ergoplatform.appkit.NetworkType;
@@ -407,6 +408,8 @@ public class PriceAmount  {
         m_currency.writeJson(writer);
         writer.endObject();
     }
+
+
 
     public JsonObject getJsonObject(){
         long amount = getLongAmount();

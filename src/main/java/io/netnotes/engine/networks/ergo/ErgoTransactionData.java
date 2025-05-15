@@ -8,7 +8,7 @@ import io.netnotes.engine.NamedNodeUrl;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
-import io.netnotes.engine.apps.ergoFileWallet.AddressData;
+import io.netnotes.engine.apps.ergoWallet.AddressData;
 
 import com.satergo.Wallet;
 

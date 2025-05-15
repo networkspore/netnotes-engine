@@ -93,6 +93,8 @@ public class Stages {
     public static final String NETNOTES_LOGO_256 = ASSETS_DIRECTORY + "/icon256.png";
     public static final String NETNOTES_LOGO_WHITE = ASSETS_DIRECTORY + "/icon.png";
 
+    public static final String UNKNOWN_IMAGE_PATH = ASSETS_DIRECTORY + "/unknown-unit.png";
+
     public static Image icon = new Image(ASSETS_DIRECTORY + "/icon15.png");
     public static Image logo = new Image(NETNOTES_LOGO_256);
     public static Image closeImg = new Image(ASSETS_DIRECTORY + "/close-outline-white.png");
@@ -100,6 +102,7 @@ public class Stages {
     public static Image globeImg = new Image(ASSETS_DIRECTORY + "/globe-outline-white-120.png");
     public static Image globeImage30 = new Image(ASSETS_DIRECTORY + "/globe-outline-white-30.png");
     public static Image settingsImg = new Image(ASSETS_DIRECTORY + "/settings-outline-white-120.png");
+    public static Image unknownImg = new Image(UNKNOWN_IMAGE_PATH);
 
     public final static double STAGE_WIDTH = 450;
     public final static double STAGE_HEIGHT = 250;

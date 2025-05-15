@@ -184,10 +184,10 @@ public class ErgoTokenMarketAppBox extends AppBox {
                         if(imageObj != null && imageObj instanceof Image){
                             m_menuBtnImgView.setImage((Image)imageObj);
                         }else{
-                            m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                            m_menuBtnImgView.setImage(Stages.unknownImg);
                         }
                     }, onFailed->{
-                        m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                        m_menuBtnImgView.setImage(Stages.unknownImg);
                     });
                     
                     marketInfoParamBox.update(  marketJson);
@@ -197,7 +197,7 @@ public class ErgoTokenMarketAppBox extends AppBox {
                     
                 }else{
                     m_tokenMarketsMenuBtn.setText(selectString);
-                    m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                    m_menuBtnImgView.setImage(Stages.unknownImg);
                     marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
                     if (m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
                         m_tokenMarketsFieldBox.getChildren().remove(m_disableBtn);
@@ -205,7 +205,7 @@ public class ErgoTokenMarketAppBox extends AppBox {
                 }
             },(onObjectFailed)->{
                 m_tokenMarketsMenuBtn.setText(selectString);
-                m_menuBtnImgView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+                m_menuBtnImgView.setImage(Stages.unknownImg);
                 marketInfoParamBox.update(NoteConstants.getJsonObject("marketInformation", "disabled"));
                 if (m_tokenMarketsFieldBox.getChildren().contains(m_disableBtn)) {
                     m_tokenMarketsFieldBox.getChildren().remove(m_disableBtn);

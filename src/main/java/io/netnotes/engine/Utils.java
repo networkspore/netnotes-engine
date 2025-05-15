@@ -1240,12 +1240,11 @@ public class Utils {
                 } catch (IOException e2) {
 
                 }
-                new Image(AppConstants.UNKNOWN_ICON);
             }
         }
 
   
-        return new Image(AppConstants.UNKNOWN_ICON);
+        return Stages.unknownImg;
         
 
     }

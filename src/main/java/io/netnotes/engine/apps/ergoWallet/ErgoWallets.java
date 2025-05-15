@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoFileWallet;
+package io.netnotes.engine.apps.ergoWallet;
 
 import java.io.File;
 import java.io.IOException;
@@ -41,7 +41,7 @@ import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.apps.ergoDex.ErgoDex;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets.ErgoWalletsTab;
+import io.netnotes.engine.apps.ergoWallet.ErgoWallets.ErgoWalletsTab;
 import io.netnotes.engine.networks.NetworkConstants;
 import io.netnotes.engine.networks.ergo.AddressBox;
 import io.netnotes.engine.networks.ergo.AddressInformation;
@@ -4293,7 +4293,7 @@ public class ErgoWallets extends Network  {
 
         
         private void setUnknownNetworkIcon(){
-            m_networkMenuBtnImageView.setImage(new Image(AppConstants.UNKNOWN_ICON));
+            m_networkMenuBtnImageView.setImage(Stages.unknownImg);
         }
         private void setDisabledNetworkIcon(){
             m_networkMenuBtnImageView.setImage(new Image(NetworkConstants.NETWORK_ICON));

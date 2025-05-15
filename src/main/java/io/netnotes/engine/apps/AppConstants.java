@@ -19,7 +19,6 @@ public class AppConstants {
     public static final String CARET_DOWN_ICON = "/assets/caret-down-15.png";
     public static final String MENU_ICON = "/assets/menu-outline-30.png";
     public static final String NAV_ICON = "/assets/navigate-outline-white-30.png";
-    public static final String UNKNOWN_ICON =  "/assets/unknown-unit.png";
     public static final String SHOW_ICON = "/assets/eye-30.png";
     public static final String HIDE_ICON = "/assets/eye-30.png";
     public static final String CLOUD_ICON = "/assets/cloud-download-30.png";

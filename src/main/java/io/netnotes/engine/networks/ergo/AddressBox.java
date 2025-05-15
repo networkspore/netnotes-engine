@@ -302,7 +302,7 @@ public class AddressBox extends HBox {
     }
 
     public Image getUnknownUnitImage() {
-        return new Image(AppConstants.UNKNOWN_ICON);
+        return Stages.unknownImg;
     }
 
     public Image getUnitImage() {

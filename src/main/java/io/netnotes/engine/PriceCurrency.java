@@ -34,7 +34,7 @@ public class PriceCurrency {
     private String m_tokenId = null;
     private String m_symbol = null;
     private String m_name = null;
-    private String m_imageString = AppConstants.UNKNOWN_ICON;
+    private String m_imageString =  Stages.UNKNOWN_IMAGE_PATH;
     private int m_fractionalPrecision = 2;
     private String m_networkType = null;
     
@@ -53,7 +53,7 @@ public class PriceCurrency {
         m_name = name;
         m_symbol = name;
         m_tokenType = tokenType;
-        m_imageString = AppConstants.UNKNOWN_ICON;
+        m_imageString = Stages.UNKNOWN_IMAGE_PATH;
         m_fractionalPrecision = decimals;
         m_networkType = networkType;
         m_url = !m_tokenId.equals(ErgoCurrency.TOKEN_ID) ? DEFAULT_TOKEN_URL + m_tokenId : ErgoCurrency.URL_STRING;
@@ -310,7 +310,7 @@ public class PriceCurrency {
     }
 
     public static Image getUnknownUnitImage() {
-        return new Image(AppConstants.UNKNOWN_ICON);
+        return Stages.unknownImg;
     }
 
     public String getImageString(){

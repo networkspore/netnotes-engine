@@ -2,7 +2,7 @@ package com.satergo;
 
 
 import io.netnotes.engine.Stages;
-import io.netnotes.engine.apps.ergoFileWallet.ErgoWallets;
+import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
 
 import com.satergo.ergo.ErgoInterface;
 import com.satergo.extra.AESEncryption;

@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoFileWallet;
+package io.netnotes.engine.apps.ergoWallet;
 
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
