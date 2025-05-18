@@ -29,6 +29,7 @@ import io.netnotes.engine.ErgoMarketControl;
 import io.netnotes.engine.JsonParametersBox;
 import io.netnotes.engine.LockField;
 import io.netnotes.engine.Network;
+import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
@@ -136,7 +137,7 @@ public class ErgoWallets extends Network  {
     }
 
     protected void getData(){
-        getNetworksData().getData("data", ".", NETWORK_ID, ErgoDex.NETWORK_ID, (onSucceeded)->{
+        getNetworksData().getData("data", ".", NETWORK_ID, ErgoNetwork.NETWORK_ID, (onSucceeded)->{
             Object obj = onSucceeded.getSource().getValue();
             openJson(obj != null && obj instanceof JsonObject ? (JsonObject) obj : null);
         });
@@ -204,8 +205,12 @@ public class ErgoWallets extends Network  {
         return json;
     }
 
+    public static NetworkInformation getNetworkInformation(){
+        return new NetworkInformation(NETWORK_ID, NAME, ICON, getSmallAppIconString(), DESCRIPTION);
+    }
+
     protected void save(){
-        getNetworksData().save("data", ".", NETWORK_ID, ErgoDex.NETWORK_ID, getJsonObject());
+        getNetworksData().save("data", ".", NETWORK_ID, ErgoNetwork.NETWORK_ID, getJsonObject());
     }
 
     public String getName(){

@@ -1,5 +1,8 @@
 package io.netnotes.engine.apps.ergoWallet;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 
@@ -15,11 +18,11 @@ import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceAmountMenuItem;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.NetworksData.ManageAppsTab;
-import io.netnotes.engine.networks.ergo.ErgoConstants;
-import io.netnotes.engine.networks.ergo.ErgoCurrency;
+import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.geometry.Insets;
+import javafx.geometry.Point2D;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
@@ -30,56 +33,66 @@ import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
 import javafx.scene.control.Menu;
-
+import javafx.scene.control.Tooltip;
+import javafx.scene.Scene;
+import javafx.stage.Window;
+import javafx.util.Duration;
+import javafx.animation.Animation;
+import javafx.animation.PauseTransition;
 import javafx.beans.binding.Bindings;
+
+
 
 public class ErgoWalletMenu extends VBox {
 
     private ErgoWalletControl m_ergoWalletControl;
 
-    
     private final String walletUnavailableString = "Wallet: (unavailable)";
-
-     private final String selectWalletString = "[ select wallet ]";
-     private final String copyString = "[ copy to clipboard ]";
-     private final String selectString = "[ select address ]";
+    private final String selectWalletString = "[ select wallet ]";
+    private final String copyString = "[ copy to clipboard ]";
+    private final String selectString = "[ select address ]";
 
     private SimpleBooleanProperty m_isInvertProperty = new SimpleBooleanProperty(false);
     private SimpleLongProperty m_walletUpdated = new SimpleLongProperty(0L);
-
-
-
-    private MenuButton networkMenuBtn = null;
+    private MenuButton m_networkMenuBtn = null;
+    private Tooltip m_networkTip = null;
 
     private Menu m_walletMenu = new Menu(selectWalletString);
     private Menu m_walletAdrMenu = new Menu("");
     private Menu m_walletBalanceMenu = new Menu("");
 
+    private PauseTransition m_noticePt = null;
+    private Tooltip m_noticeToolTip = null;
+    private ImageView m_noticeImageView = null;
     public ErgoWalletMenu(ErgoWalletControl walletControl){
         super();
+
+        m_ergoWalletControl = walletControl;
+
         ImageView networkMenuBtnImageView = new ImageView(Stages.globeImage30);
         networkMenuBtnImageView.setPreserveRatio(true);
         networkMenuBtnImageView.setFitWidth(30);
 
-        networkMenuBtn = new MenuButton();
-        networkMenuBtn.setGraphic(networkMenuBtnImageView);
-        networkMenuBtn.setGraphicTextGap(10);
-        networkMenuBtn.setPadding(new Insets(0, 3, 0, 0));
+        m_networkMenuBtn = new MenuButton();
+        m_networkMenuBtn.setGraphic(networkMenuBtnImageView);
+        m_networkMenuBtn.setGraphicTextGap(10);
+        m_networkMenuBtn.setPadding(new Insets(0, 3, 0, 0));
 
-        networkMenuBtn.getItems().add(new SeparatorMenuItem());
-        
-        networkMenuBtn.showingProperty().addListener((obs,oldval,newval)->{
-            if(newval){
-                onMenuShowing();
-            }
+
+
+        m_networkMenuBtn.setOnShowing(e->{
+            update();
         });
+        
+    
+        update();
    
         
-        Tooltip networkTip = new Tooltip(walletUnavailableString);
-        networkTip.setShowDelay(new javafx.util.Duration(50));
-        networkTip.setFont(Stages.txtFont);
+        m_networkTip = new Tooltip(walletUnavailableString);
+        m_networkTip.setShowDelay(new javafx.util.Duration(50));
+        m_networkTip.setFont(Stages.txtFont);
 
-        networkMenuBtn.setTooltip(networkTip);
+        m_networkMenuBtn.setTooltip(m_networkTip);
 
 
     
@@ -98,8 +111,9 @@ public class ErgoWalletMenu extends VBox {
                     networkMenuBtnImageView.setImage( Stages.unknownImg);
                 });
 
-                networkTip.setText(NoteConstants.getNameFromNetworkObject(newval));
+                m_networkTip.setText(NoteConstants.getNameFromNetworkObject(newval));
             }else{
+                m_networkTip.setText("Wallet: (none)");
                 networkMenuBtnImageView.setImage(Stages.unknownImg);
             }
         });
@@ -125,7 +139,7 @@ public class ErgoWalletMenu extends VBox {
 
         
 
-        networkMenuBtn.textProperty().bind(Bindings.createObjectBinding(()->{
+        m_networkMenuBtn.textProperty().bind(Bindings.createObjectBinding(()->{
             boolean isDisabled = m_ergoWalletControl.disabledProperty().get();
             boolean isUnlocked = getErgoWalletControl().currentAddressProperty().get() != null;
             boolean isWallet = getErgoWalletControl().walletObjectProperty().get() != null;
@@ -150,7 +164,7 @@ public class ErgoWalletMenu extends VBox {
             }else{
                 m_walletAdrMenu.setText("[ click to unlock ]");
                 m_walletAdrMenu.setOnAction(e->{
-                    networkMenuBtn.hide();
+                    m_networkMenuBtn.hide();
                     if(getErgoWalletControl().getWalletId() != null){
                         getErgoWalletControl().connectToWallet();
                     }
@@ -161,10 +175,52 @@ public class ErgoWalletMenu extends VBox {
         getErgoWalletControl().addressesArrayProperty().addListener((obs,oldval,newval)->updateAddressesMenu(newval));        
 
 
-        getChildren().add(networkMenuBtn);
+        getChildren().add(m_networkMenuBtn);
         
     }
 
+
+    private void showNotice(Image img, String msg){
+        Scene scene = this.getScene();
+        Window window = scene != null ? this.getScene().getWindow() : null;
+  
+        if(window != null){
+            Point2D p = m_networkMenuBtn.localToScene(0.0, 0.0);
+            m_networkTip.hide();
+            if(m_noticeToolTip == null || m_noticePt == null){
+                
+                m_noticeImageView = new ImageView();
+                m_noticeImageView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
+                m_noticeImageView.setPreserveRatio(true);
+                m_noticeImageView.setImage(img);
+
+                m_noticeToolTip = new Tooltip(msg);
+                m_noticeToolTip.setGraphic(m_noticeImageView);
+                
+                m_noticeToolTip.show(
+                        m_networkMenuBtn,
+                        p.getX() + scene.getX() + scene.getWindow().getX(),
+                        (p.getY() + m_networkMenuBtn.getScene().getY() + scene.getWindow().getY())
+                                - m_networkMenuBtn.getLayoutBounds().getHeight());
+                m_noticePt = new PauseTransition(Duration.millis(5600));
+                m_noticePt.play();
+            }else{
+                m_noticePt.playFromStart();
+            }
+           
+
+            m_noticePt.setOnFinished(noticePtE -> {
+                
+                m_noticeToolTip.hide();
+                m_noticeToolTip.setGraphic(null);
+                m_noticePt = null;
+                m_noticeImageView.setImage(null);
+                m_noticeImageView = null;
+                m_noticeToolTip = null;
+            });
+           
+        }
+    }
 
 
     public String getLocationId(){
@@ -283,36 +339,42 @@ public class ErgoWalletMenu extends VBox {
 
     }
 
-    private void onMenuShowing(){
-        networkMenuBtn.getItems().clear();
+    private void update(){
+
+
+        m_networkMenuBtn.getItems().clear();
         if(getErgoWalletControl().isWalletsAppAvailable()){
+            m_networkMenuBtn.setId("xBtnAvailable"); 
             //Wallet menu
-            networkMenuBtn.getItems().add(m_walletMenu);
+            m_networkMenuBtn.getItems().add(m_walletMenu);
             //Address menu
             if(getErgoWalletControl().getWalletId() != null){
-                networkMenuBtn.getItems().add(m_walletAdrMenu);
+                m_networkMenuBtn.getItems().add(m_walletAdrMenu);
             }
             //Balance menu
             if(getErgoWalletControl().balanceProperty().get() != null){
-                networkMenuBtn.getItems().add(m_walletBalanceMenu);
+                m_networkMenuBtn.getItems().add(m_walletBalanceMenu);
             }
 
             //Manage item
             MenuItem openWalletsItem = new MenuItem("Manage wallets…");
             openWalletsItem.setOnAction(e->{
-                networkMenuBtn.hide();
+                m_networkMenuBtn.hide();
                 getNetworksData().openApp(getErgoWalletControl().getErgoWalletsId());
             });
 
-            networkMenuBtn.getItems().addAll(new SeparatorMenuItem(), openWalletsItem);
+            m_networkMenuBtn.getItems().addAll(new SeparatorMenuItem(), openWalletsItem);
+
         }else{
+            showNotice(Stages.globeImage30, "Wallet: (not found)");
+            m_networkMenuBtn.setId("xBtnUnavailable"); 
             MenuItem openManageItem = new MenuItem("Manage apps…");
             openManageItem.setOnAction(e->{
-                networkMenuBtn.hide();
+                m_networkMenuBtn.hide();
                 getNetworksData().openStatic(ManageAppsTab.NAME);
             });
-
-            networkMenuBtn.getItems().addAll(new SeparatorMenuItem(), openManageItem);
+            openManageItem.setId("regularItem");
+            m_networkMenuBtn.getItems().addAll(new SeparatorMenuItem(), openManageItem);
         }
 
     }

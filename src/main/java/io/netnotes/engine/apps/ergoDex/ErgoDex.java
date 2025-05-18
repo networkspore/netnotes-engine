@@ -25,7 +25,6 @@ import com.google.gson.JsonObject;
 import io.netnotes.engine.AppBox;
 import io.netnotes.engine.BufferedButton;
 import io.netnotes.engine.Drawing;
-import io.netnotes.engine.networks.NetworkConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
 import io.netnotes.engine.networks.ergo.ErgoNetwork;
 import io.netnotes.engine.Network;
@@ -38,8 +37,6 @@ import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
-import io.netnotes.engine.NetworksData.ManageAppsTab;
-import io.netnotes.engine.NetworksData.ManageNetworksTab;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.apps.TimeSpan;
 import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
@@ -60,11 +57,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
-import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -524,13 +518,9 @@ public class ErgoDex extends Network implements NoteInterface {
             m_menuBar.setMinHeight(25);
 
 
-    
-
             VBox chartList = m_dexDataList.getLayoutBox();
 
             gridSscrollPane.setContent(chartList);
-            
-        //    HBox headingsBox = new HBox();
 
             HBox menuBarBox = new HBox(m_menuBar);
             HBox.setHgrow(menuBarBox,Priority.ALWAYS);
@@ -539,9 +529,6 @@ public class ErgoDex extends Network implements NoteInterface {
             m_bodyPaddingBox = new VBox(menuBarBox, gridSscrollPane);
             m_bodyPaddingBox.setPadding(new Insets(0,5,0,5));
 
-    
-
-    
             m_lastUpdatedField.setEditable(false);
             m_lastUpdatedField.setId("formFieldSmall");
             m_lastUpdatedField.setPrefWidth(230);

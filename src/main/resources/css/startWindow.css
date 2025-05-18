@@ -368,6 +368,43 @@
     -fx-text-fill: black;
 }
 
+#xBtnUnavailable{
+    -fx-font-weight: bold;
+    -fx-max-height:14;
+    -fx-alignment:center;
+    -fx-min-width:14;
+    -fx-padding: 0 1 1 1;
+    -fx-font-family: 'OpenSansEmoji, Regular';
+
+    -fx-text-fill: white;
+    -fx-font-size:12;
+}
+
+#xBtnUnavailable .label{
+    -fx-text-fill: red;
+}
+
+#xBtnAvailable{
+    -fx-font-weight: bold;
+    -fx-max-height:14;
+    -fx-alignment:center;
+    -fx-min-width:14;
+    -fx-padding: 0 1 1 1;
+    -fx-font-family: 'OpenSansEmoji, Regular';
+
+    -fx-text-fill: black;
+    -fx-font-size:12;
+}
+
+#xBtnAvailable .label{
+    -fx-text-fill: white;
+}
+
+#regularItem .label{
+    -fx-text-fill: white;
+}
+
+
 #textFieldBox{
     -fx-cursor: text;
     -fx-background-color: #33333350;
