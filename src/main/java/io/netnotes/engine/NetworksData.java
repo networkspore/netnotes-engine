@@ -74,7 +74,6 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.Alert.AlertType;
@@ -90,6 +89,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import javafx.beans.binding.Binding;
 
 public class NetworksData {
 
@@ -955,19 +955,17 @@ public class NetworksData {
         if(networkId != null) {
             
             Network network = m_networks.remove(networkId);
-            String key = getLocationKey(networkId);
-            if(key != null){
-                m_locationsIds.remove(key);
-            }
+
+          
+        
+         
             if (network != null) {
-               
+                String name = network.getName();
+
                 if(m_currentNetworkId.get() != null && m_currentNetworkId.get().equals(networkId)){
                     m_currentNetworkId.set(null);
                 }
-                
-
-                network.shutdown();
-
+         
                 if(m_currentMenuTab.get() != null && m_currentMenuTab.get().getAppId().equals(networkId)){
                     m_currentMenuTab.set(null);
                 }
@@ -979,12 +977,20 @@ public class NetworksData {
                     resultJson.addProperty("type", NETWORKS);
                     resultJson.addProperty("timeStamp", timestamp);
                     resultJson.addProperty("id", networkId);
-                    
+                    resultJson.addProperty("name", name);
                 
                     sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, NETWORKS,  resultJson.toString());
 
                     save();
                 }
+                network.shutdown();
+
+                
+                String locationId = getLocationIdByName(name);
+                if(locationId != null){
+                    m_locationsIds.remove(locationId);
+                }
+
                 return true;
             }
         }
@@ -1196,11 +1202,11 @@ public class NetworksData {
         return removeApp(networkId, true);
     }
 
-    private String getLocationKey(String networkId){
-        if(networkId != null){
+    private String getLocationIdByName(String name){
+        if(name != null){
             for (Map.Entry<String, String> entry : m_locationsIds.entrySet()) {
                 String value = entry.getValue();
-                if(value.equals(networkId)){
+                if(value.equals(name)){
                     return entry.getKey();
                 }
             }
@@ -1214,12 +1220,9 @@ public class NetworksData {
         boolean success = false;
 
         Network app = m_apps.remove(networkId);
-        String key = getLocationKey(networkId);
-        if(key != null){
-            m_locationsIds.remove(key);
-        }
+        String name = app.getName();
         if(app != null){
-            app.shutdown();
+           
 
             if(isSave){
                 long timestamp = System.currentTimeMillis();
@@ -1228,11 +1231,18 @@ public class NetworksData {
                 resultJson.addProperty("networkId", APPS);
                 resultJson.addProperty("timeStamp", timestamp);
                 resultJson.addProperty("id", networkId);
+                resultJson.addProperty("name", name);
 
                 sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, APPS, resultJson.toString());
 
                 save();
             }
+            app.shutdown();
+        }
+
+        String locationId = getLocationIdByName(networkId);
+        if(locationId != null){
+            m_locationsIds.remove(locationId);
         }
                     
     
@@ -2978,11 +2988,14 @@ public class NetworksData {
     public class ManageAppsTab extends AppBox implements TabInterface  {
         public static final int PADDING = 10;
         public static final String NAME = "Manage Apps";
+        
+        private final String installDefaultText = "(Install App)";
 
         private MenuButton m_installMenuBtn;
         private String m_status = NoteConstants.STATUS_STOPPED;
         private SimpleStringProperty m_selectedAppId = new SimpleStringProperty(null);
-        private VBox m_listBox = new VBox();
+        private VBox m_installedListBox = new VBox();
+        private VBox m_notInstalledListBox = new VBox();
         private SimpleObjectProperty<NetworkInformation> m_installItemInformation = new SimpleObjectProperty<>(null);
         private HBox m_installFieldBox;
         private SimpleStringProperty m_titleProperty = new SimpleStringProperty(NAME);
@@ -2996,29 +3009,36 @@ public class NetworksData {
             setAlignment(Pos.TOP_CENTER);
 
         
-            
+            m_installMenuBtn = new MenuButton(installDefaultText);
 
 
             
-            m_listBox.setPadding(new Insets(10));
+            m_installedListBox.setPadding(new Insets(10));
         
+            Label intstalledAppsLabel = new Label("Installed");
+            HBox intalledAppsTitleBox = new HBox(intstalledAppsLabel);
+            intalledAppsTitleBox.setAlignment(Pos.CENTER_LEFT);
+            intalledAppsTitleBox.setPadding(new Insets(10,0,0,10));
 
-            ScrollPane listScroll = new ScrollPane(m_listBox);
+            ScrollPane listScroll = new ScrollPane(m_installedListBox);
             
             listScroll.setId("bodyBox");
 
-            HBox appsListBox = new HBox(listScroll);
-            appsListBox.setPadding(new Insets(20,40,0, 40));
+            HBox installAppsListBox = new HBox(listScroll);
+            installAppsListBox.setPadding(new Insets(10,20,0, 20));
            
 
-            HBox.setHgrow(appsListBox, Priority.ALWAYS);
-            VBox.setVgrow(appsListBox, Priority.ALWAYS);
+            HBox.setHgrow(installAppsListBox, Priority.ALWAYS);
+            VBox.setVgrow(installAppsListBox, Priority.ALWAYS);
 
-            listScroll.prefViewportWidthProperty().bind(appsListBox.widthProperty().subtract(1));
-            listScroll.prefViewportHeightProperty().bind(m_appStage.getScene().heightProperty().subtract(250));
+            Binding<Number> listWidthBinding = installAppsListBox.widthProperty().subtract(1);
+            Binding<Number> listHeightBinding = m_appStage.getScene().heightProperty().subtract(250).add( intalledAppsTitleBox.heightProperty().multiply(2)).divide(2).subtract(5);
+            
+            listScroll.prefViewportWidthProperty().bind(listWidthBinding);
+            listScroll.prefViewportHeightProperty().bind(listHeightBinding);
             listScroll.viewportBoundsProperty().addListener((obs,oldval,newval)->{
-                m_listBox.setMinWidth(newval.getWidth());
-                m_listBox.setMinHeight(newval.getHeight());
+                m_installedListBox.setMinWidth(newval.getWidth());
+                m_installedListBox.setMinHeight(newval.getHeight());
             });
 
             HBox appsOptionsBox = new HBox();
@@ -3026,11 +3046,32 @@ public class NetworksData {
             HBox.setHgrow(appsOptionsBox, Priority.ALWAYS);
             appsOptionsBox.setPadding(new Insets(0,0,0,0));
 
+            //notInstalledApps
+            Label notIntstalledAppsLabel = new Label("Available Apps");
+            HBox notIntalledAppsTitleBox = new HBox(notIntstalledAppsLabel);
+            notIntalledAppsTitleBox.setAlignment(Pos.CENTER_LEFT);
+            notIntalledAppsTitleBox.setPadding(new Insets(10,0,0,10));
 
+            ScrollPane notInstalledListScroll = new ScrollPane(m_notInstalledListBox);
+            notInstalledListScroll.setId("bodyBox");
+
+            HBox installableAppsListBox = new HBox(notInstalledListScroll);
+            installableAppsListBox.setPadding(new Insets(10,20,0, 20));
+           
+
+            HBox.setHgrow(installableAppsListBox, Priority.ALWAYS);
+            VBox.setVgrow(installableAppsListBox, Priority.ALWAYS);
+
+            notInstalledListScroll.prefViewportWidthProperty().bind(listWidthBinding);
+            notInstalledListScroll.prefViewportHeightProperty().bind(listHeightBinding);
+            notInstalledListScroll.viewportBoundsProperty().addListener((obs,oldval,newval)->{
+                m_notInstalledListBox.setMinWidth(newval.getWidth());
+                m_notInstalledListBox.setMinHeight(newval.getHeight());
+            });
    
 
 
-            VBox bodyBox = new VBox( appsListBox, appsOptionsBox);
+            VBox bodyBox = new VBox(intalledAppsTitleBox, installAppsListBox,notIntalledAppsTitleBox, installableAppsListBox, appsOptionsBox);
             HBox.setHgrow(bodyBox, Priority.ALWAYS);
             VBox.setVgrow(bodyBox,Priority.ALWAYS);
             
@@ -3040,13 +3081,13 @@ public class NetworksData {
             installText.setFont(Stages.txtFont);
             installText.setFill(Stages.txtColor);
 
-            String installDefaultText = "(Click to select App)";
+           
 
             ImageView installFieldImgView = new ImageView();
             installFieldImgView.setPreserveRatio(true);
             installFieldImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
 
-            m_installMenuBtn = new MenuButton(installDefaultText);
+           
             m_installMenuBtn.setId("arrowMenuButton");
             m_installMenuBtn.setGraphic(installFieldImgView);
             m_installMenuBtn.setContentDisplay(ContentDisplay.LEFT);
@@ -3160,7 +3201,8 @@ public class NetworksData {
 
 
         public void updateAppList(){
-            m_listBox.getChildren().clear();
+            m_installedListBox.getChildren().clear();
+            m_notInstalledListBox.getChildren().clear();
         
             if(m_apps.size() > 0){
                 for (Map.Entry<String, Network> entry : m_apps.entrySet()) {
@@ -3220,9 +3262,68 @@ public class NetworksData {
                     });
 
 
-                    m_listBox.getChildren().add(networkItem);
+                    m_installedListBox.getChildren().add(networkItem);
 
                 }
+
+                m_installMenuBtn.getItems().clear();
+                NetworkInformation[] supportedApps = m_appInterface.getSupportedApps();
+
+                for(int i = 0; i < supportedApps.length; i++){
+                    NetworkInformation networkInformation = supportedApps[i];
+                    
+                    if(getAppNetwork(networkInformation.getNetworkId()) == null){
+
+                        ImageView appImgView = new ImageView();
+                        appImgView.setPreserveRatio(true);
+                        appImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
+                        appImgView.setImage(new Image(networkInformation.iconString()));
+    
+                        Label nameText = new Label(networkInformation.getNetworkName());
+                        nameText.setFont(Stages.txtFont);
+                        nameText.setPadding(new Insets(0,0,0,10));
+    
+                        int topMargin = 15;
+    
+                        Region marginRegion = new Region();
+                        marginRegion.setMinWidth(topMargin);
+    
+                        Region growRegion = new Region();
+                        HBox.setHgrow(growRegion, Priority.ALWAYS);
+    
+                        MenuButton appListmenuBtn = new MenuButton("⋮");
+    
+                        MenuItem installItem = new MenuItem("⇱   Install");
+                        installItem.setOnAction(e->{
+                            appListmenuBtn.hide();
+                            installApp(networkInformation.getNetworkId());
+                        });
+    
+                        appListmenuBtn.getItems().addAll(installItem);
+    
+                        HBox networkItemTopRow = new HBox( appImgView, nameText, growRegion, appListmenuBtn);
+                        HBox.setHgrow(networkItemTopRow, Priority.ALWAYS);
+                        networkItemTopRow.setAlignment(Pos.CENTER_LEFT);
+                        networkItemTopRow.setPadding(new Insets(2,0,2,0));
+    
+                        VBox networkItem = new VBox(networkItemTopRow);
+                        networkItem.setFocusTraversable(true);
+                        networkItem.setAlignment(Pos.CENTER_LEFT);
+                        HBox.setHgrow(networkItem, Priority.ALWAYS);
+                        networkItem.setId("rowBtn");
+                        networkItem.setPadding(new Insets(2,5,2,5));
+    
+                        networkItemTopRow.setOnMouseClicked(e->{
+                            m_installItemInformation.set(networkInformation);
+                        });
+    
+    
+                        m_notInstalledListBox.getChildren().add(networkItem);
+                    }
+                }
+           
+
+               
             }else{
                 BufferedButton emptyAddAppBtn = new BufferedButton(AppConstants.SETTINGS_ICON, 75);
                 emptyAddAppBtn.setText("Install App");
@@ -3235,7 +3336,7 @@ public class NetworksData {
                 HBox.setHgrow(addBtnBox, Priority.ALWAYS);
                 VBox.setVgrow(addBtnBox, Priority.ALWAYS);
                 addBtnBox.setAlignment(Pos.CENTER);
-                m_listBox.getChildren().add(addBtnBox);
+                m_installedListBox.getChildren().add(addBtnBox);
             }
         }
 
@@ -3250,7 +3351,7 @@ public class NetworksData {
 
         public void update(){
             
-            double minSize = m_listBox.widthProperty().get() - 110;
+            double minSize = m_installedListBox.widthProperty().get() - 110;
             minSize = minSize < 110 ? 100 : minSize;
 
             int numCells = m_apps.size();
@@ -3258,7 +3359,7 @@ public class NetworksData {
             width = width < minSize ? width : minSize;
             
             
-            m_listBox.getChildren().clear();
+            m_installedListBox.getChildren().clear();
 
             if (numCells != 0) {
 
@@ -3268,7 +3369,7 @@ public class NetworksData {
                     IconButton iconButton = new IconButton(app.getAppIcon(), app.getName(), IconStyle.ROW);
                     iconButton.setPrefWidth(width);
 
-                    m_listBox.getChildren().add(iconButton);
+                    m_installedListBox.getChildren().add(iconButton);
                 }
                 
             }else{

@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 
 import java.io.File;
@@ -1280,13 +1280,13 @@ public class AddressesData {
                   
                  
 
-                    m_walletData.sendMessage(code, timeStamp, ErgoWallets.ERGO_MARKET + ":" + networkId, num);
+                    //m_walletData.sendMessage(code, timeStamp, ErgoWallets.ERGO_MARKET + ":" + networkId, num);
         
                       
                 }
             
                 public void sendMessage(int code, long timeStamp, String networkId, String msg){
-                    m_walletData.sendMessage(code, timeStamp,  networkId, msg);
+                   // m_walletData.sendMessage(code, timeStamp,  ErgoWallets.ERGO_MARKET + ":" + networkId, msg);
                 }
 
             };
@@ -1316,12 +1316,12 @@ public class AddressesData {
 
                 public void sendMessage(int code, long timeStamp, String id, Number num){
                     
-                    m_walletData.sendMessage(code, timeStamp, ErgoWallets.TOKENM_MARKET + ":"+ id, num);
+                   // m_walletData.sendMessage(code, timeStamp, ErgoWallets.TOKEN_MARKET + ":"+ id, num);
                         
                 }
             
-                public void sendMessage(int code, long timeStamp, String networkId, String msg){
-                    m_walletData.sendMessage(code, timeStamp, networkId, msg);
+                public void sendMessage(int code, long timeStamp, String id, String msg){
+                    //m_walletData.sendMessage(code, timeStamp, ErgoWallets.TOKEN_MARKET + ":"+ id, msg);
                 }
 
         

@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

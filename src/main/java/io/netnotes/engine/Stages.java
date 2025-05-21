@@ -1466,7 +1466,7 @@ public class Stages {
     }
 
 
-    public static void enterPassword(String topTitle,Image windowLogo, Image smallLogo, String windowSubTitle, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
+    public static void enterPassword(String topTitle,Image windowLogo, Image smallLogo, String windowSubTitle, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         
         Stage passwordStage = new Stage();
@@ -1525,7 +1525,12 @@ public class Stages {
             passwordBox.getChildren().remove(passwordField);
             passwordField.setDisable(true);
             passwordField.setText("");
+            Utils.returnException(NoteConstants.STATUS_SHUTDOWN, execService, onFailed);
             passwordStage.close();
+        });
+
+        passwordStage.setOnCloseRequest(e->{
+            Utils.returnException(NoteConstants.STATUS_SHUTDOWN, execService, onFailed);
         });
 
         passwordField.setOnAction(e -> {
@@ -1665,7 +1670,7 @@ public class Stages {
 
         Scene passwordScene = new Scene(layoutVBox, 830, 600);
         passwordScene.setFill(null);
-        passwordScene.getStylesheets().add("/css/startWindow.css");
+        passwordScene.getStylesheets().add(Stages.DEFAULT_CSS);
   
         return passwordScene;
     }

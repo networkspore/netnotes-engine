@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.value.ChangeListener;

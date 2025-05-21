@@ -7,7 +7,6 @@ import org.ergoplatform.appkit.Constants;
 import org.ergoplatform.sdk.ErgoId;
 import org.ergoplatform.sdk.ErgoToken;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -87,6 +86,13 @@ public class NoteConstants {
     public static final String STATUS_TIMED_OUT = "Timed Out";
     public static final String STATUS_DISABLED = "Disabled";
     public static final String STATUS_UNKNOWN = "Unknown";
+
+    public static final String ERROR_CANCELED = "Canceled";
+    public static final String ERROR_EXISTS = "Exists";
+    public static final String ERROR_INVALID = "Invalid";
+    public static final String ERROR_NOT_FOUND = "Not found";
+
+    public static final String CMD_NOT_PRESENT = "cmd not present";
 
     public static final String CMD = "cmd";
 

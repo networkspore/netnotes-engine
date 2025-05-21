@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 import java.io.File;
 import java.io.IOException;
@@ -241,7 +241,14 @@ public class ErgoWalletData  {
     }
 
     private Future<?> getAccessId(JsonObject note, String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-    
+        JsonElement controlIdElement = note != null ? note.get("controlId") : null;
+        String controlId = controlIdElement != null && !controlIdElement.isJsonNull() && controlIdElement.isJsonPrimitive() ? controlIdElement.getAsString() : null;
+
+        if(controlId == null){
+            return Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, getExecService(), onFailed);
+        }
+
+
         Semaphore activeThreadSemaphore = new Semaphore(0);
       
         int lblCol = 180;
@@ -376,9 +383,10 @@ public class ErgoWalletData  {
                         
                             m_addressesData = new AddressesData(getId(), addressDataList, ErgoWalletData.this, m_networkType);
                         }
+
             
                         JsonObject json = new JsonObject();
-                        json.addProperty("accessId",  FriendlyId.createFriendlyId());
+                        json.addProperty("accessId", controlId + FriendlyId.createFriendlyId());
                         json.addProperty("walletId", getId());
                     
                         
@@ -533,12 +541,12 @@ public class ErgoWalletData  {
 
 
     protected void sendMessage(int code, long timeStamp,String networkId, String msg){
-        m_ergoWalletsDataList.getErgoWallets().sendMessage(code, timeStamp, networkId, msg);
+        m_ergoWalletsDataList.getErgoWallets().sendMessage(code,  timeStamp, getId() + ":" + networkId, msg);
     }
 
 
     protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        m_ergoWalletsDataList.getErgoWallets().sendMessage(code, timeStamp, networkId, num);
+        m_ergoWalletsDataList.getErgoWallets().sendMessage(code, timeStamp, getId() + ":" + networkId, num);
     }
 
 

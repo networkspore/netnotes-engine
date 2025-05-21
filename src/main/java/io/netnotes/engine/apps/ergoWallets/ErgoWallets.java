@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 import java.io.File;
 import java.io.IOException;
@@ -7,7 +7,9 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
@@ -24,7 +26,6 @@ import com.google.gson.JsonPrimitive;
 
 import io.netnotes.engine.AmountBoxInterface;
 import io.netnotes.engine.AppBox;
-import io.netnotes.engine.AppData;
 import io.netnotes.engine.ErgoMarketControl;
 import io.netnotes.engine.JsonParametersBox;
 import io.netnotes.engine.LockField;
@@ -40,9 +41,6 @@ import io.netnotes.engine.PriceQuote;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.TabInterface;
 import io.netnotes.engine.Utils;
-import io.netnotes.engine.apps.AppConstants;
-import io.netnotes.engine.apps.ergoDex.ErgoDex;
-import io.netnotes.engine.apps.ergoWallet.ErgoWallets.ErgoWalletsTab;
 import io.netnotes.engine.networks.NetworkConstants;
 import io.netnotes.engine.networks.ergo.AddressBox;
 import io.netnotes.engine.networks.ergo.AddressInformation;
@@ -54,7 +52,6 @@ import io.netnotes.engine.networks.ergo.ErgoTxViewsBox;
 import io.netnotes.engine.networks.ergo.PriceQuoteRow;
 import io.netnotes.engine.networks.ergo.PriceQuoteScroll;
 import io.netnotes.friendly_id.FriendlyId;
-import javafx.scene.Scene;
 import javafx.scene.input.MouseEvent;
 import javafx.stage.FileChooser;
 import javafx.scene.layout.HBox;
@@ -70,7 +67,6 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
@@ -81,7 +77,6 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
-import javafx.stage.StageStyle;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -109,22 +104,22 @@ public class ErgoWallets extends Network  {
     public final static String DONATION_ADDRESS_STRING = "9h123xUZMi26FZrHuzsFfsTpfD3mMuTxQTNEhAjTpD83EPchePU";
     
     public final static String ERGO_MARKET = "ERGO_MARKET";
-    public final static String TOKENM_MARKET = "TOKEN_MARKET";
+    public final static String TOKEN_MARKET = "TOKEN_MARKET";
+    public final static NetworkType NETWORK_TYPE = NetworkType.MAINNET;
 
     private final SimpleLongProperty m_timeStampProperty = new SimpleLongProperty(0);
 
     private ErgoWalletDataList m_ergoWalletDataList = null;
     private NetworksData m_networksData;
-    private NetworkType m_networkType = null;
     private String m_locationId = null;
-
 
     private ArrayList<String> m_authorizedLocations = new ArrayList<>();
     private ArrayList<String> m_blockedLocations = new ArrayList<>();
+    private HashMap<String, String> m_controlIds = new HashMap<>();
 
-    private double m_defaultRowHeight = 22;
-    private double m_defaultLblColWidth = 170;
+    private ArrayList<NoteMsgInterface> m_controlInterfaces = new ArrayList<>();
 
+    private NoteMsgInterface m_networksDataMsgInterface = null;
 
 
     public ErgoWallets( String locationId, NetworksData networksData) {
@@ -147,15 +142,17 @@ public class ErgoWallets extends Network  {
         if(json != null){
 
 
-            m_networkType = NoteConstants.getNetworkTypeFromJson(json);
+  
             readAuthorizedLocations(json);
             readBlockedLocations(json);
         }else{
-            m_networkType = NetworkType.MAINNET;
+
             save();
         }
+      
 
-        m_ergoWalletDataList = new ErgoWalletDataList(this, m_networkType, m_locationId);
+        m_ergoWalletDataList = new ErgoWalletDataList(this, NETWORK_TYPE, m_locationId);
+
     }
 
     protected void readAuthorizedLocations(JsonObject json){
@@ -199,7 +196,6 @@ public class ErgoWallets extends Network  {
     @Override
     public JsonObject getJsonObject(){
         JsonObject json = super.getJsonObject();
-        json.addProperty("networkType", m_networkType.toString().toUpperCase());
         addAuthorizedLocations(json);
         addBlockedLocations(json);
         return json;
@@ -284,47 +280,136 @@ public class ErgoWallets extends Network  {
         return false;
     }
 
-    
+
+    public void addNetworksDataListener(){
+        if(m_networksDataMsgInterface == null){
+
+            m_networksDataMsgInterface = new NoteMsgInterface() {
+
+                @Override
+                public String getId() {
+                    
+                    return m_locationId;
+                }
+
+                @Override
+                public void sendMessage(int code, long timestamp, String networkId, String msg) {
+                    if(code == NoteConstants.LIST_ITEM_REMOVED && networkId != null && networkId.equals(NetworksData.APPS)){
+                      
+                        checkLocations(msg); 
+                        
+                    }
+                }
+
+                @Override
+                public void sendMessage(int code, long timestamp, String networkId, Number number) {
+                    
+                }
+                
+            };
   
+            getNetworksData().addMsgListener(m_networksDataMsgInterface);
+        }
+    }
+
+    private void checkLocations(String msg){
+        JsonElement jsonElement = msg != null ? new JsonParser().parse(msg) : null;
+        JsonElement nameElement = jsonElement != null && jsonElement.isJsonObject() ? jsonElement.getAsJsonObject().get("name") : null;
+        
+        if(nameElement != null && !nameElement.isJsonNull() && nameElement.isJsonPrimitive()){
+            String locationString = nameElement.getAsString();
+            if(m_controlIds.containsValue(locationString)){
+                removeControlLocation(locationString);
+            }
+        }
+        
+    }
+
+    private void removeControlLocation(String locationString){
+        ArrayList<String> keysToRemove = new ArrayList<>();
+        for (Map.Entry<String, String> entry : m_controlIds.entrySet()) {
+            
+            if(entry.getValue().equals(locationString)){
+                String key = entry.getKey();
+                keysToRemove.add(key);
+
+                NoteMsgInterface controlMsgInterface = getControlMsgInterface(key);
+                if(controlMsgInterface != null){
+                    removeMsgListener(controlMsgInterface);
+                }
+            }
+        }
+        for(String key : keysToRemove){
+            m_controlIds.remove(key);
+        }
+
+        m_authorizedLocations.remove(locationString);
+    }
+
+    private NoteMsgInterface getControlMsgInterface(String key){
+        for(int i = 0; i < m_controlInterfaces.size() ; i++){
+            
+            NoteMsgInterface msgInterface = m_controlInterfaces.get(i);
+            if(msgInterface.getId().equals(key)){
+                return msgInterface;
+            }
+        }
+        return null;
+    }
+    
 
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
         JsonElement cmdElement = note.get(NoteConstants.CMD);
-
-        if (cmdElement != null) {
-            if(m_ergoWalletDataList != null){
+        if(m_ergoWalletDataList != null){
+            if (cmdElement != null && !cmdElement.isJsonNull() && cmdElement.isJsonPrimitive()) {
+                
                 JsonElement locationIdElement = note.get("locationId");
-              
                 String locationId = locationIdElement != null && locationIdElement.isJsonPrimitive() ? locationIdElement.getAsString() : null; 
         
                 String locationString = getNetworksData().getLocationString(locationId);
+
                 boolean isLocation = isLocationAuthorized(locationString);
                 boolean isThisApp = m_locationId.equals(locationId);
                 String cmd  = cmdElement.getAsString();
 
+
                 if(isThisApp || isLocation){
-                
-                    
-                    switch(cmd){
-                        case "getWallets":
-                            return Utils.returnObject(m_ergoWalletDataList.getWallets(), getExecService(), onSucceeded);
-                        case "getWalletById":
-                            return Utils.returnObject(m_ergoWalletDataList.getWalletById(note), getExecService(), onSucceeded);
-                        case "openWallet":
-                            return Utils.returnObject(m_ergoWalletDataList.openWallet(note), getExecService(), onSucceeded);
-                        case "removeWallets":
-                            return Utils.returnObject(m_ergoWalletDataList.removeWallets(note), getExecService(), onSucceeded);
-                        case "createWallet":
-                            m_ergoWalletDataList.createWallet(note, onSucceeded, onFailed);
-                        break;
-                        case "getAccessId":
-                            m_ergoWalletDataList.getAccessId(locationString, note, onSucceeded, onFailed);
-                        break;
-                        default:
-                            JsonElement accessIdElement = note.get("accessId");
-                            String accessId = accessIdElement != null && !accessIdElement.isJsonNull() ? accessIdElement.getAsString() : null;
-                            if(accessId != null){
-                                m_ergoWalletDataList.sendNote(cmd, accessId, locationString, note, onSucceeded, onFailed);
-                            }
+                    JsonElement controlIdElement = note.get("controlId");
+                   
+                    if(controlIdElement == null && cmd.equals("getControlId")){
+                        
+                        getControlId(locationString, note, onSucceeded, onFailed);
+
+                    }else if(!controlIdElement.isJsonNull() && isControlLocation(controlIdElement.getAsString(), locationString)){
+                        
+                        switch(cmd){
+                            case "getWallets":
+                                return Utils.returnObject(m_ergoWalletDataList.getWallets(), getExecService(), onSucceeded);
+                            case "getWalletById":
+                                return Utils.returnObject(m_ergoWalletDataList.getWalletById(note), getExecService(), onSucceeded);
+                            case "openWallet":
+                                return m_ergoWalletDataList.openWallet(note, onSucceeded, onFailed);
+                            case "openWalletFile":
+                                m_ergoWalletDataList.openWalletFile(note, onSucceeded, onFailed);
+                            break;
+                            case "removeWallets":
+                                return Utils.returnObject(m_ergoWalletDataList.removeWallets(note), getExecService(), onSucceeded);
+                            case "createWallet":
+                                m_ergoWalletDataList.createWallet(note, onSucceeded, onFailed);
+                            break;
+                            case "getAccessId":
+                                m_ergoWalletDataList.getAccessId(locationString, note, onSucceeded, onFailed);
+                            break;
+                            default:
+                                JsonElement accessIdElement = note.get("accessId");
+                                String accessId = accessIdElement != null && !accessIdElement.isJsonNull() ? accessIdElement.getAsString() : null;
+                                if(accessId != null){
+                                    m_ergoWalletDataList.sendNote(cmd, accessId, locationString, note, onSucceeded, onFailed);
+                                }
+                        }
+                    }else{
+
+                        return Utils.returnException("Control required", getExecService(), onFailed);
                     }
                 }else if(locationString != null && !locationString.equals(NetworksData.UNKNOWN_LOCATION)){
                     getNetworksData().verifyAppKey("Ergo Wallets", note, locationString, System.currentTimeMillis(), ()->{
@@ -332,18 +417,74 @@ public class ErgoWallets extends Network  {
                         sendNote(note, onSucceeded, onFailed);
                     });
                 }
-            }else{
-                return Utils.returnException("Ergo Wallets: (data is not loaded)", getExecService(), onFailed);
-            }
             
+            }else{
+                return Utils.returnException(NoteConstants.CMD_NOT_PRESENT, getExecService(), onFailed);
+            }
         }else{
-            return Utils.returnException("Ergo Wallets: (cmd not present)", getExecService(), onFailed);
+            return Utils.returnException(NoteConstants.STATUS_STARTING, getExecService(), onFailed);
         }
        
         return null;
 
     }
 
+    private boolean addControlId(String controlId, String locationId){
+        if(controlId != null && !m_controlIds.containsKey(controlId)){
+            m_controlIds.put(controlId, locationId);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean removeControlId(String controlId){
+        if(controlId != null){
+            m_controlIds.remove(controlId);
+            ArrayList<NoteMsgInterface> listeners = new ArrayList<>();
+
+            for(int i = 0; i < msgListeners().size(); i++){
+                NoteMsgInterface listener = msgListeners().get(i);
+                if(listener.getId().startsWith(controlId)){
+                    listeners.add(listener);
+                }
+            }
+
+            for(NoteMsgInterface listener : listeners){
+                removeMsgListener(listener);
+            }
+            return true;
+        }
+        return false;
+    }
+
+
+    private boolean isControl(String controlId){
+        return controlId != null && m_controlIds.containsKey(controlId); 
+    }
+
+    private boolean isControlLocation(String controlId, String locationId){
+        String controlLocation = controlId != null && locationId != null ? m_controlIds.get(controlId) : null; 
+    
+        return controlLocation != null && controlLocation.equals(locationId);
+    }
+
+
+    private Future<?> getControlId(String locationString, JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        
+
+        SimpleStringProperty  controlId = new SimpleStringProperty(FriendlyId.createFriendlyId());
+        while(isControl(controlId.get())){
+            controlId.set(FriendlyId.createFriendlyId());
+        }
+
+        addControlId(controlId.get(), locationString);
+
+        JsonObject json = new JsonObject();
+        json.addProperty("controlId",  controlId.get());
+    
+        return Utils.returnObject(json, getExecService(), onSucceeded);
+    
+    }
     
 
     public String getDescription(){
@@ -362,16 +503,31 @@ public class ErgoWallets extends Network  {
 
     @Override
     protected void sendMessage(int code, long timeStamp,String networkId, String msg){
-        if(networkId != null && m_ergoWalletDataList != null){
-            
-            for(int i = 0; i < msgListeners().size() ; i++){
-                NoteMsgInterface msgInterface = msgListeners().get(i);
-                String msgInterfaceId = msgInterface.getId();
-                String walletId = msgInterfaceId != null ? m_ergoWalletDataList.getWalletIdFromAccessId(msgInterfaceId) : null;
-
-                if(walletId != null && (networkId.equals(NETWORK_ID) || networkId.startsWith(walletId))){
-                    msgInterface.sendMessage(code, timeStamp, networkId, msg);
+        if(networkId != null){
+            if(networkId.equals(NETWORK_ID)){
+                for(int i = 0; i < m_controlInterfaces.size() ; i++){
+                    NoteMsgInterface controlInterface = m_controlInterfaces.get(i);
+                    String msgInterfaceId = controlInterface.getId();
+    
+                    if(isControl(msgInterfaceId)){
+                        controlInterface.sendMessage(code, timeStamp, networkId, msg);
+                    }
                 }
+            }else if(m_ergoWalletDataList != null){
+                int indexOfColon = networkId.indexOf(":");
+       
+                String walletId = indexOfColon > 0 ? networkId.substring(0, indexOfColon) : networkId;
+                if(walletId != null){
+                    for(int i = 0; i < msgListeners().size() ; i++){
+                        NoteMsgInterface msgInterface = msgListeners().get(i);
+                        String msgInterfaceId = msgInterface.getId();
+                        String interfaceWalletId = m_ergoWalletDataList.getWalletIdFromAccessId(msgInterfaceId);
+                        if(interfaceWalletId != null && interfaceWalletId.equals(walletId)){
+                            msgInterface.sendMessage(code, timeStamp, networkId, msg);
+                        }
+                    }
+                }
+                
             }
         }
         if(m_tabInterface != null){
@@ -381,34 +537,85 @@ public class ErgoWallets extends Network  {
 
     @Override
     protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        if(networkId != null && m_ergoWalletDataList != null){
-            
-            for(int i = 0; i < msgListeners().size() ; i++){
-                NoteMsgInterface msgInterface = msgListeners().get(i);
-                String msgInterfaceId = msgInterface.getId();
-                String walletId = msgInterfaceId != null ? m_ergoWalletDataList.getWalletIdFromAccessId(msgInterfaceId) : null;
+        if(networkId != null){
+            if(networkId.equals(NETWORK_ID)){
+                for(int i = 0; i < m_controlInterfaces.size() ; i++){
+                    NoteMsgInterface controlInterface = m_controlInterfaces.get(i);
+                    String msgInterfaceId = controlInterface.getId();
+    
+                    if(isControl(msgInterfaceId)){
+                        controlInterface.sendMessage(code, timeStamp, networkId, num);
+                    }
+                }
+            }else if(m_ergoWalletDataList != null){
+                int indexOfColon = networkId.indexOf(":");
+       
+                String walletId = indexOfColon > -1 ? networkId.substring(0, indexOfColon) : null;
+                if(walletId != null){
+                    for(int i = 0; i < msgListeners().size() ; i++){
+                        NoteMsgInterface msgInterface = msgListeners().get(i);
+                        String msgInterfaceId = msgInterface.getId();
 
-                if(walletId != null && (networkId.equals(NETWORK_ID) || networkId.startsWith(walletId))){
-                    msgInterface.sendMessage(code, timeStamp, networkId, num);
+                        String interfaceWalletId = m_ergoWalletDataList.getWalletIdFromAccessId(msgInterfaceId);
+                        
+                        if(interfaceWalletId != null && interfaceWalletId.equals(walletId)){
+                            msgInterface.sendMessage(code, timeStamp, networkId, num);
+                        }
+                    }
                 }
             }
         }
     }
     
+
     @Override
     public void addMsgListener(NoteMsgInterface item) {
-        if(item != null && item.getId() != null && m_ergoWalletDataList != null && m_ergoWalletDataList.hasAccess(item.getId())){
+        String itemId = item != null ? item.getId() : null;
+
+        if(itemId != null){
+            if(isControl(itemId)){
+                
+                m_controlInterfaces.add(item);
+            }else if(m_ergoWalletDataList != null && m_ergoWalletDataList.hasAccess(itemId)){
            
-            super.addMsgListener(item);
+                super.addMsgListener(item);
+            }
         }
     }
+
+    @Override
+    public boolean removeMsgListener(NoteMsgInterface item){
+        if(item != null){
+            String itemId = item.getId();
+            if(isControl(itemId)){
+
+                m_controlInterfaces.remove(item);
+                
+                return removeControlId(itemId);
+            
+            }else{
+
+                boolean removed = msgListeners().remove(item);
+                m_ergoWalletDataList.removeAccessId(itemId);
+            
+                if(msgListeners().size() == 0){
+                    stop();
+                }
+                return removed;
+            }
+        }
+
+        return false;
+    }
+   
+    
 
     public class ErgoWalletsTab extends AppBox implements TabInterface {
 
         private boolean m_current = false;
     
-        public final static String DISABLED_NETWORK_TEXT = "Ergo Network: (unavailable)";
-        public final static String UNKNOWN_NETWORK_TEXT = "Ergo Network: (information unavailable)";
+        private final String DISABLED_NETWORK_TEXT = "Ergo Network: (disabled)";
+        private final String UNKNOWN_NETWORK_TEXT = "Network: (information unavailable)";
         private MenuButton networkMenuBtn = null;
         private ImageView m_networkMenuBtnImageView = null;
         private Tooltip networkTip = null;
@@ -439,7 +646,6 @@ public class ErgoWallets extends Network  {
         private MenuButton m_openWalletBtn;
     
         private JsonParser m_jsonParser = new JsonParser();
-        private NetworkType m_networkType = NetworkType.MAINNET;
     
         private static long m_minNanoErgs = ErgoConstants.MIN_NANO_ERGS;
         private static BigDecimal m_minNetworkFee = ErgoConstants.MIN_NETWORK_FEE;
@@ -464,7 +670,7 @@ public class ErgoWallets extends Network  {
             networkMenuBtn.setGraphic(m_networkMenuBtnImageView);
             networkMenuBtn.setPadding(new Insets(0, 3, 0, 0));
 
-            m_walletControl = new ErgoWalletControl("ErgoWalletsTab",ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, m_networkType, m_locationId, getNetworksData());
+            m_walletControl = new ErgoWalletControl("ErgoWalletsTab",ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, NETWORK_TYPE, m_locationId, getNetworksData());
       
             m_lockBox = new LockField(m_walletControl.currentAddressProperty());
             
@@ -922,7 +1128,7 @@ public class ErgoWallets extends Network  {
             HBox.setHgrow(addressControlBox, Priority.ALWAYS);
             addressControlBox.setPadding(new Insets(0,10,0,0));
             
-            m_amountBoxes = new ErgoWalletAmountBoxes(true, m_networkType, m_walletControl.balanceProperty());
+            m_amountBoxes = new ErgoWalletAmountBoxes(true, NETWORK_TYPE, m_walletControl.balanceProperty());
     
             HBox balanceGradient = new HBox();
             balanceGradient.setId("hGradient");
@@ -1007,13 +1213,6 @@ public class ErgoWallets extends Network  {
         }
     
     
-        @Override 
-        public Object sendNote(JsonObject note){
-    
-            return null;
-        }
-    
-
         
         private ProgressBar progressBar = null;
         private Label loadingText = null;
@@ -1814,15 +2013,12 @@ public class ErgoWallets extends Network  {
                 addressGBox.setAlignment(Pos.CENTER);
                 addressGBox.setPadding(new Insets(0,0,0,0));
     
-                m_sendToAddress = new AddressBox(new AddressInformation(""), m_appStage.getScene(), m_networkType);
+                m_sendToAddress = new AddressBox(new AddressInformation(""), m_appStage.getScene(), NETWORK_TYPE);
                 HBox.setHgrow(m_sendToAddress, Priority.ALWAYS);
                 m_sendToAddress.getInvalidAddressList().add(m_walletControl.getCurrentAddress());
             
                 HBox addressFieldBox = new HBox(m_sendToAddress);
                 HBox.setHgrow(addressFieldBox, Priority.ALWAYS);
-               // addressFieldBox.setId("bodyBox ");
-            
-                
                 
                 VBox addressPaddingBox = new VBox(addressTextBox, addressGBox, addressFieldBox);
                 addressPaddingBox.setPadding(new Insets(0,10,10,10));
@@ -1890,7 +2086,7 @@ public class ErgoWallets extends Network  {
     
                 MenuItem ergFeeTypeItem = new MenuItem(String.format("%-20s", "Ergo")+ "(ERG)");
                 ergFeeTypeItem.setOnAction(e->{
-                    PriceCurrency currency = new ErgoCurrency(m_networkType);
+                    PriceCurrency currency = new ErgoCurrency(NETWORK_TYPE);
                     feeTypeBtn.setUserData(currency);
                     feeTypeBtn.setText(currency.getSymbol());
                 });
@@ -2098,7 +2294,7 @@ public class ErgoWallets extends Network  {
     
                     sendObject.add("assets", sendAssets);
     
-                    NoteConstants.addNetworkTypeToDataObject(m_networkType, sendObject);
+                    NoteConstants.addNetworkTypeToDataObject(NETWORK_TYPE, sendObject);
     
                     m_walletControl.sendNoteData("sendAssets", sendObject, (onComplete)->{
                         Object sourceObject = onComplete.getSource().getValue();
@@ -3374,16 +3570,7 @@ public class ErgoWallets extends Network  {
                 m_walletControl.balanceProperty().addListener((obs,oldval,newval)->updateBalance());
                 updateBalance();
             }
-    
-            public void connectToMarkets(){
-                getErgoMarketControl().addMarketConnection();
-                getErgoMarketControl().addTokenMarketConnection();
-            }
 
-            public void disconnectFromMarkets(){
-                getErgoMarketControl().removeMarketConnection();
-                getErgoMarketControl().removeTokenMarketConnection();
-            }
 
             public ErgoMarketControl getErgoMarketControl(){
                 return m_ergoWalletDataList.getErgoMarketControl();
@@ -3479,7 +3666,7 @@ public class ErgoWallets extends Network  {
                 JsonObject balanceObject = m_walletControl.balanceProperty().get();
                
                 if(balanceObject != null){
-                    ArrayList<PriceAmount> amountList = NoteConstants.getBalanceList(balanceObject, true, m_networkType);
+                    ArrayList<PriceAmount> amountList = NoteConstants.getBalanceList(balanceObject, true, NETWORK_TYPE);
     
                     PriceAmount ergoAmount = NoteConstants.getPriceAmountFromList(amountList, ErgoCurrency.TOKEN_ID);
                     m_ergoBalanceProperty.set(ergoAmount != null ? ergoAmount.getBigDecimalAmount() : BigDecimal.ZERO);
@@ -3664,7 +3851,7 @@ public class ErgoWallets extends Network  {
             private void updateAvailableSellTokens(){
                 if(m_priceQuoteScroll != null){
                     JsonObject json = m_walletControl.balanceProperty().get();
-                    ArrayList<PriceAmount> balanceList = NoteConstants.getBalanceList(json, true, m_networkType);
+                    ArrayList<PriceAmount> balanceList = NoteConstants.getBalanceList(json, true, NETWORK_TYPE);
                     if(m_searchFilter != null && m_searchFilter.length() > 0){
                         String lowerCaseFilter = m_searchFilter.toLowerCase();
                         List<PriceAmount> searchList = balanceList.stream().filter(item -> item.getSymbol().toLowerCase().indexOf(lowerCaseFilter) != -1 && !item.getTokenId().equals(ErgoCurrency.TOKEN_ID)).collect(Collectors.toList());
@@ -4300,9 +4487,7 @@ public class ErgoWallets extends Network  {
         private void setUnknownNetworkIcon(){
             m_networkMenuBtnImageView.setImage(Stages.unknownImg);
         }
-        private void setDisabledNetworkIcon(){
-            m_networkMenuBtnImageView.setImage(new Image(NetworkConstants.NETWORK_ICON));
-        }
+   
 
         private void setNetworkText(String text){
             networkTip.setText(text);
@@ -4312,9 +4497,6 @@ public class ErgoWallets extends Network  {
             m_networkMenuBtnImageView.setImage(icon);
         }
 
-        private void setDiabledNetworkText(){
-            networkTip.setText(DISABLED_NETWORK_TEXT);
-        }
 
         private void setUknownNetworkText(){
             networkTip.setText(UNKNOWN_NETWORK_TEXT);
@@ -4323,26 +4505,22 @@ public class ErgoWallets extends Network  {
 
         @Override
         public String getName() {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'getName'");
+            return NAME;
         }
 
         @Override
         public void setStatus(String status) {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'setStatus'");
+            
         }
 
         @Override
         public String getStatus() {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'getStatus'");
+            return NoteConstants.getStatusCodeMsg(ErgoWallets.this.getConnectionStatus());
         }
 
         @Override
         public SimpleStringProperty titleProperty() {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'titleProperty'");
+            return null;
         }
     }
         

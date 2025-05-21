@@ -1,8 +1,5 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 
@@ -18,7 +15,6 @@ import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceAmountMenuItem;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.NetworksData.ManageAppsTab;
-import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.geometry.Insets;
@@ -33,11 +29,9 @@ import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
 import javafx.scene.control.Menu;
-import javafx.scene.control.Tooltip;
 import javafx.scene.Scene;
 import javafx.stage.Window;
 import javafx.util.Duration;
-import javafx.animation.Animation;
 import javafx.animation.PauseTransition;
 import javafx.beans.binding.Bindings;
 
@@ -47,7 +41,7 @@ public class ErgoWalletMenu extends VBox {
 
     private ErgoWalletControl m_ergoWalletControl;
 
-    private final String walletUnavailableString = "Wallet: (unavailable)";
+    private final String walletUnavailableString = "Wallet App: (not found)";
     private final String selectWalletString = "[ select wallet ]";
     private final String copyString = "[ copy to clipboard ]";
     private final String selectString = "[ select address ]";
@@ -366,7 +360,7 @@ public class ErgoWalletMenu extends VBox {
             m_networkMenuBtn.getItems().addAll(new SeparatorMenuItem(), openWalletsItem);
 
         }else{
-            showNotice(Stages.globeImage30, "Wallet: (not found)");
+            showNotice(Stages.globeImage30, walletUnavailableString);
             m_networkMenuBtn.setId("xBtnUnavailable"); 
             MenuItem openManageItem = new MenuItem("Manage apps…");
             openManageItem.setOnAction(e->{

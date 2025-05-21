@@ -1,16 +1,22 @@
 package com.satergo;
 
 
+import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.Stages;
-import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
+import io.netnotes.engine.Utils;
 
+import com.google.gson.JsonObject;
 import com.satergo.ergo.ErgoInterface;
 import com.satergo.extra.AESEncryption;
 
-import javafx.scene.image.Image;
+import javafx.scene.control.PasswordField;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
+import javafx.stage.Stage;
+import javafx.scene.control.Button;
+import javafx.scene.Scene;
+
 import org.ergoplatform.ErgoAddressEncoder;
 import org.ergoplatform.P2PKAddress;
 import org.ergoplatform.appkit.*;
@@ -20,20 +26,14 @@ import org.ergoplatform.sdk.wallet.secrets.ExtendedPublicKey;
 import org.ergoplatform.sdk.wallet.secrets.ExtendedSecretKey;
 
 import javax.crypto.SecretKey;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-/**
- *
- * ORIGINAL MESSAGE: This API is open for extending by third-parties, but
- * consult the wallet-format.md and apply for an ID first.
- *
- * NETNOTES EDIT: wallet-format.md is not included in this distribution, go to
- * the original satergo github for details.
- */
+
 public abstract class WalletKey {
 
 
@@ -142,7 +142,7 @@ public abstract class WalletKey {
 
     public abstract WalletKey changedPassword(SecretString currentPassword, SecretString newPassword) throws Exception;
 
-    public abstract void getMnemonic(ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed);
+    public abstract void getMnemonic(JsonObject note,String locationString, ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed);
 
     public byte[] copyIv() {
         return Arrays.copyOf(encrypted, 12);
@@ -162,7 +162,7 @@ public abstract class WalletKey {
     public static class Local extends WalletKey {
 
         private static final int ID = 0;
-
+        private Stage m_mnemonicAuthStage = null;
         /**
          * Non-standard (legacy incorrect address derivation implementation in
          * ergo-wallet)
@@ -198,10 +198,9 @@ public abstract class WalletKey {
             Local key = new Local();
             key.nonstandard = nonstandard;
             byte[] iv = AESEncryption.generateNonce12();
-            // StandardCharsets.UTF_8.encode(CharBuffer.wrap(mnemonic.getPhrase().getData())) is not used because
-            // for some reason it adds multiple null characters at the end
-            byte[] mnPhraseBytes = mnemonic.getPhrase().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
-            byte[] mnPasswordBytes = mnemonic.getPassword().toStringUnsecure().getBytes(StandardCharsets.UTF_8);
+  
+            byte[] mnPhraseBytes = Utils.charsToBytes(mnemonic.getPhrase().getData()); 
+            byte[] mnPasswordBytes =  Utils.charsToBytes(mnemonic.getPassword().getData());
             ByteBuffer buffer = ByteBuffer.allocate(2 + 1 + 2 + mnPhraseBytes.length + 2 + mnPasswordBytes.length)
                     .putShort((short) ID)
                     .put((byte) (nonstandard ? 1 : 0))
@@ -224,43 +223,69 @@ public abstract class WalletKey {
            
         }
 
-
         @Override
         public void viewWalletMnemonic(SecretString pass) throws Exception {
-
-                    Mnemonic mnemonic = getMnemonic(pass);
-                    Stages.showMagnifyingStage("Mnemonic Recovery - Wallet" , mnemonic.getPhrase().toStringUnsecure());
-
-           
+            Mnemonic mnemonic = getMnemonic(pass);
+            Stages.showMagnifyingStage("Mnemonic Recovery - Wallet" , mnemonic.getPhrase().toStringUnsecure());
         }
 
         @Override
-        public void getMnemonic(ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed) {
-            Stages.enterPassword(
-                "Ergo - Wallet password",
-                new Image(ErgoWallets.getAppIconString()),
-                new Image (ErgoWallets.ICON), 
-                "Wallet password", 
-                execService, onPass->{
-                Object obj = onPass.getSource().getValue();
-                if(obj != null && obj instanceof SecretString){
-                    
+        public void getMnemonic(JsonObject note,String locationString, ExecutorService execService, EventHandler<WorkerStateEvent> onMnemonic, EventHandler<WorkerStateEvent> onFailed) {
+            if(m_mnemonicAuthStage != null){
+                Utils.returnException(NoteConstants.STATUS_STARTED, execService, onFailed);
+                return;
+            }
+
+            m_mnemonicAuthStage = new Stage();
+            PasswordField passField = new PasswordField();
+            Button closeBtn = new Button();
+
+            Scene scene = Stages.getAuthorizationScene(m_mnemonicAuthStage, "Mnemonic Request - Authorization", closeBtn, passField, note, locationString, Stages.ROW_HEIGHT, Stages.COL_WIDTH);
+            m_mnemonicAuthStage.setScene(scene);
+            passField.setOnAction(e->{
+                if(passField.getText().length() > 0 && !passField.isEditable()){
+                    passField.setEditable(false);
+                    SecretString secret = SecretString.create(passField.getText());
+                
+                    passField.setText(Utils.getRandomString(passField.getText().length()));
                     Task<Object> task = new Task<Object>() {
-
+                        @Override
                         public Object call() throws Exception {
-
-                            return  getMnemonic((SecretString) obj);
+                            return getMnemonic(secret);
                         }
                     };
 
-                    task.setOnFailed(onFailed);
-
-                    task.setOnSucceeded(onMnemonic);
-
+                    task.setOnSucceeded(onComplete->{
+                        passField.setText("");
+                        secret.erase();
+                        Utils.returnObject(onComplete.getSource().getValue(), execService, onMnemonic);
+                        m_mnemonicAuthStage.close();
+                        m_mnemonicAuthStage = null;
+                    });
+                    task.setOnFailed(onBadPass->{
+                        passField.setText("");
+                        secret.erase();
+                        passField.setEditable(true);
+                    });
                     execService.submit(task);
                 }
+                
+            });
 
-                });
+            m_mnemonicAuthStage.setOnCloseRequest(e->{
+                passField.setText("");
+                Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, execService, onFailed);
+                m_mnemonicAuthStage = null;
+            });
+
+            closeBtn.setOnAction(e->{
+                passField.setText("");
+                Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, execService, onFailed);
+                m_mnemonicAuthStage.close();
+
+                m_mnemonicAuthStage = null;
+            });
+            m_mnemonicAuthStage.show();
         }
 
         private static Mnemonic readMnemonic(ByteBuffer data) {

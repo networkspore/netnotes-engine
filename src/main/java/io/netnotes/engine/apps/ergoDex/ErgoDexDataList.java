@@ -21,9 +21,9 @@ import io.netnotes.engine.NoteMsgInterface;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.TimeSpan;
-import io.netnotes.engine.apps.ergoWallet.ErgoWalletControl;
-import io.netnotes.engine.apps.ergoWallet.ErgoWalletMenu;
-import io.netnotes.engine.apps.ergoWallet.ErgoWallets;
+import io.netnotes.engine.apps.ergoWallets.ErgoWalletControl;
+import io.netnotes.engine.apps.ergoWallets.ErgoWalletMenu;
+import io.netnotes.engine.apps.ergoWallets.ErgoWallets;
 import io.netnotes.friendly_id.FriendlyId;
 
 import org.reactfx.util.FxTimer;

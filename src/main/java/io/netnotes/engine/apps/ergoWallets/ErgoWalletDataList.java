@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 
 import java.io.File;
@@ -47,6 +47,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.layout.HBox;
@@ -107,7 +108,7 @@ public class ErgoWalletDataList {
         }
         return false;
     }
-    private boolean removeAccessId(String accessId){
+    protected boolean removeAccessId(String accessId){
         if(accessId != null){
             m_walletAccessMap.remove(accessId);
             return true;
@@ -192,9 +193,217 @@ public class ErgoWalletDataList {
     }
 
 
+    public void openWalletFile(JsonObject note,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        
+        ExecutorService execService = getExecService();
+
+        Image smallIcon = new Image(ErgoWallets.ICON);
+        Image largeIcon = new Image(ErgoWallets.getSmallAppIconString());
+
+        Stage stage = new Stage();
+        stage.setResizable(false);
+        stage.initStyle(StageStyle.UNDECORATED);
+        stage.getIcons().add(smallIcon);
+
+        
+        Label headingText = new Label("Open - Wallet File (*.erg)");
+        headingText.setFont(Stages.txtFont);
+        headingText.setPadding(new Insets(0,0,0,15));
+
+        Button closeBtn = new Button();
+
+        HBox headingBox = Stages.createTopBar(smallIcon, headingText, closeBtn, stage);
     
+    
+        VBox headerBox = new VBox(headingBox);
+        headerBox.setPadding(new Insets(0, 5, 0, 0));
+
+        Label walletNameText = new Label("Name ");
+        walletNameText.setFont(Stages.txtFont);
+        walletNameText.setMinWidth(70);
+
+        TextField walletNameField = new TextField();
+        HBox.setHgrow(walletNameField, Priority.ALWAYS);
+
+        HBox walletNameFieldBox = new HBox(walletNameField);
+        HBox.setHgrow(walletNameFieldBox, Priority.ALWAYS);
+        walletNameFieldBox.setId("bodyBox");
+        walletNameFieldBox.setPadding(new Insets(0, 5, 0, 0));
+        walletNameFieldBox.setMaxHeight(18);
+        walletNameFieldBox.setAlignment(Pos.CENTER_LEFT);
+
+        HBox walletNameBox = new HBox(walletNameText, walletNameFieldBox);
+        walletNameBox.setAlignment(Pos.CENTER_LEFT);
+        walletNameBox.setPadding(new Insets(2, 0, 2, 0));
+
+        
+
+        Label walletFileText = new Label("File");
+        walletFileText.setFont(Stages.txtFont);
+        walletFileText.setMinWidth(70);
+        
+        final String selectWalletText = "[ Select Wallet ]";
+
+        Button walletFileField = new Button(selectWalletText);
+        HBox.setHgrow(walletFileField, Priority.ALWAYS);
+        walletFileField.setId("tokenBtn");
 
 
+        Button walletFileOpenBtn = new Button("…");
+        walletFileOpenBtn.setId("lblBtn");
+
+        walletFileField.setOnAction(e->walletFileOpenBtn.fire());
+
+        HBox walletFileFieldBox = new HBox(walletFileField, walletFileOpenBtn);
+        HBox.setHgrow(walletFileFieldBox, Priority.ALWAYS);
+        walletFileFieldBox.setId("bodyBox");
+        walletFileFieldBox.setAlignment(Pos.CENTER_LEFT);
+        walletFileFieldBox.setMaxHeight(18);
+        walletFileFieldBox.setPadding(new Insets(0, 5, 0, 0));
+
+        walletFileField.prefWidthProperty().bind(walletFileFieldBox.widthProperty().subtract(walletFileOpenBtn.widthProperty()).subtract(1));
+
+
+
+        Runnable openFile = new Runnable(){
+            private File openFile_walletFile = null;
+
+
+            public void run(){
+                if(openFile_walletFile == null){
+                    FileChooser openFileChooser = new FileChooser();
+                    openFileChooser.setTitle("Select wallet (*.erg)");
+                    openFileChooser.setInitialDirectory(AppData.HOME_DIRECTORY);
+                    openFileChooser.getExtensionFilters().add(ErgoWallets.ergExt);
+                    openFileChooser.setSelectedExtensionFilter(ErgoWallets.ergExt);
+
+                    openFile_walletFile = openFileChooser.showOpenDialog(stage);
+                    
+                    if (openFile_walletFile != null) {
+                        enterFilePassword();
+                    }
+                }else{
+                    Alert a = new Alert(AlertType.NONE, "Password dialog open", ButtonType.OK);
+                    a.setHeaderText("Error");
+                    a.show();
+                }
+
+            }
+        
+            private void enterFilePassword(){
+          
+                Stages.enterPassword("Enter Password - (close to cancel)", largeIcon, smallIcon, "Opening: " + openFile_walletFile.getName(), execService, (onPassword->{
+                    Object secretObject = onPassword.getSource().getValue();
+                    if(secretObject != null && secretObject instanceof SecretString){
+                        SecretString secret = (SecretString) secretObject;
+                    
+                        try {
+                            Wallet.load(openFile_walletFile.toPath(), secret);
+                            walletFileField.setText(openFile_walletFile.getAbsolutePath());
+                            if(walletNameField.getText().length() == 0){
+                                walletNameField.setText(checkWalletName(openFile_walletFile.getName()));
+                            }
+                            walletFileField.setUserData(openFile_walletFile);
+                            openFile_walletFile = null;
+                        } catch (Exception e1) {
+                            enterFilePassword();
+                        }
+                    
+            
+                    }
+                }), onFailed->{
+                    walletFileField.setText(selectWalletText);
+                    walletFileField.setUserData(null);
+                    openFile_walletFile = null;
+                    
+                });
+                   
+                
+            }
+        };
+
+        walletFileOpenBtn.setOnAction(e -> openFile.run());
+
+        Button nextBtn = new Button("Next");
+
+
+        HBox nextBox = new HBox(nextBtn);
+        nextBox.setAlignment(Pos.CENTER);
+        nextBox.setPadding(new Insets(20, 0, 20, 0));
+
+
+
+
+
+        VBox bodyBox = new VBox(nextBox);
+        VBox.setMargin(bodyBox, new Insets(10, 10, 0, 20));
+
+        
+        VBox layoutVBox = new VBox(headerBox, bodyBox);
+
+
+
+
+        Scene scene = new Scene(layoutVBox, 420, 420);
+        scene.setFill(null);
+        scene.getStylesheets().add(Stages.DEFAULT_CSS);
+        
+        stage.setScene(scene);
+
+        stage.show();
+
+        Runnable clear = ()->{
+            walletFileField.setText(selectWalletText);
+            walletFileField.setUserData(null);
+            nextBtn.setDisable(false);
+        };
+
+        closeBtn.setOnAction(e->{
+            clear.run();
+            stage.close();
+            Utils.returnException(NoteConstants.ERROR_CANCELED, execService, onFailed);
+        });
+
+        stage.setOnCloseRequest(e->{
+            clear.run();
+            Utils.returnException(NoteConstants.ERROR_CANCELED, execService, onFailed);
+        });
+
+        //Tooltip errorToolTip = new Tooltip();
+
+        //char[] chars = Utils.getAsciiCharArray();
+
+        nextBtn.setOnAction(e -> {
+            nextBtn.setDisable(true);
+            if(!walletFileField.getText().equals(selectWalletText)){
+                
+                Object walletFileUserObject = walletFileField.getUserData();
+                if(walletFileUserObject != null && walletFileUserObject instanceof File){
+                    File walletFile = (File) walletFileUserObject;
+                    String pathString = walletFileField.getText();
+                    if(walletFile.getAbsolutePath().equals(pathString)){
+                        String name = walletNameField.getText().length() > 0 ? walletNameField.getText() : walletFile.getName();
+                        ErgoWalletData walletData = new ErgoWalletData(createWalletId(), checkWalletName(name), walletFile, ErgoWallets.NETWORK_TYPE, this);
+                        add(walletData, true);
+                        JsonObject jsonData = walletData.getJsonObject();
+                        Utils.returnObject(jsonData, execService, onSucceeded);
+                        stage.close();
+                    }
+                }
+            }
+
+            clear.run();
+            
+        });
+    }
+
+    private String createWalletId(){
+        SimpleStringProperty walletId = new SimpleStringProperty(FriendlyId.createFriendlyId());
+        while(getWallet(walletId.get()) != null){
+            walletId.set(FriendlyId.createFriendlyId());
+        }
+        return walletId.get();
+    }
     
     public void createWallet(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
@@ -206,7 +415,7 @@ public class ErgoWalletDataList {
                 File walletFile = fileObject != null && fileObject instanceof File ? (File) fileObject : null;
 
                 if(walletFile != null && walletFile.isFile()){
-                    String id = FriendlyId.createFriendlyId();
+                    String id = createWalletId();
                     String name = walletFile.getName();
                     ErgoWalletData walletdata = new ErgoWalletData(id, name, walletFile, m_networkType, this);
                     add(walletdata, true);
@@ -265,7 +474,7 @@ public class ErgoWalletDataList {
                             JsonElement nameElement = jsonObject.get("name");
                             JsonElement idElement = jsonObject.get("id");
                         
-                            String id = idElement == null ? FriendlyId.createFriendlyId() : idElement.getAsString();
+                            String id = idElement == null ? createWalletId() : idElement.getAsString();
                             String name = nameElement == null ? "Wallet " + id : nameElement.getAsString();
                             String fileString = fileElement != null && fileElement.isJsonPrimitive() ? fileElement.getAsString() : null;
                            
@@ -310,7 +519,7 @@ public class ErgoWalletDataList {
             
             long timeStamp = System.currentTimeMillis();
 
-            getErgoWallets().sendMessage(NoteConstants.LIST_ITEM_ADDED,timeStamp, walletData.getId(), "Wallet added");
+            getErgoWallets().sendMessage(NoteConstants.LIST_ITEM_ADDED,timeStamp, ErgoWallets.NETWORK_ID, "Wallet added");
         }
     }
     
@@ -539,7 +748,18 @@ public class ErgoWalletDataList {
     }
 
 
+    private String checkWalletName(String name){
+        name = name.endsWith(".erg") ? name.substring(0, name.length()-4) :name;
 
+        SimpleStringProperty nameProperty = new SimpleStringProperty(name);
+        
+        int i = 1;
+        while(containsName(nameProperty.get())){
+            nameProperty.set( name + " #" + i);
+            i++;
+        }
+        return nameProperty.get();
+    }
 
 
     private ErgoWalletData getWallet(String id){
@@ -551,9 +771,7 @@ public class ErgoWalletDataList {
         }
         return null;
     }
-    private String m_tmpStr = "";
-
-    public Object openWallet(JsonObject note){
+    public Future<?> openWallet(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
         JsonElement dataElement = note != null ? note.get("data") : null;
 
@@ -574,46 +792,32 @@ public class ErgoWalletDataList {
                 JsonObject existingWalletJson = getWalletByPath(file.getAbsolutePath());
 
                 if(existingWalletJson != null){
-                    return existingWalletJson;
+                    return Utils.returnException(new Exception(NoteConstants.ERROR_EXISTS), getExecService(), onFailed);                    
                 }
 
-                
+                if(file.getName().length() > 0){
 
-                m_tmpStr = file.getName();
+                   String name = checkWalletName(file.getName());
 
-                if(!m_tmpStr.equals("")){
-
-                    m_tmpStr = m_tmpStr.endsWith(".erg") ? m_tmpStr.substring(0, m_tmpStr.length()-4) : m_tmpStr;
+                    String id = createWalletId();
                     
-                    int i = 1;
-                    while(containsName(m_tmpStr)){
-                        m_tmpStr =  m_tmpStr + " #" + i;
-                        i++;
-                    }
-                    String name = m_tmpStr;
+                    boolean isFlagged = networkTypeElement != null && networkTypeElement.isJsonPrimitive() && networkTypeElement.getAsString().toUpperCase().equals(NetworkType.TESTNET.toString().toUpperCase()) ? ErgoWallets.NETWORK_TYPE == NetworkType.TESTNET : ErgoWallets.NETWORK_TYPE == NetworkType.MAINNET;
+                    if(isFlagged){
+
+                        ErgoWalletData walletData = new ErgoWalletData(id, name, file, ErgoWallets.NETWORK_TYPE, this);
+                        add(walletData, true);
+
                     
-
-                    m_tmpStr = FriendlyId.createFriendlyId();
-
-                    while(getWallet(m_tmpStr) != null){
-                        m_tmpStr = FriendlyId.createFriendlyId(); 
-                    }
-
-                    String id = m_tmpStr;
-                    m_tmpStr = null;
-                    
-                    NetworkType networkType = networkTypeElement != null && networkTypeElement.isJsonPrimitive() && networkTypeElement.getAsString().equals(NetworkType.TESTNET.toString()) ? NetworkType.TESTNET : NetworkType.MAINNET;
-                    ErgoWalletData walletData = new ErgoWalletData(id, name, file, networkType, this);
-                    add(walletData, true);
-
-                   
-                    return walletData.getJsonObject();
+                        return Utils.returnObject(walletData.getJsonObject(), getExecService(), onSucceeded);
+                    }else{
+                        return Utils.returnException(new Exception(NoteConstants.ERROR_INVALID), getExecService(), onFailed);
+                    }                
                 }
             }
             
         }
 
-        return null;
+        return Utils.returnException(new Exception(NoteConstants.ERROR_NOT_FOUND), getExecService(), onFailed);
     }
 
 
@@ -706,6 +910,8 @@ public class ErgoWalletDataList {
        
         return fileObject;
     }
+
+
 
 
     private void createWalletFile(boolean isNew, ExecutorService execService, EventHandler<WorkerStateEvent> complete, EventHandler<WorkerStateEvent> onCanceled) {

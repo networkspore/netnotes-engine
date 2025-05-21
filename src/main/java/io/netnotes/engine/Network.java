@@ -170,7 +170,7 @@ public class Network  {
         
     }
  
-    public ArrayList<NoteMsgInterface> msgListeners(){
+    protected ArrayList<NoteMsgInterface> msgListeners(){
         return m_msgListeners;
     }
 

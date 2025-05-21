@@ -1,4 +1,4 @@
-package io.netnotes.engine.apps.ergoWallet;
+package io.netnotes.engine.apps.ergoWallets;
 
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
@@ -748,7 +748,7 @@ public class AddressData extends Network {
 
         }*/
         
-        m_walletData.sendMessage(NoteConstants.UPDATED,timeStamp ,m_addressString, m_balanceString); 
+        m_walletData.sendMessage(NoteConstants.UPDATED, timeStamp ,m_addressString, m_balanceString); 
 
 
     }
