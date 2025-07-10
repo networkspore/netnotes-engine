@@ -1,6 +1,5 @@
 package io.netnotes.engine.networks.ergo;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -15,13 +14,11 @@ import org.ergoplatform.appkit.RestApiErgoClient;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.Drawing;
 import io.netnotes.engine.NamedNodeUrl;
 import io.netnotes.engine.Network;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.Utils;
-import io.netnotes.engine.apps.ergoDex.ErgoDex;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent; 
@@ -50,8 +47,6 @@ public class ErgoNodeData extends Network implements NoteInterface {
     private String m_imgUrl = DEFAULT_IMG;
 
     
-    private final SimpleObjectProperty<LocalDateTime> m_shutdownNow = new SimpleObjectProperty<>(LocalDateTime.now());
-
 
     //  public SimpleStringProperty nodeApiAddress;
     private ErgoNodesList m_ergoNodesList;
@@ -103,10 +98,11 @@ public class ErgoNodeData extends Network implements NoteInterface {
    }
 
 
-    public SimpleObjectProperty<LocalDateTime> shutdownNow(){
-        return m_shutdownNow;
-    }
+   public void updateUrl(NamedNodeUrl namedNode){
 
+        m_namedNodeUrlProperty.set(namedNode);
+        
+   }
 
 
 
@@ -313,8 +309,7 @@ public class ErgoNodeData extends Network implements NoteInterface {
                 switch(subject){
                     case "getStatus":
                         return getStatus(onSucceeded, onFailed);
-                    case "getNetworkObject":
-                        return getNetworkObject(onSucceeded, onFailed);
+                    
                 }
         }
         return null;
@@ -333,17 +328,6 @@ public class ErgoNodeData extends Network implements NoteInterface {
         return namedNode != null ? namedNode.getUrlString() : null;
     }
 
-    public Future<?> getNetworkObject(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-         JsonObject returnObject = getJsonObject();
-        returnObject.addProperty("apiUrl", getApiUrl());
-        returnObject.addProperty("website", getWebsite());
-        returnObject.addProperty("description", getDescription());
-        return Drawing.convertImgToHexString(getAppIcon(), getExecService(), onImgHex->{
-            returnObject.addProperty("appIcon",(String) onImgHex.getSource().getValue());
-            Utils.returnObject(returnObject, getExecService(), onSucceeded);
-        }, onFailed);
-
-    }
 
 
 }

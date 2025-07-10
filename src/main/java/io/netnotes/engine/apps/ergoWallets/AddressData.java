@@ -32,6 +32,7 @@ import io.netnotes.engine.networks.ergo.ErgoAmount;
 import io.netnotes.engine.networks.ergo.ErgoBoxInfo;
 import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.engine.networks.ergo.ErgoNetwork;
+import io.netnotes.engine.networks.ergo.ErgoNetworkControl;
 import io.netnotes.engine.networks.ergo.ErgoTransactionView;
 import io.netnotes.engine.networks.ergo.ErgoTxInfo;
 import io.netnotes.engine.networks.ergo.ErgoTransactionView.TransactionStatus;
@@ -128,165 +129,54 @@ public class AddressData extends Network {
     }
 
 
-    public NoteInterface getErgoNetworkInterface(){
-        return m_addressesData.getWalletData().getErgoNetworkInterface();
+    public ErgoNetworkControl getErgoNetworkControl(){
+        return m_addressesData.getWalletData().getErgoNetworkControl();
     }
 
     public void updateBalance() {
 
-        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
-
-        if(ergoNetworkInterface != null){
-            JsonObject note = NoteConstants.getCmdObject("getBalance",  ErgoConstants.EXPLORER_NETWORK, getLocationId());
-            note.addProperty("address", m_addressString);
-        
-            ergoNetworkInterface.sendNote(note, success -> {
-                Object sourceObject = success.getSource().getValue();
-                JsonObject jsonObject = sourceObject != null && sourceObject instanceof JsonObject ? (JsonObject) sourceObject : null;
-                if (jsonObject != null) {
-                    parseBalance(jsonObject, onParsed->{
-                        Object parsedObject = onParsed.getSource().getValue();
-                        
-                        setBalance(parsedObject != null && parsedObject instanceof JsonObject ? (JsonObject) parsedObject : jsonObject);
-                    });
-                }
-            }, failed -> {
-                try {
-                    Files.writeString(AppConstants.LOG_FILE.toPath(), "AddressData, Explorer failed update: " + failed.getSource().getException().toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                } catch (IOException e) {
-                }
-            });
-        }
+        getErgoNetworkControl().getBalance(m_addressString, success -> {
+            Object sourceObject = success.getSource().getValue();
+            JsonObject jsonObject = sourceObject != null && sourceObject instanceof JsonObject ? (JsonObject) sourceObject : null;
+            if (jsonObject != null) {
+                parseBalance(jsonObject, onParsed->{
+                    Object parsedObject = onParsed.getSource().getValue();
+                    
+                    setBalance(parsedObject != null && parsedObject instanceof JsonObject ? (JsonObject) parsedObject : jsonObject);
+                });
+            }
+        }, failed -> {
+            try {
+                Files.writeString(AppConstants.LOG_FILE.toPath(), "AddressData, Explorer failed update: " + failed.getSource().getException().toString() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException e) {
+            }
+        });
+    
     }
 
-     public Future<?> getTransactions(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+    public Future<?> getTransactions(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
         
-        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
-
-        if(ergoNetworkInterface != null){
-            JsonObject txNote = NoteConstants.getCmdObject("getTransactionsByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
-            txNote.addProperty("address", m_addressString);
-
-            JsonElement startIndexElement = note.get("startIndex");
-            JsonElement limitElement = note.get("limit");
-            JsonElement conciseElement = note.get("concise");
-            JsonElement fromHeightElement = note.get("fromHeight");
-            JsonElement toHeightElement = note.get("toHeight");
-
-            if(startIndexElement != null){
-                txNote.add("startIndex", startIndexElement);
-            }
-            if(limitElement != null){
-                txNote.add("limit",limitElement);
-            }
-            if(conciseElement != null){
-                txNote.add("concise", conciseElement);
-            }
-            if(fromHeightElement != null){
-                txNote.add("fromHeight", fromHeightElement);
-            }
-            if(toHeightElement != null){
-                txNote.add("toHeight", toHeightElement);
-            }
-
-            return ergoNetworkInterface.sendNote(txNote, onSucceeded, onFailed);
-        }else{
-            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
-        }
-
+        return getErgoNetworkControl().getTransactionsByAddress(m_addressString, note, onSucceeded, onFailed);
+        
     }
 
-
-
+    
+    public Future<?> getTransactionViews(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
+        return getErgoNetworkControl().getTransactionViewsByAddress(m_addressString, note, onTxViews->{
+            Object obj = onTxViews.getSource().getValue();
+            if(obj != null && obj instanceof JsonObject){
+                parseTxViews((JsonObject) obj, onSucceeded, onFailed);
+            }else{
+                Utils.returnException("Returned null", getExecService(), onFailed);
+            }
+        }, onFailed);
+    
+    }
 
     public Future<?> getUnspentBoxes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
-        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
-
-        if(ergoNetworkInterface != null){
-            JsonObject note = NoteConstants.getCmdObject("getUnspentByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
-            note.addProperty("value", m_addressString);
-        
-            return ergoNetworkInterface.sendNote(note, onSucceeded,onFailed);
-        }else{
-            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
-        }
+        return getErgoNetworkControl().getUnspentBoxesByAddress(m_addressString, onSucceeded, onFailed);
     }
     
-
-
-  
-    /*public void openAddressJson(JsonObject json){
-        if(json != null){
-         
-            JsonElement txsElement = json.get("txs");
-            
-            if(txsElement != null && txsElement.isJsonArray()){
-                openWatchedTxs(txsElement.getAsJsonArray());
-            }
-           
-         
-        }
-    }*/
-
-
-
-
-    /*public void openWatchedTxs(JsonArray txsJsonArray){
-        if(txsJsonArray != null){
-       
-            int size = txsJsonArray.size();
-
-            for(int i = 0; i<size ; i ++){
-                JsonElement txElement = txsJsonArray.get(i);
-
-                if(txElement != null && txElement.isJsonObject()){
-                    JsonObject txJson = txElement.getAsJsonObject();
-                                                
-                        JsonElement txIdElement = txJson.get("txId");
-                        JsonElement parentAdrElement = txJson.get("parentAddress");
-                        JsonElement timeStampElement = txJson.get("timeStamp");
-                        JsonElement txTypeElement = txJson.get("txType");
-                       // JsonElement nodeUrlElement = txJson.get("nodeUrl");
-
-                        if(txIdElement != null && txIdElement.isJsonPrimitive() 
-                            && parentAdrElement != null && parentAdrElement.isJsonPrimitive() 
-                            && timeStampElement != null && timeStampElement.isJsonPrimitive() 
-                            && txTypeElement != null && txTypeElement.isJsonPrimitive()){
-
-                            String txId = txIdElement.getAsString();
-                            String txType = txTypeElement.getAsString();
-                            String parentAdr = parentAdrElement.getAsString();
-
-                            
-
-                            if(parentAdr.equals(getAddressString())){
-                                switch(txType){
-                                    case TransactionType.SEND:
-                                        
-                                        try {
-                                            ErgoSimpleSendTx simpleSendTx = new ErgoSimpleSendTx(txId, this, txJson);
-                                            addWatchedTransaction(simpleSendTx, false);
-                                        } catch (Exception e) {
-                                            try {
-                                                Files.writeString(AppConstants.LOG_FILE.toPath(), "\nCould not read tx json: " + e.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                                            } catch (IOException e1) {
-                                                
-                                            }
-                                        }
-                                      
-                                        break;
-                                    default:
-                                        ErgoTransaction ergTx = new ErgoTransaction(txId, this, txType);
-                                        
-                                        addWatchedTransaction(ergTx, false);
-                                }
-                            }
-                        }
-                    }
-                }
-            
-        }
-    }*/
 
     
 
@@ -774,60 +664,8 @@ public class AddressData extends Network {
 
     public File getAddressTxViewFile() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, InterruptedException, IOException{
         return getNetworksData().getIdDataFileBlocking(getAddressString(), "txView" , ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID);
-     }
+    }
  
-
-    private ExecutorService getExecService(){
-        return getNetworksData().getExecService();
-    }
-
-    
-    public Future<?> getTransactionViews(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
-        
-        
-        NoteInterface ergoNetworkInterface = getErgoNetworkInterface();
-
-        if(ergoNetworkInterface != null){
-            JsonObject txNote = NoteConstants.getCmdObject("getTransactionViewsByAddress", ErgoConstants.EXPLORER_NETWORK, getLocationId());
-
-
-            txNote.addProperty("address", m_addressString);
-
-            JsonElement startIndexElement = note.get("startIndex");
-            JsonElement limitElement = note.get("limit");
-            JsonElement conciseElement = note.get("concise");
-            JsonElement fromHeightElement = note.get("fromHeight");
-            JsonElement toHeightElement = note.get("toHeight");
-
-            if(startIndexElement != null){
-                txNote.add("startIndex", startIndexElement);
-            }
-            if(limitElement != null){
-                txNote.add("limit",limitElement);
-            }
-            if(conciseElement != null){
-                txNote.add("concise", conciseElement);
-            }
-            if(fromHeightElement != null){
-                txNote.add("fromHeight", fromHeightElement);
-            }
-            if(toHeightElement != null){
-                txNote.add("toHeight", toHeightElement);
-            }
-
-            return ergoNetworkInterface.sendNote(txNote, onTxViews->{
-                Object obj = onTxViews.getSource().getValue();
-                if(obj != null && obj instanceof JsonObject){
-                    parseTxViews((JsonObject) obj, onSucceeded, onFailed);
-                }else{
-                    Utils.returnException("Returned null", getExecService(), onFailed);
-                }
-            }, onFailed);
-        }else{
-            return Utils.returnException("Ergo Network: Not found", getExecService(), onFailed);
-        }
-
-    }
 
     private void parseTxViews(JsonObject json, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ){
 

@@ -210,12 +210,6 @@ public class ErgoDexChartView {
         }
     }
 
-    protected void sendMessage(int code, long timeStamp,String networkId, Number num){
-        for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp,networkId, num);
-        }
-    }
-
     private String m_errorString = "";
 
     public void setConnectionStatus(int status){
@@ -256,7 +250,7 @@ public class ErgoDexChartView {
                       
 
                   
-                            sendMessage(NoteConstants.STARTED, m_lastTimeStamp, poolId, m_data.length);
+                            sendMessage(NoteConstants.STARTED, m_lastTimeStamp, poolId, NoteConstants.STATUS_STARTED);
                         }
                     }
                 }, (onFailed)->{
@@ -311,11 +305,11 @@ public class ErgoDexChartView {
                                 m_lastTimeStamp = lastTimeStamp;
                                 
 
-                                sendMessage(lastTimeStamp > 0 ? NoteConstants.LIST_UPDATED : NoteConstants.LIST_CHECKED, m_lastTimeStamp, poolId, prices.length);
+                                sendMessage(lastTimeStamp > 0 ? NoteConstants.LIST_UPDATED : NoteConstants.LIST_CHECKED, m_lastTimeStamp, poolId, NoteConstants.STATUS_UPDATED);
                                 
                             }else{
 
-                                sendMessage(NoteConstants.LIST_CHECKED, m_lastTimeStamp,poolId, prices.length);
+                                sendMessage(NoteConstants.LIST_CHECKED, m_lastTimeStamp,poolId, NoteConstants.STATUS_UPDATED);
                             
                             }
                         

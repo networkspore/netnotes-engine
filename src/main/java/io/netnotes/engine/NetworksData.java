@@ -1,22 +1,37 @@
 package io.netnotes.engine;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.math.BigInteger;
+import java.net.MalformedURLException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileStore;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
@@ -24,12 +39,15 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.ShortBufferException;
+import javax.crypto.spec.GCMParameterSpec;
 
 import org.apache.commons.io.FileUtils;
 import org.reactfx.util.FxTimer;
@@ -39,14 +57,19 @@ import org.ergoplatform.sdk.SecretString;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.IconButton.IconStyle;
-import io.netnotes.engine.adapters.Adapter;
-import io.netnotes.engine.adapters.AdapterNoteInterface;
+import io.netnotes.engine.NoteFile.NetworksInterface;
 import io.netnotes.engine.apps.AppConstants;
-import io.netnotes.engine.networks.NetworkConstants;
+import io.netnotes.engine.apps.ergoWallets.ErgoWallets;
+import io.netnotes.engine.networks.ergo.ErgoBoxInfo;
+import io.netnotes.engine.networks.ergo.ErgoNetwork;
+import io.netnotes.engine.networks.ergo.ErgoTransactionView;
+import io.netnotes.engine.networks.ergo.ErgoTxInfo;
 import io.netnotes.friendly_id.FriendlyId;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyDoubleProperty;
@@ -89,7 +112,14 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import oshi.SystemInfo;
+import oshi.hardware.NetworkIF;
+import oshi.hardware.PhysicalMemory;
+import oshi.hardware.CentralProcessor.PhysicalProcessor;
+import oshi.software.os.OSFileStore;
 import javafx.beans.binding.Binding;
+import javafx.event.ActionEvent;
+import scorex.util.encode.Base64;
 
 public class NetworksData {
 
@@ -98,25 +128,21 @@ public class NetworksData {
 
     public final static String APPS = "APPS";
     public final static String NETWORKS = "NETWORKS";
-    public final static String ADAPTERS = "ADAPTERS";
 
     public final static int BTN_IMG_SIZE = 30;
     public final static long EXECUTION_TIME = 500;
     
-    public final static NetworkInformation NO_NETWORK = new NetworkInformation("NO_NETWORK", "(none)",NetworkConstants.NETWORK_ICON256, NetworkConstants.NETWORK_ICON, "No network selected" );
+    public final static NetworkInformation NO_NETWORK = new NetworkInformation(new NoteBytes("NO_NETWORK"), "(none)", new Image( AppConstants.NETWORK_ICON256), new Image( AppConstants.NETWORK_ICON), "No network selected" );
     
     public static final String UNKNOWN_LOCATION = "Unknown";
 
-    private SimpleStringProperty m_currentNetworkId = new SimpleStringProperty(null);
+    private SimpleObjectProperty<NoteBytes> m_currentNetworkId = new SimpleObjectProperty<>(null);
     
+    private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
+
    // private Tooltip m_networkToolTip = new Tooltip("Network");
 
-    private HashMap<String, String>  m_locationsIds = new HashMap<>();
-
-
-    private HashMap<String, Network> m_apps = new HashMap<>();
-    private HashMap<String, Network> m_networks = new HashMap<>();
-    private HashMap<String, Adapter> m_adapters = new HashMap<>();
+    private HashMap<NoteBytes, NetworkLocation>  m_locationsIds = new HashMap<>();
 
     private Stage m_addNetworkStage = null;
 
@@ -141,7 +167,6 @@ public class NetworksData {
     private BufferedButton m_appsBtn;
     private Tooltip m_appsToolTip;
     private BufferedButton m_networkBtn;
-
     private AppsMenu m_appsMenu = null;
     /*private SettingsTab m_settingsTab = null;
     private NetworkTab m_networkTab = null;
@@ -156,10 +181,7 @@ public class NetworksData {
     private SimpleDoubleProperty m_contentWidth;
     private SimpleDoubleProperty m_contentHeight;
 
-
-
     private final Semaphore m_dataSemaphore;
-    private final Semaphore m_fileSemaphore;
    // private String m_localId;
 
     private SimpleStringProperty m_titleProperty;
@@ -176,13 +198,20 @@ public class NetworksData {
     private HBox m_staticContentBox;
     private final HostServicesInterface m_hostServices;
     private AppInterface m_appInterface = null;
+    private NetworkControl m_networkControl = null;
 
     public NetworksData(AppData appData, Stage appStage, HostServicesInterface hostServices) {
         m_dataSemaphore = new Semaphore(1);
-        m_fileSemaphore = new Semaphore(1);
         m_hostServices = hostServices;
         m_appStage = appStage;
         m_appData = appData;
+    }
+
+    public NetworkControl getNetworkControl(){
+        if(m_networkControl == null){
+            m_networkControl = new NetworkControl();
+        }
+        return m_networkControl;
     }
 
     public void init(AppInterface appInterface){
@@ -190,17 +219,17 @@ public class NetworksData {
             
             m_appInterface = appInterface;
            
-
-            getData("data",  ".", "main","root", (onComplete)->{
+            
+            getNotePairTree(new NoteListString("data/./main/root"), (onComplete)->{
                 Object obj = onComplete.getSource().getValue();
-                JsonObject json = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
+                NotePairTree tree = obj != null && obj instanceof NotePairTree ? (NotePairTree) obj : null;
                 
-                if(json != null){
-                    openJson(json);
+                if(tree != null){
+                    openData(tree);
                     initLayout();
                 }else{
                     initLayout();
-                    openJson(null);
+                    openData(null);
                 }
             });
         }
@@ -481,7 +510,7 @@ public class NetworksData {
         return m_appData.getSchedualedExecService();
     }
 
-    public boolean isAppSupported(String networkId){
+    public boolean isAppSupported(NoteBytes networkId){
         if(networkId != null){
             NetworkInformation [] supportedApps = m_appInterface.getSupportedApps();
 
@@ -494,7 +523,7 @@ public class NetworksData {
         return false;
     }
 
-    public boolean isNetworkSupported(String networkId){
+    public boolean isNetworkSupported(NoteBytes networkId){
         if(networkId != null){
             NetworkInformation [] supportedNetworks = m_appInterface.getSupportedApps();
 
@@ -549,105 +578,71 @@ public class NetworksData {
 
         return getExecService().submit(task);
     }
+   
 
-    private void openJson(JsonObject networksObject) {
-        if (networksObject != null) {
 
-            JsonElement adaptersArrayElement = networksObject.get("adapters");
 
-            JsonArray adapterArray = adaptersArrayElement != null && adaptersArrayElement.isJsonArray() ? adaptersArrayElement.getAsJsonArray() : new JsonArray();
-     
-            for(JsonElement element : adapterArray){
-                if(element != null && element.isJsonObject()){
-                    JsonObject jsonObject = element.getAsJsonObject();
-                    JsonElement networkIdElement = jsonObject.get("networkId");
 
-                    if (networkIdElement != null) {
-                        String networkId = networkIdElement.getAsString();
-
-                        Adapter adapter = createAdapter(networkId);
-                        if(adapter != null){
-                            addAdapter(adapter, false);
-                        }
-                    }
-                }
-            }
-
-            JsonElement jsonNetArrayElement = networksObject.get("netArray");
-            
-            JsonElement stageElement = networksObject.get("stage");
-            JsonElement currentNetworkIdElement = networksObject.get("currentNetworkId");
-
-          
-            JsonArray jsonArray = jsonNetArrayElement != null && jsonNetArrayElement.isJsonArray() ? jsonNetArrayElement.getAsJsonArray() : new JsonArray();
-            
+    private void openData(NotePairTree networksTree) {
+        NoteBytePair locationsPair = networksTree != null ? networksTree.get("locations") : null;
         
-            for (JsonElement element : jsonArray) {
-                if(element != null && element.isJsonObject()){
-                    JsonObject jsonObject = element.getAsJsonObject();
-                    JsonElement networkIdElement = jsonObject.get("networkId");
+        if (locationsPair != null) {
+            NotePairTree locationsTree = locationsPair.getValueAsNotePairTree();
 
-                    if (networkIdElement != null) {
-                        String networkId = networkIdElement.getAsString();
+            NoteBytePair jsonNetArrayElement = locationsTree.get("networks") ;
+            NoteBytePair appsArrayElement = locationsTree.get("apps");
 
-                        Network network = createNetwork(networkId);
-                        if(network != null){
-                            addNetwork(network, false);
-                        }
-                    }
+
+            NoteBytes[] noteBytesArray = jsonNetArrayElement != null  ? jsonNetArrayElement.getValueAsNoteBytesArray().getAsArray() : new NoteBytes[0];
+            
+            for (NoteBytes noteBytes : noteBytesArray) {
+                Network network = createNetwork(noteBytes);
+                if(network != null){
+                    addNetwork(network, false);
                 }
             }
-            String currentNetworkString = currentNetworkIdElement != null && currentNetworkIdElement.isJsonPrimitive() ? currentNetworkIdElement.getAsString() : null; 
+            
+            NoteBytePair currentNetworkIdPair = networksTree.get("currentNetworkId");
+            NoteBytes currentNetworkId = currentNetworkIdPair != null && currentNetworkIdPair.getValue().byteLength() > 0 ? currentNetworkIdPair.getValue() : null; 
           
-            if(currentNetworkString != null && getNetworkInterface(currentNetworkString) != null){
+            if(currentNetworkId != null && getNetwork(currentNetworkId) != null){
                 
-                m_currentNetworkId.set(currentNetworkString); 
+                m_currentNetworkId.set(currentNetworkId); 
             }else{
                 m_currentNetworkId.set(null);
             }
             
         
-            JsonElement appsArrayElement = networksObject.get("apps");
+      
 
+            NoteBytes[] appsArray = appsArrayElement != null  ? appsArrayElement.getValueAsNoteBytesArray().getAsArray() : new NoteBytes[0];
+            
+             for (NoteBytes noteBytes : appsArray) {
 
-            JsonArray appsArray = appsArrayElement != null && appsArrayElement.isJsonArray() ? appsArrayElement.getAsJsonArray() : new JsonArray();
-
-          
-            for (JsonElement element : appsArray) {
-                if(element != null){
-                    JsonObject jsonObject = element.getAsJsonObject();
-                    JsonElement networkIdElement = jsonObject.get("networkId");
-
-                    if (networkIdElement != null) {
-                        String networkId = networkIdElement.getAsString();
-
-                        Network app = createApp(networkId);
-                        if(app != null){
-                            addApp(app, false);
-                        }
-
-                    }
+                Network app = createApp(noteBytes);
+                if(app != null){
+                    addApp(app, false);
                 }
             }
+            NoteBytePair stagePair = networksTree.get("stage");
             
-            if (stageElement != null && stageElement.isJsonObject()) {
+            if (stagePair != null) {
 
-                JsonObject stageObject = stageElement.getAsJsonObject();
-                JsonElement stagePrevXElement = stageObject.get("prevX");
-                JsonElement stagePrevYElement = stageObject.get("prevY");
+                NotePairTree stageTree = stagePair.getValueAsNotePairTree();
 
-                JsonElement stageWidthElement = stageObject.get("width");
-                JsonElement stageHeightElement = stageObject.get("height");
-                JsonElement stagePrevWidthElement = stageObject.get("prevWidth");
-                JsonElement stagePrevHeightElement = stageObject.get("prevHeight");
+                NoteBytePair stagePrevXElement = stageTree.get("prevX");
+                NoteBytePair stagePrevYElement = stageTree.get("prevY");
+                NoteBytePair stageWidthElement = stageTree.get("width");
+                NoteBytePair stageHeightElement = stageTree.get("height");
+                NoteBytePair stagePrevWidthElement = stageTree.get("prevWidth");
+                NoteBytePair stagePrevHeightElement = stageTree.get("prevHeight");
+                NoteBytePair iconStyleElement = stageTree.get("iconStyle");
+                NoteBytePair stageMaximizedElement = stageTree.get("maximized");
 
-                JsonElement iconStyleElement = stageObject.get("iconStyle");
-                JsonElement stageMaximizedElement = stageObject.get("maximized");
-
-                boolean maximized = stageMaximizedElement == null ? false : stageMaximizedElement.getAsBoolean();
-                String iconStyle = iconStyleElement != null ? iconStyleElement.getAsString() : IconStyle.ICON;
-                m_prevX = stagePrevXElement != null && stagePrevXElement.isJsonPrimitive() ? stagePrevXElement.getAsDouble() : -1;
-                m_prevY = stagePrevYElement != null && stagePrevYElement.isJsonPrimitive() ? stagePrevYElement.getAsDouble() : -1;
+                boolean maximized = stageMaximizedElement == null ? false : stageMaximizedElement.getValue().getAsBoolean();
+                String iconStyle = iconStyleElement != null ? iconStyleElement.getValue().getAsString() : IconStyle.ICON;
+                m_prevX = stagePrevXElement != null ? stagePrevXElement.getValue().getAsDouble() : -1;
+                m_prevY = stagePrevYElement != null ? stagePrevYElement.getValue().getAsDouble() : -1;
 
                 m_stageIconStyle.set(iconStyle);
                 setStagePrevWidth(Stages.DEFAULT_STAGE_WIDTH);
@@ -655,43 +650,32 @@ public class NetworksData {
 
                 if (!maximized) {
 
-                    setStageWidth(stageWidthElement.getAsDouble());
-                    setStageHeight(stageHeightElement.getAsDouble());
+                    setStageWidth(stageWidthElement.getValue().getAsDouble());
+                    setStageHeight(stageHeightElement.getValue().getAsDouble());
                 } else {
-                    double prevWidth = stagePrevWidthElement != null && stagePrevWidthElement.isJsonPrimitive() ? stagePrevWidthElement.getAsDouble() : Stages.DEFAULT_STAGE_WIDTH;
-                    double prevHeight = stagePrevHeightElement != null && stagePrevHeightElement.isJsonPrimitive() ? stagePrevHeightElement.getAsDouble() : Stages.DEFAULT_STAGE_HEIGHT;
+                    double prevWidth = stagePrevWidthElement != null  ? stagePrevWidthElement.getValue().getAsDouble() : Stages.DEFAULT_STAGE_WIDTH;
+                    double prevHeight = stagePrevHeightElement != null ? stagePrevHeightElement.getValue().getAsDouble() : Stages.DEFAULT_STAGE_HEIGHT;
                     setStageWidth(prevWidth);
                     setStageHeight(prevHeight);
                     setStagePrevWidth(prevWidth);
                     setStagePrevHeight(prevHeight);
                 }
                 setStageMaximized(maximized);
-            }
-          
-            
+            } 
              
 
-
         }else{
-        
-            String[] appIds = m_appInterface.getDefaultAppIds();
-            if(appIds != null){
-                for(String appId : appIds){
 
-                    Network app = createApp(appId);
-                    if(app != null){
-                        addApp(app, false);
-                    }
+            NoteBytes[] appIds = m_appInterface.getDefaultAppIds();
+            if(appIds != null){
+                for(NoteBytes appId : appIds){
+                    installApp(appId, false);
                 }
             }
-            String[] networkIds = m_appInterface.getDefaultNetworkIds();
+            NoteBytes[] networkIds = m_appInterface.getDefaultNetworkIds();
             if(networkIds != null){
-                for(String networkId : networkIds){
-
-                    Network network = createNetwork(networkId);
-                    if(network != null){
-                        addNetwork(network, false);
-                    }
+                for(NoteBytes networkId : networkIds){
+                    installNetwork(networkId, false);
                 }
                 if(networkIds.length == 1){
                     m_currentNetworkId.set(networkIds[0]);
@@ -700,45 +684,29 @@ public class NetworksData {
 
 
             save();
+            return;
         }
+      
     }
 
 
-    private Network createApp(String networkId){
+
+
+    private Network createApp(NoteBytes networkId){
         if(getApp(networkId) == null){
 
-            String locationId = FriendlyId.createFriendlyId();
-            Network app = m_appInterface.createApp(networkId, locationId);
-
+            Network app = m_appInterface.createApp(networkId);
+          
             if(app != null){
-                m_locationsIds.put(locationId, app.getName());
                 return app;
             }
         }
         return null;
     }
 
-    private Network createNetwork(String networkId){
-        
-        if(getNetworkInterface(networkId) == null){
-            String locationId = FriendlyId.createFriendlyId();
-            Network network = m_appInterface.createNetwork(networkId, locationId);
-            
-            if(network != null){
-             
-                m_locationsIds.put(locationId, network.getName());
-                return network;
-            }
-        }
-        return null;
-    }
-
-    private Adapter createAdapter(String networkId){
-        
-        if(getAdapter(networkId) == null){
-
-            Adapter network = m_appInterface.createAdapter(networkId);
-            
+    private Network createNetwork(NoteBytes networkId){
+        if(getNetwork(networkId) == null){
+            Network network = m_appInterface.createNetwork(networkId);
             if(network != null){
                 return network;
             }
@@ -794,35 +762,20 @@ public class NetworksData {
         return m_stagePrevHeight;
     }
 
-    public JsonObject getStageJson() {
-        JsonObject json = new JsonObject();
-        json.addProperty("prevX", m_prevX);
-        json.addProperty("prevY", m_prevY);
-        json.addProperty("maximized", getStageMaximized());
-        json.addProperty("width", getStageWidth());
-        json.addProperty("height", getStageHeight());
-        json.addProperty("prevWidth", getStagePrevWidth());
-        json.addProperty("prevHeight", getStagePrevHeight());
-        return json;
+    public NotePairTree getStageTree() {
+        NotePairTree tree = new NotePairTree();
+        tree.add("prevX", m_prevX);
+        tree.add("prevY", m_prevY);
+        tree.add("maximized", getStageMaximized());
+        tree.add("width", getStageWidth());
+        tree.add("height", getStageHeight());
+        tree.add("prevWidth", getStagePrevWidth());
+        tree.add("prevHeight", getStagePrevHeight());
+        return tree;
     }
 
 
 
-
-    public void openHostUrl(String url) {
-        
-    }
-
-    private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
-
-    public void addMsgListener(NoteMsgInterface item) {
-        if (item != null && !m_msgListeners.contains(item)) {
-            String locationId = item.getId();
-            if(getLocationString(locationId) != null){
-                m_msgListeners.add(item);
-            }
-        }
-    }
 
     public boolean removeMsgListener(NoteMsgInterface item){
         if(item != null){
@@ -832,7 +785,7 @@ public class NetworksData {
         return false;
     }
 
-    private void sendMessage(int code, long timeStamp,String networkId, String msg){
+    private void sendMessage(int code, long timeStamp, String networkId, String msg){
         m_appsMenu.sendMessage(code, timeStamp, networkId, msg);
         
 
@@ -845,35 +798,19 @@ public class NetworksData {
         }
         
     }
-
-    private void sendMessage(int code, long timeStamp, String networkId, Number num){
- 
-
-        for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, num);
-        }
-    }
-
-
+    
     private boolean addApp(Network app, boolean isSave) {
-        // int i = 0;
-
-        String networkId = app.getNetworkId();
-
+        NoteBytes networkId = app.getNetworkId();
         if (getApp(networkId) == null) {
-            m_apps.put(networkId, app);
+            
+            NetworkLocation networkLocation = new NetworkLocation(app, NoteConstants.APPS);
+            m_locationsIds.put( networkId, networkLocation);
             
             if(isSave){
                 save();
                 long timestamp = System.currentTimeMillis();
-                JsonObject resultJson = new JsonObject();
-                resultJson.addProperty("code", NoteConstants.LIST_ITEM_ADDED);
-                resultJson.addProperty("neworkId", APPS);
-                resultJson.addProperty("timeStamp", timestamp);
-                resultJson.addProperty("id", networkId);
-                
-            
-                sendMessage( NoteConstants.LIST_ITEM_ADDED, timestamp, APPS, resultJson.toString());
+
+                sendMessage( NoteConstants.LIST_ITEM_ADDED, timestamp, APPS, "");
 
             }
             return true;
@@ -882,85 +819,35 @@ public class NetworksData {
     }
 
     private boolean addNetwork(Network network, boolean isSave) {
-        // int i = 0;
-
-        String networkId = network.getNetworkId();
-
-        if (getNetworkInterface(networkId) == null) {
-               
-        
-            m_networks.put(network.getNetworkId(), network);
+        NoteBytes networkId = network.getNetworkId();
+        if (getNetwork(networkId) == null) {
+            NetworkLocation networkLocation = new NetworkLocation(network, NoteConstants.NETWORKS);
+            m_locationsIds.put( networkId, networkLocation);
            
             if(isSave){
                 long timestamp = System.currentTimeMillis();
-                JsonObject resultJson = new JsonObject();
-                resultJson.addProperty("code", NoteConstants.LIST_ITEM_ADDED);
-                resultJson.addProperty("type", NETWORKS);
-                resultJson.addProperty("timeStamp", timestamp);
-                resultJson.addProperty("id", networkId);
-                
-            
-                sendMessage( NoteConstants.LIST_ITEM_ADDED, timestamp, NETWORKS, resultJson.toString());
-
-
+                sendMessage( NoteConstants.LIST_ITEM_ADDED, timestamp, NETWORKS, "");
                 save();
             }
-         
 
             return true;
         }
         return false;
     }
 
-    private boolean addAdapter(Adapter network, boolean isSave) {
-        // int i = 0;
-
-        String networkId = network.getAdapterId();
-
-        if (getAdapter(networkId) == null) {
-               
-        
-            m_adapters.put(network.getAdapterId(), network);
-           
-            if(isSave){
-                long timestamp = System.currentTimeMillis();
-                JsonObject resultJson = new JsonObject();
-                resultJson.addProperty("code", NoteConstants.LIST_ITEM_ADDED);
-                resultJson.addProperty("type", ADAPTERS);
-                resultJson.addProperty("timeStamp", timestamp);
-                resultJson.addProperty("id", networkId);
-                
-            
-                sendMessage( NoteConstants.LIST_ITEM_ADDED, timestamp, ADAPTERS, resultJson.toString());
-
-
-                save();
-            }
-         
-
-            return true;
-        }
-        return false;
+    public NetworkInformation getLocationNetworkInformation(NoteBytes networkId){
+        NetworkLocation location = m_locationsIds.get(networkId);
+        return location != null ? location.getNetworkInformation() : null;
     }
 
-    
-    public String getLocationString(String locationId){
-        
-        String locationString = locationId != null ? m_locationsIds.get(locationId) : null;
-        return  locationString != null ?  locationString : UNKNOWN_LOCATION;
-    }
-
-    private boolean removeNetwork(String networkId, boolean isSave){       
+    private boolean removeNetwork(NoteBytes networkId, boolean isSave){       
     
         if(networkId != null) {
-            
-            Network network = m_networks.remove(networkId);
-
+            NetworkLocation location = m_locationsIds.remove(networkId);
           
-        
-         
-            if (network != null) {
-                String name = network.getName();
+            if (location != null) {
+                Network network = location.getNetwork();
+                network.shutdown();
 
                 if(m_currentNetworkId.get() != null && m_currentNetworkId.get().equals(networkId)){
                     m_currentNetworkId.set(null);
@@ -972,23 +859,8 @@ public class NetworksData {
                 
                 if(isSave){
                     long timestamp = System.currentTimeMillis();
-                    JsonObject resultJson = new JsonObject();
-                    resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
-                    resultJson.addProperty("type", NETWORKS);
-                    resultJson.addProperty("timeStamp", timestamp);
-                    resultJson.addProperty("id", networkId);
-                    resultJson.addProperty("name", name);
-                
-                    sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, NETWORKS,  resultJson.toString());
-
+                    sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, NETWORKS, "");
                     save();
-                }
-                network.shutdown();
-
-                
-                String locationId = getLocationIdByName(name);
-                if(locationId != null){
-                    m_locationsIds.remove(locationId);
                 }
 
                 return true;
@@ -997,52 +869,9 @@ public class NetworksData {
      
         return false;
         
-    }
-
-    
-
-    private boolean removeAdapter(String adapterId, boolean isSave){       
-    
-        if(adapterId != null) {
-            
-            Adapter adapter = m_adapters.remove(adapterId);
-     
-            if (adapter != null) {
-               
-
-                adapter.shutdown();
-
-                if(isSave){
-                    long timestamp = System.currentTimeMillis();
-                    JsonObject resultJson = new JsonObject();
-                    resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
-                    resultJson.addProperty("type", ADAPTERS);
-                    resultJson.addProperty("timeStamp", timestamp);
-                    resultJson.addProperty("id", adapterId);
-                    
-                    sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, ADAPTERS,  resultJson.toString());
-
-                    save();
-                }
-                return true;
-            }
-        }
-     
-        return false;
-        
-    }
-
-
-
-  
-    private SimpleObjectProperty<LocalDateTime> m_shutdownNow = new SimpleObjectProperty<>(null);
-
-    public SimpleObjectProperty<LocalDateTime> shutdownNowProperty() {
-        return m_shutdownNow;
     }
 
     public void shutdown() {
-        m_shutdownNow.set(LocalDateTime.now());
 
         removeAllApps(false);
 
@@ -1084,169 +913,102 @@ public class NetworksData {
     }
 
 
-    private Network getAppNetwork(String networkId) {
-        if (networkId != null) {
-            return m_apps.get(networkId);
-        }
-        return null;
+    private Network getApp(NoteBytes networkId) {
+        
+        NetworkLocation location = m_locationsIds.get(networkId);
+
+        return location != null ? location.getNetwork() : null;
+  
     }
 
 
-
-    public NoteInterface getApp(String networkId) {
-        if(networkId != null){
-            Network network = getAppNetwork(networkId);
-            return network != null ? network.getNoteInterface() : null;
-        }
-        return null;
+    private void installNetwork(NoteBytes networkId){
+        installNetwork(networkId, true);
     }
 
-
-    private void installNetwork(String networkId){
-        if(getNetworkInterface(networkId) == null && isNetworkSupported(networkId)){
-           
-            addNetwork(createNetwork(networkId), true);
-           
+    private void installNetwork(NoteBytes networkId, boolean isSave){
+        if(isNetworkSupported(networkId)){           
+            addNetwork(createNetwork(networkId), isSave);
         }
     }
 
-    private void installApp(String networkId){
+    private void installApp(NoteBytes networkId){
         installApp(networkId, true);
     }
 
-    private void installApp(String networkId, boolean save) {
-
+    private void installApp(NoteBytes networkId, boolean save) {
         if(getApp(networkId) == null && isAppSupported(networkId)){
            
             addApp(createApp(networkId), true);
            
         }
-
     }
 
 
-    private void addAllApps(boolean save) {
+    private void addAllApps(boolean isSave) {
         NetworkInformation[] supportedApps = m_appInterface.getSupportedApps();
         for (NetworkInformation networkInfo : supportedApps) {
             if (getApp(networkInfo.getNetworkId()) == null) {
                 installApp(networkInfo.getNetworkId(), false);
             }
         }
-       // updateInstallables();
-        if(save){
+        if(isSave){
             save();
         }
     }
 
     private void removeAllApps(boolean isSave) {
-        JsonArray result = new JsonArray();
-        for (Map.Entry<String, Network> entry : m_apps.entrySet()) {
-            
-            Network app = entry.getValue();
-            
-            app.shutdown();
-            if(isSave){
-                result.add(app.getJsonObject());
+        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_locationsIds.entrySet()) {
+            NetworkLocation location = entry.getValue();
+            if(location.isApp()){
+                removeApp(entry.getKey(), false);
             }
         }
-
-        m_apps.clear();
-
         if(isSave){
             long timestamp = System.currentTimeMillis();
-            JsonObject resultJson = new JsonObject();
-            resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
-            resultJson.addProperty("networkId", APPS);
-            resultJson.addProperty("timeStamp", timestamp);
-            resultJson.add("ids", result);
-
-            sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, APPS, resultJson.toString());
-
+            sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, APPS, "");
             save();
         }
-        
     }
 
-    private void removeAllNetworks(boolean isSave) {
-        JsonArray result = new JsonArray();
-        for (Map.Entry<String, Network> entry : m_networks.entrySet()) {
-            
-            Network network = entry.getValue();
-            
-            network.shutdown();
-            if(isSave){
-                result.add(network.getJsonObject());
+     private void removeAllNetworks(boolean isSave) {
+        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_locationsIds.entrySet()) {
+            NetworkLocation location = entry.getValue();
+            if(location.isNetwork()){
+                removeNetwork(entry.getKey(), false);
             }
         }
-
-        m_networks.clear();
-
         if(isSave){
             long timestamp = System.currentTimeMillis();
-            JsonObject resultJson = new JsonObject();
-            resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
-            resultJson.addProperty("networkId", NETWORKS);
-            resultJson.addProperty("timeStamp", timestamp);
-            resultJson.add("ids", result);
-
-            sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp,NETWORKS, resultJson.toString());
-
+            sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, NETWORKS, "");
             save();
         }
-        
     }
 
 
   
-    private boolean removeApp(String networkId) {
+    private boolean removeApp(NoteBytes networkId) {
         return removeApp(networkId, true);
     }
 
-    private String getLocationIdByName(String name){
-        if(name != null){
-            for (Map.Entry<String, String> entry : m_locationsIds.entrySet()) {
-                String value = entry.getValue();
-                if(value.equals(name)){
-                    return entry.getKey();
-                }
-            }
-        }
-        return null;
-    }
 
+    private boolean removeApp(NoteBytes networkId, boolean isSave) {
 
+        NetworkLocation location = m_locationsIds.get(networkId);
 
-    private boolean removeApp(String networkId, boolean isSave) {
-        boolean success = false;
-
-        Network app = m_apps.remove(networkId);
-        String name = app.getName();
-        if(app != null){
-           
-
+        if(location != null && location.isApp()){
+            location.getNetwork().shutdown();
             if(isSave){
                 long timestamp = System.currentTimeMillis();
-                JsonObject resultJson = new JsonObject();
-                resultJson.addProperty("code", NoteConstants.LIST_ITEM_REMOVED);
-                resultJson.addProperty("networkId", APPS);
-                resultJson.addProperty("timeStamp", timestamp);
-                resultJson.addProperty("id", networkId);
-                resultJson.addProperty("name", name);
-
-                sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, APPS, resultJson.toString());
+    
+                sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, APPS, "");
 
                 save();
             }
-            app.shutdown();
+            return true;
         }
 
-        String locationId = getLocationIdByName(networkId);
-        if(locationId != null){
-            m_locationsIds.remove(locationId);
-        }
-                    
-    
-        return success;
+        return false;
     }
 
     /*public void broadcastNote(JsonObject note) {
@@ -1275,45 +1037,16 @@ public class NetworksData {
         });
     }*/
 
-    private Network getNetwork(String networkId) {
-        if (networkId != null) {
-            return m_networks.get(networkId);
-        }
-        return null;
+
+
+    private Network getNetwork(NoteBytes networkId) {
+        NetworkLocation location = m_locationsIds.get(networkId);
+        return location != null ? location.getNetwork() : null;
     }
 
-    private Adapter getAdapter(String networkId) {
-        if (networkId != null) {
-            return m_adapters.get(networkId);
-        }
-        return null;
-    }
 
-    public NoteInterface getNetworkInterface(String networkId) {
-        if (networkId != null) {
-   
-            Network network = getNetwork(networkId);
-
-            return network != null ? network.getNoteInterface() : null;
-        }
-        return null;
-    }
-
-    public AdapterNoteInterface getAdapterInterface(String networkId) {
-        if (networkId != null) {
-   
-            Adapter adapter = getAdapter(networkId);
-
-            return adapter != null ? adapter.getNoteAdapterInterface() : null;
-        }
-        return null;
-    }
-
-    public TabInterface getNetworkTab(String networkId){
-       
-
-       
-        
+    public TabInterface getNetworkTab(NoteBytes networkId){
+           
         Network noteInterface = getNetwork(networkId);
       
         if(noteInterface != null){
@@ -1335,76 +1068,57 @@ public class NetworksData {
         });
     }*/
 
-    public JsonArray getAppsArray(){
-        JsonArray jsonArray = new JsonArray();
-
-        for (Map.Entry<String, Network> entry : m_apps.entrySet()) {
-            
-            Network app = entry.getValue();
-
-            jsonArray.add(app.getJsonObject());
-        }
-
-
-        return jsonArray;
-    }
     
-    public JsonArray getNetworksArray(){
-        JsonArray jsonArray = new JsonArray();
+    public NotePairTree getLocationsTree(){
+        NoteBytesArray networksArray = new NoteBytesArray();
+        NoteBytesArray appsArray = new NoteBytesArray();
 
-        for (Map.Entry<String, Network> entry : m_networks.entrySet()) {
+        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_locationsIds.entrySet()) {
             
-            Network network = entry.getValue();
+            NetworkLocation networkLocation = entry.getValue();
+            int type = networkLocation.getLocationType();
+            Network network = networkLocation.getNetwork();
 
-            jsonArray.add(network.getJsonObject());
+            switch(type){
+                case NoteConstants.APPS:
+                    appsArray.add(network.getNetworkId());
+                break;
+                case NoteConstants.NETWORKS:
+                    networksArray.add(network.getNetworkId());
+                break;
+            }
         }
 
-
-        return jsonArray;
+        return new NotePairTree(new NoteBytePair[]{
+            new NoteBytePair(APPS, appsArray),
+            new NoteBytePair(NETWORKS, networksArray)
+        });
     }
 
-    public JsonArray getAdaptersArray(){
-        JsonArray jsonArray = new JsonArray();
-
-        for (Map.Entry<String, Adapter> entry : m_adapters.entrySet()) {
-            
-            Adapter adapter = entry.getValue();
-
-            jsonArray.add(adapter.getJsonObject());
-        }
 
 
-        return jsonArray;
-    }
-
-  
-
-    private JsonObject getSaveJson(){
-        JsonObject fileObject = new JsonObject();
-        JsonArray appsArray = getAppsArray();
-        JsonArray networksArray = getNetworksArray();
-        JsonArray adaptersArray = getAdaptersArray();
+    private NotePairTree getSaveTree(){
+        
+        NotePairTree tree = new NotePairTree();
 
         if(m_currentNetworkId.get() != null){
-            fileObject.addProperty("currentNetworkId", m_currentNetworkId.get());
+            tree.add("currentNetworkId", m_currentNetworkId.get());
         }
-        fileObject.add("netArray", networksArray);
-        fileObject.add("apps", appsArray);
-        fileObject.add("adapters", adaptersArray);
-        fileObject.add("stage", getStageJson());
-        return fileObject;
+        tree.add("locations", getLocationsTree());
+        tree.add("stage", getStageTree());
+        return tree;
     }
     
-    public void save() {
+    private void save() {
        
-        save("data", ".", "main","root", getSaveJson());
+        save(new NoteListString("./data/main/root"), getSaveTree());
 
     }
 
-    public void openStatic(String networkId){
+    public void openStatic(NoteBytes networkId){
         TabInterface currentTab = m_currentMenuTab.get();
 
-        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             return;
@@ -1423,10 +1137,10 @@ public class NetworksData {
     }
 
    
-    public void openNetwork(String networkId){
+    public void openNetwork(NoteBytes networkId){
         TabInterface currentTab = m_currentMenuTab.get();
         
-        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             currentTab.setStatus(NoteConstants.STATUS_MINIMIZED);
@@ -1454,10 +1168,10 @@ public class NetworksData {
         }
     }
 
-    public void openApp(String networkId){
+    public void openApp(NoteBytes networkId){
         TabInterface currentTab = m_currentMenuTab.get();
 
-        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             
@@ -1467,7 +1181,7 @@ public class NetworksData {
         }
       
 
-        Network appNetwork = getAppNetwork(networkId);
+        Network appNetwork = getApp(networkId);
 
 
         if(appNetwork != null){
@@ -1482,23 +1196,22 @@ public class NetworksData {
         }
     }
   
+    public List<NetworkInformation> getAppsContainsAllKeyWords(String... keyWords){
+        return getLocationContainsAllKeyWords(NoteConstants.APPS, keyWords);
+    }
 
+    public List<NetworkInformation> getNetworkssContainsAllKeyWords(String... keyWords){
+        return getLocationContainsAllKeyWords(NoteConstants.NETWORKS, keyWords);
+    }
 
-    public List<NoteInterface> getAppsContainsAllKeyWords(String... keyWords){
-        //m_searchList = m_marketsList.stream().filter(item -> item.getBaseSymbol().equals(base)).collect(Collectors.toList());
-        ArrayList<NoteInterface> list = new ArrayList<>();
+    public List<NetworkInformation> getLocationContainsAllKeyWords(int type, String... keyWords){
+        ArrayList<NetworkInformation> list = new ArrayList<>();
         
-        
-        for (Map.Entry<String, Network> entry : m_apps.entrySet()) {
-            
-            Network app = entry.getValue();
-
-            if(app != null && app instanceof Network){
-
-                if(containsAllKeyWords(app, keyWords)){
-                    list.add(app.getNoteInterface());
-                }
-
+        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_locationsIds.entrySet()) {
+            NetworkLocation location = entry.getValue();
+            Network network = location.getNetwork();
+            if(location.getLocationType() == type && containsAllKeyWords(network, keyWords)){
+                list.add(network.getNetworkInformation());
             }
         }
 
@@ -1537,12 +1250,12 @@ public class NetworksData {
     }
 
 
-    private TabInterface getStaticTab(String networkId){
+    private TabInterface getStaticTab(NoteBytes networkId){
 
         if(m_currentMenuTab.get() != null && m_currentMenuTab.get().getAppId().equals(networkId)){
             return m_currentMenuTab.get();
         }
-        switch(networkId){
+        switch(networkId.getAsString()){
             case ManageAppsTab.NAME:
                 return new ManageAppsTab();
 
@@ -1733,9 +1446,6 @@ public class NetworksData {
      
     }
 
-    public void releaseDataSemaphore(){
-        m_dataSemaphore.release();
-    }
 
     public Future<?> removeData(  String scope, String type, EventHandler<WorkerStateEvent> onFinished){
 
@@ -1854,36 +1564,35 @@ public class NetworksData {
 
    
 
-    public void save(String version, String id, String scope, String type, JsonObject json) {
-        if(id != null && version != null && scope != null && type != null){ 
-            getIdDataFile(version,id,scope,type,(onDataFile)->{
+    public void save(NoteListString saveLocation, NotePairTree tree) {
+        if(saveLocation != null){
+            getNoteFile(saveLocation, (onDataFile)->{
                 Object dataObject = onDataFile.getSource().getValue();
-                if(dataObject != null && dataObject instanceof File){
-                    File idDataFile = (File) dataObject;
-                    
+                if(dataObject != null && dataObject instanceof NoteFile){
+                    NoteFile noteFile = (NoteFile) dataObject;
+                    File file = noteFile.getFile();
+
                     Task<Object> task = new Task<Object>() {
                         @Override
                         public Object call() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException, InterruptedException, ShortBufferException{
-                            
-                            m_fileSemaphore.acquire();
-                            Utils.saveJson(getAppKey(), json, idDataFile);
-                           // Utils.saveEncryptedData(getAppKey(), json.toString().getBytes(), idDataFile);
-                            m_fileSemaphore.release();
+                            noteFile.acquire();
+                                                
+                            Utils.saveEncryptedData(getAppKey(), tree.get(), file);
                             return true;
                         }
                     };
         
                     task.setOnFailed((onFailed)->{
-                        m_dataSemaphore.release();
+                        noteFile.release();
                         try {
-                            Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (getData):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                            Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (save):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                         } catch (IOException e1) {
                         
                         }
                     });
         
                     task.setOnSucceeded((onComplete)->{
-                       
+                        noteFile.release();
                     });
         
                     getExecService().submit(task);
@@ -1894,99 +1603,137 @@ public class NetworksData {
     }
 
 
-    public JsonObject getDataBlocking(String version, String id, String scope, String type) throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, InterruptedException, IOException{
-        
-            File idDataFile = getIdDataFileBlocking(version, id, scope, type);
+    public static Future<?> getNotePairTree(NoteFile noteFile, EventHandler<WorkerStateEvent> onComplete){
+     
+  
+        File file = noteFile.getFile();
 
-            m_fileSemaphore.acquire();
-            JsonObject json = Utils.readJsonFile(getAppKey(), idDataFile);
-            m_fileSemaphore.release();
-            return json;
-    }
+        PipedOutputStream os = new PipedOutputStream();
+        noteFile.readEncryptedFile(os, onSuccess->{
 
+        }, onFailed->{
 
-    public Future<?> getData(String version, String id, String scope, String type, EventHandler<WorkerStateEvent> onComplete){
-        if(id != null && version != null && scope != null && type != null){ 
-            return getIdDataFile(version,id,scope,type,(onDataFile)->{
+        });
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException, InterruptedException, ShortBufferException{
+                noteFile.acquire();
             
-                Object dataObject = onDataFile.getSource().getValue();
-                if(dataObject != null && dataObject instanceof File){
-                    File idDataFile = (File) dataObject;
+                PipedInputStream is = new PipedInputStream(os);
 
-                    Task<Object> task = new Task<Object>() {
-                        @Override
-                        public Object call() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException, InterruptedException, ShortBufferException{
-                            
-                            m_fileSemaphore.acquire();
-                            JsonObject json = Utils.readJsonFile(getAppKey(), idDataFile);
-                            m_fileSemaphore.release();
-                            return json;
-                        }
-                    };
+                NotePairTree notePairTree = new NotePairTree(is);
+
+                return notePairTree;
+            }
+        };
+
+        task.setOnFailed((onFailed)->{
+            noteFile.release();
+            Utils.returnObject(null,getExecService(), onComplete, null);
+            try {
+                Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (getNotePairTree):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException e1) {
+            
+            }
+        });
+
+        task.setOnSucceeded((onSucceeded)->{
+            noteFile.release();
+            Utils.returnObject(onSucceeded.getSource().getValue(), getExecService(), onComplete);
+        });
+
+        getExecService().submit(task);
         
-                    task.setOnFailed((onFailed)->{
-                        m_dataSemaphore.release();
-                        Utils.returnObject(null,getExecService(), onComplete, null);
-                        try {
-                            Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (getData):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                        } catch (IOException e1) {
-                        
-                        }
-                    });
-        
-                    task.setOnSucceeded(onComplete);
-        
-                    getExecService().submit(task);
-                }
-            });
+    }
+
+  
+
+    private Future<?> getNoteFile(NoteListString path, EventHandler<WorkerStateEvent> onComplete){
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException, InterruptedException{
+                m_dataSemaphore.acquire();
            
-        }
-        return null;
-    }
-
-
-
-    public File getIdDataFileBlocking(String version, String id, String scope, String type) throws InterruptedException, InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException{
-        m_dataSemaphore.acquire();
-        File idDataFile = getIdDataFile(version,id, scope, type);
-        m_dataSemaphore.release();
-
-        return idDataFile;
-    }
-
-
-    public Future<?> getIdDataFile(String version, String id, String scope, String type, EventHandler<WorkerStateEvent> onComplete){
-        if(id != null && version != null && scope != null && type != null){ 
-            Task<Object> task = new Task<Object>() {
-                @Override
-                public Object call() throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException, InterruptedException{
-                    return getIdDataFileBlocking(version, id, scope, type);                   
-                }
-            };
-
-            task.setOnFailed((onFailed)->{
+                NoteFile idDataFile = getIdDataFile(path);
                 m_dataSemaphore.release();
-                try {
-                    Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (getData):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                } catch (IOException e1) {
-                
-                }
-                Utils.returnObject(null, getExecService(), onComplete, null);
-            });
+                return idDataFile;
+            }
+        };
 
-            task.setOnSucceeded(onComplete);
+        task.setOnFailed((onFailed)->{
+         
+            m_dataSemaphore.release();
+            
+            try {
+                Files.writeString(AppConstants.LOG_FILE.toPath(),"Error: (getData):" + onFailed.getSource().getException().toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException e1) {
+            
+            }
+            Utils.returnObject(null, getExecService(), onComplete, null);
+        });
 
-            return getExecService().submit(task);
-           
-        }
-        return null;
+        task.setOnSucceeded(onComplete);
+
+        return getExecService().submit(task);
+        
+
     }
    
+    private HashMap<NoteListString, NoteFile> m_noteFiles = new HashMap<>();
 
+    private NetworksInterface getNetworksInterface(NoteListString path){
+        return new NetworksInterface(){
 
-    private File getIdDataFile(String version, String id1, String scope, String type) throws IOException, InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException{
+            @Override
+            public void release(){
+                NoteFile noteFile = m_noteFiles.get(path);
+
+                if(noteFile != null && !noteFile.isAquired()){
+                    m_noteFiles.remove(noteFile);
+                }
+            }
+       
+            @Override
+            public ExecutorService getExecService() {
+                return getExecService();
+            }
+
+            @Override
+            public Future<?> readEncryptedFile(PipedOutputStream pipedOutput, EventHandler<WorkerStateEvent> onSucceeded,
+                    EventHandler<WorkerStateEvent> onFailed) {
+                return readEncryptedFile(pipedOutput, onSucceeded, onFailed);
+            }
+
+            @Override
+            public Future<?> writeEncryptedFile( PipedInputStream pipedWriterInput, EventHandler<WorkerStateEvent> onFailed) {
+                return writeEncryptedFile(pipedWriterInput, onFailed);
+            }
+
+            @Override
+            public Future<?> getNoteFile(NoteListString path, EventHandler<WorkerStateEvent> onComplete) {
+                return getNoteFile(path, onComplete);
+            }
+
+        };
+    }
+
+    private NoteFile getIdDataFile(NoteListString path) throws IOException, InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException{
+        NoteFile openFile = m_noteFiles.get(path);
+        if(openFile != null){
+            return openFile;
+        }
+        List<NoteString> pathList = path.getAsList();
+        int pathListSize = pathList.size();
+        NoteBytes version = pathListSize > 0 ? pathList.get(0) : new NoteBytes(".");
+        NoteBytes id1 =  pathListSize > 0 ? pathList.get(1) : new NoteBytes(".");
+        NoteBytes scope = pathListSize > 0 ? pathList.get(2) : new NoteBytes(".");
+        NoteBytes type = pathListSize > 0 ? pathList.get(3) : new NoteBytes(".");
+        
         String id = id1 +":" + version;
         String id2 = type + ":" + scope;
+
         File idDataFile = getIdDataFile();
     
         File dataDir = idDataFile.getParentFile();
@@ -2025,7 +1772,8 @@ public class NetworksData {
                                                     JsonElement fileElement = fileIdObject.get("file");
 
                                                     if(fileElement != null && fileElement.isJsonPrimitive()){
-                                                        return new File(fileElement.getAsString());
+                                                        m_noteFiles.put(path, new NoteFile(path, new File(fileElement.getAsString()), getNetworksInterface()));
+                                                
                                                     }
                                                 }
                                             }
@@ -2049,7 +1797,7 @@ public class NetworksData {
                                     Utils.saveJson(getAppKey(), json, idDataFile);
                                     
                                 
-                                    return newFile;
+                                    return new NoteFile(path, newFile, getNetworksInterface(null)); 
 
                                 }
 
@@ -2108,15 +1856,19 @@ public class NetworksData {
         
     }
 
-    public void verifyAppKey( String networkName, JsonObject note, String locationString, long timeStamp, Runnable onVerified){
+
+
+    public void verifyAppKey( String networkName, JsonObject note, NetworkInformation networkInformation, long timeStamp, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         double lblCol = 170;
         double rowHeight = 22;
+
+
 
         if(note.get("timeStamp") == null && note.get("timestamp") == null){
             note.addProperty("timeStamp", timeStamp);
         }
 
-        String title = "Netnotes - " +networkName + " - Authorize: " + locationString;
+        String title = "Netnotes - " +networkName + " - Authorize: " + networkInformation.getNetworkName();
 
         Stage passwordStage = new Stage();
         passwordStage.getIcons().add(Stages.logo);
@@ -2133,9 +1885,9 @@ public class NetworksData {
         HBox.setHgrow(passwordField, Priority.ALWAYS);
 
 
-        Scene passwordScene = Stages.getAuthorizationScene(passwordStage, title, closeBtn, passwordField, note, locationString, rowHeight, lblCol);
+        Scene passwordScene = Stages.getAuthorizationScene(passwordStage, title, closeBtn, passwordField, note, networkInformation.getNetworkName(), rowHeight, lblCol);
         passwordScene.setFill(null);
-        passwordScene.getStylesheets().add("/css/startWindow.css");
+        passwordScene.getStylesheets().add(Stages.DEFAULT_CSS);
 
         passwordStage.setScene(passwordScene);
         passwordField.setOnAction(e -> {
@@ -2147,12 +1899,14 @@ public class NetworksData {
                 statusStage.show();
                 char[] pass = passwordField.getText().toCharArray();
                 passwordField.setText("");
-                verifyAppPassword(pass, onSucceeded->{
+                verifyAppPassword(pass, onVerified->{
                     statusStage.close();
                     passwordStage.close();
-                    onVerified.run();
-                }, onFailed->{
+                    Utils.returnObject(NoteConstants.VERIFIED, getExecService(), onSucceeded);
+                }, onUnverified->{
+
                     statusStage.close();
+                    Utils.returnException(NoteConstants.ERROR_CANCELED, getExecService(), onFailed);
                 });
             }
         
@@ -2282,356 +2036,6 @@ public class NetworksData {
         return passwordStage;
     }
 
-    public class ManageAdaptersTab extends AppBox  implements TabInterface{
-        public static final String NAME = "Adapters";
-        private SimpleStringProperty m_titleProperty = new SimpleStringProperty(NAME);
-
-        private String m_status = NoteConstants.STATUS_STOPPED;
-        private VBox m_listBox = new VBox();
-
-        private SimpleObjectProperty<NetworkInformation> m_installItemInformation = new SimpleObjectProperty<>(null);
-        private HBox m_installFieldBox;
-        private MenuButton m_installMenuBtn;
-
-        public ManageAdaptersTab(){
-            super(NAME);
-           
-            prefWidthProperty().bind(m_staticContentWidth);
-            prefHeightProperty().bind(m_staticContentHeight);
-            setAlignment(Pos.CENTER);
-            minHeightProperty().bind(m_staticContentHeight);
-    
-            m_listBox.setPadding(new Insets(10));     
-
-            ScrollPane listScroll = new ScrollPane(m_listBox);
-           
-            listScroll.setId("bodyBox");
-
-            HBox adapterListBox = new HBox(listScroll);
-            adapterListBox.setPadding(new Insets(20,40,0, 40));
-        
-
-            HBox.setHgrow(adapterListBox, Priority.ALWAYS);
-            VBox.setVgrow(adapterListBox, Priority.ALWAYS);
-
-            listScroll.prefViewportWidthProperty().bind(adapterListBox.widthProperty().subtract(1));
-            listScroll.prefViewportHeightProperty().bind(m_appStage.getScene().heightProperty().subtract(250));
-
-            listScroll.viewportBoundsProperty().addListener((obs,oldval,newval)->{
-                m_listBox.setMinWidth(newval.getWidth());
-                m_listBox.setMinHeight(newval.getHeight());
-            });
-
-            HBox adapterOptionsBox = new HBox();
-            adapterOptionsBox.setAlignment(Pos.CENTER);
-            HBox.setHgrow(adapterOptionsBox, Priority.ALWAYS);
-            adapterOptionsBox.setPadding(new Insets(0,0,0,0));
-
-    
-           
-
-            VBox bodyBox = new VBox(adapterListBox, adapterOptionsBox);
-            HBox.setHgrow(bodyBox, Priority.ALWAYS);
-            VBox.setVgrow(bodyBox,Priority.ALWAYS);
-
-            updateNetworkList();
-
-            Text installText = new Text("Adapters: ");
-            installText.setFont(Stages.txtFont);
-            installText.setFill(Stages.txtColor);
-
-            String emptyInstallstring = "(Click to select adapter)";
-            m_installMenuBtn = new MenuButton(emptyInstallstring);
-            m_installMenuBtn.setId("arrowMenuButton");
-
-            m_installMenuBtn.showingProperty().addListener((obs,oldval,newval)->{
-                if(newval){
-                    m_installMenuBtn.getItems().clear();
-                    NetworkInformation[] supportedAdapters = m_appInterface.getSupportedAdapters();
-
-                    for(int i = 0; i < supportedAdapters.length; i++){
-                        NetworkInformation networkInformation = supportedAdapters[i];
-                        if(getAdapter(networkInformation.getNetworkId()) == null){
-                            ImageView intallItemImgView = new ImageView();
-                            intallItemImgView.setPreserveRatio(true);
-                            intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-                            intallItemImgView.setImage(new Image(networkInformation.getSmallIconString()));
-                            MenuItem installItem = new MenuItem(String.format("%-30s",networkInformation.getNetworkName()), intallItemImgView);
-                        
-                            installItem.setOnAction(e->{
-                                m_installItemInformation.set(networkInformation);
-                            });
-        
-                            m_installMenuBtn.getItems().add(installItem);
-                        }
-                    }
-                    if(m_installMenuBtn.getItems().size() == 0){
-                        MenuItem installItem = new MenuItem(String.format("%-30s","(none available)"));
-                        m_installMenuBtn.getItems().add(installItem);
-                    }
-                }
-            });
-
-            ImageView installFieldImgView = new ImageView();
-            installFieldImgView.setPreserveRatio(true);
-            installFieldImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-
-            m_installFieldBox = new HBox(m_installMenuBtn);
-            HBox.setHgrow(m_installFieldBox, Priority.ALWAYS);
-            m_installFieldBox.setId("bodyBox");
-            m_installFieldBox.setPadding(new Insets(2, 5, 2, 2));
-            m_installFieldBox.setMaxHeight(18);
-            m_installFieldBox.setAlignment(Pos.CENTER_LEFT);
-
-            m_installMenuBtn.prefWidthProperty().bind(m_installFieldBox.widthProperty().subtract(-1));
-
-            Button installBtn = new Button("Install");
-      
-            HBox installBox = new HBox(installText, m_installFieldBox);
-            HBox.setHgrow(installBox,Priority.ALWAYS);
-            installBox.setAlignment(Pos.CENTER);
-            installBox.setPadding(new Insets(10,20,10,20));
-
-            m_installItemInformation.addListener((obs,oldval,newval)->{
-                if(newval != null){
-                    m_installMenuBtn.setText(newval.getNetworkName());
-                    installFieldImgView.setImage(new Image(newval.getSmallIconString()));
-                    if(!m_installFieldBox.getChildren().contains(installFieldImgView)){
-                        m_installFieldBox.getChildren().add(0, installFieldImgView);
-                    }
-                    if(!m_installFieldBox.getChildren().contains(installBtn)){
-                        m_installFieldBox.getChildren().add(installBtn);
-                    }
-                }else{
-                    m_installMenuBtn.setText(emptyInstallstring);
-                    installFieldImgView.setImage(null);
-                    if(m_installFieldBox.getChildren().contains(installFieldImgView)){
-                        m_installFieldBox.getChildren().remove(installFieldImgView);
-                    }
-                    if(m_installFieldBox.getChildren().contains(installBtn)){
-                        m_installFieldBox.getChildren().remove(installBtn);
-                    }
-                }
-            });
-
-            Region topRegion = new Region();
-            
-  
-            VBox.setVgrow(topRegion, Priority.ALWAYS);
-          
-            Region hBar1 = new Region();
-            hBar1.setPrefWidth(400);
-            hBar1.setMinHeight(2);
-            hBar1.setId("hGradient");
-    
-            HBox gBox1 = new HBox(hBar1);
-            gBox1.setAlignment(Pos.CENTER);
-            gBox1.setPadding(new Insets(30, 30, 20, 30));
-
-                                        
-            HBox botRegionBox = new HBox();
-            botRegionBox.setMinHeight(40);
-            getChildren().addAll( bodyBox, gBox1, installBox,botRegionBox);
-    
-        
-            installBtn.setOnAction(e->{
-                NetworkInformation info = m_installItemInformation.get();
-                String networkId = info != null ? info.getNetworkId() : null;
-                
-                if (networkId != null){
-                    m_installItemInformation.set(null);
-                    installNetwork(networkId);
-                    if(m_currentNetworkId.get() == null){
-                        m_currentNetworkId.set(networkId);
-                    }
-                }
-            });
-            
-
-            m_currentNetworkId.addListener((obs,oldval,newval)->{
-                updateNetworkList();
-            });
-
-        }
-
-        @Override
-        public void sendMessage(int code, long timestamp, String type, String msg) {
-            switch(type){
-                case NETWORKS:
-                    updateNetworkList();
-                break;
-            }
-        }
-
-    
-        public void updateNetworkList(){
-
-            m_listBox.getChildren().clear();
-    
-            if(m_networks.size() > 0){
-                for (Map.Entry<String, Network> entry : m_networks.entrySet()) {
-            
-
-                    Network network = entry.getValue();
-                    
-                    if(network != null){
-                        ImageView networkImgView = new ImageView();
-                        networkImgView.setPreserveRatio(true);
-                        networkImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-                        networkImgView.setImage(network.getAppIcon());
-
-                        Label nameText = new Label(network.getName());
-                        nameText.setFont(Stages.txtFont);
-                        nameText.setPadding(new Insets(0,0,0,10));
-
-
-
-                        Tooltip selectedTooltip = new Tooltip();
-                        selectedTooltip.setShowDelay(javafx.util.Duration.millis(100));
-
-                        Label selectedBtn = new Label();
-                        selectedBtn.setTooltip(selectedTooltip);
-                        selectedBtn.setId("lblBtn");
-                        
-                        selectedBtn.setOnMouseClicked(e->{
-                            String currentNetworkId = m_currentNetworkId.get();
-                            boolean selectedNetwork = currentNetworkId != null && currentNetworkId.equals(network.getNetworkId());         
-                        
-                            if(selectedNetwork){
-                                m_currentNetworkId.set(null);
-                            }else{
-                                m_currentNetworkId.set(network.getNetworkId());
-                                save();
-                            }
-                        });
-
-                    
-                
-
-                        Runnable updateSelectedSwitch = () ->{
-                            String currentNetworkId = m_currentNetworkId.get();
-                            boolean selectedNetwork = currentNetworkId != null && currentNetworkId.equals(network.getNetworkId());         
-                            
-                            selectedBtn.setText(selectedNetwork ? "🟊" : "⚝");
-                
-                            selectedTooltip.setText(selectedNetwork ? "Selected" : "Select network");
-                        
-
-                        };
-        
-                        updateSelectedSwitch.run();
-                
-                
-                        int topMargin = 15;
-
-                        Region marginRegion = new Region();
-                        marginRegion.setMinWidth(topMargin);
-
-
-                        Region growRegion = new Region();
-                        HBox.setHgrow(growRegion, Priority.ALWAYS);
-
-                    
-                        if(m_networks.size() > 0){
-                            MenuButton menuBtn = new MenuButton("⋮");
-                    
-                        
-
-                            MenuItem openItem = new MenuItem("⇲   Open…");
-                            openItem.setOnAction(e->{
-                                menuBtn.hide();
-                                openNetwork(network.getNetworkId());
-                            });
-
-                            MenuItem removeItem = new MenuItem("🗑   Uninstall");
-                            removeItem.setOnAction(e->{
-                                menuBtn.hide();
-                                removeNetwork(network.getNetworkId(), true);
-                                
-                            });
-
-                            menuBtn.getItems().addAll(openItem, removeItem);
-
-                    
-
-                            HBox networkItemTopRow = new HBox(selectedBtn,marginRegion, networkImgView, nameText, growRegion, menuBtn);
-                            HBox.setHgrow(networkItemTopRow, Priority.ALWAYS);
-                            networkItemTopRow.setAlignment(Pos.CENTER_LEFT);
-                            networkItemTopRow.setPadding(new Insets(2,0,2,0));
-
-
-            
-
-                            VBox networkItem = new VBox(networkItemTopRow);
-                            networkItem.setFocusTraversable(true);
-                            networkItem.setAlignment(Pos.CENTER_LEFT);
-                            HBox.setHgrow(networkItem, Priority.ALWAYS);
-                            networkItem.setId("rowBtn");
-                            networkItem.setPadding(new Insets(2,5,2,5));
-
-                            networkItemTopRow.setOnMouseClicked(e->{
-                                if(e.getClickCount() == 2){
-                                    openItem.fire();
-                                }
-                            });
-
-                            m_listBox.getChildren().add(networkItem);
-
-                        }
-            
-                    }
-    
-                }
-            }else{
-                
-                BufferedButton emptyAddAppBtn = new BufferedButton(AppConstants.SETTINGS_ICON, 75);
-                emptyAddAppBtn.setText("Install Network");
-                emptyAddAppBtn.setContentDisplay(ContentDisplay.TOP);
-                emptyAddAppBtn.setOnAction(e->{
-                    m_installMenuBtn.show();
-                });
-                HBox addBtnBox = new HBox(emptyAddAppBtn);
-                HBox.setHgrow(addBtnBox, Priority.ALWAYS);
-                addBtnBox.setAlignment(Pos.CENTER);
-                addBtnBox.setPrefHeight(300);
-                m_listBox.getChildren().add(addBtnBox);
-            
-            }
-
-        }
-        
-
-        @Override
-        public String getName() {
-            return NAME;
-        }
-
-        @Override
-        public void setStatus(String status) {
-            switch(status){
-                case NoteConstants.STATUS_STOPPED:
-                case NoteConstants.STATUS_MINIMIZED:
-                    m_settingsBtn.setId("menuTabBtn");
-                break;
-                case NoteConstants.STATUS_STARTED:
-                    m_settingsBtn.setId("activeMenuBtn");
-                break;
-                
-            }
-            m_status = status;
-        }
-
-        @Override
-        public String getStatus() {
-            return m_status;
-        }
-
-        @Override
-        public SimpleStringProperty titleProperty() {
-            return m_titleProperty;
-        }
-    }
-
 
     public class ManageNetworksTab extends AppBox  implements TabInterface{
         public static final String NAME = "Networks";
@@ -2738,7 +2142,7 @@ public class NetworksData {
                             ImageView intallItemImgView = new ImageView();
                             intallItemImgView.setPreserveRatio(true);
                             intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-                            intallItemImgView.setImage(new Image(networkInformation.getSmallIconString()));
+                            intallItemImgView.setImage(networkInformation.getSmallIcon());
                             MenuItem installItem = new MenuItem(String.format("%-30s",networkInformation.getNetworkName()), intallItemImgView);
                         
                             installItem.setOnAction(e->{
@@ -2778,7 +2182,7 @@ public class NetworksData {
             m_installItemInformation.addListener((obs,oldval,newval)->{
                 if(newval != null){
                     m_installMenuBtn.setText(newval.getNetworkName());
-                    installFieldImgView.setImage(new Image(newval.getSmallIconString()));
+                    installFieldImgView.setImage(newval.getSmallIcon());
                     if(!m_installFieldBox.getChildren().contains(installFieldImgView)){
                         m_installFieldBox.getChildren().add(0, installFieldImgView);
                     }
@@ -3104,7 +2508,7 @@ public class NetworksData {
                             ImageView intallItemImgView = new ImageView();
                             intallItemImgView.setPreserveRatio(true);
                             intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-                            intallItemImgView.setImage(new Image(networkInformation.getSmallIconString()));
+                            intallItemImgView.setImage(networkInformation.getSmallIcon());
                             
                             MenuItem installItem = new MenuItem(String.format("%-30s",networkInformation.getNetworkName()), intallItemImgView);
                             installItem.setOnAction(e->{
@@ -3142,7 +2546,7 @@ public class NetworksData {
             m_installItemInformation.addListener((obs,oldval,newval)->{
                 if(newval != null){
                     m_installMenuBtn.setText(newval.getNetworkName());
-                    installFieldImgView.setImage(new Image(newval.getSmallIconString()));
+                    installFieldImgView.setImage(newval.getSmallIcon());
                  
                     if(!m_installFieldBox.getChildren().contains(installBtn)){
                         m_installFieldBox.getChildren().add(installBtn);
@@ -3277,7 +2681,7 @@ public class NetworksData {
                         ImageView appImgView = new ImageView();
                         appImgView.setPreserveRatio(true);
                         appImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
-                        appImgView.setImage(new Image(networkInformation.iconString()));
+                        appImgView.setImage(networkInformation.getIcon());
     
                         Label nameText = new Label(networkInformation.getNetworkName());
                         nameText.setFont(Stages.txtFont);
@@ -3448,10 +2852,7 @@ public class NetworksData {
             settingsManageNetworksItem.setOnAction(e->{
                 openStatic(ManageNetworksTab.NAME);
             });
-            MenuItem manageAdaptersItem = new MenuItem("Manage Adapters…");
-            manageAdaptersItem.setOnAction(e->{
-                openStatic(ManageAdaptersTab.NAME);
-            });
+  
             MenuItem settingsAppItem = new MenuItem("Settings");
             settingsAppItem.setOnAction(e->{
                 openStatic(SettingsTab.NAME);
@@ -3468,7 +2869,7 @@ public class NetworksData {
         //  m_appTabsBox = new VBox();
         // m_menuContentBox = new VBox(m_appTabsBox);
 
-            m_networkBtn =new BufferedButton(NetworkConstants.NETWORK_ICON, BTN_IMG_SIZE);
+            m_networkBtn =new BufferedButton(NO_NETWORK.getSmallIcon(), BTN_IMG_SIZE);
             m_networkBtn.disablePressedEffects();
             m_networkBtn.setId("menuTabBtn");
 
@@ -3589,7 +2990,7 @@ public class NetworksData {
                     m_networkBtn.setImage(currentNetwork.getAppIcon());
                     currentNetworkTooltip.setText(currentNetwork.getName());
                 }else{
-                    m_networkBtn.setImage( new Image(NetworkConstants.NETWORK_ICON));
+                    m_networkBtn.setImage( NO_NETWORK.getSmallIcon());
                     currentNetworkTooltip.setText("Select network");
                 }
             };
@@ -4151,6 +3552,11 @@ public class NetworksData {
         private HashMap<String, ContentTab> m_itemTabs = new HashMap<>();
 
         private SimpleStringProperty m_currentId = new SimpleStringProperty(null);
+        private SimpleStringProperty m_lastRemovedTabId = new SimpleStringProperty();
+
+        public ReadOnlyStringProperty lastRemovedTabIdProperty(){
+            return m_lastRemovedTabId;
+        }
         
         public ContentTabs(){
             setAlignment(Pos.TOP_LEFT);
@@ -4225,11 +3631,14 @@ public class NetworksData {
                 m_itemTabs.put(id, tab);
                 tab.currentIdProperty().bind(m_currentId);
                 m_tabsBox.getChildren().add(tab.getTabBox());
-                tab.onCloseBtn(e->{
+                EventHandler<ActionEvent> onCloseHandler = onClose->{
                     removeContentTab(id);
-                });
+                    tab.onCloseBtn(null);
+                };
+                tab.onCloseBtn(onCloseHandler);
                 tab.onTabClicked(e->{
                     m_currentId.set(tab.getId());
+                    
                 });
        
                 tabPane.prefWidthProperty().bind(m_contentWidth);
@@ -4261,7 +3670,8 @@ public class NetworksData {
                 tabPane.prefWidthProperty().unbind();
                 tabPane.prefHeightProperty().unbind();
 
-                tab.shutdownMilliesProperty().set(System.currentTimeMillis());
+                tab.shutdown();
+                m_lastRemovedTabId.set(tab.getId());
                 
                 m_tabsBox.getChildren().remove( tab.getTabBox());
                
@@ -4334,38 +3744,38 @@ public class NetworksData {
     } 
 
 
-    public Future<?> readEncryptedFile( File file,AtomicBoolean isAquired, PipedOutputStream pipedOutput, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public Future<?> readEncryptedFile( File file,AtomicBoolean isAquired,Semaphore dataSemaphore, PipedOutputStream pipedOutput, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
-        return Utils.readEncryptedFile(file,isAquired,m_dataSemaphore, getAppKey(), pipedOutput, getExecService(), onSucceeded, onFailed);
+        return Utils.readEncryptedFile(file,isAquired, dataSemaphore, getAppKey(), pipedOutput, getExecService(), onSucceeded, onFailed);
 
     }
 
     
 
-    public Future<?> writeEncryptedFile(File writeFile, File copyToFile, AtomicBoolean isAquired, PipedInputStream pipedWriterInput){
+    public Future<?> writeEncryptedFile(File tmpFile, File idFile, AtomicBoolean isAquired, Semaphore semaphore, PipedInputStream pipedWriterInput, EventHandler<WorkerStateEvent> onError){
 
-        return Utils.writeEncryptedFile(writeFile, getAppKey(), pipedWriterInput, getExecService(), onComplete->{
+        return Utils.writeEncryptedFile(tmpFile, getAppKey(), pipedWriterInput, getExecService(), onComplete->{
             getExecService().execute(()->{
                 if(isAquired.get()){
-                    if(copyToFile != null){
+                    if(idFile != null){
                         try{
-                            Files.deleteIfExists(copyToFile.toPath());
-                            FileUtils.moveFile(writeFile, copyToFile);
+                            Files.deleteIfExists(idFile.toPath());
+                            FileUtils.moveFile(tmpFile, idFile);
                             isAquired.set(false);
-                            m_dataSemaphore.release();
+                            semaphore.release();
                         }catch(IOException e1){
                             isAquired.set(false);
-                            m_dataSemaphore.release();
+                            semaphore.release();
                         }
                     }else{
                         isAquired.set(false);
-                        m_dataSemaphore.release();
+                        semaphore.release();
                     }
                 }else{
-                    if(copyToFile != null){
+                    if(idFile != null){
                     
                         try {
-                            Files.deleteIfExists(writeFile.toPath());
+                            Files.deleteIfExists(tmpFile.toPath());
                         } catch (IOException e) {
 
                         }
@@ -4373,22 +3783,84 @@ public class NetworksData {
                     
                 }
             });    
-        }, (failed)->{
+        }, failed->{
+            Throwable throwable = failed.getSource().getException();
 
-            if(copyToFile != null){
-                try {
-                    Files.deleteIfExists(writeFile.toPath());
-                } catch (IOException e) {
+            getExecService().execute(()->{
+                if(isAquired.get()){
+                    if(tmpFile != null && tmpFile.isFile()){
+                        try{
+                            Files.deleteIfExists(tmpFile.toPath());
+                            isAquired.set(false);
+                            semaphore.release();
+                        }catch(IOException e1){
+                            if(isAquired.get()){
+                                isAquired.set(false);
+                                semaphore.release();
+                            }
+                        }
+                    }else{
+                        isAquired.set(false);
+                        semaphore.release();
+                    }
+                }else{
+                    if(tmpFile != null){
+                    
+                        try {
+                            Files.deleteIfExists(tmpFile.toPath());
+                        } catch (IOException e) {
 
+                        }
+                    };
+                    
                 }
-            }
-            if(isAquired.get()){
-                isAquired.set(false);
-                m_dataSemaphore.release();
-            }
-    
-        });
+                if(throwable != null && throwable instanceof Exception){
+                    Utils.returnException((Exception) throwable, getExecService(), onError);
+                }else{
+                    Utils.returnException(throwable != null ? throwable.getMessage() : NoteConstants.ERROR_IO, getExecService(), onError);
+                }
+            });    
+        } );
+
     }
+
+    public class NetworkControl {
+        private SimpleObjectProperty <NoteUUID> m_networkId = new SimpleObjectProperty<>();
+
+        public NetworkControl(){
+            
+        }
+        
+ 
+        private Future<?> sendToApps(Network app, String destinationId, int senderType, String senderId, PipedInputStream stream, EventHandler<WorkerStateEvent> onSucceeded,  EventHandler<WorkerStateEvent> onFailed){
+            if(app != null){
+                try {
+                    PipedOutputStream outputStream = new PipedOutputStream(stream);
+                    return app.sendStream(outputStream, senderType, senderId); 
+                } catch (IOException e) {
+                    return Utils.returnException(e, getExecService(), onFailed);
+                }
+            }else{
+                return Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+            }
+        }
+
+
+        private Future<?> sendToNetworks(Network network, String destinationId,int senderType, String senderId, PipedInputStream stream, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+            if(network != null){
+                try {
+                    PipedOutputStream outputStream = new PipedOutputStream(stream);
+                    return network.sendStream(outputStream, senderType, senderId); 
+                } catch (IOException e) {
+                    return Utils.returnException(e, getExecService(), onFailed);
+                }
+            }else{
+                return Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+            }
+        }
+
+     
+    } 
 
     
 }

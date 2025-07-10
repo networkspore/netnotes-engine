@@ -11,7 +11,6 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +38,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 import java.util.zip.ZipFile;
 
 import javax.crypto.BadPaddingException;
@@ -58,6 +58,8 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PipedInputStream;
@@ -69,14 +71,18 @@ import java.math.RoundingMode;
 import java.net.URLConnection;
 import java.lang.Double;
 
+import javafx.animation.PauseTransition;
 import javafx.beans.binding.Binding;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
-import javafx.collections.ObservableList;
+import javafx.collections.*;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
+import javafx.geometry.Point2D;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ProgressIndicator;
@@ -90,7 +96,11 @@ import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import javafx.stage.Window;
+import oshi.util.tuples.Pair;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.layout.Region;
+import javafx.scene.control.Tooltip;
 
 import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
@@ -105,6 +115,7 @@ import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.ove.crypto.digest.Blake2b;
 import scala.util.Try;
+import scorex.util.encode.Base64;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -121,8 +132,46 @@ public class Utils {
     public static final int PRINTABLE_CHAR_RANGE_END = 127;
     
 
+
+
+    public static byte[] getTimeStampBytes(){
+        long timeStamp = System.currentTimeMillis();
+        return longToBytes(timeStamp);
+    }
+
+
     public static char[] getPrintableCharArray(){
         return getCharRange(PRINTABLE_CHAR_RANGE_START, PRINTABLE_CHAR_RANGE_END);
+    }
+
+    public static ByteBuffer getLongBuffer() {
+        return ByteBuffer.allocate(Long.BYTES);
+    }
+
+    public static byte[] longToBytes(long x){
+        return longToBytes(getLongBuffer(), x);
+    }
+
+    public static byte[] longToBytes(ByteBuffer buffer, long x) {
+        buffer.putLong(x);
+        return buffer.array();
+    }
+
+
+
+    public static byte[] unboxInts(Integer[] integerObjects){
+        byte[] bytes = new byte[integerObjects.length];
+        int i = 0;
+        for(Integer myInt: integerObjects)
+            bytes[i++] = (byte) (myInt & 0xff); 
+        return bytes;
+    }
+
+
+    public static long bytesToLong(ByteBuffer buffer, byte[] bytes) {
+        buffer.put(bytes);
+        buffer.flip();//need flip 
+        return buffer.getLong();
     }
 
 
@@ -179,7 +228,7 @@ public class Utils {
         return findPathPrefixInRoots(roots, filePathString);
     }
 
-        public static File[] getRoots(){
+    public static File[] getRoots(){
     
         if((System.currentTimeMillis() - m_rootsTimeStamp) > 1000){
             m_roots = File.listRoots();
@@ -212,6 +261,7 @@ public class Utils {
 
 
 
+
     public static byte[] digestFileBlake2b(File file, int digestLength) throws IOException {
         final Blake2b digest = Blake2b.Digest.newInstance(digestLength);
         try(
@@ -233,14 +283,13 @@ public class Utils {
     }
 
 
-
-    public static byte[] digestBytesToBytes(byte[] bytes) {
-        final Blake2b digest = Blake2b.Digest.newInstance(32);
-
-        digest.update(bytes);
-
-        return digest.digest();
-    }
+      
+    /*
+        eturn (data[0]<<24)&0xff000000|
+            (data[1]<<16)&0x00ff0000|
+            (data[2]<< 8)&0x0000ff00|
+            (data[3]<< 0)&0x000000ff;
+     */
 
     public static Map<String, List<String>> parseArgs(String args[]) {
 
@@ -343,6 +392,16 @@ public class Utils {
 
         return latestString;
     }
+
+    public static byte[] appendBytes(byte[] a, byte[] b){
+        byte[] bytes = new byte[a.length + b.length];
+       
+        System.arraycopy(a, 0, bytes, 0, a.length);
+        System.arraycopy(b, 0, bytes, a.length, b.length);
+        return bytes;
+    }
+
+
 
     public static Version getFileNameVersion(String fileName){
         int end = fileName.length() - 4;
@@ -709,11 +768,15 @@ public class Utils {
 
     public static Future<?> checkDrive(File file, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
-        Task<Boolean> task = new Task<Boolean>() {
+        Task<Object> task = new Task<Object>() {
             @Override
-            public Boolean call() throws IOException {
+            public Object call() throws Exception {
                 
-                return findPathPrefixInRoots(file.getCanonicalPath());
+                if(file == null){
+                    throw new NullPointerException(NoteConstants.ERROR_EXISTS);
+                }
+                String path = file.getCanonicalPath();
+                return findPathPrefixInRoots(path) ? path : null;
              
             }
         };
@@ -738,6 +801,14 @@ public class Utils {
 
         return execService.submit(task);
 
+    }
+
+    public static Future<?> returnException(Throwable throwable, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
+        if(throwable != null && throwable instanceof Exception){
+            return Utils.returnException((Exception) throwable, execService, onFailed);
+        }else{
+            return Utils.returnException(throwable != null ? throwable.getMessage() : NoteConstants.ERROR_IO, execService, onFailed);
+        }
     }
 
     public static Future<?> returnException(Exception exception, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed) {
@@ -966,6 +1037,27 @@ public class Utils {
 
     public static int getJsonElementType(JsonElement jsonElement){
         return jsonElement.isJsonNull() ? -1 : jsonElement.isJsonObject() ? 1 : jsonElement.isJsonArray() ? 2 : jsonElement.isJsonPrimitive() ? 3 : 0;
+    }
+
+    public static int arrayCopy(Object src, int srcOffset, Object dst, int dstOffset, int length){
+        System.arraycopy(src, srcOffset, dst, dstOffset, length);
+        return dstOffset + length;
+    }
+
+    public static byte[] readInputStreamAsBytes(InputStream inputStream) throws IOException{
+   
+        try(
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ){
+            byte[] buffer = new byte[DEFAULT_BUFFER_SIZE];
+            int length = 0;
+
+            while((length = inputStream.read(buffer)) != -1){
+                outputStream.write(buffer, 0, length);
+            }
+
+            return outputStream.toByteArray();
+        }
     }
 
     public static String getUrlOutputStringSync(String urlString) throws IOException{
@@ -1220,11 +1312,29 @@ public class Utils {
         return img;
     }
 
+    public static void showTip(String msg, Region region, Tooltip tooltip, PauseTransition pt){
+    
+        Point2D p = region.localToScene(0.0, 0.0);
+        Scene scene = region.getScene();
+        Window window = scene.getWindow();
+
+        tooltip.setText(msg != null ? msg : "Error");
+        tooltip.show(region,
+                p.getX() + scene.getX()
+                        + window.getX()
+                        + region.getLayoutBounds().getWidth(),
+                (p.getY() + scene.getY()
+                        + window.getY()) - 30);
+        pt.setOnFinished(e->tooltip.hide());
+        pt.playFromStart();
+    }
+
+
     
     public static Image checkAndLoadImage(String imageString, HashData hashData) {
         if(imageString != null ){
             
-            if(imageString.startsWith(Stages.ASSETS_DIRECTORY + "/")){
+            if(imageString.startsWith(AppConstants.ASSETS_DIRECTORY + "/")){
                 return new Image(imageString);
             }
             File checkFile = new File(imageString);
@@ -1465,7 +1575,7 @@ public class Utils {
                     testBytes[i] = addressBytes[i];
                 }
 
-                byte[] hashBytes = Utils.digestBytesToBytes(testBytes);
+                byte[] hashBytes = ByteHashing.digestBytesToBytes(testBytes);
 
                 if (!(checksumBytes[0] == hashBytes[0]
                         && checksumBytes[1] == hashBytes[1]
@@ -1563,6 +1673,7 @@ public class Utils {
         }
         
     }
+
 
 
 
@@ -1667,7 +1778,19 @@ public class Utils {
         return false;
     }
 
-    
+    public boolean compareStreams(Stream<Object> stream1, Stream<Object> stream2){
+        return stream1.count() == stream2.count() && stream1
+               .allMatch(element -> stream2.anyMatch(element2 -> element2.equals(element)));
+    }
+
+
+
+    public static byte[] getRandomBytes(int size){
+        byte[] randomBytes = new byte[size];
+        SecureRandom secureRandom = new SecureRandom();
+        secureRandom.nextBytes(randomBytes);
+        return randomBytes;
+    }
 
     public static Future<?> encryptBytesToFile(SecretKey appKey, byte[] bytes, File outputFile, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
@@ -1686,22 +1809,85 @@ public class Utils {
         return execService.submit(task);
     }
 
-    public static byte[] charsToBytes(char[] chars){
+     public static Byte[] charsToBoxedBytes(char[] chars){
         CharBuffer charBuffer = CharBuffer.wrap(chars);
         ByteBuffer byteBuffer = StandardCharsets.UTF_8.encode(charBuffer);
-        byte[] bytes = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
+        
+        int limit = byteBuffer.limit();
+        int position = byteBuffer.position();
+        byte[] arr = byteBuffer.array();
+
+
+        int size = limit - position;
+        Byte[] bytes = new Byte[size];
+
+        int i = position;
+        int j = 0;
+        while( i < limit){
+            bytes[j] = arr[i];
+            j++;
+            i++;
+        }
         byteBuffer.clear();
+        charBuffer.clear();
+
         return bytes;
     }
 
+
+
+
     public static byte[] createKeyBytes(SecretString password) throws InvalidKeySpecException, NoSuchAlgorithmException  {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        KeySpec spec = new PBEKeySpec(password.getData(), charsToBytes(password.getData()), 65536, 256);
+        KeySpec spec = new PBEKeySpec(password.getData(), ByteDecoding.charsToBytes(password.getData()), 65536, 256);
         SecretKey tmp = factory.generateSecret(spec);
         return tmp.getEncoded();
 
     }
+    public static Object getKeyObject(List<? extends Object> items, String key){
+        for(int i = 0; i < items.size(); i++){
+            Object item = items.get(i);
+            if(item instanceof KeyInterface){
+                KeyInterface keyItem = (KeyInterface) item;
+                if(keyItem.getKey().equals(key)){
+                    return keyItem;
+                }
+            }
+        }
+        return null;
+    }
 
+
+    public static void removeOldKeys(List<? extends Object> items, long timeStamp){
+        ArrayList<String> keyRemoveList  = new ArrayList<>();
+
+        for(int i = 0; i < items.size(); i++){
+            Object item = items.get(i);
+            if(item instanceof KeyInterface){
+                KeyInterface keyItem = (KeyInterface) item;
+                if(keyItem.getTimeStamp() < timeStamp){
+                    keyRemoveList.add(keyItem.getKey());        
+                }
+            }
+        }
+
+        for(String key : keyRemoveList){
+            removeKey(items, key);
+        }
+    }
+
+    public static Object removeKey(List<? extends Object> items, String key){
+        for(int i = 0; i < items.size(); i++){
+            Object item = items.get(i);
+            if(item instanceof KeyInterface){
+                KeyInterface keyItem = (KeyInterface) item;
+                if(keyItem.getKey().equals(key)){
+                    return items.remove(i);
+                }
+            }
+        }
+        return null;
+    }
 
     
     public static boolean updateFileEncryption(SecretKey oldAppKey, SecretKey newAppKey, File file, File tmpFile) throws FileNotFoundException, IOException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, InvalidAlgorithmParameterException, IllegalBlockSizeException, BadPaddingException {
@@ -1770,6 +1956,12 @@ public class Utils {
             return true;
         }
         return false;
+    }
+
+
+    public static String hashChars(char[] chars){
+
+        return Base64.encode(ByteHashing.digestBytesToBytes(ByteDecoding.charsToBytes(chars)));
     }
 
     public static String getStringFromResource(String resourceLocation) throws IOException{
@@ -1895,6 +2087,70 @@ public class Utils {
         }
         return null;
 
+    }
+
+
+    public static byte[] readEncryptedData(SecretKey appKey, File dataFile) throws IOException, NoSuchAlgorithmException, InvalidKeyException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, ShortBufferException {
+
+        File tmpFile = new File(dataFile.getAbsolutePath() + ".tmp");
+        byte[] outputData;
+
+        try(
+            FileInputStream inputStream = new FileInputStream(dataFile);
+            FileOutputStream fileOutputStream = new FileOutputStream(tmpFile);
+            ByteArrayOutputStream outStream = new ByteArrayOutputStream();
+        ){
+            
+            byte[] inIV = new byte[12];
+            int length = inputStream.read(inIV);
+
+            if(length < 12){
+                return null;
+            }
+
+            Cipher inCipher = Cipher.getInstance("AES/GCM/NoPadding");
+            GCMParameterSpec inSpec = new GCMParameterSpec(128, inIV);
+            inCipher.init(Cipher.DECRYPT_MODE, appKey, inSpec);
+
+
+            byte[] outIV = getIV();
+
+            Cipher outCipher = Cipher.getInstance("AES/GCM/NoPadding");
+            GCMParameterSpec outSpec = new GCMParameterSpec(128, outIV);
+            outCipher.init(Cipher.ENCRYPT_MODE, appKey, outSpec);
+
+            byte[] byteArray = new byte[DEFAULT_BUFFER_SIZE];
+            byte[] output;
+
+            fileOutputStream.write(outIV);    
+
+
+            while((length = inputStream.read(byteArray)) != -1){
+
+                output = outCipher.update(byteArray, 0, length);
+                if(output != null){
+                    fileOutputStream.write(output);
+                    outStream.write(output);
+                }
+            }
+
+            output = outCipher.doFinal();
+            if(output != null){
+                fileOutputStream.write(output);
+                outStream.write(output);
+            }
+
+            outputData = outStream.toByteArray();
+
+        }
+
+        Path filePath = dataFile.toPath();
+        Files.delete(filePath);
+        FileUtils.moveFile(tmpFile, dataFile);
+        
+        
+        return outputData;
+        
     }
 
     public static Future<?> getImageFromBytes(byte[] bytes, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){

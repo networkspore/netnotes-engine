@@ -14,13 +14,15 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.HashData;
 import io.netnotes.engine.JsonParametersBox;
+import io.netnotes.engine.Network;
+import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.ResizeHelper;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
+import io.netnotes.engine.networks.ergo.ErgoNetworkControl;
 import io.netnotes.friendly_id.FriendlyId;
 
 import org.ergoplatform.appkit.Address;
@@ -96,8 +98,8 @@ public class ErgoWalletData  {
         return getErgoWalletsDataList().getNetworksData();
     }
 
-    public NoteInterface getErgoNetworkInterface(){
-        return getErgoWalletsDataList().getErgoNetworkInterface();
+    public ErgoNetworkControl getErgoNetworkControl(){
+        return getErgoWalletsDataList().getErgoNetworkControl();
     }
 
 
@@ -240,7 +242,7 @@ public class ErgoWalletData  {
         return getNetworksData().getExecService();
     }
 
-    private Future<?> getAccessId(JsonObject note, String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    private Future<?> getAccessId(JsonObject note, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonElement controlIdElement = note != null ? note.get("controlId") : null;
         String controlId = controlIdElement != null && !controlIdElement.isJsonNull() && controlIdElement.isJsonPrimitive() ? controlIdElement.getAsString() : null;
 
@@ -277,7 +279,7 @@ public class ErgoWalletData  {
         imageBox.setPadding(new Insets(10,0,10,0));
 
         JsonObject paramsObject = new JsonObject();
-        paramsObject.addProperty("location", locationString);
+        paramsObject.addProperty("location", networkInformation.getNetworkName());
         paramsObject.addProperty("wallet", getName());
         paramsObject.addProperty("timeStamp", System.currentTimeMillis());
         
@@ -475,7 +477,7 @@ public class ErgoWalletData  {
    
         String locationId = locationIdElement != null && !locationIdElement.isJsonNull() ? locationIdElement.getAsString() : null;
         String cmd = cmdElement != null ? cmdElement.getAsString() : null;
-        String locationString = getNetworksData().getLocationString(locationId);
+        NetworkInformation networkInformation = locationId != null ?getNetworksData().getLocationNetworkInformation(locationId) : null;
 
         if(cmd != null){
             JsonElement accessIdElement = note.get("accessId");
@@ -491,17 +493,17 @@ public class ErgoWalletData  {
                         case "updateAddressBoxInfo":
                             return m_addressesData.updateAddressBoxInfo(note, onSucceeded, onFailed);
                         case "sendAssets":
-                            return m_addressesData.sendAssets(note,locationString, onSucceeded, onFailed);
+                            return m_addressesData.sendAssets(note, networkInformation, onSucceeded, onFailed);
                         case "executeTransaction":
                             try{
-                                return m_addressesData.executeTransaction(note, locationString, onSucceeded, onFailed);
+                                return m_addressesData.executeTransaction(note, networkInformation, onSucceeded, onFailed);
                             }catch(Exception e){
                                 return Utils.returnException(e, getExecService(), onFailed);
                             }
                         case "reclaimBox":
-                            return m_addressesData.reclaimBox(note, locationId, locationString, onSucceeded, onFailed);
+                            return m_addressesData.reclaimBox(note, locationId, networkInformation, onSucceeded, onFailed);
                         case "viewWalletMnemonic":
-                            m_addressesData.viewWalletMnemonic(locationString, onSucceeded, onFailed);
+                            m_addressesData.viewWalletMnemonic(networkInformation, onSucceeded, onFailed);
                         break;
                         case "getAddresses":
                             return Utils.returnObject(m_addressesData.getAddressesJson(), getExecService(), onSucceeded);
@@ -521,7 +523,7 @@ public class ErgoWalletData  {
             }else{
                 switch (cmd) {
                     case "getAccessId":
-                        return getAccessId(note, locationString, onSucceeded, onFailed);
+                        return getAccessId(note, networkInformation, onSucceeded, onFailed);
                     case "getWallet":
                         return Utils.returnObject(getWalletJson(), getExecService(), onSucceeded);
                     case "updateFile":
@@ -543,13 +545,6 @@ public class ErgoWalletData  {
     protected void sendMessage(int code, long timeStamp,String networkId, String msg){
         m_ergoWalletsDataList.getErgoWallets().sendMessage(code,  timeStamp, getId() + ":" + networkId, msg);
     }
-
-
-    protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        m_ergoWalletsDataList.getErgoWallets().sendMessage(code, timeStamp, getId() + ":" + networkId, num);
-    }
-
-
 
 
     public boolean isFile(){

@@ -1,6 +1,5 @@
 package io.netnotes.engine.apps.ergoDex;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.BufferedButton;
@@ -8,23 +7,19 @@ import io.netnotes.engine.BufferedMenuButton;
 import io.netnotes.engine.ContentTab;
 import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
-import io.netnotes.engine.networks.ergo.ErgoNetwork;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceCurrency;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
-import io.netnotes.engine.NetworksData.ManageNetworksTab;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.engine.apps.ControlInterface;
 import io.netnotes.engine.apps.RangeBar;
 import io.netnotes.engine.apps.TimeSpan;
 import io.netnotes.engine.apps.ergoWallets.ErgoWalletControl;
 import io.netnotes.engine.apps.ergoWallets.ErgoWalletMenu;
-import io.netnotes.engine.apps.ergoWallets.ErgoWallets;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.animation.PauseTransition;
@@ -56,7 +51,6 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.effect.DropShadow;
@@ -82,11 +76,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-import org.ergoplatform.appkit.NetworkType;
 import org.reactfx.util.FxTimer;
 
 

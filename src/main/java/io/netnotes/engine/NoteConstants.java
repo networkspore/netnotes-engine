@@ -32,8 +32,16 @@ import scorex.util.encode.Base16;
 
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
+import javafx.scene.image.Image;
 
 public class NoteConstants {
+
+    public static final byte KEY_AND_VALUE = 0x12;
+    public static final byte VALUE_AND_KEY = 0x21;
+    public static final byte KEY_NO_VALUE = 0x10;
+    public static final byte VALUE_NO_KEY = 0x00;
+
+
     public final static String WALLET_ADDRESS_PK = "walletAddressPK";
     public final static String WALLET_ADDRESS_PROP_BYTES = "walletAddressPropBytes";
     public final static String CURRENT_WALLET_FILE = "wallet file";
@@ -44,6 +52,7 @@ public class NoteConstants {
     
 
 
+    public static final int DEFAULT = 0;
     public static final int SUCCESS = 1;
     public static final int ERROR = 2;
 
@@ -63,6 +72,8 @@ public class NoteConstants {
     public static final int CANCEL = 13;
     public static final int READY = 14;
 
+    public static final int MSG_SEND_NOTE = 255;
+
     
     public static final int LIST_CHANGED = 20;
     public static final int LIST_CHECKED = 21;
@@ -70,6 +81,12 @@ public class NoteConstants {
     public static final int LIST_ITEM_ADDED = 23;
     public static final int LIST_ITEM_REMOVED = 24;
     public static final int LIST_DEFAULT_CHANGED= 25;
+
+
+
+    public static final int APPS = 100;
+    public static final int NETWORKS = 101;
+    public static final int REMOTE = 102;
 
     public static final String STATIC_TYPE = "STATIC";
     public static final String STATUS_MINIMIZED = "Minimized";
@@ -86,15 +103,29 @@ public class NoteConstants {
     public static final String STATUS_TIMED_OUT = "Timed Out";
     public static final String STATUS_DISABLED = "Disabled";
     public static final String STATUS_UNKNOWN = "Unknown";
+    
+    public static final String VERIFIED = "Verified";
+    public static final String BLOCKED = "Blocked";
 
+
+    public static final String ERROR_CLOSING = "Closing";
     public static final String ERROR_CANCELED = "Canceled";
     public static final String ERROR_EXISTS = "Exists";
     public static final String ERROR_INVALID = "Invalid";
+    public static final String ERROR_IO = "IO";
     public static final String ERROR_NOT_FOUND = "Not found";
+    public static final String ERROR_CONTROL_NOT_AVAILABLE = "Control not available";
+    public static final String ERROR_OUT_OF_RANGE = "Out of range";
+
+    public static final String SEARCH_SORT_ASC = "asc";
+    public static final String SEARCH_SORT_DSC = "dsc";
 
     public static final String CMD_NOT_PRESENT = "cmd not present";
 
     public static final String CMD = "cmd";
+
+
+    
 
     public static String getStatusCodeMsg(int status){
         switch(status){
@@ -1119,16 +1150,17 @@ public class NoteConstants {
     }
 
     public static Future<?> getAppIconFromNetworkObject(JsonObject json, ExecutorService execService, EventHandler<WorkerStateEvent> onImage, EventHandler<WorkerStateEvent> onFailed){
-        if(json != null){
-            JsonElement nameElement = json.get("appIcon");
-            
-            String imgStr = nameElement != null && nameElement.isJsonPrimitive() ? nameElement.getAsString() : null;
-            
-            if(imgStr != null){
-                return Drawing.convertHexStringToImg(imgStr, execService, onImage, onFailed);
-            }
-        }
-        return null;
+        return getJsonImage("appIcon", json, execService, onImage, onFailed);
+    }
+
+    public static String checkAsc(String value){
+       return (value != null && value.toLowerCase().equals(NoteConstants.SEARCH_SORT_ASC.toLowerCase())) ? NoteConstants.SEARCH_SORT_ASC : NoteConstants.SEARCH_SORT_DSC;
+    }
+
+    public static String getJsonName(String defaultString, JsonObject json){
+        String name = json == null ? defaultString : NoteConstants.getJsonName(json);
+        return name != null ? name : defaultString;
+        
     }
 
     public static String getJsonName(JsonObject obj){
@@ -1151,6 +1183,63 @@ public class NoteConstants {
         return null;
     }
 
+    public static String getMemberStringByValue(JsonObject obj, String memberName){
+        if(obj != null){
+            JsonElement idElement = obj.get(memberName);
+            if(idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive()){
+                return idElement.getAsString();
+            }
+        }
+        return null;
+
+    }
+
+    public static JsonObject getJsonObjectByMemberName(String memberName, String id, JsonArray jsonArray){
+        if(jsonArray != null){
+            for(JsonElement jsonElement : jsonArray){
+                if(jsonElement != null && jsonElement.isJsonObject()){
+                    JsonObject jsonObject = jsonElement.getAsJsonObject();
+                    String nodeObjectId = NoteConstants.getMemberStringByValue(jsonObject, "networkId");
+                    if(nodeObjectId != null && nodeObjectId.equals(id)){
+                        return jsonObject;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+
+
+    public static JsonObject getJsonObjectById(String id, JsonArray jsonArray){
+        if(jsonArray != null){
+            for(JsonElement jsonElement : jsonArray){
+                if(jsonElement != null && jsonElement.isJsonObject()){
+                    JsonObject jsonObject = jsonElement.getAsJsonObject();
+                    String nodeObjectId = NoteConstants.getJsonId(jsonObject);
+                    if(nodeObjectId != null && nodeObjectId.equals(id)){
+                        return jsonObject;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public static Future<?> getJsonImage(String memberName, JsonObject json, ExecutorService execService, EventHandler<WorkerStateEvent> onImage, EventHandler<WorkerStateEvent> onFailed){
+        if(json != null && memberName != null){
+            JsonElement memberNameElement = json.get(memberName);
+            
+            String imgStr = memberNameElement != null && memberNameElement.isJsonPrimitive() ? memberNameElement.getAsString() : null;
+            
+     
+            return Drawing.convertHexStringToImg(imgStr, execService, onImage, onFailed);
+           
+        }else{
+            return Utils.returnException(NoteConstants.ERROR_EXISTS, execService, onFailed);
+        }
+    }
+
 
     public static JsonObject getCmdObject(String cmd, String locationId){        
         JsonObject note = NoteConstants.getCmdObject(cmd);
@@ -1165,15 +1254,7 @@ public class NoteConstants {
         return note;
     }
 
-    public static Future<?> getNetworkObject(NoteInterface networkInteface, String locationId, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-    
-        if(networkInteface != null){
-            JsonObject note = NoteConstants.getCmdObject("getNetworkObject", locationId);
-            return networkInteface.sendNote(note, onSucceeded, onFailed);
-        }else{
-            return Utils.returnException("Network disabled", execService, onFailed);
-        }
-    }
+
 
     public static String getNameFromNetworkObject(JsonObject json){
       
@@ -1181,6 +1262,22 @@ public class NoteConstants {
         
         return nameElement != null && !nameElement.isJsonNull() && nameElement.isJsonPrimitive() ? nameElement.getAsString() : "(Unknown)";
     
+    }
+
+    public static boolean isNameInJsonArray(JsonArray jsonArray, String name){
+       
+        for(JsonElement jsonElement : jsonArray){
+  
+            JsonElement nameElement = jsonElement != null && jsonElement.isJsonObject() ? jsonElement.getAsJsonObject().get("name") : null;
+            
+            if(nameElement != null && !nameElement.isJsonNull() && nameElement.isJsonPrimitive()){
+                String nameString = nameElement.getAsString();
+                if(name.equals(nameString)){
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
 

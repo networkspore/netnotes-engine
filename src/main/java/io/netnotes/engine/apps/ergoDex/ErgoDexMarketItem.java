@@ -1063,15 +1063,16 @@ public class ErgoDexMarketItem {
                 m_marketData, 
                 this);
            
-            m_chartTab.shutdownMilliesProperty().addListener((obs,oldval,newval)->{
-                if(newval.longValue() > 0){
+            
+            getNetworksData().getContentTabs().addContentTab(m_chartTab);
+
+            getNetworksData().getContentTabs().lastRemovedTabIdProperty().addListener((obs,oldval,newval)->{
+                if(newval != null && m_chartTab != null && m_chartTab.getId().equals(newval)){
                     
                     m_chartTab = null;
                 }
                 
             });
-            getNetworksData().getContentTabs().addContentTab(m_chartTab);
-
 
         }else{
             if(!getNetworksData().getContentTabs().containsId(m_chartTab.getId())){
@@ -1099,11 +1100,6 @@ public class ErgoDexMarketItem {
     public NetworksData getNetworksData(){
         return m_dataList.getErgoDex().getNetworksData();
     }
-
-    public NoteInterface getCurrentNetwork(){
-        return  getNetworksData().getNetworkInterface(ErgoNetwork.NETWORK_ID);
-    }
-
 
 
 

@@ -164,8 +164,8 @@ public class ContentTab {
         this.m_pane = pane;
     }
 
-    public SimpleLongProperty shutdownMilliesProperty(){
-        return m_shutdownMilliesProperty;
+    public void shutdown(){
+        
     }
 
 

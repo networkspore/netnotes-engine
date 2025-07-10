@@ -17,7 +17,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
 
@@ -27,7 +26,6 @@ public class ErgoExplorerList {
     
     private ChangeListener<LocalDateTime> m_updateListener = null;
     private ErgoNetworkData m_ergoNetworkData;
-    private String m_defaultExplorerId = ErgoPlatformExplorerData.ERGO_PLATFORM_EXPLORER;
 
     public ErgoExplorerList(ErgoExplorers ergoExplorer, ErgoNetworkData ergoNetworkData) {
         m_ergoExplorer = ergoExplorer;
@@ -36,76 +34,6 @@ public class ErgoExplorerList {
         getData();
 
         
-    }
-
-    public String getDefaultExplorerId(){
-        return m_defaultExplorerId;
-    }
-
-    public void setDefaultExplorerId(String id, boolean isSave){
-        m_defaultExplorerId = id;
-
-        
-       
-        
-
-        if(isSave){
-            
-             long timeStamp = System.currentTimeMillis();
-            save();
-           
-            JsonObject note = NoteConstants.getJsonObject("networkId", ErgoConstants.EXPLORER_NETWORK);
-            if(id != null){
-                ErgoExplorerData explorerData = getErgoExplorerData(id);
-                note.addProperty("id",  id);
-                note.addProperty("name", explorerData.getName());
-            }
-            note.addProperty("code", NoteConstants.LIST_DEFAULT_CHANGED);
-            note.addProperty("timeStamp", timeStamp);
-            
-            getErgoNetwork().sendMessage(NoteConstants.LIST_DEFAULT_CHANGED, timeStamp, ErgoConstants.EXPLORER_NETWORK, note.toString());
-        }
-        
-    }
-
-    public Future<?> clearDefault(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded){
-
-        m_defaultExplorerId = null;
-        long timeStamp = System.currentTimeMillis();
-        
-        JsonObject msg = NoteConstants.getJsonObject("networkId", ErgoConstants.EXPLORER_NETWORK);
-        msg.addProperty("code", NoteConstants.LIST_DEFAULT_CHANGED);
-        msg.addProperty("timeStamp", timeStamp);
-        getErgoNetwork().sendMessage(NoteConstants.LIST_DEFAULT_CHANGED, timeStamp, ErgoConstants.EXPLORER_NETWORK, msg.toString());
-        
-
-        return Utils.returnObject(msg, getExecService(), onSucceeded);
-    }
-
-    public Future<?> setDefault(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        JsonElement idElement = note != null ? note.get("id") : null;
-        if(idElement != null){
-            String defaultId = idElement.getAsString();
-            ErgoExplorerData explorerData = getErgoExplorerData(defaultId);
-            if(explorerData != null){
-                setDefaultExplorerId(defaultId, true);
-                return Utils.returnObject(explorerData.getJsonObject(), getExecService(), onSucceeded);
-            }
-        }
-
-        return Utils.returnException("Id element required", getExecService(), onFailed);
-    }
-
-    public Future<?> getDefaultJson(EventHandler<WorkerStateEvent> onSucceeded){
-        ErgoExplorerData explorerData = getErgoExplorerData(getDefaultExplorerId());
-
-        return Utils.returnObject(explorerData != null ? explorerData.getJsonObject() : null, getExecService(), onSucceeded);
-    }
-
-    public ErgoExplorerData getDefaultExplorer(){
-        ErgoExplorerData explorerData = getErgoExplorerData(getDefaultExplorerId());
-
-        return explorerData != null ? explorerData : null;
     }
 
     public ErgoExplorers getErgoExplorer(){
@@ -121,14 +49,18 @@ public class ErgoExplorerList {
     }
 
 
-    public Future<?> getExplorerById(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public Future<?> getExplorerObjectById(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonElement idElement = note.get("id");
 
         if(idElement != null && idElement.isJsonPrimitive()){
             String id = idElement.getAsString() ;
         
             ErgoExplorerData explorerData = getErgoExplorerData(id);
-            return Utils.returnObject(explorerData != null ? explorerData.getJsonObject() : null, getExecService(), onSucceeded);
+            if(explorerData != null){
+                return Utils.returnObject( explorerData.getNetworkObject(), getExecService(), onSucceeded);
+            }else{
+                Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+            }
         }
         return Utils.returnException( "Id element required", getExecService(), onFailed);
     }
@@ -174,7 +106,7 @@ public class ErgoExplorerList {
         JsonElement dataElement = json.get("data");
 
         if (dataElement != null && dataElement.isJsonArray()) {
-            com.google.gson.JsonArray dataArray = dataElement.getAsJsonArray();
+            JsonArray dataArray = dataElement.getAsJsonArray();
 
             for (int i = 0; i < dataArray.size(); i++) {
                 JsonElement dataItem = dataArray.get(i);
@@ -213,12 +145,6 @@ public class ErgoExplorerList {
             }
         }
         
-
-        JsonElement explorerIdElement = json != null ? json.get("defaultId") : null;
-        setDefaultExplorerId( explorerIdElement != null && explorerIdElement.isJsonPrimitive() ? explorerIdElement.getAsString() : null, false);
-      
-
-        
     }
 
  
@@ -251,7 +177,8 @@ public class ErgoExplorerList {
     }
 
     public boolean remove(String id, boolean doSave){
-        if (id != null) {
+        if (id != null && !id.equals(ErgoPlatformExplorerData.ERGO_PLATFORM_EXPLORER)) {
+            
             ErgoExplorerData explorerData = m_dataHashMap.remove(id);
             if (explorerData != null) {
                 
@@ -302,7 +229,6 @@ public class ErgoExplorerList {
     public JsonObject getJsonObject() {
         JsonObject json = new JsonObject();
         if(m_dataHashMap.size() > 0){
-            json.addProperty("defaultId", getDefaultExplorerId());
             json.add("data", getDataJsonArray());
         }
 
@@ -316,10 +242,7 @@ public class ErgoExplorerList {
         for (Map.Entry<String, ErgoExplorerData> entry : m_dataHashMap.entrySet()) {
             
             ErgoExplorerData data = entry.getValue();
-            JsonObject jsonObj = NoteConstants.getJsonObject("name", data.getName());
-            jsonObj.addProperty("id", data.getId());
-            jsonObj.addProperty("isDefault", getDefaultExplorerId() != null ? data.getId().equals(getDefaultExplorerId()) : false);
-            jsonArray.add(jsonObj);
+            jsonArray.add(data.getNetworkObject());
 
         }
         return Utils.returnObject(jsonArray, getExecService(), onSucceeded);

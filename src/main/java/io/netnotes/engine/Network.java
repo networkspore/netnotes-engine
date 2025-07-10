@@ -1,33 +1,44 @@
 package io.netnotes.engine;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.PipedOutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+
+import javax.imageio.ImageIO;
 
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.WorkerStateEvent;
+import javafx.embed.swing.SwingFXUtils;
 import javafx.event.EventHandler;
 import javafx.scene.control.Button;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
 
-public class Network  {
+public class Network extends NoteFile  {
 
     private int m_connectionStatus = NoteConstants.STOPPED;
-    private String m_networkId;
-    private NetworksData m_networksData;
-    private SimpleObjectProperty<LocalDateTime> m_lastUpdated = new SimpleObjectProperty<LocalDateTime>(LocalDateTime.now());
-    private ChangeListener<LocalDateTime> m_changeListener = null;
+    private NoteBytes m_networkId;
+    private String m_website = "";
+
     private SimpleObjectProperty<LocalDateTime> m_shutdownNow = new SimpleObjectProperty<>(null);
     public final static long EXECUTION_TIME = 500;
 
+    public final static String DEFAULT_IMAGE_URL = "/assets/globe-outline-white-30.png";
 
     private double m_stagePrevWidth = Stages.DEFAULT_STAGE_WIDTH;
     private double m_stagePrevHeight = Stages.DEFAULT_STAGE_HEIGHT;
@@ -40,21 +51,44 @@ public class Network  {
 
     private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
 
-    private String m_name;
-    private Image m_icon;
-    private Button m_appBtn;
+    private WritableImage m_icon = null;
+    private Button m_appBtn = null;
+    private String m_name = null;
 
-    public Network(Image icon, String name, String id, NetworksData networksData) {
-        m_icon = icon;
-        m_name = name;
-        m_networkId = id;
-        m_networksData = networksData;
+
+    public Network(NoteBytes networkId, String name, NoteListString listString, File file, NetworksInterface networksData) {
+        super(listString, file, networksData);
+        m_networkId = networkId;
+        loadDefaultIcon();
+        openFile(file);
     }
 
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         return null;
     }
+
+    private void loadDefaultIcon(){
+        try{
+            m_icon = SwingFXUtils.toFXImage(ImageIO.read(getResourceURL(DEFAULT_IMAGE_URL)), m_icon);
+        }catch(IOException e){
+            try {
+                Files.writeString(AppConstants.LOG_FILE.toPath(), "network ("+getName()+") default image err:" + e.toString() , StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (IOException e1) {
+                e1.printStackTrace();
+            }
+        }
+    }
+
+    protected void setIconFromNoteFile(NoteFile noteFile){
+
+    }
+
+
+    protected void openFile(File file){
+
+    }
+
 
 
     public Button getButton(double size){
@@ -86,6 +120,12 @@ public class Network  {
     }
 
 
+    public Future<?> sendStream( PipedOutputStream outputStream, int senderType, String senderId){
+
+    
+        return null;
+
+    }
 
     private String m_description = null;
 
@@ -97,36 +137,6 @@ public class Network  {
         return m_description;
     }
 
-    public NoteInterface getNoteInterface(){
-       
-        return new NoteInterface() {
-            
-            public String getNetworkId(){
-                return Network.this.getNetworkId();
-            }
-
-            public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-                return Network.this.sendNote(note, onSucceeded, onFailed);
-            }
-
-            public void addMsgListener(NoteMsgInterface listener){
-                if(listener != null && listener.getId() != null){
-                    Network.this.addMsgListener(listener);
-                }
-            }
-            public boolean removeMsgListener(NoteMsgInterface listener){
-                
-                return Network.this.removeMsgListener(listener);
-            }
-
-        };
-    }
-
-
-    protected void setName(String name){
-        m_name = name;
-        
-    }
 
     public Image getAppIcon(){
         return m_icon;
@@ -186,13 +196,6 @@ public class Network  {
         }
     }
 
-    protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, num);
-        }
-    }
-
-
     protected NoteMsgInterface getListener(String id) {
         for (int i = 0; i < m_msgListeners.size(); i++) {
             NoteMsgInterface listener = m_msgListeners.get(i);
@@ -211,11 +214,11 @@ public class Network  {
         m_keyWords = value;
     }
 
-    public void setNetworkId(String id) {
+    protected void setNetworkId(NoteString id) {
         m_networkId = id;
     }
 
-    public String getNetworkId() {
+    public NoteBytes getNetworkId() {
         return m_networkId;
     }
 
@@ -263,16 +266,6 @@ public class Network  {
 
   
 
-    public JsonObject getStageJson() {
-        JsonObject json = new JsonObject();
-        json.addProperty("maximized", getStageMaximized());
-        json.addProperty("width", getStageWidth());
-        json.addProperty("height", getStageHeight());
-        json.addProperty("prevWidth", getStagePrevWidth());
-        json.addProperty("prevHeight", getStagePrevHeight());
-        return json;
-    }
-
     public String getName(){
         return m_name;
     }
@@ -281,21 +274,22 @@ public class Network  {
         return m_icon;
     }
 
-    public void setIcon(Image icon){
-        m_icon = icon;
+
+
+    public String getWebsite(){
+        return m_website;
     }
 
-    public JsonObject getJsonObject() {
-        JsonObject networkObj = new JsonObject();
-        networkObj.addProperty("name", getName());
-        networkObj.addProperty("networkId", getNetworkId());
-        return networkObj;
-
+    public void setWebsite(String website){
+        m_website = website;
     }
 
-    public NetworksData getNetworksData() {
-        return m_networksData;
+    public ExecutorService getExecService(){
+        return  getNetworksInterface().getExecService();
     }
+
+
+
     /* 
     public NoteInterface getTunnelNoteInterface(String networkId) {
 
@@ -329,30 +323,10 @@ public class Network  {
         }
     }*/
 
-    public SimpleObjectProperty<LocalDateTime> getLastUpdated() {
-        return m_lastUpdated;
-    }
-
-    public void addUpdateListener(ChangeListener<LocalDateTime> changeListener) {
-        m_changeListener = changeListener;
-        if (m_changeListener != null) {
-            m_lastUpdated.addListener(m_changeListener);
-
-        }
-        // m_lastUpdated.addListener();
-    }
-
-    public void removeUpdateListener() {
-        if (m_changeListener != null) {
-            m_lastUpdated.removeListener(m_changeListener);
-            m_changeListener = null;
-        }
-    }
 
     public void shutdown() {
         shutdownNowProperty().set(LocalDateTime.now());
         
-        removeUpdateListener();
         removeAllMsgListeners();
     }
 
@@ -382,6 +356,10 @@ public class Network  {
             m_cmdProperty.removeListener(m_cmdListener);
             m_cmdListener = null;
         }
+    }
+
+    public NetworkInformation getNetworkInformation(){
+        return new NetworkInformation(getNetworkId(), getName(), getAppIcon(), getAppIcon(), getDescription());
     }
 
     private ChangeListener<LocalDateTime> m_shutdownListener;

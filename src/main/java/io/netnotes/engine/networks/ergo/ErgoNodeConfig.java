@@ -5,9 +5,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-
-import javafx.beans.property.SimpleObjectProperty;
 
 import com.google.gson.JsonObject;
 import io.netnotes.engine.HashData;
@@ -57,7 +54,7 @@ public class ErgoNodeConfig {
     public ErgoNodeConfig( String configText, String fileName, ErgoNodeLocalData nodeLocalData) throws FileNotFoundException, IOException, Exception {
         m_ergoNodeLocalData = nodeLocalData;
         m_configFileName = fileName;
-        
+        m_configText = configText;
         updateConfigFile();
         addListeners();
     }
@@ -119,13 +116,10 @@ public class ErgoNodeConfig {
 
     public void setConfigText(String configText) {
         this.m_configText = configText;
-        getLastUpdated().set(LocalDateTime.now());
+        save();
     }
 
 
-    public SimpleObjectProperty<LocalDateTime> getLastUpdated() {
-        return m_ergoNodeLocalData.getLastUpdated();
-    } 
     public static String getApiKeyHash(String apiKey){
         if(!apiKey.equals("")){
         
@@ -166,7 +160,7 @@ public class ErgoNodeConfig {
         return m_configFileName;
     }
 
-    public void setConfigFileName(String name, boolean update) throws FileNotFoundException, IOException, Exception {
+    public void setConfigFileName(String name, boolean update) {
         m_configFileName = name;
         if(update){
             File configFile = getConfigFile();
@@ -174,7 +168,7 @@ public class ErgoNodeConfig {
                 File newName = new File(configFile.getParentFile().getAbsolutePath() + "/" + name );
                 configFile.renameTo(newName);
             }
-            getLastUpdated().set(LocalDateTime.now());
+            save();
         }    
     }
 
@@ -185,6 +179,10 @@ public class ErgoNodeConfig {
         } else {
             return null;
         }
+    }
+
+    public void save(){
+        m_ergoNodeLocalData.save();
     }
 
     public void updateConfigFile() throws FileNotFoundException, IOException, Exception {

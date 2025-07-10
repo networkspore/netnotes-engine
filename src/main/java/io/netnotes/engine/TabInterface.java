@@ -7,7 +7,7 @@ import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 
 public interface TabInterface {
-    String getAppId();
+    NoteBytes getAppId();
     String getName();
     void shutdown();
     void setStatus(String status);

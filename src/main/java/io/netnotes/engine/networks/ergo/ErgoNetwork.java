@@ -59,26 +59,21 @@ public class ErgoNetwork extends Network implements NoteInterface {
 //    private Image m_sendImage = new Image("/assets/arrow-send-white-30.png");
 
 
-
     //private SimpleBooleanProperty m_shuttingdown = new SimpleBooleanProperty(false);
     public ErgoNetwork(NetworksData networksData, String locationId) {
         super(new Image("/assets/ergo-network-30.png"), NAME, NETWORK_ID, networksData);
         
 
-        setKeyWords(new String[]{"blockchain","smart contracts", "programmable", "dApp", "wallet"});
+        setKeyWords(new String[]{"ergo","explorers", "nodes"});
 
         m_ergNetData = new ErgoNetworkData(this, locationId);
 
     }
-  
 
     @Override
     public String getDescription(){
         return DESCRIPTION;
     }
-
-
-
 
     private Image m_smallAppIcon = new Image(getSmallAppIconString());
 
@@ -118,7 +113,6 @@ public class ErgoNetwork extends Network implements NoteInterface {
         return m_networkType;
     }
 
-
     @Override
     protected void start(){
         if(getConnectionStatus() == NoteConstants.STOPPED){
@@ -131,8 +125,6 @@ public class ErgoNetwork extends Network implements NoteInterface {
     @Override
     protected void stop(){
         super.stop();
-
-
         sendStatus();        
     }
 
@@ -147,58 +139,45 @@ public class ErgoNetwork extends Network implements NoteInterface {
         sendMessage(NoteConstants.STATUS, timeStamp, ErgoNetwork.NETWORK_ID, json.toString());
     }
 
-   
-
-
-
-
-
-
-
-
     public void shutdown() {
         m_ergNetData.shutdown();
     }
 
-  
-
-    
     @Override
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
         JsonElement cmdElement = note.get(NoteConstants.CMD);
         JsonElement networkIdElement = note.get("networkId");
         JsonElement locationIdElement = note.get("locationId");
 
-    
-        if (cmdElement != null  && networkIdElement != null && networkIdElement != null && networkIdElement.isJsonPrimitive() && locationIdElement != null && locationIdElement.isJsonPrimitive()) {
-            String locationId = locationIdElement.getAsString();
-            String locationString = getNetworksData().getLocationString(locationId);
-            if(m_ergNetData.isLocationAuthorized(locationString)){
-                
-                note.remove("locationString");
-                note.addProperty("locationString", locationString);
+        String locationId = locationIdElement != null && !locationIdElement.isJsonNull() ? locationIdElement.getAsString() : null;
+        NetworkInformation networkInformation = locationId != null ? getNetworksData().getLocationNetworkInformation(locationId) : null;
 
+        if (cmdElement != null && !cmdElement.isJsonNull() && cmdElement.isJsonPrimitive() && networkInformation != null) {
+          
+            if(cmdElement.getAsString().equals("getNetworkObject")){
+                return getNetworkObject(onSucceeded, onFailed);
+            }else if(networkIdElement != null && networkIdElement != null && networkIdElement.isJsonPrimitive()){
                 String networkId = networkIdElement.getAsString();
 
                 switch(networkId){
                     case ErgoConstants.EXPLORER_NETWORK:
                         return m_ergNetData.getErgoExplorers().sendNote(note, onSucceeded, onFailed);
                     case ErgoConstants.NODE_NETWORK:
-                        return m_ergNetData.getErgoNodes().sendNote(note, onSucceeded, onFailed);
+                        return m_ergNetData.getErgoNodes().sendNote(note, locationId, networkInformation, onSucceeded, onFailed);
 
                 }
 
             }
-            
         }
-       
-
         return null;
     }
 
+    
 
-    public static NetworkInformation getNetworkInformation(){
-        return new NetworkInformation(NETWORK_ID, NAME, getAppIconString(), getSmallAppIconString(), DESCRIPTION);
+
+    @Override
+    public NetworkInformation getNetworkInformation(){
+        return new NetworkInformation(NETWORK_ID, NAME, new Image(getAppIconString()), new Image( getSmallAppIconString()), DESCRIPTION);
     }
 
 
@@ -220,10 +199,6 @@ public class ErgoNetwork extends Network implements NoteInterface {
         super.sendMessage(code, timeStamp, networkId, msg);
     }
 
-    @Override
-    protected void sendMessage(int code, long timeStamp, String networkId, Number num){
-        super.sendMessage(code, timeStamp, networkId, num);
-    }
 
     @Override
     protected NoteMsgInterface getListener(String id){
@@ -232,14 +207,15 @@ public class ErgoNetwork extends Network implements NoteInterface {
 
     private class ErgoNetworkTab extends AppBox implements TabInterface{
         
+       
+
         private ScrollPane m_tabScroll;
         private ScrollPane m_walletScroll;
         private ChangeListener<Bounds> m_boundsChange;
-
+        
         private ErgoExplorersAppBox m_ergoExplorerAppBox = null;
         private ErgoNodesAppBox m_ergoNodesAppBox = null;
         private VBox m_tabScrollContent = null;
-        private NoteMsgInterface m_ergoNetworkMsgInterface = null;
         
         private SimpleStringProperty m_status = new SimpleStringProperty(NoteConstants.STATUS_STOPPED);
         private Button m_menuBtn;
@@ -256,8 +232,10 @@ public class ErgoNetwork extends Network implements NoteInterface {
 
         public ErgoNetworkTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button networkBtn){
             super(NETWORK_ID);
-            
+            m_ergNetData.getErgoNetworkControl().addNetworkConnection();
+
             m_menuBtn = networkBtn;
+
 
             m_tabScrollContent = new VBox();
            
@@ -271,42 +249,9 @@ public class ErgoNetwork extends Network implements NoteInterface {
             getChildren().add(m_tabScroll);
           
 
-            m_ergoExplorerAppBox = new ErgoExplorersAppBox(appStage, m_ergNetData.getLocationId(), getNoteInterface());
-            m_ergoNodesAppBox = new ErgoNodesAppBox(appStage, m_ergNetData.getLocationId(),getNetworksData(), getNoteInterface());
+            m_ergoExplorerAppBox = new ErgoExplorersAppBox(appStage, m_ergNetData.getErgoNetworkControl());
+            m_ergoNodesAppBox = new ErgoNodesAppBox(appStage, m_ergNetData.getErgoNetworkControl());
               
-            m_ergoNetworkMsgInterface = new NoteMsgInterface() {
-                public String getId(){
-                    return m_ergNetData.getId();
-                }
-                public void sendMessage(int code, long timestamp, String networkId, Number num){
-                    switch(networkId){
-                        case ErgoConstants.NODE_NETWORK:
-                            m_ergoNodesAppBox.sendMessage(code, timestamp, networkId, num);
-                        break;
-                        case ErgoConstants.EXPLORER_NETWORK:
-                            m_ergoExplorerAppBox.sendMessage(code, timestamp, networkId, num);
-                        break;
-                    }
-                }
-
-                public void sendMessage(int code, long timestamp, String networkId, String msg){
-                    switch(networkId){
-          
-                        case ErgoConstants.NODE_NETWORK:
-                            m_ergoNodesAppBox.sendMessage(code, timestamp, networkId, msg);
-                        break;
-                        case ErgoConstants.EXPLORER_NETWORK:
-                            m_ergoExplorerAppBox.sendMessage(code, timestamp, networkId, msg);
-                        break;
-           
-            
-                    }
-                }
-            };
-            
-
-       
-            addMsgListener(m_ergoNetworkMsgInterface);
 
             Region hBar = new Region();
             hBar.setPrefWidth(400);
@@ -361,11 +306,7 @@ public class ErgoNetwork extends Network implements NoteInterface {
         @Override
         public void shutdown(){
             
-            if(m_ergoNetworkMsgInterface != null){
-                removeMsgListener(m_ergoNetworkMsgInterface);
-                m_ergoNetworkMsgInterface = null;
-            }
-
+            m_ergNetData.getErgoNetworkControl().removeNetworkConnection();
             
             /*
                 shutdownMenu.fire();

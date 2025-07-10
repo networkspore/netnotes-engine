@@ -75,14 +75,14 @@ public class Stages {
     
     public final static int DEFAULT_RGBA = 0x00000000;
 
-    public final static String ASSETS_DIRECTORY = "/assets";
+    
     public final static String FONTS_DIRECTORY = "/fonts";
     public final static String DEFAULT_CSS = "/css/startWindow.css";
 
-    public static final String WAITING_IMG = ASSETS_DIRECTORY + "/spinning.gif";
-    public static final String OPEN_IMG = ASSETS_DIRECTORY + "/open-outline-white-20.png";
-    public static final String DISK_IMG = ASSETS_DIRECTORY + "/save-outline-white-20.png";
-    public static final String ADD_IMG = ASSETS_DIRECTORY + "/add-outline-white-40.png";
+    public static final String WAITING_IMG = AppConstants.ASSETS_DIRECTORY + "/spinning.gif";
+    public static final String OPEN_IMG = AppConstants.ASSETS_DIRECTORY + "/open-outline-white-20.png";
+    public static final String DISK_IMG = AppConstants.ASSETS_DIRECTORY + "/save-outline-white-20.png";
+    public static final String ADD_IMG = AppConstants.ASSETS_DIRECTORY + "/add-outline-white-40.png";
 
     public static final String PRIMARY_FONT = FONTS_DIRECTORY + "/OCRAEXT.TTF";
     public static final String PRIMARY_FONT_FAMILY = "OCR A Extended";
@@ -90,18 +90,18 @@ public class Stages {
     public static final String EMOJI_FONT = FONTS_DIRECTORY + "/OpenSansEmoji.ttf";
     public static final String EMOJI_FONT_FAMILY = "OpenSansEmoji, Regular";
 
-    public static final String NETNOTES_LOGO_256 = ASSETS_DIRECTORY + "/icon256.png";
-    public static final String NETNOTES_LOGO_WHITE = ASSETS_DIRECTORY + "/icon.png";
+    public static final String NETNOTES_LOGO_256 = AppConstants.ASSETS_DIRECTORY + "/icon256.png";
+    public static final String NETNOTES_LOGO_WHITE = AppConstants.ASSETS_DIRECTORY + "/icon.png";
 
-    public static final String UNKNOWN_IMAGE_PATH = ASSETS_DIRECTORY + "/unknown-unit.png";
+    public static final String UNKNOWN_IMAGE_PATH = AppConstants.ASSETS_DIRECTORY + "/unknown-unit.png";
 
-    public static Image icon = new Image(ASSETS_DIRECTORY + "/icon15.png");
+    public static Image icon = new Image(AppConstants.ASSETS_DIRECTORY + "/icon15.png");
     public static Image logo = new Image(NETNOTES_LOGO_256);
-    public static Image closeImg = new Image(ASSETS_DIRECTORY + "/close-outline-white.png");
-    public static Image minimizeImg = new Image(ASSETS_DIRECTORY + "/minimize-white-20.png");
-    public static Image globeImg = new Image(ASSETS_DIRECTORY + "/globe-outline-white-120.png");
-    public static Image globeImage30 = new Image(ASSETS_DIRECTORY + "/globe-outline-white-30.png");
-    public static Image settingsImg = new Image(ASSETS_DIRECTORY + "/settings-outline-white-120.png");
+    public static Image closeImg = new Image(AppConstants.ASSETS_DIRECTORY + "/close-outline-white.png");
+    public static Image minimizeImg = new Image(AppConstants.ASSETS_DIRECTORY + "/minimize-white-20.png");
+    public static Image globeImg = new Image(AppConstants.ASSETS_DIRECTORY + "/globe-outline-white-120.png");
+    public static Image globeImage30 = new Image(AppConstants.ASSETS_DIRECTORY + "/globe-outline-white-30.png");
+    public static Image settingsImg = new Image(AppConstants.ASSETS_DIRECTORY + "/settings-outline-white-120.png");
     public static Image unknownImg = new Image(UNKNOWN_IMAGE_PATH);
 
     public final static double STAGE_WIDTH = 450;

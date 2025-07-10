@@ -1,24 +1,26 @@
 package io.netnotes.engine;
 
+import javafx.scene.image.Image;
+
 public class NetworkInformation {
-    private String m_networkId;
+    private NoteBytes m_networkId;
     private String m_networkName;
-    private String m_iconString;
-    private String m_smallIconString;
+    private Image m_icon;
+    private Image m_smallIcon;
     private String m_description;
 
-    public NetworkInformation(String networkId, String networkName, String iconString){
+    public NetworkInformation(NoteBytes networkId, String networkName, Image icon){
         m_networkId = networkId;
         m_networkName = networkName;
-        m_iconString = iconString;
-        m_smallIconString = iconString;
+        m_icon = icon;
+        m_smallIcon = icon;
     }
 
-    public NetworkInformation(String networkId, String networkName, String iconString, String smallIconString, String description){
+    public NetworkInformation(NoteBytes networkId, String networkName, Image icon, Image smallIcon, String description){
         m_networkId = networkId;
         m_networkName = networkName;
-        m_iconString = iconString;
-        m_smallIconString = iconString;
+        m_icon = icon;
+        m_smallIcon = smallIcon;
         m_description = description;
     }
 
@@ -26,7 +28,7 @@ public class NetworkInformation {
         return m_description;
     }
 
-    public String getNetworkId(){
+    public NoteBytes getNetworkId(){
         return m_networkId;
     }
 
@@ -34,12 +36,12 @@ public class NetworkInformation {
         return m_networkName;
     }
 
-    public String iconString(){
-        return m_iconString;
+    public Image getIcon(){
+        return m_icon;
     }
 
-    public String getSmallIconString(){
-        return m_smallIconString;
+    public Image getSmallIcon(){
+        return m_smallIcon;
     }
 
 }

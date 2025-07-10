@@ -75,28 +75,32 @@ public class ErgoExplorers  {
         JsonElement idElement = note != null ? note.get("id") : null;
      
         if(cmdElement != null){
-            String id = idElement != null ? idElement.getAsString() : m_explorerList.getDefaultExplorerId();
          
             switch(cmdElement.getAsString()){
-                case "getExplorerById":
-                    return m_explorerList.getExplorerById(note, onSucceeded, onFailed);
+                case "getExplorerObjectById":
+                    return m_explorerList.getExplorerObjectById(note, onSucceeded, onFailed);
                 case "getExplorers":
                     return m_explorerList.getExplorers(onSucceeded);
-                case "getDefaultJson":
-                    return m_explorerList.getDefaultJson(onSucceeded);
-                case "setDefault":
-                    return m_explorerList.setDefault(note, onSucceeded, onFailed);
-                case "clearDefault":
-                    return m_explorerList.clearDefault(note, onSucceeded);
+                
                 default:
-                    ErgoExplorerData explorerData = m_explorerList.getErgoExplorerData(id);
-                    return explorerData.sendNote(note, onSucceeded, onFailed);
+                    
+                    String id = idElement != null ? idElement.getAsString() : null;
+                    if(id != null){
+                        ErgoExplorerData explorerData = m_explorerList.getErgoExplorerData(id);
+                        if(explorerData != null){
+                            return explorerData.sendNote(note, onSucceeded, onFailed);
+                        }else{
+                            return Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+                        } 
+                    }else{
+                        return Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+                    }
             }
                     
             
+        }else{
+            return Utils.returnException(NoteConstants.CMD_NOT_PRESENT, getExecService(), onFailed);
         }
-
-        return null;
     }
 
 

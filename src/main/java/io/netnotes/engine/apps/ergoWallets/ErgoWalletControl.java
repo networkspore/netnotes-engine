@@ -1,5 +1,15 @@
 package io.netnotes.engine.apps.ergoWallets;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -8,16 +18,27 @@ import org.ergoplatform.appkit.NetworkType;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.NoteBytePair;
+import io.netnotes.engine.NoteConnection;
+import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteInterface;
 import io.netnotes.engine.NoteMsgInterface;
+import io.netnotes.engine.NoteStatusMsg;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.Stages;
+import io.netnotes.engine.StreamInterface;
+import io.netnotes.engine.SubmitButton;
 import io.netnotes.engine.Utils;
+import io.netnotes.engine.NetworksData.NetworkControl;
 import io.netnotes.engine.networks.ergo.ErgoBoxInfo;
 import io.netnotes.engine.networks.ergo.ErgoConstants;
 import io.netnotes.engine.networks.ergo.ErgoCurrency;
@@ -36,57 +57,77 @@ import javafx.geometry.Point2D;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.util.Duration;
+import oshi.util.tuples.Pair;
 import javafx.scene.control.Control;
 import javafx.scene.control.Tooltip;
 
 public class ErgoWalletControl {
 
-    public final String NETWORK_ID = "ERGO_WALLET_CONTROL";
-    private final String m_networkId;
-    private String m_locationId = null;
+    private final NoteBytePair m_networkId;
+    private final NoteBytePair m_parentId;
+    
+    private NoteBytePair m_locationId = null;
     private Future<?> m_accessIdFuture = null;
 
     private SimpleObjectProperty<JsonObject> m_walletsNetworkObject = new SimpleObjectProperty<>(null);
-    private SimpleObjectProperty<NoteInterface> m_walletsInterface = new SimpleObjectProperty<>(null);
-    private NoteInterface m_controlInterface = null;
+    private StreamInterface m_walletsInterface = null;
 
     private SimpleStringProperty m_currentAddress = new SimpleStringProperty(null);
+    private SimpleObjectProperty<JsonArray> m_walletsArray = new SimpleObjectProperty<>(null);
     private SimpleObjectProperty<JsonArray> m_addressesArray = new SimpleObjectProperty<>(null);
     private SimpleObjectProperty<JsonObject> m_balanceObject = new SimpleObjectProperty<>(null);
     private SimpleObjectProperty<JsonObject> m_walletObject = new SimpleObjectProperty<>();
 
     private String m_accessId = null;
-    private String m_controlId = null;
 
     private NoteMsgInterface m_walletMsgInterface = null;
     private NoteMsgInterface m_networksDataMsgInterface = null;
     private NetworksData m_networksData = null;
     private NetworkType m_networkType = null;
     private JsonParser m_jsonParser;
-    private String m_walletsNetworkId;
-    private String m_ergoNetworkNetworkId;
+    private int m_destinationType  = -1;
+    private NoteBytePair m_walletsNetworkId;
+    private NoteBytePair m_ergoNetworkNetworkId;
 
     private String m_defaultWalletId = null;
     private SimpleBooleanProperty m_disabledProperty = new SimpleBooleanProperty(false);
 
+    private NoteInterface m_controlInterface = null;
     private NoteMsgInterface m_controlMsgInterface = null;
 
-    public ErgoWalletControl(String networkId, String walletsNetworkId, String ergoNetworkNetworkId, NetworkType networkType, String locationId, NetworksData networksData) {
+    public ErgoWalletControl(NoteBytePair networkId, NoteBytePair parentId, NoteBytePair walletsNetworkId, NoteBytePair ergoNetworkNetworkId, NetworkType networkType, NoteBytePair locationId, NetworksData networksData) {
+        this(NoteConstants.APPS, networkId, parentId,  walletsNetworkId,  ergoNetworkNetworkId,  networkType,  locationId,  networksData);     
+    }
+
+    public ErgoWalletControl(int destinationType, NoteBytePair networkId, NoteBytePair parentId, NoteBytePair walletsNetworkId, NoteBytePair ergoNetworkNetworkId, NetworkType networkType, NoteBytePair locationId, NetworksData networksData) {
         m_networkId = networkId;
+        m_parentId = parentId;
         m_locationId = locationId;
+        m_destinationType = destinationType;
         m_walletsNetworkId = walletsNetworkId;
         m_ergoNetworkNetworkId = ergoNetworkNetworkId;
         m_networksData = networksData;
         m_networkType = networkType;
         m_jsonParser = new JsonParser();
-        
         addNetworksDataListener();
         getData();
 
     }
 
+    public NoteInterface getControlInterface(){
+        return m_controlInterface;
+    }
+
+    public NoteBytePair getNetworkId(){
+        return m_networkId;
+    }
+
+    public NoteBytePair getParentId(){
+        return m_parentId;
+    }
+
     public boolean isWalletsAppAvailable(){
-        return m_networksData.getApp(m_walletsNetworkId) != null;
+        return m_networksData.isAvailable(m_destinationType, m_walletsNetworkId);
     }
 
     public boolean isDisabled(){
@@ -103,12 +144,19 @@ public class ErgoWalletControl {
         }
     }
 
+    public ReadOnlyObjectProperty<JsonArray> walletsProperty(){
+        return m_walletsArray;
+    }
+
    
     public ReadOnlyBooleanProperty disabledProperty(){
         return m_disabledProperty;
     }
 
     public void addNetworksDataListener(){
+       /* getNetworksData().getNetworkId();
+        NetworkControl networkControl = getNetworksData().getNetworkControl();
+        networkControl.sendStream(NoteConstants.APPLICATION, )
         if(m_networksDataMsgInterface == null){
             updateWalletsInterface();
 
@@ -128,95 +176,59 @@ public class ErgoWalletControl {
                         break;
                     }
                 }
-
-                @Override
-                public void sendMessage(int code, long timestamp, String networkId, Number number) {
-                    
-                }
                 
             };
   
             getNetworksData().addMsgListener(m_networksDataMsgInterface);
-        }
+        }*/
     }
 
-    public void updateWalletsInterface(){
-        NoteInterface walletsInterface = m_networksData.getApp(m_walletsNetworkId);
-
+    private void readStatusMessages(JsonReader statusMessage) throws Exception{
+        statusMessage.beginArray();
         
 
-        if(walletsInterface == null){
-            
-            if(m_walletsInterface.get() != null){
-                disconnectWallet();
-            }
-            if(m_controlInterface  != null){
-                disconnectControl();
-            }
-        }else{
-            if(m_controlInterface == null){
-                JsonObject note = NoteConstants.getCmdObject("getControlId", m_locationId);
-
-                walletsInterface.sendNote(note, (onSucceeded)->{
-                    Object resultObject = onSucceeded.getSource().getValue();
-                    JsonObject result = resultObject != null && resultObject instanceof JsonObject ? (JsonObject) resultObject : null;
-                    JsonElement controlIdElement = result != null ? result.get("controlId") : null;
-                    if(controlIdElement != null && !controlIdElement.isJsonNull()){
-                        m_controlInterface = walletsInterface;
-                        String controlId = controlIdElement.getAsString();
-                        m_controlId = controlId;
-                        m_controlMsgInterface = new NoteMsgInterface() {
-                  
-                            @Override
-                            public String getId() {
-                                return controlId;
-                            }
-
-                            @Override
-                            public void sendMessage(int code, long timestamp, String networkId, String msg) {
-                                if(networkId != null && networkId.equals(ErgoWallets.NETWORK_ID)){
-                                    switch(code){
-                                        case NoteConstants.LIST_ITEM_REMOVED:
-                                            walletRemoved(msg);
-                                        break;
-                                    }                                
-                                }
-
-                            }
-
-                            @Override
-                            public void sendMessage(int code, long timestamp, String networkId, Number number) {
-                       
-                            }
-                            
-                        };
-                        m_controlInterface.addMsgListener(m_controlMsgInterface);
-                    }
-                }, onFailed->{
-
-                });
+        while(statusMessage.hasNext()){
+            if(statusMessage.peek() == JsonToken.BEGIN_OBJECT){
+                statusMessage(new NoteStatusMsg(statusMessage));
+            }else{
+                statusMessage.skipValue();
             }
         }
+        statusMessage.endArray();
     }
 
+    private void statusMessage(NoteStatusMsg msg){
+        String header = msg != null ? msg.getHeader() : null;
+        if(header != null && header.equals(ErgoWallets.NETWORK_ID)){
+            switch(msg.getCode()){
+                case NoteConstants.LIST_ITEM_REMOVED:
+                case NoteConstants.LIST_ITEM_ADDED:
+                    updateWallets();
+            }                                
+        } 
+    }
+    
+
     public void getData(){
-        m_networksData.getData(NETWORK_ID, m_networkId, m_walletsNetworkId, m_ergoNetworkNetworkId, (onComplete)->{
+        m_networksData.getData(m_parentId, m_networkId, m_walletsNetworkId, m_ergoNetworkNetworkId+m_networkType.toString(), (onComplete)->{
             Object obj = onComplete.getSource().getValue();
             JsonObject json = obj != null && obj instanceof JsonObject ? (JsonObject) obj : null;
             openJson(json); 
-            updateWalletsInterface();
+           // updateWalletsInterface();
         });
     
     }
 
     public void save(){
-        m_networksData.save(NETWORK_ID, m_networkId, m_walletsNetworkId, m_ergoNetworkNetworkId, getJsonObject());
+        m_networksData.save(m_parentId, m_networkId, m_walletsNetworkId, m_ergoNetworkNetworkId+m_networkType.toString(), getJsonObject());
     }
 
     private void openJson(JsonObject json){
         if(json != null){
+            JsonElement destinationType = json != null ? json.get("destinationType") : null; 
             JsonElement walletIdElement = json != null ? json.get("walletId") : null;
             JsonElement disabledElement = json != null ? json.get("isDisabled") : null;
+            m_destinationType = destinationType != null ? destinationType.getAsInt() : NoteConstants.APPS;
             m_defaultWalletId = walletIdElement != null ? (walletIdElement.isJsonNull() ? null : walletIdElement.getAsString() ) : null;
             boolean disabled = disabledElement != null ? (disabledElement.isJsonNull() ? false : disabledElement.getAsBoolean() ) : false;
             m_disabledProperty.set(disabled);
@@ -224,7 +236,49 @@ public class ErgoWalletControl {
         }
     }
 
-  
+    public void updateWallets(){
+        getWallets((onSucceeded)->{
+            Object result = onSucceeded.getSource().getValue();
+            if(result != null && result instanceof JsonArray){
+                JsonArray walletsArray = (JsonArray) result;
+                String walletId = getWalletId();
+                if(walletId != null && getWalletObjectFromArray(walletsArray, walletId) == null){
+                    disconnectWallet();
+                }
+                m_walletsArray.set(walletsArray);
+            }
+        }, (onFailed)->{
+            disconnectWallet();
+            m_walletsArray.set(null);
+        });
+    }
+
+    public static JsonObject getWalletObjectFromArray(JsonArray jsonArray, String walletId){
+        if (jsonArray != null) {
+            int size = jsonArray.size();
+
+            for (int i = 0; i < size; i++) {
+                JsonElement objectElement = jsonArray.get(i);
+               
+                JsonObject json = objectElement != null && objectElement.isJsonObject() ? objectElement.getAsJsonObject() : null;
+                JsonElement idElement = json != null ? json.get("id") : null;
+
+                String id = idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive()
+                        ? idElement.getAsString()
+                        : null;
+
+                if (id != null && id.equals(walletId)) {
+                    
+                    
+                    return json;
+                }
+            
+            }
+        }
+
+        return null;
+    }
+
 
     public String getDefaultWalletId(){
         return m_defaultWalletId;
@@ -310,30 +364,26 @@ public class ErgoWalletControl {
     }
 
     public void setWalletObject(JsonObject json){
-        if(json == null){
-            if(m_defaultWalletId != null){
-                m_defaultWalletId = null;
-                save();
-            }
-        }else{
-            JsonElement idElement = json.get("id");
-            if(idElement != null && !idElement.isJsonNull()){
-                String id = idElement.getAsString();
-                if(m_defaultWalletId != null && !m_defaultWalletId.equals(id)){
-                    m_defaultWalletId = id;
-                    save();
-                }
-            }else{
-                if(m_defaultWalletId != null){
-                    m_defaultWalletId = null;
-                    save();
-                }
-            }
+        String oldWalletId = getWalletId();
+
+        JsonElement idElement = json != null ? json.get("id") : null;
+        String newId = idElement != null && !idElement.isJsonNull() ? idElement.getAsString() : null;
+        
+        boolean isSame =oldWalletId != null && newId != null && oldWalletId.equals(newId);
+
+        if(!isSame){
+            disconnectWallet();
+            setDefaultWalletId(newId);
         }
-        m_walletObject.set(json);
+
+ 
+        
+        if(!isSame){
+            m_walletObject.set(json);
+        }
     }
 
-    public String getLocationId() {
+    public char[] getLocationId() {
         return m_locationId;
     }
 
@@ -441,18 +491,34 @@ public class ErgoWalletControl {
     }
 
 
+   
+
+
+    private void respondToObject(JsonWriter writer, JsonReader reader) throws Exception{
+        NoteStatusMsg noteStatusMsg = new NoteStatusMsg(reader);
+        
+        switch(noteStatusMsg.getCode()){
+            case NoteConstants.READY:
+
+            break;
+        }
+
+    }
+
 
     public void connectToWallet() {
-        NoteInterface walletsInterface = m_networksData.getApp(m_walletsNetworkId);
+
+        NoteConnection noteconnection = new NoteConnection(m_locationId)
+
         String walletId = getWalletId();
-        if (!isDisabled() && walletsInterface != null && walletId != null) {
+        if (!isDisabled() && walletId != null) {
 
             if (m_accessIdFuture == null || (m_accessIdFuture != null && m_accessIdFuture.isDone())) {
                 
                 JsonObject getAccessIdNote = NoteConstants.getCmdObject("getAccessId", getLocationId());
                 getAccessIdNote.addProperty("id", walletId);
 
-                m_accessIdFuture = walletsInterface.sendNote(getAccessIdNote, onSucceeded -> {
+               sendToWallet(getAccessIdNote, onSucceeded -> {
                     Object successObject = onSucceeded.getSource().getValue();
 
                     if (successObject != null) {
@@ -491,16 +557,14 @@ public class ErgoWalletControl {
                                     }
                                 }
 
-                                @Override
-                                public void sendMessage(int code, long timestamp, String networkId, Number number) {
-                                 
-                                }
+                        
                             };
                             walletsInterface.addMsgListener(m_walletMsgInterface);
                             m_walletsInterface.set(walletsInterface);
                             m_walletObject.set(walletObject);
 
-                            NoteConstants.getNetworkObject(walletsInterface, m_locationId, getExecService(), (onNetworkObject)->{
+                           
+                            getNetworkObject(walletsInterface, (onNetworkObject)->{
                                 Object obj = onNetworkObject.getSource().getValue();
                                 m_walletsNetworkObject.set(obj != null && obj instanceof JsonObject ? (JsonObject) obj : null);
                             }, onFailed->{
@@ -536,22 +600,13 @@ public class ErgoWalletControl {
     }
 
 
-    public void createWallet(boolean isNew, EventHandler<WorkerStateEvent> onFailed){
+
+    public void createWallet(boolean isNew){
         NoteInterface controlInterface = getControlInterface();
         if(controlInterface != null){
-            JsonObject note = getControlCmdObject("createWallet");
-            note.addProperty("isNew", isNew);
-            controlInterface.sendNote(note, onCreated->{
-                Object obj = onCreated.getSource().getValue();
-                if(obj != null && obj instanceof JsonObject){
-
-                }else{
-                    Utils.returnException(NoteConstants.STATUS_ERROR, getExecService(), onFailed);
-                }
-            }, onFailed);
-
+            
         }else{
-            Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, getExecService(), onFailed);
+
         }
     }
 
@@ -583,17 +638,21 @@ public class ErgoWalletControl {
         }
     }
 
-    private JsonObject getControlCmdObject(String cmd){
-        JsonObject cmdObj = NoteConstants.getCmdObject(cmd, m_locationId);
-        cmdObj.addProperty("controlId", m_controlId);
-        return cmdObj;
+
+
+
+    public Future<?> getNetworkObject(NoteInterface walletsInterface, EventHandler<WorkerStateEvent> onSucceess, EventHandler<WorkerStateEvent> onFailed){
+        
+        JsonObject note = NoteConstants.getCmdObject("getNetworkObject", m_locationId);
+
+        return walletsInterface.sendNote(note, onSucceess, onFailed);
     }
 
 
     public Future<?> getWalletById(String walletId, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         NoteInterface controlInterface = getControlInterface();
         if (controlInterface != null) {
-            JsonObject note = getControlCmdObject("getWalletById");
+            JsonObject note =  NoteConstants.getCmdObject("getWalletById", m_locationId);
 
             return controlInterface.sendNote(note, onSucceeded, onFailed);
         } else {
@@ -605,7 +664,7 @@ public class ErgoWalletControl {
     public Future<?> getWallets(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
         NoteInterface controlInterface = getControlInterface();
         if (controlInterface != null) {
-            JsonObject note = getControlCmdObject("getWallets");
+            JsonObject note =  NoteConstants.getCmdObject("getWallets", m_locationId);
             return controlInterface.sendNote(note, onSucceeded, onFailed);
         } else {
             return Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, getExecService(), onFailed);
@@ -615,9 +674,8 @@ public class ErgoWalletControl {
     public Future<?> removeWallets(JsonArray removeIds, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
         NoteInterface controlInterface = getControlInterface();
         if (controlInterface != null) {
-            JsonObject note = getControlCmdObject("removeWallets");
-            note.add("ids", removeIds);
-            return controlInterface.sendNote(note, onSucceeded, onFailed);
+
+            return null;
         } else {
             return Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, getExecService(), onFailed);
         }
@@ -757,58 +815,7 @@ public class ErgoWalletControl {
     }
 
 
-    public void openWalletFile(EventHandler<WorkerStateEvent> onFailed) {
-        NoteInterface controlInterface = getControlInterface();
 
-        if (controlInterface != null) {
-
-            JsonObject note = NoteConstants.getCmdObject("openWalletFile", m_locationId);
-            note.addProperty("networkType", m_networkType.toString());
-            controlInterface.sendNote(note, onSucceeded->{
-
-            }, onFailed);
-
-        }else{
-            Utils.returnException(NoteConstants.STATUS_UNAVAILABLE, getExecService(), onFailed);
-        }
-
-    }
-
-    public void walletRemoved(String msg) {
-        NoteInterface walletsInterface = getWalletsInterface();
-
-        if (walletsInterface != null) {
-
-            String walletId = getWalletId();
-            if (walletId != null) {
-                JsonParser jsonParser = m_jsonParser;
-                JsonElement jsonElement = jsonParser != null ? jsonParser.parse(msg) : null;
-                JsonObject json = jsonElement != null && !jsonElement.isJsonNull() && jsonElement.isJsonObject()
-                        ? jsonElement.getAsJsonObject()
-                        : null;
-                JsonElement walletsElement = json != null ? json.get("removedIds") : null;
-                JsonArray removedIdsArray = walletsElement != null ? walletsElement.getAsJsonArray() : null;
-                if (removedIdsArray != null) {
-                    int size = removedIdsArray.size();
-
-                    for (int i = 0; i < size; i++) {
-                        JsonElement idElement = removedIdsArray.get(i);
-                       
-                        String id = idElement != null && !idElement.isJsonNull() && idElement.isJsonPrimitive()
-                                ? idElement.getAsString()
-                                : null;
-
-                        if (id != null && id.equals(walletId)) {
-                            
-                            disconnectWallet();
-                            return;
-                        }
-                    
-                    }
-                }
-            }
-        }
-    }
 
     public void copyCurrentAddressToClipboard(Control control) {
         String adrText = m_currentAddress.get();
@@ -913,6 +920,55 @@ public class ErgoWalletControl {
         }
 
     }
+
+    public boolean isControl(){
+        return m_controlInterface != null;
+    }
+
+    public void openWallet()  {
+        openWallet(null);
+    }
+
+    public void openWallet(File walletFile){
+        NoteInterface controlInterface = getControlInterface();
+
+        if (controlInterface != null) {
+
+            NetworkInformation networkInformation = getNetworksData().getLocationNetworkInformation(m_locationId);
+
+            SubmitButton submitButton = new SubmitButton("Open");
+
+            ErgoWalletOpenTab openTab = new ErgoWalletOpenTab(walletFile, networkInformation, this, submitButton);
+            String openTabId = openTab.getId();
+
+            submitButton.setOnSubmit(onSubmit->{
+                Object submitObject = onSubmit.getSource().getValue();
+                JsonObject submitJson = submitObject != null && submitObject instanceof JsonObject ? (JsonObject) submitObject : null;
+                if(submitJson != null){
+                    JsonObject note = NoteConstants.getCmdObject("openWallet", m_locationId);
+                    note.add("data", submitJson);
+
+                    controlInterface.sendNote(note, onSucceeded->{
+                        getNetworksData().getContentTabs().removeContentTab(openTabId);
+                    }, (onOpenFailed)->{
+                        Throwable throwable = onOpenFailed.getSource().getException();
+
+                        if(submitButton.getOnError() != null){
+                            
+                            Utils.returnException("Error:" + (throwable != null ? throwable.getMessage() : " failed") , getExecService(), submitButton.getOnError());
+                        }
+                    });
+                }
+            });
+
+            getNetworksData().getContentTabs().addContentTab(openTab);
+
+ 
+
+        }
+
+    }
+
     
     public NetworkType getNetworkType(){
         return m_networkType;
@@ -929,9 +985,6 @@ public class ErgoWalletControl {
         return m_walletsInterface.get();
     }
 
-    private NoteInterface getControlInterface(){
-        return m_controlInterface;
-    }
 
     public void disconnectWallet() {
         if (m_accessIdFuture != null && (!m_accessIdFuture.isDone() || !m_accessIdFuture.isCancelled())) {
@@ -951,14 +1004,7 @@ public class ErgoWalletControl {
         m_accessId = null;
     }
 
-    private void disconnectControl(){
-        NoteInterface controlInterface = getControlInterface();
-        if(controlInterface != null && m_controlMsgInterface != null){
-            controlInterface.removeMsgListener(m_controlMsgInterface);
-        }
-        m_controlInterface = null;
-        m_controlMsgInterface = null;
-    }
+ 
     public Future<?> sendNoteData(String cmd, JsonObject noteData, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         if(m_accessId == null){
             return Utils.returnException("No access to wallet", getExecService(), onFailed);
@@ -988,6 +1034,43 @@ public class ErgoWalletControl {
 
     public boolean isUnlocked(){
         return !isDisabled() && m_accessId != null && m_locationId != null && getWalletsInterface() != null;
+    }
+
+    public String checkWalletName(String name){
+
+        name = name.endsWith(".erg") ? name.substring(0, name.length()-4) :name;
+
+        SimpleStringProperty nameProperty = new SimpleStringProperty(name);
+        
+        int i = 1;
+        while(containsName(nameProperty.get())){
+            nameProperty.set( name + " #" + i);
+            i++;
+        }
+        return nameProperty.get();
+    }
+
+    public boolean containsName(String name) {
+        JsonArray jsonArray = m_walletsArray.get();
+        if(jsonArray != null){
+            for (JsonElement element : jsonArray ) {
+                JsonObject json = element.isJsonObject() ? element.getAsJsonObject() : null;
+                String walletName = json != null ? NoteConstants.getJsonName(json) : null;
+
+                if(walletName.equals(name)){
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public void disconnectControl(){
+        if(m_controlInterface != null && m_controlMsgInterface != null){
+            m_controlInterface.removeMsgListener(m_controlMsgInterface);
+            m_controlInterface = null;
+            m_controlMsgInterface = null;
+        }
     }
 
     public void shutdown() {

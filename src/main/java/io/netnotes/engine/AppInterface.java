@@ -6,12 +6,12 @@ import io.netnotes.engine.adapters.Adapter;
 
 public interface AppInterface {
     void shutdown();
-    String[] getDefaultAppIds();
-    String[] getDefaultNetworkIds();
-    String[] getDefaultAdapters();
-    Network createApp(String networkId, String locationId);
-    Network createNetwork(String networkId, String locationId);
-    Adapter createAdapter(String networkId);
+    NoteBytes[] getDefaultAppIds();
+    NoteBytes[] getDefaultNetworkIds();
+    NoteBytes[] getDefaultAdapters();
+    Network createApp(NoteBytes networkId);
+    Network createNetwork(NoteBytes networkId);
+    Adapter createAdapter(NoteBytes networkId);
     NetworkInformation[] getSupportedNetworks();
     NetworkInformation[] getSupportedApps();
     NetworkInformation[] getSupportedAdapters();

@@ -7,8 +7,16 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+
+import javax.imageio.ImageIO;
+import javax.imageio.stream.ImageOutputStream;
 
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
@@ -153,6 +161,8 @@ public class Drawing {
         int r1 = (RGB1 >> 16) & 0xff;
         int g1 = (RGB1 >> 8) & 0xff;
         int b1 = RGB1 & 0xff;
+
+
 
         int a2 = (RGB2 >> 24) & 0xff;
         int r2 = (RGB2 >> 16) & 0xff;
@@ -1059,7 +1069,7 @@ public class Drawing {
                     return new Image( new ByteArrayInputStream(bytes));
                 }
                 
-                throw new NullPointerException();
+                throw new NullPointerException(NoteConstants.ERROR_EXISTS);
             }
         };
 
@@ -1070,29 +1080,15 @@ public class Drawing {
         return execService.submit(task);
     }
 
-    public static Future<?> convertImgToHexString(Image img, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
- 
-         Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws NullPointerException{
-                if(img != null && execService != null){
-                    int w = (int) img.getWidth();
-                    int h = (int) img.getHeight();
-                    if(w > 0 && h > 0){
-                        byte[] buf = new byte[w * h * 4];
-                        img.getPixelReader().getPixels(0, 0, w, h, PixelFormat.getByteBgraInstance(), buf, 0, w * 4);
-                        
-                        return Base16.encode(buf);
-                    }
-                }
-                throw new NullPointerException();
-            }
-        };
+    public static void writeEncodedImageToStream(Image img, OutputStream stream) throws IOException{
+        if(img != null){
 
-        task.setOnFailed(onFailed);
+            ImageIO.write(SwingFXUtils.fromFXImage(img, null), "png", ImageIO.createImageOutputStream(stream));
+        }
+    }
 
-        task.setOnSucceeded(onSucceeded);
+    public static Image readEncodedImageFromStream(InputStream stream) throws IOException{
 
-        return execService.submit(task);
+        return SwingFXUtils.toFXImage(ImageIO.read(stream), null);
     }
 }

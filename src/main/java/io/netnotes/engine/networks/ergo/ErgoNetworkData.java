@@ -7,13 +7,13 @@ import org.ergoplatform.appkit.NetworkType;
 import com.google.gson.JsonObject;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.apps.ergoDex.ErgoDex;
-import io.netnotes.engine.apps.ergoMarkets.ErgoMarkets;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.beans.property.SimpleLongProperty;
 
 public class ErgoNetworkData {
-    
+    private static final String NETWORK_ID = "ErgoNetworkData";
+
     private SimpleLongProperty m_updated = new SimpleLongProperty();
 
     private double m_stageWidth = 750;
@@ -23,15 +23,17 @@ public class ErgoNetworkData {
 
     private ErgoNodes m_ergoNodes = null;
     private ErgoExplorers m_ergoExplorers = null;
-    private ErgoMarkets m_ergoMarkets = null;
            
     private ArrayList<String> m_authorizedLocations = new ArrayList<>();
 
     private String m_locationId;
     private String m_id;
 
+    private ErgoNetworkControl m_ergoNetworkControl = null;
+         
+
     public ErgoNetworkData(ErgoNetwork ergoNetwork, String locationId) {
-        m_id = FriendlyId.createFriendlyId();
+        m_id = NETWORK_ID;
         m_ergoNetwork = ergoNetwork;
         m_locationId = locationId;
         m_authorizedLocations.add(ErgoDex.NAME);
@@ -75,9 +77,6 @@ public class ErgoNetworkData {
         return m_ergoExplorers;
     }
 
-    public ErgoMarkets getErgoMarkets(){
-        return m_ergoMarkets;
-    }
 
 
     public void installNetworks() {
@@ -85,7 +84,7 @@ public class ErgoNetworkData {
 
         m_ergoExplorers = new ErgoExplorers(this, m_ergoNetwork); 
         m_ergoNodes = new ErgoNodes(this, m_ergoNetwork);
-
+        m_ergoNetworkControl = new ErgoNetworkControl(getId(), getLocationId(),  getNetworksData());
     }
 
     public NetworksData getNetworksData(){
@@ -103,7 +102,9 @@ public class ErgoNetworkData {
         return m_ergoNetwork;
     }
 
-
+    public ErgoNetworkControl getErgoNetworkControl(){
+        return m_ergoNetworkControl;
+    }
 
 
     public void shutdown(){

@@ -13,11 +13,14 @@ import javafx.event.EventHandler;
 import org.apache.commons.io.FileUtils;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+
 import io.netnotes.engine.FreeMemory;
 import io.netnotes.engine.NamedNodeUrl;
+import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteInterface;
+import io.netnotes.engine.SubmitButton;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.friendly_id.FriendlyId;
@@ -40,7 +43,7 @@ public class ErgoNodesList {
 
 
     private String m_downloadImgUrl = "/assets/cloud-download-30.png";
-    private String m_defaultNodeId = null;
+
     private ErgoNetworkData m_ergoNetworkData;
 
     public ErgoNodesList( ErgoNodes ergoNodes, ErgoNetworkData ergoNetworkData) {
@@ -80,79 +83,9 @@ public class ErgoNodesList {
         
     }
 
-    public String getDefaultNodeId(){
-        return m_defaultNodeId;
-    }
 
-    public Future<?> getDefaultNodeId(EventHandler<WorkerStateEvent> onSucceeded){
-        JsonObject json = new JsonObject();
-        if(m_defaultNodeId != null){
-            json.addProperty("defaultNodeId", m_defaultNodeId);
-        }
-  
-        return Utils.returnObject(json, getExecService(), onSucceeded);
-    }
 
-    public void setDefaultNodeId(String id){
-        setDefaultNodeId(id, true);
-    }
 
-    public void setDefaultNodeId(String id, boolean isSave){
-        m_defaultNodeId = id;
-
-        if(isSave){
-          
-            save();
-            long timeStamp = System.currentTimeMillis();
-            JsonObject note = NoteConstants.getMsgObject(NoteConstants.LIST_DEFAULT_CHANGED, timeStamp, ErgoConstants.NODE_NETWORK);
-            note.addProperty("code", NoteConstants.LIST_DEFAULT_CHANGED);
-            note.addProperty("timeStamp", timeStamp);
-            if(id != null){
-                note.addProperty("id",  id);
-            }
-            
-            getErgoNetwork().sendMessage(NoteConstants.LIST_DEFAULT_CHANGED, timeStamp, ErgoConstants.NODE_NETWORK, note.toString());
-        }
-    
-    }
-
-    public Future<?> setDefault(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        JsonElement idElement = note != null ? note.get("id") : null;
-  
-        if(idElement != null){
-            String defaultId = idElement.getAsString();
-            ErgoNodeData nodeData = getNodeById(defaultId);
-            if(nodeData != null){
-                setDefaultNodeId(defaultId);
-                return Utils.returnObject(true, getExecService(), onSucceeded);
-            }
-        }
-        return Utils.returnException("Id Element required", getExecService(), onFailed);
-    }
-
-    public Future<?> clearDefault( EventHandler<WorkerStateEvent> onSucceeded){
-
-        return Utils.returnObject(clearDefault(), getExecService(), onSucceeded);
-    }
-
-    private JsonObject clearDefault(){
-        m_defaultNodeId = null;
-        long timeStamp = System.currentTimeMillis();
-        
-        JsonObject note = NoteConstants.getJsonObject("networkId", ErgoConstants.NODE_NETWORK);
-        note.addProperty("code", NoteConstants.LIST_DEFAULT_CHANGED);
-        note.addProperty("timeStamp", timeStamp);
-        getErgoNetwork().sendMessage(NoteConstants.LIST_DEFAULT_CHANGED, timeStamp, ErgoConstants.NODE_NETWORK, note.toString());
-        
-        return note;
-    }
-
-    public Future<?> getDefaultJson(EventHandler<WorkerStateEvent> onSucceeded){
-        ErgoNodeData nodeData = getNodeById(m_defaultNodeId);
-
-        return Utils.returnObject(nodeData != null ? nodeData.getJsonObject() : null, getExecService(), onSucceeded) ;
-        
-    }
 
     public NetworksData getNetworksData(){
         return m_ergoNetworkData.getNetworksData();
@@ -166,7 +99,6 @@ public class ErgoNodesList {
     private void openJson(JsonObject json) {
       
         JsonElement nodesElement = json != null ? json.get("nodes") : null;
-        JsonElement defaultNodeIdElement = json !=null ? json.get("defaultNodeId") : null;
 
      
         if (nodesElement != null && nodesElement.isJsonArray()) {
@@ -219,7 +151,7 @@ public class ErgoNodesList {
                 }
             }
            
-            setDefaultNodeId(defaultNodeIdElement != null ?  defaultNodeIdElement.getAsString() : null, false);
+          
         }else{
             NamedNodeUrl defaultUrl = new NamedNodeUrl();
             ErgoNodeData nodeData = new ErgoNodeData(
@@ -230,7 +162,6 @@ public class ErgoNodesList {
             );
             
             addRemoteNode(nodeData, false);
-            m_defaultNodeId = nodeData.getId();
         }
 
 
@@ -247,32 +178,16 @@ public class ErgoNodesList {
 
     private void addNode(ErgoNodeData nodeData, boolean isSave){
         if(nodeData != null && nodeData.getId() != null){
-            nodeData.addUpdateListener((obs,oldval,newval)->{
-                JsonObject note = NoteConstants.getJsonObject("networkId", ErgoConstants.NODE_NETWORK);
-                note.addProperty("id", nodeData.getId());
-                note.addProperty("code", NoteConstants.UPDATED);
-
-                long timeStamp = System.currentTimeMillis();
-                note.addProperty("timeStamp", timeStamp);
-
-                getErgoNetwork().sendMessage(NoteConstants.LIST_ITEM_ADDED,timeStamp, ErgoConstants.NODE_NETWORK, note.toString());
-                
-                save();
-            });
+          
             String id = nodeData.getId();
             m_dataList.put(id, nodeData);
 
           
 
             if(isSave){
-                JsonObject note = NoteConstants.getJsonObject("networkId", ErgoConstants.NODE_NETWORK);
-                note.addProperty("id", id);
-                note.addProperty("code", NoteConstants.UPDATED);
-
                 long timeStamp = System.currentTimeMillis();
-                note.addProperty("timeStamp", timeStamp);
 
-                getErgoNetwork().sendMessage(NoteConstants.LIST_ITEM_ADDED, timeStamp, ErgoConstants.NODE_NETWORK, note.toString());
+                getErgoNetwork().sendMessage(NoteConstants.LIST_ITEM_ADDED, timeStamp, ErgoConstants.NODE_NETWORK, id);
 
                
             }
@@ -315,10 +230,7 @@ public class ErgoNodesList {
 
     public boolean remove(String id, boolean isDelete, boolean isSave) {
         if(id != null ){
-            if(id.equals(m_defaultNodeId)){
-                clearDefault();
-            }
-             
+
             ErgoNodeData nodeData = m_dataList.remove(id);
 
             if(nodeData != null){
@@ -364,9 +276,9 @@ public class ErgoNodesList {
         
     }
 
-    public Future<?> removeNodes(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public void removeNodes(JsonObject note,NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
-        long timestamp = System.currentTimeMillis();
+        long timeStamp = System.currentTimeMillis();
 
         JsonElement idsElement = note.get("ids");
 
@@ -374,57 +286,66 @@ public class ErgoNodesList {
        
             JsonArray idsArray = idsElement.getAsJsonArray();
             if(idsArray.size() > 0){
-                
-                JsonObject json = NoteConstants.getMsgObject(NoteConstants.LIST_ITEM_REMOVED, timestamp, ErgoConstants.NODE_NETWORK);
-                JsonArray jsonArray = new JsonArray();
+                getNetworksData().verifyAppKey(ErgoNodes.NAME, note, networkInformation, timeStamp, onVerified->{
+                    
+                    JsonArray jsonArray = new JsonArray();
 
-                for(JsonElement element : idsArray){
-                    JsonObject idObj = element.getAsJsonObject();
+                    for(JsonElement element : idsArray){
+                        JsonObject idObj = element.getAsJsonObject();
 
-                    JsonElement idElement = idObj.get("id");
+                        JsonElement idElement = idObj.get("id");
 
-                    if(idElement != null){
-                        String id = idElement.getAsString();
+                        String id = idElement != null ? idElement.getAsString() : null;
 
-                        JsonElement deleteElement = idObj.get("isDelete");
+                        JsonElement deleteElement = id != null ? idObj.get("isDelete") : null;
                         
                         boolean isDelete = deleteElement != null && deleteElement.isJsonPrimitive() ? deleteElement.getAsBoolean() : false;
-             
-                        
-                        if(remove(id, isDelete, false)){
-                            jsonArray.add(idObj);
+                
+                        boolean isRemove = id != null ? remove(id, isDelete, false) : false;
+                        if(isRemove){
+                            jsonArray.add(new JsonPrimitive(id)); 
                         }
                     }
-                }
-                
-                json.add("ids", jsonArray);
-
-
-
-                save();
-
-                getErgoNetwork().sendMessage( NoteConstants.LIST_ITEM_REMOVED, timestamp, ErgoConstants.NODE_NETWORK, json.toString());
-
-                return Utils.returnObject(json, getExecService(), onSucceeded);
+                    
+                    if(jsonArray.size() > 0){
+                        save();
+                        getErgoNetwork().sendMessage( NoteConstants.LIST_ITEM_REMOVED, timeStamp, ErgoConstants.NODE_NETWORK, jsonArray.toString());
+                    }
+                    Utils.returnObject(NoteConstants.VERIFIED, getExecService(), onSucceeded);
+                },onFailed);
             }
 
+        }else{
+            Utils.returnException("Id element required", getExecService(), onSucceeded);
         }
 
-        return Utils.returnException("Id element required", getExecService(), onSucceeded);
+       
     }
 
     public ErgoNodeData getNodeById(String id){
- 
         if(id != null){
-
             return m_dataList.get(id);
         
         }
-
         return null;
     }
 
+    public Future<?> getNodeObjectById(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        JsonElement idElement = note.get("id");
 
+        String id = idElement != null && !idElement.isJsonNull() ? idElement.getAsString() : null;
+
+        if(id != null){
+            ErgoNodeData nodeData = getNodeById(id);
+            if(nodeData != null){
+                return Utils.returnObject(nodeData.getJsonObject(), getExecService(), onSucceeded);
+            }else{
+                return Utils.returnException(NoteConstants.ERROR_NOT_FOUND, getExecService(), onFailed);
+            }
+        }else{
+            return Utils.returnException(NoteConstants.ERROR_INVALID, getExecService(), onFailed);
+        }
+    }
 
     public JsonObject getLocalNodeByFile(File file){
         if (m_dataList.size() > 0 && file != null) {
@@ -514,7 +435,15 @@ public class ErgoNodesList {
     }
 
     public Future<?> getNodes(EventHandler<WorkerStateEvent> onSucceeded){
-        return Utils.returnObject(getNodesJsonArray(), getExecService(), onSucceeded);
+         JsonArray jsonArray = new JsonArray();
+
+        for (Map.Entry<String, ErgoNodeData> entry : m_dataList.entrySet()) {
+            ErgoNodeData data = entry.getValue();
+            JsonObject jsonObj = data.getJsonObject();
+            jsonArray.add(jsonObj);
+        }
+
+        return Utils.returnObject(jsonArray, getExecService(), onSucceeded);
     }
 
 
@@ -522,17 +451,19 @@ public class ErgoNodesList {
         JsonObject json = new JsonObject();
 
         json.add("nodes", getNodesJsonArray());
-        if(m_defaultNodeId != null){
-            json.addProperty("defaultNodeId", m_defaultNodeId);
-        }
+
         return json;
     }
 
 
+    
+
+  
+
 
     public void save() {
-        JsonObject saveJson = getDataJson();
-        getNetworksData().save("data",".", ErgoConstants.NODE_NETWORK, ErgoConstants.ERGO_NETWORK_ID, saveJson);
+  
+        getNetworksData().save("data",".", ErgoConstants.NODE_NETWORK, ErgoConstants.ERGO_NETWORK_ID, getDataJson());
         
  
     }
@@ -737,170 +668,264 @@ public class ErgoNodesList {
         return null;
     }
 
-    public Future<?> addRemoteNode(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        if(note != null){
-            JsonElement dataElement = note.get("data");
-            JsonObject dataJson = dataElement != null ? dataElement.getAsJsonObject() : null;
-            
-            
-            if(dataJson != null){
 
-                NamedNodeUrl nodeUrl = null;
-                try{
-                    nodeUrl = new NamedNodeUrl(dataJson);
-                }catch(Exception e){
-                    try {
-                        Files.writeString(AppConstants.LOG_FILE.toPath(), "\naddRemoteNode failed: " + e.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                    } catch (IOException e1) {
+    public void editLocalNode(JsonObject note, NetworkInformation networkInformation,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        if(note != null && note.get("data") != null){
+            addEditLocalNode(true, note, networkInformation, onSucceeded, onFailed);
+        }else{
+            Utils.returnException("Data element required", getExecService(), onFailed);
+        }
+    }
 
-                    }
-                }
+    public void addLocalNode(JsonObject note, NetworkInformation networkInformation,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        if(note != null && note.get("data") != null){
+            addEditLocalNode(false, note, networkInformation, onSucceeded, onFailed);
+        }else{
+            Utils.returnException("Data element required", getExecService(), onFailed);
+        }
+    }
 
-
-                if(nodeUrl != null){
-                    
-
-                    ErgoNodeData existingNode = getRemoteNodeByUrl(nodeUrl.getUrlString());
+    private void addEditLocalNode(boolean isEdit, JsonObject note, NetworkInformation networkInformation,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
-                    if(existingNode != null){
-                        return Utils.returnObject(existingNode.getNetworkId(), getExecService(), onSucceeded);
-                    }
+        JsonElement dataElement = note.get("data");
+        JsonObject json = dataElement != null && dataElement.isJsonObject() ? dataElement.getAsJsonObject() : null;
+        
+        if(json != null){
+            String jsonId = isEdit ? NoteConstants.getJsonId(json) : null;
+            ErgoNodeLocalData currentNodeData = jsonId != null && isEdit ? getLocalNode(jsonId) : null;
+
+            boolean isNodeData = currentNodeData != null && isEdit;
+
+            if(isEdit && (currentNodeData != null && !(currentNodeData instanceof ErgoNodeLocalData) || currentNodeData == null)){
+                Utils.returnException(NoteConstants.ERROR_NOT_FOUND+":"+jsonId, getExecService(), onFailed);
+                return;
+            }
+
+            JsonElement namedNodeElement = json.get("namedNode");
+            if(namedNodeElement != null && namedNodeElement.isJsonObject()){
+                long timeStamp = System.currentTimeMillis();
+                String nodeId = isNodeData ? jsonId : getNewId();
+                json.remove("id");
+                json.addProperty("id", nodeId);
+                
+                
+                getNetworksData().verifyAppKey(ErgoNodes.NAME, note, networkInformation, timeStamp, onVerified->{
+
+                    JsonElement appDirElement = json.get("appDir");
+                    String appDirString = appDirElement != null && !appDirElement.isJsonNull() ? appDirElement.getAsString() : null;
+                    File appDir = appDirString != null ? new File(appDirString) : null;
+
+                    Utils.checkDrive(appDir, getExecService(), onPath->{
+                        Object pathObject = onPath.getSource().getValue();
+                        String path = pathObject != null && pathObject instanceof String  ? (String)pathObject : null;
+                        if(path != null && !appDir.isDirectory()){
+                            
+                            try {
+                                Files.createDirectories(appDir.toPath());
+                                if (!appDir.isDirectory()) {
+                                
+                                    Utils.returnException(NoteConstants.ERROR_NOT_FOUND+":" + path, getExecService(), onFailed);
+                                    
+                                    return;
+                                }
+
+                            } catch (IOException e1) {
+                        
+                                Utils.returnException(e1, getExecService(), onFailed);
+                                
+                                return;
+                            }
+                        }
+                        
+                        if(getLocalNodeByFile(appDir) != null){
+                      
+                                Utils.returnException("Directory contains an existing node", getExecService(), onFailed);
+                            
+                            return;
+                        }
+
+
+                        JsonElement isAppFileElement = json.get("isAppFile");
+                        JsonElement appFileElement = json.get("appFile");
+
+                        boolean isAppFile = isAppFileElement != null && !isAppFileElement.isJsonNull() ? isAppFileElement.getAsBoolean() : false;
+                        String appFileString = appFileElement != null && !appFileElement.isJsonNull() ? appFileElement.getAsString() : null;
                     
-                   
-                    String networkId = getNewId();
-                    ErgoNodeData ergoNodeData = new ErgoNodeData(networkId, nodeUrl.getName(), ErgoNodeData.LIGHT_CLIENT, this, nodeUrl);
+                        JsonElement configTextElement = json.get("configText");
+                        JsonElement configFileNameElement = json.get("configFileName");
+                    
+                        String configText = configTextElement != null && !configTextElement.isJsonNull() ? configTextElement.getAsString() : null;
+                        String configFileNameString = configFileNameElement != null && !configFileNameElement.isJsonNull() ? configFileNameElement.getAsString() : null;
 
-                   
-                    addRemoteNode(ergoNodeData, true);
+                      
+                    
+                        JsonObject namedNodeJson = namedNodeElement != null && namedNodeElement.isJsonObject() ? namedNodeElement.getAsJsonObject() : null;
+                            
+                        getErgoNetworkData().getErgoNetworkControl().createNamedNode(namedNodeJson, onNamedNode->{
+                            Object namedNodeObject = onNamedNode.getSource().getValue();
+                            if(namedNodeObject != null && namedNodeObject instanceof NamedNodeUrl){
+                                NamedNodeUrl namedNodeUrl = (NamedNodeUrl) namedNodeObject;
+                                    addEditLocalNode(isEdit, nodeId, appDir, isAppFile, isAppFile ? new File(appFileString) : null
+                                    , configFileNameString, configText, appFileString, namedNodeUrl, currentNodeData, onSucceeded, onFailed);
+                                }
+                    
+                            }, onFailed);
+                        }, (checkFailed)->{
+                            
+                                Throwable throwable = checkFailed.getSource().getException();
 
-                    return Utils.returnObject(networkId, getExecService(), onSucceeded);
-                }
+                                Utils.returnException("Invalid directory : "  + throwable != null ? throwable.getMessage() : "err", getExecService(), onFailed);
+                            
+                        });
+                    
+                }, onCanceled->{
+          
+                    Throwable throwable = onCanceled.getSource().getException();
+
+                    Utils.returnException("Not Verified" + (throwable != null ? (": " + throwable.getMessage()) : ""), getExecService(), onFailed);
+                
+                });
+                 
+            }else{
+                Utils.returnException(NoteConstants.ERROR_INVALID, getExecService(), onFailed);
+            }
+        }else{
+            Utils.returnException(NoteConstants.ERROR_INVALID, getExecService(), onFailed);
+        }
+    }
+
+    private void addEditLocalNode(
+        boolean isEdit,
+        String nodeId, 
+        File appDir, 
+        boolean isAppFile, 
+        File appFile, 
+        String configName, 
+        String configText, 
+        String appFileString, 
+        NamedNodeUrl namednode, 
+        ErgoNodeLocalData currentNodeData, 
+        EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        
+        if(isEdit){
+            
+            currentNodeData.updateData(appDir, isAppFile, appFile, configName, configText, namednode,onFinished->{
+                save();
+                Utils.returnObject(NoteConstants.VERIFIED, getExecService(), onSucceeded);
+            
+            }, onFailed);
+            
+            return;
+            
+        
+        }else{
+
+            try {
+                ErgoNodeLocalData localNodeData = new ErgoNodeLocalData(nodeId, appDir, isAppFile, appFile, configName, configText, namednode, this);
+                addNode(localNodeData, true);
+
+                Utils.returnObject(NoteConstants.VERIFIED, getExecService(), onSucceeded);
+                
+                return;
+            } catch (Exception e) {
+                
+                Utils.returnException(e, getExecService(), onFailed);
+                return;
+                
             }
         }
 
-        return Utils.returnException("Data element required", getExecService(), onFailed);
     }
 
+    public void editRemoteNode(JsonObject note, NetworkInformation networkInformation,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        if(note != null && note.get("data") != null){
+            addEditRemoteNode(true, note, networkInformation, onSucceeded, onFailed);
+        }else{
+            Utils.returnException("Data element required", getExecService(), onFailed);
+        }
+    }
+
+    public void addRemoteNode(JsonObject note, NetworkInformation networkInformation,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        if(note != null && note.get("data") != null){
+            addEditRemoteNode(false, note, networkInformation, onSucceeded, onFailed);
+        }else{
+            Utils.returnException("Data element required", getExecService(), onFailed);
+        }
+    }
+
+
+    
+    public void addEditRemoteNode(boolean isEdit, JsonObject note, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        if(note != null && note.get("data") != null){
+            
+            JsonElement dataElement = note.get("data");
+            JsonObject dataJson = dataElement != null ? dataElement.getAsJsonObject() : null;
+            long timeStamp = System.currentTimeMillis();
+            String dataId = isEdit ? NoteConstants.getJsonId(dataJson) : null;
+
+            JsonElement namedNodeElement = dataJson != null ? dataJson.get("namedNode") : null;
+            JsonObject namedNodeObject = namedNodeElement != null && namedNodeElement.isJsonObject() ? namedNodeElement.getAsJsonObject() : null;
+
+            if(namedNodeObject != null && (isEdit ? dataId != null : true)){
+                
+                getNetworksData().verifyAppKey(ErgoNodes.NAME, note, networkInformation, timeStamp, onVerified->{
+                    
+
+                     m_ergoNetworkData.getErgoNetworkControl().createNamedNode(namedNodeObject, onCreated->{
+                        Object sourceObject = onCreated.getSource().getValue();
+                        if(sourceObject != null && sourceObject instanceof NamedNodeUrl){
+                            
+                            NamedNodeUrl nodeUrl = (NamedNodeUrl) sourceObject;        
+                            
+                            
+                            ErgoNodeData existingNode = isEdit ? getNodeById(dataId) : getRemoteNodeByUrl(nodeUrl.getUrlString());
+                
+                            if(isEdit){
+                                if(existingNode != null){
+
+                                    existingNode.updateUrl(nodeUrl);
+                                    save();
+                                    getErgoNetwork().sendMessage(NoteConstants.LIST_UPDATED, timeStamp, ErgoConstants.NODE_NETWORK, dataId);
+                                }else{
+                                    Utils.returnException(NoteConstants.ERROR_NOT_FOUND+":"+dataId, getExecService(), onFailed);
+                                    return;
+                                }
+
+                                
+                            }else{
+                                if(existingNode != null){
+                                    Utils.returnException(NoteConstants.ERROR_EXISTS + ":" +existingNode.getNetworkId(), getExecService(), onFailed);
+                                    return;
+                                }
+                                
+                                String nodeId = getNewId();
+                                ErgoNodeData ergoNodeData = new ErgoNodeData(nodeId, nodeUrl.getName(), ErgoNodeData.LIGHT_CLIENT, this, nodeUrl);
+
+                            
+                                addRemoteNode(ergoNodeData, true);
+
+                                Utils.returnObject(ergoNodeData.getJsonObject(), getExecService(), onSucceeded);
+                            }
+                            
+
+                            
+                        
+                        }
+                     }, onFailed);
+    
+                }, onFailed);
+                
+            }
+        }else{
+            Utils.returnException("Data element required", getExecService(), onFailed);
+        }
+
+    }
+ 
     public ExecutorService getExecService(){
         return getNetworksData().getExecService();
     }
 
-
-    public Future<?> addLocalNode(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-       
-        if(note != null){
-            JsonElement dataElement = note.get("data");
-
-            if(dataElement != null && dataElement.isJsonObject()){
-
-        
-                JsonObject dataJson = dataElement.getAsJsonObject();
-
-                JsonElement namedNodeElement = dataJson.get("namedNode");
-                
-
-                JsonElement configFileNameElement = dataJson.get("configFileName");
-                JsonElement configTextElement = dataJson.get("configText");
-
-                JsonElement isAppElement = dataJson.get("isAppFile");
-                JsonElement appFileElement = dataJson.get("appFile");
-
-                JsonElement appDirElement = dataJson.get("appDir");
-
-                if(namedNodeElement != null && namedNodeElement.isJsonObject() && appDirElement != null){
-                    NamedNodeUrl namedNodeUrl = null;
-                    try {
-                        JsonObject namedNodeJson = namedNodeElement.getAsJsonObject();
-                     
-                        namedNodeUrl = new NamedNodeUrl(namedNodeJson);
-                    } catch (Exception e1) {
-                        return Utils.returnException(e1, getExecService(), onFailed);
-                    }
-
-                    if(configFileNameElement != null){
-                        String configFileName = configFileNameElement.getAsString();
-                        String configText = configTextElement != null ? configTextElement.getAsString() : null;
-
-                        File roots[] = Utils.getRoots();
-                        String appDirString = appDirElement != null && appDirElement.isJsonPrimitive() ? appDirElement.getAsString() : null;
-
-                        File appDir = appDirElement != null && Utils.findPathPrefixInRoots(roots, appDirString) ? new File(appDirString) : null;
-
-                        
-
-                        if(appDir != null){
-            
-
-                            if(!appDir.isDirectory()){
-                                try {
-                                    boolean success = appDir.mkdirs();
-                                    if (!success && !appDir.isDirectory()) {
-                                    
-                                        return Utils.returnException("Unable to access folder location", getExecService(), onFailed);
-                                    }
-
-                                } catch (SecurityException e1) {
-                                    return Utils.returnException(e1, getExecService(), onFailed);
-                                }
-                            }
-
-                            if(getLocalNodeByFile(appDir) != null){
-                                return Utils.returnException("Directory contains an existing node", getExecService(), onFailed);
-                            }
-
-                            boolean isAppFile = isAppElement != null && isAppElement.isJsonPrimitive() ? isAppElement.getAsBoolean() : false;
-                            String appFileString = isAppFile && appFileElement != null && appFileElement.isJsonPrimitive() ? appFileElement.getAsString() : null;
-
-                            File appFile = appFileString != null && Utils.findPathPrefixInRoots(roots, appFileString) ? new File(appFileString) : null;
-                        
-            
-                            if((isAppFile && appFile != null) || !isAppFile){
-                                
-                                
-                                String id = getNewId();
-                                
-                                
-                                try {
-                                    ErgoNodeLocalData localNodeData = new ErgoNodeLocalData(id, appDir, isAppFile, appFile, configFileName, configText, namedNodeUrl, this);
-                                    addNode(localNodeData, true);
-                                             
-                                    JsonObject returnObject = NoteConstants.getJsonObject("code", NoteConstants.SUCCESS);
-                                    returnObject.addProperty("id",id);
-
-                                    return Utils.returnObject(returnObject, getExecService(), onSucceeded);
-                                } catch (Exception e1) {
-                                    return Utils.returnException(e1, getExecService(), onFailed);
-                                }
-                                
-                            }else{
-                                return Utils.returnException("App file missing", getExecService(), onFailed);
-                       
-                                
-                            }
-                        
-                        }else{
-                            return Utils.returnException("Directory element missing", getExecService(), onFailed);
-                        }
-                    }else{
-                        return Utils.returnException("Config element missing", getExecService(), onFailed);
-
-                    }
-                
-                }else{
-                    return Utils.returnException("Named node json object missing", getExecService(), onFailed);
-   
-                }
-
-
-            }else{
-                return Utils.returnException("Note data element required", getExecService(), onFailed);
-        
-            }
-        }
-           
-        return Utils.returnException("Note is null", getExecService(), onFailed);
-        
-    }
 
 
 }

@@ -1,5 +1,6 @@
 package io.netnotes.engine.apps.ergoWallets;
 
+
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 
@@ -14,6 +15,7 @@ import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.PriceAmount;
 import io.netnotes.engine.PriceAmountMenuItem;
 import io.netnotes.engine.Stages;
+import io.netnotes.engine.Utils;
 import io.netnotes.engine.NetworksData.ManageAppsTab;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleLongProperty;
@@ -41,19 +43,20 @@ public class ErgoWalletMenu extends VBox {
 
     private ErgoWalletControl m_ergoWalletControl;
 
+    private Menu m_walletMenu = null;
+    private Menu m_walletAdrMenu = null;
+    private Menu m_walletBalanceMenu = null;
+
     private final String walletUnavailableString = "Wallet App: (not found)";
     private final String selectWalletString = "[ select wallet ]";
     private final String copyString = "[ copy to clipboard ]";
     private final String selectString = "[ select address ]";
+    private final String unlockWalletString = "[ unlock wallet ]";
 
     private SimpleBooleanProperty m_isInvertProperty = new SimpleBooleanProperty(false);
     private SimpleLongProperty m_walletUpdated = new SimpleLongProperty(0L);
     private MenuButton m_networkMenuBtn = null;
     private Tooltip m_networkTip = null;
-
-    private Menu m_walletMenu = new Menu(selectWalletString);
-    private Menu m_walletAdrMenu = new Menu("");
-    private Menu m_walletBalanceMenu = new Menu("");
 
     private PauseTransition m_noticePt = null;
     private Tooltip m_noticeToolTip = null;
@@ -112,27 +115,36 @@ public class ErgoWalletMenu extends VBox {
             }
         });
 
+        String walletName = m_ergoWalletControl.walletObjectProperty().get() != null ? m_ergoWalletControl.getWalletName() : selectWalletString;
+                
+        m_walletMenu = new Menu(walletName != null ? walletName : selectWalletString);
+    
+        updateWalletsMenu();
+
         getErgoWalletControl().walletObjectProperty().addListener((obs,oldval,newval)->{
-            if(newval != null){
-                String walletName = m_ergoWalletControl.getWalletName();
-                m_walletMenu.setText(walletName);
-            }else{
-                m_walletMenu.setText(selectWalletString);
-            }
-        });
-        m_walletMenu.getItems().add(new SeparatorMenuItem());
-
-        m_walletMenu.setText(getErgoWalletControl().walletObjectProperty().get() != null ? getErgoWalletControl().getWalletName() : selectWalletString);
-        m_walletMenu.showingProperty().addListener((obs,oldval,newval)->{
-            if(newval){
-                walletMenuOnShowing();
-            }
+            updateWalletsMenu();
+            updateAddressesMenu();
         });
 
-        
+        getErgoWalletControl().walletsProperty().addListener((obs,oldval,newval)->updateWalletsMenu());
+
+        m_networkMenuBtn.getItems().add(m_walletMenu);
 
         
+        String currentAddress = m_ergoWalletControl.getCurrentAddress();
 
+        m_walletAdrMenu = new Menu(currentAddress != null ? currentAddress : unlockWalletString);
+
+        getErgoWalletControl().currentAddressProperty().addListener((obs,oldval,newval)->updateAddressesMenu());
+
+        getErgoWalletControl().addressesArrayProperty().addListener((obs,oldval,newval)->updateAddressesMenu(newval));        
+
+
+        m_walletBalanceMenu = new Menu();
+
+
+
+        
         m_networkMenuBtn.textProperty().bind(Bindings.createObjectBinding(()->{
             boolean isDisabled = m_ergoWalletControl.disabledProperty().get();
             boolean isUnlocked = getErgoWalletControl().currentAddressProperty().get() != null;
@@ -141,32 +153,8 @@ public class ErgoWalletMenu extends VBox {
             //"∅"
         }, getErgoWalletControl().walletObjectProperty(), m_ergoWalletControl.disabledProperty(), getErgoWalletControl().currentAddressProperty()));
         
-        m_walletBalanceMenu.getItems().add(new SeparatorMenuItem());
 
-        getErgoWalletControl().balanceProperty().addListener((obs,oldval,newval)->{
-            if(m_walletBalanceMenu.isShowing()){
-                updateBalanceMenu();
-            }
-        });
-
-        getErgoWalletControl().currentAddressProperty().addListener((obs,oldval,newval)->{
-            if(oldval == null){
-                m_walletAdrMenu.setOnAction(null);
-            }
-            if(newval != null){
-                m_walletAdrMenu.setText(newval);
-            }else{
-                m_walletAdrMenu.setText("[ click to unlock ]");
-                m_walletAdrMenu.setOnAction(e->{
-                    m_networkMenuBtn.hide();
-                    if(getErgoWalletControl().getWalletId() != null){
-                        getErgoWalletControl().connectToWallet();
-                    }
-                });
-            }
-        });
-
-        getErgoWalletControl().addressesArrayProperty().addListener((obs,oldval,newval)->updateAddressesMenu(newval));        
+        getErgoWalletControl().balanceProperty().addListener((obs,oldval,newval)->updateBalanceMenu());
 
 
         getChildren().add(m_networkMenuBtn);
@@ -246,56 +234,32 @@ public class ErgoWalletMenu extends VBox {
         updateBalanceMenu();
     }
 
-    private PriceAmountMenuItem getPriceAmountMenuItem(String tokenId){
-        for(int i = 0; i < m_walletBalanceMenu.getItems().size(); i++){
-            MenuItem item = m_walletBalanceMenu.getItems().get(i);
-            if(item instanceof PriceAmountMenuItem){
-                PriceAmountMenuItem priceItem = (PriceAmountMenuItem) item;
-                if(priceItem.getPriceAmount().getTokenId().equals(tokenId)){
-                    return priceItem;
-                }
-            }
-        }
-        return null;
-    }
-
-
-    private PriceAmountMenuItem removePriceAmountMenuItem(String tokenId){
-        for(int i = 0; i < m_walletBalanceMenu.getItems().size(); i++){
-            MenuItem item = m_walletBalanceMenu.getItems().get(i);
-            if(item instanceof PriceAmountMenuItem){
-                PriceAmountMenuItem priceItem = (PriceAmountMenuItem) item;
-                if(priceItem.getPriceAmount().getTokenId().equals(tokenId)){
-                    return (PriceAmountMenuItem) m_walletBalanceMenu.getItems().remove(i);
-                }
-            }
-        }
-        return null;
-    }
-
 
     public void updateBalanceMenu(){
 
         JsonObject balanceObject = getErgoWalletControl().balanceProperty().get();
 
+
         if(balanceObject != null){
-            if(m_walletBalanceMenu.getItems().size() == 1 && m_walletBalanceMenu.getItems().get(0) instanceof SeparatorMenuItem){
-                m_walletBalanceMenu.getItems().remove(0);
+            if(!m_networkMenuBtn.getItems().contains(m_walletBalanceMenu)){
+                m_networkMenuBtn.getItems().add(m_walletBalanceMenu);
             }
+
             ArrayList<PriceAmount> priceAmountList = NoteConstants.getBalanceList(balanceObject,true, getErgoWalletControl().getNetworkType());
             long timeStamp = System.currentTimeMillis();
             if(m_walletBalanceMenu.getItems().size() > 0){
                 for(int i = 0; i < priceAmountList.size() ; i++){
                     PriceAmount amount = priceAmountList.get(i);
                     
-                    PriceAmountMenuItem item = getPriceAmountMenuItem(amount.getTokenId());
-                    if(item != null){
+                    Object keyObject =  Utils.getKeyObject(m_walletBalanceMenu.getItems(), amount.getTokenId());
+                    if(keyObject != null && keyObject instanceof PriceAmountMenuItem ){
+                        PriceAmountMenuItem item = (PriceAmountMenuItem) keyObject;
                         item.setPriceAmount(amount, timeStamp);
                     }else{
                         m_walletBalanceMenu.getItems().add(new PriceAmountMenuItem(amount, timeStamp));
                     }
                 }
-                removeOld(timeStamp);
+                Utils.removeOldKeys(m_walletBalanceMenu.getItems(), timeStamp);
             }else{
                 for(PriceAmount amount : priceAmountList){
                     m_walletBalanceMenu.getItems().add(new PriceAmountMenuItem(amount, timeStamp));
@@ -305,33 +269,14 @@ public class ErgoWalletMenu extends VBox {
             m_walletUpdated.set(timeStamp);
          
         }else{
-         
-            m_walletBalanceMenu.getItems().clear();
-            m_walletBalanceMenu.getItems().add(new SeparatorMenuItem());
-            m_walletUpdated.set(0);
+            if(m_networkMenuBtn.getItems().contains(m_walletBalanceMenu)){
+                m_networkMenuBtn.getItems().remove(m_walletBalanceMenu);
+            }
         }
    
     }
 
-    private void removeOld(long timeStamp){
-        ArrayList<String> removeList  = new ArrayList<>();
 
-
-        for(int i = 0; i < m_walletBalanceMenu.getItems().size(); i++){
-            MenuItem item = m_walletBalanceMenu.getItems().get(i);
-            if(item instanceof PriceAmountMenuItem){
-                PriceAmountMenuItem priceItem = (PriceAmountMenuItem) item;
-                if(priceItem.getTimeStamp() < timeStamp){
-                    removeList.add(priceItem.getPriceAmount().getTokenId());        
-                }
-            }
-        }
-
-        for(String tokenId : removeList){
-            removePriceAmountMenuItem(tokenId);
-        }
-
-    }
 
     private void update(){
 
@@ -373,68 +318,118 @@ public class ErgoWalletMenu extends VBox {
 
     }
 
-    private void walletMenuOnShowing(){
-        m_walletMenu.getItems().clear();
-        boolean disabled = getErgoWalletControl().isDisabled();
-        if(!disabled){
-           m_walletMenu.getItems().add(new MenuItem( "Getting wallets..."));
-        }else{
-            m_walletMenu.getItems().add(new MenuItem( "(wallet disabled)"));
-        }
-        m_walletMenu.getItems().add(new SeparatorMenuItem());
+    public Menu getWalletMenu(long timeStamp){
+       
 
-        MenuItem disableWallet = new MenuItem(disabled ? "[ enable ]" : "[ disable ]");
-        disableWallet.setOnAction(e->{
-            getErgoWalletControl().setDisabled(!disabled);
-        });
-
-
-        m_walletMenu.getItems().add(disableWallet);
-
-
-        if(! disabled){
-            getErgoWalletControl().getWallets((onWallets)->{
-
-                Object onWalletsObject = onWallets.getSource().getValue();
-                m_walletMenu.getItems().remove(0);
-                JsonArray walletIds = onWalletsObject != null && onWalletsObject instanceof JsonArray ? (JsonArray) onWalletsObject : null;
-                if (walletIds != null) {
-                    
-
-                    if (walletIds != null) {
-                        for (int i = 0; i < walletIds.size() ; i++) {
-                            JsonElement element = walletIds.get(i);
-                            if (element != null && element instanceof JsonObject) {
-                                JsonObject json = element.getAsJsonObject();
-
-                                String name = json.get("name").getAsString();
-                                //String id = json.get("id").getAsString();
-
-                                MenuItem walletItem = new MenuItem(String.format("%-50s", " " + name));
-
-                                walletItem.setOnAction(action -> {
-                                    getErgoWalletControl().setWalletObject(json);
-                                    getErgoWalletControl().connectToWallet();
-                                });
-
-                                m_walletMenu.getItems().add(i, walletItem);
-                            }else{
-                                m_walletMenu.getItems().add(i, new MenuItem("Error: (cannot read wallet)"));
-                            }
-                        }
-                    }
-                }else{
-                    m_walletMenu.getItems().add(0, new MenuItem( "(no wallets)"));
-                }
-            }, onFailed->{
-                Throwable throwable = onFailed.getSource().getException();
-                String msg = throwable != null ? throwable.getMessage() : "Error";
-                m_walletMenu.getItems().remove(0);
-                m_walletMenu.getItems().add(0, new MenuItem("Error: " + msg));
-            });
-        }
-
+        String walletName = m_ergoWalletControl.walletObjectProperty().get() != null ? m_ergoWalletControl.getWalletName() : selectWalletString;
+                
+        m_walletMenu.setText(walletName != null ? walletName : selectWalletString);
+        return m_walletMenu;
     }
+
+    private void updateWalletsMenu(){
+        updateWalletsMenu(System.currentTimeMillis());
+    }
+
+    private void updateWalletsMenu(long timeStamp){
+        Menu walletMenu = m_walletMenu;
+        
+        boolean disabled = getErgoWalletControl().isDisabled();
+        KeyMenuItem disabledItem = KeyMenuItem.getKeyMenuItem(walletMenu.getItems(), NoteConstants.STATUS_DISABLED);
+        boolean isDisabledItem = disabledItem != null;
+        if(disabled){
+            if(!isDisabledItem){
+                walletMenu.getItems().add(0, new KeyMenuItem(NoteConstants.STATUS_DISABLED, "(control disabled)", timeStamp, KeyMenuItem.NOT_KEY_VALUE));
+            }else{
+                disabledItem.setTimeStamp(timeStamp);
+            }
+
+        }else{
+            if(isDisabledItem){
+                KeyMenuItem.removeKeyItem(walletMenu.getItems(),  NoteConstants.STATUS_DISABLED);
+            }
+        }
+
+        String disableValue = disabled ? "[ enable ]" : "[ disable ]";
+        String disableKey =  NoteConstants.CMD + "disable";
+
+        KeyMenuItem existingDisableWalletItem = KeyMenuItem.getKeyMenuItem(walletMenu.getItems(), disableKey);
+
+        if(existingDisableWalletItem == null){
+
+            KeyMenuItem disableWallet = new KeyMenuItem(disableKey, disableValue, timeStamp, KeyMenuItem.NOT_KEY_VALUE);
+            disableWallet.setOnAction(e->{
+                getErgoWalletControl().setDisabled(!getErgoWalletControl().isDisabled());
+            });
+
+            walletMenu.getItems().addAll(disableWallet,  new SeparatorMenuItem());
+        }else{
+            existingDisableWalletItem.setValue(disableValue, timeStamp);
+        }
+
+        JsonArray walletsArray = m_ergoWalletControl.walletsProperty().get();
+        String setCurrentKey = "setCurrent";
+        if (walletsArray != null && !disabled) {
+            String currentWalletId = getErgoWalletControl().getWalletId();
+
+            for (int i = 0; i < walletsArray.size() ; i++) {
+                JsonElement element = walletsArray.get(i);
+                if (element != null && element instanceof JsonObject) {
+                    JsonObject json = element.getAsJsonObject();
+
+                    String name = json.get("name").getAsString();
+                    String id = json.get("id").getAsString();
+
+                    boolean isCurrentWallet = currentWalletId != null && currentWalletId.equals(id);
+
+                    String value = isCurrentWallet ? "* +" + name : name;
+
+                    KeyMenu existingItem = KeyMenu.getKeyMenu(walletMenu.getItems(), id);
+                    if(existingItem == null){
+                        KeyMenu walletItem = new KeyMenu(id, value, timeStamp, KeyMenu.VALUE_NOT_KEY);
+                        
+                        KeyMenuItem setCurrentItem = new KeyMenuItem(setCurrentKey, isCurrentWallet ? "(selected)" : "(select wallet)", timeStamp, KeyMenu.VALUE_NOT_KEY);
+                        setCurrentItem.setOnAction(action -> {
+                            getErgoWalletControl().setWalletObject(json);
+                            if(!getErgoWalletControl().isConnected()){
+                                getErgoWalletControl().connectToWallet();
+                            }
+                        });
+                        walletItem.getItems().add(setCurrentItem);
+                        
+
+
+                        walletMenu.getItems().add(walletItem);
+                    }else{
+
+                        existingItem.setValue(value, timeStamp);
+
+                        KeyMenuItem setCurrentItem = KeyMenuItem.getKeyMenuItem(existingItem.getItems(), setCurrentKey);
+                        setCurrentItem.setValue( isCurrentWallet ? "(selected)" : "(select wallet)", timeStamp);
+                        
+                        
+                    }
+                }
+            }
+            
+        }else{
+            String noWalletsKey = NoteConstants.STATUS_UNAVAILABLE + "walletsArray";
+            String noWalletsValue = "(no wallets)";
+
+            KeyMenuItem existingNoWalletsItem = KeyMenuItem.getKeyMenuItem(walletMenu.getItems(), noWalletsKey);
+            if(existingNoWalletsItem == null){
+                KeyMenuItem newNoWalletsItem = new KeyMenuItem(noWalletsKey, noWalletsValue, timeStamp, KeyMenuItem.NOT_KEY_VALUE);
+                walletMenu.getItems().add(newNoWalletsItem);
+            }else{
+                existingNoWalletsItem.setTimeStamp(timeStamp);
+            }
+        }
+
+        Utils.removeOldKeys(walletMenu.getItems(), timeStamp);
+    }
+
+    
+
 
 
     public PriceAmount getBalancePriceAmountByTokenId(String tokenId){
@@ -456,96 +451,94 @@ public class ErgoWalletMenu extends VBox {
         m_ergoWalletControl.shutdown();
     }
 
-    public void updateAddressesMenu(JsonArray jsonArray){  
-        
-        if(jsonArray != null){
-            String currentAddress = getErgoWalletControl().getCurrentAddress();
-            long timeStamp = System.currentTimeMillis();
-            if(m_walletAdrMenu.getItems().size() == 0){
-                for (int i = 0; i < jsonArray.size(); i++) {
-                    JsonElement element = jsonArray.get(i);
-                    if (element != null && element.isJsonObject()) {
-                        JsonObject jsonObj = element.getAsJsonObject();
-                        String address = jsonObj.get("address").getAsString();
-                        String name = jsonObj.get("name").getAsString();
-                        boolean isCurrentAddress = currentAddress != null && currentAddress.equals(address);
-                        name = isCurrentAddress ? name + " *" : name + "  ";
-                        KeyMenu item = new KeyMenu(address, name, timeStamp);
-                        KeyMenuItem copyAddress = new KeyMenuItem(copyString, "", timeStamp);
-                        copyAddress.setOnAction(e->{
-                            Clipboard clipboard = Clipboard.getSystemClipboard();
-                            ClipboardContent content = new ClipboardContent();
-                            content.putString(address);
-                            clipboard.setContent(content);
-                        });
-                        item.getItems().add(copyAddress);
-                        if(!isCurrentAddress){
-                            KeyMenuItem selectAddress = new KeyMenuItem(selectString, "", timeStamp);
-                            selectAddress.setOnAction(e->{
-                                getErgoWalletControl().setCurrentAddress(address);
-                            });
-                            item.getItems().add(selectAddress);
-                        }
-                        m_walletAdrMenu.getItems().add(item);
-                    }
-                }
-            }else{  
-                for (int i = 0; i < jsonArray.size(); i++) {
-                    JsonElement element = jsonArray.get(i);
-                    if (element != null && element.isJsonObject()) {
-                        JsonObject jsonObj = element.getAsJsonObject();
-                        String address = jsonObj.get("address").getAsString();
-                        String name = jsonObj.get("name").getAsString();
-                        boolean isCurrentAddress = currentAddress != null && currentAddress.equals(address);
-                        name = isCurrentAddress ? name + " *" : name + "  ";
-                        
+    public void updateAddressesMenu(){
+        updateAddressesMenu(m_ergoWalletControl.addressesArrayProperty().get());
+    }
 
-                        KeyMenu existingItem =  KeyMenu.getKeyMenu(m_walletAdrMenu.getItems(), address);
+    private void updateAddressesMenu(JsonArray jsonArray){  
+        long timeStamp = System.currentTimeMillis();
+        
+        String walletId = m_ergoWalletControl.getWalletId();
+        
+        if(walletId != null){
+          
+            if(!m_networkMenuBtn.getItems().contains(m_walletAdrMenu)){
+                m_networkMenuBtn.getItems().add(1, m_walletAdrMenu);
+            }
+        }else{
+            if(m_networkMenuBtn.getItems().contains(m_walletAdrMenu)){
+                m_networkMenuBtn.getItems().remove(m_walletAdrMenu);
+            }
+        }
+
+        String currentAddress = m_ergoWalletControl.getCurrentAddress();
+
+        m_walletAdrMenu.setText(currentAddress != null ? currentAddress : "(locked)");
+
+        if(jsonArray != null){
+           
+            String selectStringKey = NoteConstants.CMD+selectString;
+            String copyStringKey = NoteConstants.CMD+copyString;
+
+            for (int i = 0; i < jsonArray.size(); i++) {
+                JsonElement element = jsonArray.get(i);
+                if (element != null && element.isJsonObject()) {
+                    JsonObject jsonObj = element.getAsJsonObject();
+                    JsonElement addressElement = jsonObj.get("address");
+                    JsonElement nameElement =jsonObj.get("name");
+                    String address = addressElement != null && !addressElement.isJsonNull() ? addressElement.getAsString() :null;
+                    String name =  nameElement != null && !nameElement.isJsonNull() ? nameElement.getAsString() : null;
+
+                    if(address != null && name != null){
+                        boolean isCurrentAddress = currentAddress != null && currentAddress.equals(address);
+                    
+                        name = isCurrentAddress ? name + " *" : name + "  ";
+
+                        KeyMenu currentAddressItem = KeyMenu.getKeyMenu(m_walletAdrMenu.getItems(), address);
                         
-                        if(existingItem != null){
-                            existingItem.setValue(name, timeStamp);
-                            if(isCurrentAddress){
-                                KeyMenuItem.removeKeyItem(existingItem.getItems(), selectString);
-                            }else{
-                                if(KeyMenuItem.getKeyMenuItem(existingItem.getItems(), selectString) == null){
-                                    KeyMenuItem selectAddress = new KeyMenuItem(selectString, "", timeStamp);
-                                    selectAddress.setOnAction(e->{
-                                        getErgoWalletControl().setCurrentAddress(address);
-                                    });
-                                    existingItem.getItems().add(selectAddress);
-                                }
-                            }
+                        if(currentAddressItem != null){
+                            currentAddressItem.setValue(name, timeStamp);
                         }else{
-                            KeyMenu item = new KeyMenu(address, name, timeStamp);
-                            KeyMenuItem copyAddress = new KeyMenuItem(copyString, "", timeStamp);
+                            KeyMenu newAddressitem = new KeyMenu(address, name, timeStamp);
+
+                            KeyMenuItem copyAddress = new KeyMenuItem(copyStringKey, copyString, timeStamp, KeyMenuItem.NOT_KEY_VALUE);
                             copyAddress.setOnAction(e->{
                                 Clipboard clipboard = Clipboard.getSystemClipboard();
                                 ClipboardContent content = new ClipboardContent();
                                 content.putString(address);
                                 clipboard.setContent(content);
                             });
-                            item.getItems().add(copyAddress);
-                            if(!isCurrentAddress){
-                                KeyMenuItem selectAddress = new KeyMenuItem(selectString, "", timeStamp);
-                                selectAddress.setOnAction(e->{
-                                    getErgoWalletControl().setCurrentAddress(address);
-                                });
-                                item.getItems().add(selectAddress);
-                            }
-                            m_walletAdrMenu.getItems().add(item);
+            
+
+                            KeyMenuItem selectAddress = new KeyMenuItem(selectStringKey, selectString, timeStamp, KeyMenuItem.NOT_KEY_VALUE);
+                            selectAddress.setOnAction(e->{
+                                getErgoWalletControl().setCurrentAddress(address);
+                            });
+                            newAddressitem.getItems().addAll(copyAddress, selectAddress);
+                        
+                            m_walletAdrMenu.getItems().add(newAddressitem);
                         }
                     }
                 }
-                
-
-                KeyMenu.removeeOldKeyMenus(m_walletAdrMenu.getItems(), timeStamp);
-
             }
         }else{
-            m_walletAdrMenu.getItems().clear();
-
+            if(getErgoWalletControl().isControl() && walletId != null){
+                String openWalletKey = NoteConstants.CMD + unlockWalletString;
+                KeyMenuItem unlockWalletItem = KeyMenuItem.getKeyMenuItem(m_walletAdrMenu.getItems(), openWalletKey);
+                if(unlockWalletItem != null){
+                    unlockWalletItem.setTimeStamp(timeStamp);
+                }else{
+                    KeyMenuItem newUnlockWalletItem = new KeyMenuItem(openWalletKey, unlockWalletString, timeStamp, KeyMenuItem.NOT_KEY_VALUE);
+                    newUnlockWalletItem.setOnAction(e->{
+                        if(!getErgoWalletControl().isUnlocked()){
+                            getErgoWalletControl().connectToWallet();
+                        }
+                    });
+                    m_walletAdrMenu.getItems().add(newUnlockWalletItem);
+                }
+            }
         }
-        
+        Utils.removeOldKeys(m_walletAdrMenu.getItems(), timeStamp);
     }
 
     

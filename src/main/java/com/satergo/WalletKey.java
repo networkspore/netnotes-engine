@@ -1,6 +1,7 @@
 package com.satergo;
 
 
+import io.netnotes.engine.ByteDecoding;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
@@ -199,8 +200,8 @@ public abstract class WalletKey {
             key.nonstandard = nonstandard;
             byte[] iv = AESEncryption.generateNonce12();
   
-            byte[] mnPhraseBytes = Utils.charsToBytes(mnemonic.getPhrase().getData()); 
-            byte[] mnPasswordBytes =  Utils.charsToBytes(mnemonic.getPassword().getData());
+            byte[] mnPhraseBytes = ByteDecoding.charsToBytes(mnemonic.getPhrase().getData()); 
+            byte[] mnPasswordBytes = ByteDecoding.charsToBytes(mnemonic.getPassword().getData());
             ByteBuffer buffer = ByteBuffer.allocate(2 + 1 + 2 + mnPhraseBytes.length + 2 + mnPasswordBytes.length)
                     .putShort((short) ID)
                     .put((byte) (nonstandard ? 1 : 0))

@@ -1,9 +1,6 @@
 package io.netnotes.engine.apps.ergoWallets;
 
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -16,8 +13,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.satergo.Wallet;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -29,7 +24,6 @@ import io.netnotes.engine.networks.ergo.ErgoNetworkUrl;
 import io.netnotes.engine.networks.ergo.ErgoTransactionData;
 import io.netnotes.engine.networks.ergo.ErgoTransactionData.OutputData;
 import io.netnotes.engine.ErgoMarketControl;
-import io.netnotes.engine.JsonParametersBox;
 import io.netnotes.engine.NamedNodeUrl;
 import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
@@ -43,14 +37,11 @@ import io.netnotes.engine.Utils;
 import io.netnotes.friendly_id.FriendlyId;
 
 import javafx.application.Platform;
-import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -58,16 +49,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
-import javafx.scene.text.Text;
-import javafx.stage.FileChooser;
-import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
@@ -78,7 +61,7 @@ public class AddressesData {
 
    
     
-    public final static NetworkInformation NOMARKET = new NetworkInformation("null", "(disabled)","/assets/bar-chart-150.png", "/assets/bar-chart-30.png", "No market selected" );
+  //  public final static NetworkInformation NOMARKET = new NetworkInformation("null", "(disabled)","/assets/bar-chart-150.png", "/assets/bar-chart-30.png", "No market selected" );
 
     private final NetworkType m_networkType;
 
@@ -214,7 +197,7 @@ public class AddressesData {
         return m_walletData.getNetworksData().getExecService();
     }
 
-    public void viewWalletMnemonic(String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public void viewWalletMnemonic(NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
         JsonObject authObj = new JsonObject();
 
@@ -230,7 +213,7 @@ public class AddressesData {
         PasswordField passwordField = new PasswordField();
         Button closeBtn = new Button();
 
-        Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, authObj, locationString, rowHeight, lblCol);
+        Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, authObj, networkInformation.getNetworkName(), rowHeight, lblCol);
 
         txStage.setScene(passwordScene);
 
@@ -341,7 +324,7 @@ public class AddressesData {
     private int lblCol = 170;
     private int rowHeight = 22;
 
-    public Future<?> sendAssets(JsonObject note, String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public Future<?> sendAssets(JsonObject note, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
         JsonElement dataElement = note.get("data");
 
@@ -448,7 +431,7 @@ public class AddressesData {
             PasswordField passwordField = new PasswordField();
             Button closeBtn = new Button();
 
-            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, dataObject, locationString, rowHeight, lblCol);
+            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, dataObject, networkInformation.getNetworkName(), rowHeight, lblCol);
 
             txStage.setScene(passwordScene);
 
@@ -583,7 +566,7 @@ public class AddressesData {
 
   
 
-    public Future<?> reclaimBox(JsonObject note,String locationId, String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public Future<?> reclaimBox(JsonObject note,String locationId, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonElement dataElement = note.get("data");
 
         if(dataElement != null && dataElement.isJsonObject())
@@ -652,7 +635,7 @@ public class AddressesData {
             PasswordField passwordField = new PasswordField();
             Button closeBtn = new Button();
 
-            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, dataObject, locationString, rowHeight, lblCol);
+            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, dataObject, networkInformation.getNetworkName(), rowHeight, lblCol);
 
             txStage.setScene(passwordScene);
 
@@ -783,7 +766,7 @@ public class AddressesData {
 
 
     
-    public Future<?> executeTransaction(JsonObject note, String locationString, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) throws Exception{
+    public Future<?> executeTransaction(JsonObject note, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) throws Exception{
         
         JsonElement dataElement = note.get("data");
         int lblCol = 170;
@@ -837,7 +820,7 @@ public class AddressesData {
             PasswordField passwordField = new PasswordField();
             Button closeBtn = new Button();
 
-            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, txDataObject, locationString, rowHeight, lblCol);
+            Scene passwordScene = Stages.getAuthorizationScene(txStage,title,closeBtn, passwordField, txDataObject, networkInformation.getNetworkName(), rowHeight, lblCol);
 
             txStage.setScene(passwordScene);
 

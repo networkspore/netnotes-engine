@@ -142,7 +142,7 @@ public class ErgoDex extends Network implements NoteInterface {
 
     public ErgoDex(NetworksData networksData, String locationId) {
         super(new Image(getAppIconString()), NAME, NETWORK_ID, networksData);
-        setKeyWords(new String[]{"ergo", "exchange", "usd", "ergo tokens", "dApp", "SigUSD"});
+        setKeyWords(new String[]{"ergo", "market", "usd", "ergo tokens", "dApp", "SigUSD"});
         m_locationId = locationId;
     }
 
@@ -314,7 +314,7 @@ public class ErgoDex extends Network implements NoteInterface {
             m_tabWidth = widthObject;
             m_heightObject = heightObject;
 
-            m_ergoWalletMenu = new ErgoWalletMenu(new ErgoWalletControl(NETWORK_ID, ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, NETWORK_TYPE, m_locationId, getNetworksData()));
+            m_ergoWalletMenu = new ErgoWalletMenu(new ErgoWalletControl("ErgoDexWallet", NETWORK_ID, ErgoWallets.NETWORK_ID, ErgoNetwork.NETWORK_ID, NETWORK_TYPE, m_locationId, getNetworksData()));
 
  
             m_gridHeight = new SimpleDoubleProperty(heightObject.get() - 100);
@@ -661,11 +661,17 @@ public class ErgoDex extends Network implements NoteInterface {
       
     }
 
-    public Future<?> getNetworkObject(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    @Override
+    public String getWebsite(){
+        return WEB_URL;
+
+    }
+    @Override
+    public Future<?> getNetworkObject(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         JsonObject spectrumObject = ErgoDex.this.getJsonObject();
         spectrumObject.addProperty("apiUrl", API_URL);
-        spectrumObject.addProperty("website", WEB_URL);
-        spectrumObject.addProperty("description", DESCRIPTION);
+        spectrumObject.addProperty("website", getWebsite());
+        spectrumObject.addProperty("description", getDescription());
         return Drawing.convertImgToHexString(getAppIcon(), getExecService(), onImgHex->{
             spectrumObject.addProperty("appIcon",(String) onImgHex.getSource().getValue());
             Utils.returnObject(spectrumObject, getExecService(), onSucceeded);
@@ -722,15 +728,18 @@ public class ErgoDex extends Network implements NoteInterface {
         
         if(cmd != null && locationIdElement != null && locationIdElement.isJsonPrimitive()){
             String locationId = locationIdElement.getAsString();
-            String locationString = getNetworksData().getLocationString(locationId);
-            if(isLocationAuthorized(locationString)){
-              
+            NetworkInformation locationInfo = getNetworksData().getLocationNetworkInformation(locationId);
+            String locationNetworkId = locationInfo != null ? locationInfo.getNetworkId() : null;
+            String locationString = locationInfo != null ? locationInfo.getNetworkName(): null;
+
+            if(isLocationAuthorized(locationNetworkId)){
+               
                 note.remove("locationString");
                 note.addProperty("locationString", locationString);
 
                 switch(cmd){
                     case "getNetworkObject":
-                        return getNetworkObject(note, onSucceeded, onFailed);
+                        return getNetworkObject(onSucceeded, onFailed);
                     case "getStatus":
                         return getConnectionStatus(note, onSucceeded, onFailed);
                     case "getQuote":
@@ -803,9 +812,7 @@ public class ErgoDex extends Network implements NoteInterface {
    
 
   
-    public ExecutorService getExecService(){
-        return getNetworksData().getExecService();
-    }
+
     // /v1/amm/pools/summary/all
 
     private Future<?> getPoolsSummary(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
@@ -1138,7 +1145,7 @@ public class ErgoDex extends Network implements NoteInterface {
                 }
             }
             m_n2tItems = numN2tItems;
-            sendMessage(NoteConstants.LIST_CHANGED, timeStamp,NETWORK_ID, m_marketsList.size());
+            sendMessage(NoteConstants.LIST_CHANGED, timeStamp,NETWORK_ID,m_marketsList.size() > 0 ? NoteConstants.STATUS_STARTED : NoteConstants.STATUS_READY);
         }else{
             SimpleBooleanProperty changed = new SimpleBooleanProperty(false);
             int numN2tItems = 0;
@@ -1164,9 +1171,9 @@ public class ErgoDex extends Network implements NoteInterface {
             }
             m_n2tItems = numN2tItems;
             if(changed.get()){
-                sendMessage(NoteConstants.LIST_CHANGED, timeStamp,NETWORK_ID,  m_marketsList.size());
+                sendMessage(NoteConstants.LIST_CHANGED, timeStamp,NETWORK_ID,  NoteConstants.STATUS_UPDATED);
             }else{
-                sendMessage(NoteConstants.LIST_UPDATED, timeStamp,NETWORK_ID,  m_marketsList.size());
+                sendMessage(NoteConstants.LIST_UPDATED, timeStamp,NETWORK_ID,  NoteConstants.STATUS_UPDATED);
             }
             
         }
@@ -1241,8 +1248,9 @@ public class ErgoDex extends Network implements NoteInterface {
         }
      */
 
-    public static NetworkInformation getNetworkInformation(){
-        return new NetworkInformation(NETWORK_ID, NAME, getAppIconString(), getSmallAppIconString(), DESCRIPTION);
+     @Override
+    public NetworkInformation getNetworkInformation(){
+        return new NetworkInformation(NETWORK_ID, NAME, new Image(getAppIconString()), new Image( getSmallAppIconString()), DESCRIPTION);
     }
 
     public void getOrderHistory(String address, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
@@ -1327,7 +1335,7 @@ public class ErgoDex extends Network implements NoteInterface {
         if(getConnectionStatus() == NoteConstants.STOPPED){
 
             setConnectionStatus(NoteConstants.STARTING);
-            sendMessage(NoteConstants.STARTING, System.currentTimeMillis(), NETWORK_ID, NoteConstants.STARTING);
+
             ExecutorService executor = getNetworksData().getExecService();
             
             Runnable exec = ()->{
@@ -1376,9 +1384,9 @@ public class ErgoDex extends Network implements NoteInterface {
 
 
 
-    private boolean isLocationAuthorized(String locationString){
+    private boolean isLocationAuthorized(String networkId){
         
-        return locationString.equals(ErgoNetwork.NAME) || m_authorizedLocations.contains(locationString);
+        return networkId.equals(ErgoNetwork.NETWORK_ID) || m_authorizedLocations.contains(networkId);
     }
     
   

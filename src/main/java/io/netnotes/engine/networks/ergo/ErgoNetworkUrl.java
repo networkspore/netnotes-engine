@@ -7,6 +7,7 @@ import org.ergoplatform.appkit.NetworkType;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.IconButton;
+import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.IconButton.IconStyle;
 import io.netnotes.friendly_id.FriendlyId;
 import javafx.beans.property.SimpleObjectProperty;
@@ -21,7 +22,7 @@ public class ErgoNetworkUrl {
 
     //type
 
-
+    private String m_id = "localHost";
     private String m_name = "localhost";
     private String m_protocol = "https";
     private String m_url = "127.0.0.1";
@@ -33,7 +34,7 @@ public class ErgoNetworkUrl {
     private SimpleObjectProperty<LocalDateTime> m_lastUpdated = new SimpleObjectProperty<>(null);
 
     public ErgoNetworkUrl(String id, String name, String protocol, String url, int port, NetworkType networkType) {
-
+        m_id = id;
         m_name = name;
         m_protocol = protocol;
         m_url = url;
@@ -43,8 +44,10 @@ public class ErgoNetworkUrl {
 
     public ErgoNetworkUrl(JsonObject json) throws Exception {
         if (json != null) {
-
-
+            JsonElement idElement = json.get("id");
+            if(idElement == null || (idElement != null && idElement.isJsonNull())){
+                throw new NullPointerException(NoteConstants.ERROR_INVALID);
+            }
             JsonElement nameElement = json.get("name");
             JsonElement urlElement = json.get("url");
             JsonElement portElement = json.get("port");
@@ -55,17 +58,19 @@ public class ErgoNetworkUrl {
                 String networkTypeString = networkTypeElement.getAsString();
                 m_networkType = networkTypeString.equals(TESTNET_STRING) ? NetworkType.TESTNET : NetworkType.MAINNET;
             }
-
+            
             m_name = nameElement != null ? nameElement.getAsString() : m_networkType.toString() + " #" + FriendlyId.createFriendlyId();
             m_url = urlElement != null ? urlElement.getAsString() : m_url;
             m_port = portElement != null ? portElement.getAsInt() : m_port;
             m_protocol = protocolElement != null ? protocolElement.getAsString() : m_protocol;
         }else{
-            throw new Exception("Json url is null");
+            throw new Exception("Json is null");
         }
     }
 
-
+    public String getId(){
+        return m_id;
+    }
 
   
     public String getName() {

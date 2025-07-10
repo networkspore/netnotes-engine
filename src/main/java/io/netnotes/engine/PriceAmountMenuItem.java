@@ -11,7 +11,7 @@ import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 
-public class PriceAmountMenuItem extends Menu {
+public class PriceAmountMenuItem extends Menu implements KeyInterface{
     private PriceAmount m_priceAmount = null;
     private long m_timeStamp = 0;
     private MenuItem m_copyAmountItem;
@@ -49,11 +49,22 @@ public class PriceAmountMenuItem extends Menu {
     }
 
     public void setPriceAmount(PriceAmount amount, long timeStamp){
-        m_priceAmount = amount;
-        m_timeStamp = timeStamp;
-        update();
-     
+        if(m_priceAmount.getTokenId().equals(amount.getTokenId())){
+            m_priceAmount = amount;
+            m_timeStamp = timeStamp;
+            update();
+        }
     }
+
+    @Override
+    public String getKey(){
+        return m_priceAmount.getTokenId();
+    }
+
+    @Override
+    public String getValue(){
+        return m_priceAmount.getAmountString();
+    } 
 
     public long getTimeStamp(){
         return m_timeStamp;

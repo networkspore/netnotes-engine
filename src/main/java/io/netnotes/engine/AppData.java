@@ -22,7 +22,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import io.netnotes.engine.GitHubAPI.GitHubAsset;
-
 import com.google.gson.JsonParseException;
 
 import javafx.beans.property.SimpleObjectProperty;
@@ -38,7 +37,6 @@ public class AppData {
     public static final File HOME_DIRECTORY = new File(System.getProperty("user.home"));
     public static final File DESKTOP_DIRECTORY = new File(HOME_DIRECTORY + "/Desktop");
   
-    
 
     private File m_appDir = null;
     private File m_settingsFile = null;
@@ -52,6 +50,7 @@ public class AppData {
     private boolean m_updates = false;
     private final ExecutorService m_execService;
     private final ScheduledExecutorService m_schedualedExecutor;
+    
    // private Stage m_persistenceStage = null;
 
 
@@ -111,17 +110,16 @@ public class AppData {
     
     }
 
+
     private void openJson(JsonObject dataObject) throws NullPointerException, JsonParseException{
         
         JsonElement appkeyElement = dataObject.get("appKey");
         JsonElement updatesElement = dataObject.get("updates");
-
         if (appkeyElement != null && appkeyElement.isJsonPrimitive()) {
 
             m_appKey = appkeyElement.getAsString();
             m_updates = updatesElement != null && updatesElement.isJsonPrimitive() ? updatesElement.getAsBoolean() : false;
-           
-        } else {
+       } else {
             throw new JsonParseException("Null appKey");
         }
      

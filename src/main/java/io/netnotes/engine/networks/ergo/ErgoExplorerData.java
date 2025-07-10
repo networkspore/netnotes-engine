@@ -212,8 +212,6 @@ public class ErgoExplorerData {
                          return getTokenInfo(note, onSucceeded, onFailed);
                     case "getNetworkState":
                          return getNetworkState(note, onSucceeded, onFailed);
-                    case "getNetworkObject":
-                         return getNetworkObject(note, onSucceeded, onFailed);
                     case "getTransactionById":
                          return getTransactionById(note, onSucceeded, onFailed);
                     case "getTransactionsByAddress":
@@ -251,14 +249,14 @@ public class ErgoExplorerData {
           return m_websiteUrlProperty != null ? m_websiteUrlProperty.getUrlString() : "";
     }
     
-    public Future<?> getNetworkObject(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public JsonObject getNetworkObject(){
         JsonObject explorerObject = new JsonObject();
         explorerObject.addProperty("apiUrl", getApiUrl());
         explorerObject.addProperty("website", getWebsiteUrl());
         explorerObject.addProperty("name", getName());
         explorerObject.addProperty("id", getId());
         explorerObject.addProperty("description", ErgoExplorers.DESCRIPTION);
-        return Utils.returnObject(explorerObject, getExecService(), onSucceeded);
+        return explorerObject;
     }
     
     public Future<?> getBy(JsonObject json, String cmd, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {

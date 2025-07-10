@@ -6,6 +6,8 @@ import java.util.concurrent.Future;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+
+import io.netnotes.engine.Network;
 import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NoteConstants;
 
@@ -60,7 +62,7 @@ public class ErgoNodes {
 
 
 
-    public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+    public Future<?> sendNote(JsonObject note,String locationId, NetworkInformation networkInformation, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
 
         JsonElement cmdElement = note != null ? note.get(NoteConstants.CMD) : null;
         JsonElement idElement = note != null ? note.get("id") : null;
@@ -69,34 +71,40 @@ public class ErgoNodes {
 
 
             switch (cmdElement.getAsString()) {
+  
+                case "addLocalNode":
+                    m_ergoNodesList.addLocalNode(note, networkInformation, onSucceeded, onFailed);
+                break;
+                case "editLocalNode":
+                    m_ergoNodesList.editLocalNode(note, networkInformation, onSucceeded, onFailed);
+                break;
+                case "addRemoteNode":
+                    m_ergoNodesList.addRemoteNode(note, networkInformation, onSucceeded, onFailed);
+                break;
+                case "editRemoteNode":
+                    m_ergoNodesList.editRemoteNode(note, networkInformation, onSucceeded, onFailed);
+                break;
+                case "getNodeObjectById":
+                    return m_ergoNodesList.getNodeObjectById(note, onSucceeded, onFailed);
                 case "getNodes":
                     return m_ergoNodesList.getNodes(onSucceeded);
-                case "addRemoteNode":
-                    return m_ergoNodesList.addRemoteNode(note, onSucceeded, onFailed);
+               
                 case "getRemoteNodes":
                     return m_ergoNodesList.getRemoteNodes(note, onSucceeded);
                 case "getLocalNodes":
                     return m_ergoNodesList.getLocalNodes(note, onSucceeded);
-                case "getDefaultJson":
-                    return m_ergoNodesList.getDefaultJson(onSucceeded);
-                case "setDefault":
-                    return m_ergoNodesList.setDefault(note, onSucceeded, onFailed);
-                case "clearDefault":
-                    return m_ergoNodesList.clearDefault(onSucceeded);
-                case "getDefaultNodeId":
-                    return m_ergoNodesList.getDefaultNodeId(onSucceeded);
                 case "removeNodes":
-                    return m_ergoNodesList.removeNodes(note, onSucceeded, onFailed);
-                case "addLocalNode":
-                    return m_ergoNodesList.addLocalNode(note, onSucceeded, onFailed);
+                    m_ergoNodesList.removeNodes(note, networkInformation, onSucceeded, onFailed);
+                break;
                 default: 
-                    String id = idElement != null ? idElement.getAsString() : m_ergoNodesList.getDefaultNodeId();
-                
-                    ErgoNodeData nodeData = m_ergoNodesList.getNodeById(id);
-                
-                    if(nodeData != null){
+                    String id = idElement != null ? idElement.getAsString() : null;
+                    if(id != null){
+                        ErgoNodeData nodeData = m_ergoNodesList.getNodeById(id);
                     
-                        return nodeData.sendNote(note, onSucceeded, onFailed);
+                        if(nodeData != null){
+                        
+                            return nodeData.sendNote(note, onSucceeded, onFailed);
+                        }
                     }
             }
         }
@@ -275,6 +283,6 @@ public class ErgoNodes {
     }
 
     public NetworkInformation getNetworkInformation(){
-        return new NetworkInformation(ErgoConstants.NODE_NETWORK, NAME, getAppIconString(), getSmallAppIconString(), DESCRIPTION);
+        return new NetworkInformation(ErgoConstants.NODE_NETWORK, NAME, new Image( getAppIconString()), new Image( getSmallAppIconString()), DESCRIPTION);
     }
 }

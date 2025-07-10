@@ -2,29 +2,23 @@ package io.netnotes.engine.networks.ergo;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.time.Duration;
-import java.time.LocalDateTime;
 
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.io.FileUtils;
 import org.ergoplatform.appkit.NetworkType;
-import org.reactfx.util.FxTimer;
-
 import javafx.beans.property.SimpleStringProperty;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
@@ -107,6 +101,8 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     private int m_peerCount;*/
     private JsonObject m_statusJson;
 
+    
+
     public ErgoNodeLocalData(String id,  File appDir, boolean isAppFile, File appFile, String configName, String configText, NamedNodeUrl namedNode, ErgoNodesList ergoNodesList) throws Exception {
         super(id,namedNode.getName(), LOCAL_NODE,  ergoNodesList, namedNode);
         m_appDir = appDir;
@@ -144,7 +140,9 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     }
 
 
-
+    public ErgoNodeConfig getErgoNodeConfig(){
+        return m_nodeConfigData;
+    }
 
 
     public ErgoNodeLocalData(String imgString, String id, String name, String clientType, JsonObject json, ErgoNodesList ergoNodesList) throws Exception {
@@ -208,8 +206,6 @@ public class ErgoNodeLocalData extends ErgoNodeData {
                     return Utils.returnObject(true, getExecService(), onSucceeded);
                 case "getStatus":
                     return getStatus(onSucceeded, onFailed);
-                case "getNetworkObject":
-                    return getNetworkObject(onSucceeded, onFailed);
             }
         }
         return null;
@@ -376,8 +372,8 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     }
 
 
-    public File getAppFile() {
-        return m_appDir != null && m_appDir.isDirectory() && m_appFileName != null ? new File(m_appDir.getAbsolutePath() + "/" + m_appFileName) : null;
+    public File getAppFile(String appPath) {
+        return m_appDir != null && m_appDir.isDirectory() && m_appFileName != null ? new File(appPath + "/" + m_appFileName) : null;
     }
 
     
@@ -522,9 +518,13 @@ public class ErgoNodeLocalData extends ErgoNodeData {
         m_appVersion = version;
         
         if(isSave){
-            getLastUpdated().set(LocalDateTime.now());
+            save();
         }
 
+    }
+
+    public void save(){
+        getErgoNodesList().save();
     }
 
     public String getUrlString(){
@@ -826,9 +826,10 @@ public class ErgoNodeLocalData extends ErgoNodeData {
                 
                 Object sourceValue = onSuccess.getSource().getValue();
 
-                if(sourceValue != null && sourceValue instanceof Boolean && (Boolean) sourceValue){
-                
-                    File appFile = getAppFile();
+                if(sourceValue != null && sourceValue instanceof String){
+                    String path = (String) sourceValue;
+
+                    File appFile = getAppFile(path);
 
                     File configFile = m_nodeConfigData != null ? m_nodeConfigData.getConfigFile() : null;
 
@@ -920,14 +921,13 @@ public class ErgoNodeLocalData extends ErgoNodeData {
     }
 
 
-
     public boolean checkValidSetup() {
 
         
         File configFile = m_nodeConfigData != null ? m_nodeConfigData.getConfigFile() : null;
-        File appFile = getAppFile();
+        File appFile = m_appDir != null && m_appDir.isDirectory()  ? getAppFile(m_appDir.getAbsolutePath()) : null;
 
-        return (m_appDir != null && m_appDir.isDirectory() && configFile != null && configFile.isFile() && appFile != null && appFile.isFile());
+        return (m_appDir != null && configFile != null && configFile.isFile() && appFile != null && appFile.isFile());
     }
 
 
@@ -993,6 +993,15 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
     public File getAppDir(){
         return m_appDir;
+    }
+
+    public static boolean isClientLocal(JsonObject json){
+        JsonElement clientTypeElement = json != null ? json.get("clientType") : null;
+
+        String clientType = clientTypeElement != null && !clientTypeElement.isJsonNull() ? clientTypeElement.getAsString() : null;
+  
+
+        return  clientType != null && clientType.equals(LOCAL_NODE);
     }
    
 
@@ -1089,90 +1098,98 @@ public class ErgoNodeLocalData extends ErgoNodeData {
 
             m_cancelUpdate.set(false);  
           
-            String appDirString = m_appDir.getAbsolutePath();  
-            Version prevVersion = m_appVersion;
-            File prevAppFile = getAppFile();
-
-            terminate((onSucceeded)->{
-                updateStatus(NoteConstants.UPDATING, "Checking for updates...");
-
-                m_gitHubAPI.getAssetsLatestRelease(getNetworksData().getExecService(), (onFinished)->{
-                    Object finishedObject = onFinished.getSource().getValue();
-                    if(finishedObject != null && finishedObject instanceof GitHubAsset[] && ((GitHubAsset[]) finishedObject).length > 0){
+            Utils.checkDrive(m_appDir, getExecService(), onChecked->{
+                Object checkedObject = onChecked.getSource().getValue();
+                if(checkedObject != null && checkedObject instanceof String){
+                    String checkedPath = (String) checkedObject;
                     
-                        GitHubAsset[] assets = (GitHubAsset[]) finishedObject;
-    
-                        GitHubAsset fileAsset = assets[0];
-    
-                        String name = fileAsset.getName();
-                        String url = fileAsset.getUrl();
-    
-                        m_latestVersion = Utils.getFileNameVersion(name);
-    
-                        if (m_latestVersion.compareTo(prevVersion) > 0  || prevAppFile == null || (prevAppFile != null && !prevAppFile.isFile()) || force) { 
-    
-                            File appFile =  new File(appDirString + "/" + name);
-          
-                            Utils.getUrlFileHash(url,getAppIcon(),"Downloading...", appFile, getNetworksData().getExecService(), (onDlSucceeded) -> {
-                                Object dlObject = onDlSucceeded.getSource().getValue();
-                                if (dlObject != null && dlObject instanceof HashData) {
-                                    m_appFileHashData = (HashData) dlObject;
-                                    m_appFileName = name;
-                                    m_appVersion = m_latestVersion;
-    
-                                    if (m_deleteOldFiles) {
-                                        if (prevAppFile != null && !prevAppFile.getName().equals(name) && prevAppFile.isFile()) {
-                                            prevAppFile.delete();
-                                             }
-                                    }
-    
-                                    updateStatus(NoteConstants.STOPPED, m_appFileName +": " +  m_appVersion.get());
-                                    
-                                    getLastUpdated().set(LocalDateTime.now());
+                    String appDirString = m_appDir.getAbsolutePath();  
+                    Version prevVersion = m_appVersion;
+                    File prevAppFile = getAppFile(checkedPath);
+
+                    terminate((onSucceeded)->{
+                        updateStatus(NoteConstants.UPDATING, "Checking for updates...");
+
+                        m_gitHubAPI.getAssetsLatestRelease(getNetworksData().getExecService(), (onFinished)->{
+                            Object finishedObject = onFinished.getSource().getValue();
+                            if(finishedObject != null && finishedObject instanceof GitHubAsset[] && ((GitHubAsset[]) finishedObject).length > 0){
+                            
+                                GitHubAsset[] assets = (GitHubAsset[]) finishedObject;
+            
+                                GitHubAsset fileAsset = assets[0];
+            
+                                String name = fileAsset.getName();
+                                String url = fileAsset.getUrl();
+            
+                                m_latestVersion = Utils.getFileNameVersion(name);
+            
+                                if (m_latestVersion.compareTo(prevVersion) > 0  || prevAppFile == null || (prevAppFile != null && !prevAppFile.isFile()) || force) { 
+            
+                                    File appFile =  new File(appDirString + "/" + name);
+                
+                                    Utils.getUrlFileHash(url,getAppIcon(),"Downloading...", appFile, getNetworksData().getExecService(), (onDlSucceeded) -> {
+                                        Object dlObject = onDlSucceeded.getSource().getValue();
+                                        if (dlObject != null && dlObject instanceof HashData) {
+                                            m_appFileHashData = (HashData) dlObject;
+                                            m_appFileName = name;
+                                            m_appVersion = m_latestVersion;
+            
+                                            if (m_deleteOldFiles) {
+                                                if (prevAppFile != null && !prevAppFile.getName().equals(name) && prevAppFile.isFile()) {
+                                                    prevAppFile.delete();
+                                                    }
+                                            }
+            
+                                            updateStatus(NoteConstants.STOPPED, m_appFileName +": " +  m_appVersion.get());
+                                            
+                                            save();
+                                            Utils.returnObject(getJsonObject(), getExecService(), onUpdateSucceeded);
+                                            if(m_isRunOnStart){
+                                                run();
+                                            }
+                                        } else {
+                            
+                                            Utils.returnException("Download incomplete", getExecService(), onUpdateSucceeded);
+                                
+                                            
+                                        }
+                                    }, (onError)->{
+                                        Throwable throwable = onError.getSource().getException();
+                                        String msg =throwable != null ? throwable.toString() : "Download failed";
+                                        Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+
+
+                                    });
+            
+                                }else{
+            
+                                    updateStatus(NoteConstants.STOPPED, "Node is latest: " + m_latestVersion.get());
                                     Utils.returnObject(getJsonObject(), getExecService(), onUpdateSucceeded);
                                     if(m_isRunOnStart){
                                         run();
                                     }
-                                } else {
-                    
-                                    Utils.returnException("Download incomplete", getExecService(), onUpdateSucceeded);
-                        
                                     
                                 }
-                            }, (onError)->{
-                                Throwable throwable = onError.getSource().getException();
-                                String msg =throwable != null ? throwable.toString() : "Download failed";
-                                Utils.returnException(msg , getExecService(), onUpdateSucceeded);
-
-
-                            });
-    
-                        }else{
-    
-                            updateStatus(NoteConstants.STOPPED, "Node is latest: " + m_latestVersion.get());
-                            Utils.returnObject(getJsonObject(), getExecService(), onUpdateSucceeded);
-                            if(m_isRunOnStart){
-                                run();
-                            }
                             
-                        }
-                    
-                    }else{
-                        Utils.returnException("Network unavailable" , getExecService(), onUpdateSucceeded);
- 
-    
-                    }
-                }, onError->{
-                    Throwable throwable = onError.getSource().getException();
-                    String msg =throwable != null ? "Update information unavailable: " + throwable.toString() : "Update information unavailable";
-                    Utils.returnException(msg , getExecService(), onUpdateSucceeded);
-                });
-            }, onError->{
-                Throwable throwable = onError.getSource().getException();
-                String msg =throwable != null ? "Application unresponsive: " + throwable.toString() : "Application unresponsive";
-                Utils.returnException(msg , getExecService(), onUpdateSucceeded);
-         
-            });
+                            }else{
+                                Utils.returnException("Network unavailable" , getExecService(), onUpdateSucceeded);
+        
+            
+                            }
+                        }, onError->{
+                            Throwable throwable = onError.getSource().getException();
+                            String msg =throwable != null ? "Update information unavailable: " + throwable.toString() : "Update information unavailable";
+                            Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+                        });
+                    }, onError->{
+                        Throwable throwable = onError.getSource().getException();
+                        String msg =throwable != null ? "Application unresponsive: " + throwable.toString() : "Application unresponsive";
+                        Utils.returnException(msg , getExecService(), onUpdateSucceeded);
+                
+                    });
+                }
+            }, onDriveFailed->{});
+
            
    
         }else{
@@ -1180,6 +1197,85 @@ public class ErgoNodeLocalData extends ErgoNodeData {
         }
     }
 
+
+    public void updateData(File appDir, boolean isAppFile, File appFile, String configName,String configText, NamedNodeUrl namedNodeUrl,EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed ) {
+        terminate(onTerminated->{
+            doUpdate(appDir,isAppFile, appFile, configName, configText, namedNodeUrl,onSucceeded, onFailed);
+        }, onFailed);
+       
+    }
+
+    private void doUpdate(File appDir, boolean isAppFile, File appFile, String configName,String configText, NamedNodeUrl namedNodeUrl, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+        setName(namedNodeUrl.getName());
+        setNamedNodeUrl(namedNodeUrl);
+        m_appDir = appDir;
+
+        if(!appDir.isDirectory()){
+            try {
+                Files.createDirectories(appDir.toPath());
+            } catch (IOException e) {
+                Utils.returnException(NoteConstants.ERROR_IO  + ":appDir", getExecService(), onFailed);
+                sendError(NoteConstants.STOPPED,"Setup required", "Application");
+                return;
+            }
+        }
+
+        try {
+            m_nodeConfigData = new ErgoNodeConfig(configText, configName, this);
+        } catch (FileNotFoundException e) {
+             Utils.returnException(NoteConstants.ERROR_NOT_FOUND + ":" + "configFile" + ":" + e.toString(), getExecService(), onFailed);
+            return;
+        } catch (IOException e) {
+             Utils.returnException(NoteConstants.ERROR_IO + ":" + "config" + ":" + e.toString(), getExecService(), onFailed);
+            return;
+        } catch (Exception e) {
+            
+            Utils.returnException(NoteConstants.ERROR_INVALID + ":" + "config" + ":" + e.toString(), getExecService(), onFailed);
+            return;
+        }
+
+        if(isAppFile){
+            if(appFile != null && appFile.isFile()){
+                File appFileParent = appFile.getParentFile();
+                m_appFileName = appFile.getName();
+                if(!appFileParent.getAbsolutePath().equals(m_appDir.getAbsolutePath())){
+                    
+                    File appFileCopy = new File(m_appDir.getAbsolutePath() + "/" + m_appFileName);
+                    try{
+                        Files.copy(appFile.toPath(), appFileCopy.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                        
+                        m_appFileHashData = new HashData(appFileCopy);  
+                        checkLatest((onLatest)->{
+                            if(m_isRunOnStart){
+
+                                run();
+                            }
+                        });
+                    }catch(Exception copyException){
+                        Utils.returnException(copyException, getExecService(), onFailed);
+                        sendError(NoteConstants.STOPPED,"File copy failed", "Application");
+                        return;       
+                    }
+                }else{
+                    checkLatest((onLatest)->{
+                        if(m_isRunOnStart){
+
+                            run();
+                        }
+                    });
+                }
+                
+              
+            }else{
+                
+                Utils.returnException(NoteConstants.ERROR_NOT_FOUND+":" + "appFile", getExecService(), onFailed);
+                return;
+            }
+        }
+        
+    
+        Utils.returnObject(NoteConstants.SUCCESS, getExecService(), onSucceeded);
+    }
 
 
     
