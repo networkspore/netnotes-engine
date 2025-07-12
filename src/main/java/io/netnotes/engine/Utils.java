@@ -803,6 +803,12 @@ public class Utils {
 
     }
 
+    public static Future<?> returnException(WorkerStateEvent stateEvent, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
+        return returnException(stateEvent.getSource().getException(), execService, onFailed);
+    }
+
+
+
     public static Future<?> returnException(Throwable throwable, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
         if(throwable != null && throwable instanceof Exception){
             return Utils.returnException((Exception) throwable, execService, onFailed);
@@ -900,85 +906,25 @@ public class Utils {
     }
 
     
-
-    public static Future<?> readEncryptedFile( File file,AtomicBoolean isAquired,Semaphore dataSemaphore, SecretKey secretKey, PipedOutputStream pipedOutput, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-
-        Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws InterruptedException, InvalidKeyException, NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException{
-                try (
-                        FileInputStream fileInputStream = new FileInputStream(file);
-                ) {
-                    dataSemaphore.acquire();
-                    isAquired.set(true);
-                    if(file.length() < 12){
-                        return false;
-                    }
-                    byte[] iV = new byte[12];
-                    fileInputStream.read(iV);
-
-                    Cipher decryptCipher = Cipher.getInstance("AES/GCM/NoPadding");
-                    GCMParameterSpec parameterSpec = new GCMParameterSpec(128, iV);
-                    decryptCipher.init(Cipher.DECRYPT_MODE, secretKey, parameterSpec);
-
-                    int length = 0;
-                    byte[] readBuffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
-                
-                    while ((length = fileInputStream.read(readBuffer)) != -1) {
-                        pipedOutput.write(decryptCipher.update(readBuffer, 0, length));
-                        pipedOutput.flush();
-                    }
-                }
-                
-
-                return true;
-            }
-        };
-        task.setOnFailed(onFailed);
-
-        task.setOnSucceeded(onSucceeded);
-
-        return execService.submit(task);
-
+    public static String getErrorMsg(WorkerStateEvent failedEvent){
+        Throwable throwable =  failedEvent.getSource().getException();
+        return throwable != null ? throwable.getMessage() : NoteConstants.ERROR_NOT_FOUND;
     }
+
+    public static void writeLogMsg(String scope, WorkerStateEvent failedEvent){
+        writeLogMsg(scope, getErrorMsg(failedEvent));
+    }
+
+    public static void writeLogMsg(String scope, String msg){
+        try {
+            Files.writeString(AppConstants.LOG_FILE.toPath(),scope + ": " + msg + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     
-    public static Future<?> writeEncryptedFile(File file, SecretKey secretKey, PipedInputStream pipedWriterInput,  ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-
-        Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws InterruptedException, InvalidKeyException, NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, IOException{
-                int length = 0;  
-                byte[] readBuffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
-                try(
-                    FileOutputStream fileOutputStream = new FileOutputStream(file);
-                ){
-                    
-                    byte[] outIV = Utils.getIV();
-                    Cipher encryptCipher = Cipher.getInstance("AES/GCM/NoPadding");
-                    GCMParameterSpec outputParameterSpec = new GCMParameterSpec(128, outIV);
-                    encryptCipher.init(Cipher.ENCRYPT_MODE, secretKey, outputParameterSpec);
-
-                    fileOutputStream.write(outIV);
-
-                    while((length = pipedWriterInput.read(readBuffer)) != -1){
-                        fileOutputStream.write(encryptCipher.update(readBuffer, 0, length));
-                    }
-                    byte[] bytes = encryptCipher.doFinal();
-                    if(bytes == null){
-                        fileOutputStream.write(bytes);        
-                    }
-                }
-                return true;
-            }
-        };
-
-        task.setOnFailed(onFailed);
-
-        task.setOnSucceeded(onSucceeded);
-
-        return execService.submit(task);
-    }
-
+ 
     public static Future<?> delayObject(Object object, long delayMillis, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
 
         Task<Object> task = new Task<Object>() {

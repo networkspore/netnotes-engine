@@ -14,7 +14,7 @@ import oshi.hardware.NetworkIF;
 import oshi.hardware.PhysicalMemory;
 import oshi.software.os.OSFileStore;
 
-public class HardwareInfo extends NotePairTree {
+public class HardwareInfo extends NoteBytesObject {
 
     public HardwareInfo(){
         super();
@@ -24,10 +24,10 @@ public class HardwareInfo extends NotePairTree {
         return str != null && str.length() > 0? str : Utils.getRandomString(30);
     }
 
-    private static NotePairTree processorBytes(SystemInfo systemInfo){
+    private static NoteBytesObject processorBytes(SystemInfo systemInfo){
         List<PhysicalProcessor> physicalProcessorList = systemInfo.getHardware().getProcessor().getPhysicalProcessors();
         
-        NotePairTree pairTree = new NotePairTree();
+        NoteBytesObject pairTree = new NoteBytesObject();
         int i = 0;
         for(PhysicalProcessor physicalProcessor : physicalProcessorList){
             pairTree.add(new NoteBytes(i + ": " + physicalProcessor.getPhysicalPackageNumber()), new NoteString( getStringOrRandom(physicalProcessor.getIdString())));
@@ -47,9 +47,9 @@ public class HardwareInfo extends NotePairTree {
         return ByteDecoding.charsToBytes(chars);
     }
 
-    private static NotePairTree nicBytes(SystemInfo systemInfo){
+    private static NoteBytesObject nicBytes(SystemInfo systemInfo){
         List<NetworkIF> networkIfList = systemInfo.getHardware().getNetworkIFs();
-        NotePairTree pairTree = new NotePairTree();
+        NoteBytesObject pairTree = new NoteBytesObject();
         int i = 0;
         
         for(NetworkIF networkIf : networkIfList){
@@ -62,10 +62,10 @@ public class HardwareInfo extends NotePairTree {
     }
 
 
-    private static NotePairTree memorySerialNumberBytes(SystemInfo systemInfo){
+    private static NoteBytesObject memorySerialNumberBytes(SystemInfo systemInfo){
         List<PhysicalMemory> pysicalMemoryList = systemInfo.getHardware().getMemory().getPhysicalMemory();
         
-        NotePairTree pairTree = new NotePairTree();
+        NoteBytesObject pairTree = new NoteBytesObject();
         int i = 0;
         for(PhysicalMemory physicalMemory : pysicalMemoryList){
             pairTree.add(new NoteBytes(i + ": " + physicalMemory.getBankLabel()), new NoteString( getStringOrRandom(physicalMemory.getSerialNumber())));
@@ -74,10 +74,10 @@ public class HardwareInfo extends NotePairTree {
         return pairTree;
     }
 
-    private static NotePairTree hdUuidBytes(SystemInfo systemInfo){
+    private static NoteBytesObject hdUuidBytes(SystemInfo systemInfo){
         List<OSFileStore> fileStores = systemInfo.getOperatingSystem().getFileSystem().getFileStores();
 
-        NotePairTree pairTree = new NotePairTree();
+        NoteBytesObject pairTree = new NoteBytesObject();
         for(int i = 0; i < fileStores.size() ; i++){
             OSFileStore store = fileStores.get(i);
             pairTree.add(new NoteBytes(i + ": " + store.getName()), new NoteString( getStringOrRandom(store.getUUID())));

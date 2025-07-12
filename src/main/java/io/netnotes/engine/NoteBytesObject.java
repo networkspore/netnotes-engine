@@ -11,28 +11,28 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
-public class NotePairTree extends NoteBytes{
+public class NoteBytesObject extends NoteBytes{
 
-    public NotePairTree(){
+    public NoteBytesObject(){
         super(new byte[0], ByteDecoding.NOTE_BYTE_PAIR);
     }
 
-    public NotePairTree(byte[] bytes){
+    public NoteBytesObject(byte[] bytes){
         super(bytes, ByteDecoding.NOTE_BYTE_PAIR);        
     }
 
-    public NotePairTree(NoteBytePair[] pairs){
+    public NoteBytesObject(NoteBytesPair[] pairs){
         this(noteBytePairsToByteArray(pairs));
     }
 
-    public NotePairTree(InputStream inputStream) throws IOException{
+    public NoteBytesObject(InputStream inputStream) throws IOException{
         this(Utils.readInputStreamAsBytes(inputStream));
     }
 
-    public static byte[] noteBytePairsToByteArray(NoteBytePair[] pairs){
+    public static byte[] noteBytePairsToByteArray(NoteBytesPair[] pairs){
         byte[] bytes = new byte[0];
         int offset = 0;
-        for(NoteBytePair pair : pairs){
+        for(NoteBytesPair pair : pairs){
             int length = bytes.length;
             byte[] dstBytes = Arrays.copyOf(bytes, length + 8 + pair.getKey().byteLength() + pair.getValue().byteLength());
             offset = NoteBytes.writeNote(pair.getKey(), dstBytes, offset);
@@ -41,17 +41,17 @@ public class NotePairTree extends NoteBytes{
         return bytes;
     }
 
-    public Stream<NoteBytePair> getAsStream() {
-        return getAsStream(get());
+    public Stream<NoteBytesPair> getAsStream() {
+        return getAsStream(get(), getByteDecoding());
     }
 
-    public static Stream<NoteBytePair> getAsStream(byte[] bytes){
-        Stream.Builder<NoteBytePair> noteBytesBuilder = Stream.builder();
+    public static Stream<NoteBytesPair> getAsStream(byte[] bytes, ByteDecoding byteDecoding){
+        Stream.Builder<NoteBytesPair> noteBytesBuilder = Stream.builder();
         int length = bytes.length;
         int offset = 0;
-        NoteBytePair pair;
+        NoteBytesPair pair;
         while(offset < length){
-            pair = NoteBytePair.read(bytes, offset);
+            pair = NoteBytesPair.read(bytes, offset, byteDecoding);
             noteBytesBuilder.accept(pair);
             offset += 8 + pair.getKey().byteLength() + pair.getValue().byteLength();
         }
@@ -59,13 +59,13 @@ public class NotePairTree extends NoteBytes{
     }
 
 
-    public NoteBytePair[] getAsArray(){
-        return getAsStream().toArray(NoteBytePair[]::new);
+    public NoteBytesPair[] getAsArray(){
+        return getAsStream().toArray(NoteBytesPair[]::new);
     }
 
 
     public Map<NoteBytes, NoteBytes> getAsMap(){
-        return getAsStream().collect(Collectors.toMap(NoteBytePair::getKey, NoteBytePair::getValue));
+        return getAsStream().collect(Collectors.toMap(NoteBytesPair::getKey, NoteBytesPair::getValue));
     }
 
     public void clear() {
@@ -76,19 +76,20 @@ public class NotePairTree extends NoteBytes{
         set(new byte[0]);
     }
 
-    public NoteBytePair get(String keyString){
+    public NoteBytesPair get(String keyString){
         return get(new NoteBytes(keyString));
     }
 
-    public NoteBytePair get(NoteBytes key){
+    public NoteBytesPair get(NoteBytes key){
 
         byte[] bytes = get();
         int length = bytes.length;
+        
         if(bytes != null && length > 0){
             int offset = 0;
-            
+            ByteDecoding byteDecoding = getByteDecoding();
             while(offset < length){
-                NoteBytePair pair = NoteBytePair.read(bytes, offset);
+                NoteBytesPair pair = NoteBytesPair.read(bytes, offset, byteDecoding);
                 if(pair.getKey().equals(key)){
                     return pair;
                 }
@@ -102,18 +103,19 @@ public class NotePairTree extends NoteBytes{
 
 
 
-    public NoteBytePair getFirst(){
+    public NoteBytesPair getFirst(){
         return getAtIndex(0);
     }
 
-    public NoteBytePair getAtIndex(int index){
+    public NoteBytesPair getAtIndex(int index){
         byte[] bytes = get();
         int length = bytes.length;
         if(bytes != null && length > 0){
             int offset = 0;
             int i = 0;
+            ByteDecoding byteDecoding = getByteDecoding();
             while(offset < length){
-                NoteBytePair pair = NoteBytePair.read(bytes, offset);
+                NoteBytesPair pair = NoteBytesPair.read(bytes, offset, byteDecoding);
                 if(i == index){
                     return pair;
                 }
@@ -129,7 +131,7 @@ public class NotePairTree extends NoteBytes{
         return get().length == 0;
     }
 
-    public void add(NoteBytePair pair){
+    public void add(NoteBytesPair pair){
         byte[] bytes = getBytes();
         int length = bytes.length;
         byte[] newBytes = Arrays.copyOf(bytes, length + 8 + pair.getKey().byteLength() + pair.getValue().byteLength());
@@ -141,7 +143,7 @@ public class NotePairTree extends NoteBytes{
     }
 
     public void add(NoteBytes key, NoteBytes value) {
-        add(new NoteBytePair(key, value));       
+        add(new NoteBytesPair(key, value));       
     }
 
     public void add(String key, NoteBytes value) {
@@ -184,7 +186,7 @@ public class NotePairTree extends NoteBytes{
         add(new NoteBytes(key), new NoteBigDecimal(value));
     }
 
-    public void add(String key, NotePairTree value) {
+    public void add(String key, NoteBytesObject value) {
         add(key, (NoteBytes) value);
     }
 
@@ -194,18 +196,18 @@ public class NotePairTree extends NoteBytes{
         }
     }
 
-    public NoteBytePair remove(String keyString) {
+    public NoteBytesPair remove(String keyString) {
         return remove(new NoteBytes(keyString));
     }
 
-    public NoteBytePair remove(NoteBytes key) {
+    public NoteBytesPair remove(NoteBytes key) {
         byte[] bytes = get();
         int length = bytes.length;
         if(bytes != null && length > 0){
     
             int offset = 0;
             int dstOffset = 0;
-            NoteBytePair removedPair = null;
+            NoteBytesPair removedPair = null;
             byte[] dstBytes = new byte[0];
             while(offset < length){
                 byte[] keyIntBytes = new byte[4];
@@ -235,7 +237,7 @@ public class NotePairTree extends NoteBytes{
 
                 NoteBytes keyNoteBytes = removedPair == null ? new NoteBytes(keyBytes) : null;
                 boolean isKey = keyNoteBytes != null && keyNoteBytes.equals(key);
-                removedPair = isKey ? new NoteBytePair(keyBytes, valueBytes) : removedPair;
+                removedPair = isKey ? new NoteBytesPair(keyBytes, valueBytes) : removedPair;
 
                 dstBytes  = !isKey ? Arrays.copyOf(dstBytes, dstBytes.length + 8 + keyBytes.length + valueBytes.length) : dstBytes;
                 dstOffset = !isKey ? Utils.arrayCopy(keyIntBytes,  0, dstBytes, dstOffset,        4) : dstOffset;
@@ -256,14 +258,14 @@ public class NotePairTree extends NoteBytes{
 
     
 
-    public NoteBytePair removeAt(int pairIndex) {
+    public NoteBytesPair removeAt(int pairIndex) {
         byte[] bytes = get();
         int length = bytes.length;
         if(bytes != null && length > 0){
 
                 int offset = 0;
                 int index = 0;
-                NoteBytePair removedPair = null;
+                NoteBytesPair removedPair = null;
                 byte[] dstBytes = new byte[0];
                 int dstOffset = 0;
                 while(offset < length){
@@ -291,7 +293,7 @@ public class NotePairTree extends NoteBytes{
                         offset++;
                     }
                     boolean isKey = removedPair == null && pairIndex == index;
-                    removedPair = isKey ? new NoteBytePair(keyBytes, valueBytes) : removedPair;
+                    removedPair = isKey ? new NoteBytesPair(keyBytes, valueBytes) : removedPair;
                     
                     dstBytes  = !isKey ? Arrays.copyOf(dstBytes, dstBytes.length + 8 + keyBytes.length + valueBytes.length) : dstBytes;
                     dstOffset = !isKey ? Utils.arrayCopy(keyIntBytes,  0, dstBytes, dstOffset,        4) : dstOffset;
@@ -322,10 +324,10 @@ public class NotePairTree extends NoteBytes{
         return index/2;
     }
 
-    public static int writePairs( ByteArrayOutputStream outputStream, NoteBytePair[] pairs) throws IOException{
+    public static int writePairs( ByteArrayOutputStream outputStream, NoteBytesPair[] pairs) throws IOException{
         int len = 0;
-        for(NoteBytePair pair : pairs){
-            len += NoteBytePair.writeNoteBytePair(pair, outputStream);
+        for(NoteBytesPair pair : pairs){
+            len += NoteBytesPair.writeNoteBytePair(pair, outputStream);
         }
         return len;
     }

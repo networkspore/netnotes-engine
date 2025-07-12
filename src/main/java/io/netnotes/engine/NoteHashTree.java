@@ -2,10 +2,10 @@ package io.netnotes.engine;
 
 import java.io.IOException;
 
-public class NoteHashTree extends NotePairTree {
+public class NoteHashTree extends NoteBytesObject {
     private int m_digestLength = 32;
-    public NoteHashTree(NoteBytePair... pairs) throws IOException{
-        super(NotePairTree.noteBytePairsToByteArray(pairs));
+    public NoteHashTree(NoteBytesPair... pairs) throws IOException{
+        super(NoteBytesObject.noteBytePairsToByteArray(pairs));
     }
 
 }

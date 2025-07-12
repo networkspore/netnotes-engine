@@ -25,8 +25,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 
-import io.netnotes.engine.NoteBytePair;
-import io.netnotes.engine.NoteConnection;
+import io.netnotes.engine.NoteBytes;
 import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NetworksData;
 import io.netnotes.engine.NoteConstants;
@@ -63,10 +62,10 @@ import javafx.scene.control.Tooltip;
 
 public class ErgoWalletControl {
 
-    private final NoteBytePair m_networkId;
-    private final NoteBytePair m_parentId;
+    private final NoteBytes m_networkId;
+    private final NoteBytes m_parentId;
     
-    private NoteBytePair m_locationId = null;
+    private NoteBytes m_locationId = null;
     private Future<?> m_accessIdFuture = null;
 
     private SimpleObjectProperty<JsonObject> m_walletsNetworkObject = new SimpleObjectProperty<>(null);
@@ -86,8 +85,8 @@ public class ErgoWalletControl {
     private NetworkType m_networkType = null;
     private JsonParser m_jsonParser;
     private int m_destinationType  = -1;
-    private NoteBytePair m_walletsNetworkId;
-    private NoteBytePair m_ergoNetworkNetworkId;
+    private NoteBytes m_walletsNetworkId;
+    private NoteBytes m_ergoNetworkNetworkId;
 
     private String m_defaultWalletId = null;
     private SimpleBooleanProperty m_disabledProperty = new SimpleBooleanProperty(false);
@@ -95,11 +94,11 @@ public class ErgoWalletControl {
     private NoteInterface m_controlInterface = null;
     private NoteMsgInterface m_controlMsgInterface = null;
 
-    public ErgoWalletControl(NoteBytePair networkId, NoteBytePair parentId, NoteBytePair walletsNetworkId, NoteBytePair ergoNetworkNetworkId, NetworkType networkType, NoteBytePair locationId, NetworksData networksData) {
+    public ErgoWalletControl(NoteBytes networkId, NoteBytes parentId, NoteBytes walletsNetworkId, NoteBytes ergoNetworkNetworkId, NetworkType networkType, NoteBytes locationId, NetworksData networksData) {
         this(NoteConstants.APPS, networkId, parentId,  walletsNetworkId,  ergoNetworkNetworkId,  networkType,  locationId,  networksData);     
     }
 
-    public ErgoWalletControl(int destinationType, NoteBytePair networkId, NoteBytePair parentId, NoteBytePair walletsNetworkId, NoteBytePair ergoNetworkNetworkId, NetworkType networkType, NoteBytePair locationId, NetworksData networksData) {
+    public ErgoWalletControl(int destinationType, NoteBytes networkId, NoteBytes parentId, NoteBytes walletsNetworkId, NoteBytes ergoNetworkNetworkId, NetworkType networkType, NoteBytes locationId, NetworksData networksData) {
         m_networkId = networkId;
         m_parentId = parentId;
         m_locationId = locationId;
@@ -118,11 +117,11 @@ public class ErgoWalletControl {
         return m_controlInterface;
     }
 
-    public NoteBytePair getNetworkId(){
+    public NoteBytes getNetworkId(){
         return m_networkId;
     }
 
-    public NoteBytePair getParentId(){
+    public NoteBytes getParentId(){
         return m_parentId;
     }
 

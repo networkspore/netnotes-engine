@@ -354,8 +354,8 @@ public class NoteBytes {
         return getBytes().length;
     }
     
-    public NotePairTree getAsNotePairTree(){
-        return new NotePairTree(getBytes());
+    public NoteBytesObject getAsNotePairTree(){
+        return new NoteBytesObject(getBytes());
     }
 
     public NoteBytesArray getAsNoteBytesArray(){

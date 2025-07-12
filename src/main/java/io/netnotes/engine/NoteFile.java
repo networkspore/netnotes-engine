@@ -1,5 +1,6 @@
 package io.netnotes.engine;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -7,20 +8,24 @@ import java.io.PipedOutputStream;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 
 public class NoteFile extends NoteListString {
 
-    private NetworksInterface m_networksData = null;
+    private NoteFileInterface m_networksData = null;
     private File m_file;
+    private AtomicBoolean m_isAquired = new AtomicBoolean(false);
 
 
-    public NoteFile(NoteListString listString, File file, NetworksInterface networksData){
+    public NoteFile(NoteListString listString, File file, NoteFileInterface networksData){
         super(listString.toString());
         m_networksData = networksData;
         m_file = file;
+
     }
 
     public void acquire() throws InterruptedException{
@@ -29,15 +34,16 @@ public class NoteFile extends NoteListString {
 
     public void release(){
         getSemaphore().release();
-        releaseFile();
     }
 
-    protected void releaseFile(){
-        m_networksData.release();
+    public ExecutorService getExecService(){
+        return m_networksData.getExecService();
     }
 
-    public boolean isAquired(){
-        return getSemaphore().availablePermits() < 1;
+
+
+    public AtomicBoolean isAquired(){
+        return m_isAquired;
     }
 
     public boolean isNetworksData(){
@@ -48,20 +54,18 @@ public class NoteFile extends NoteListString {
         return m_file;
     }
 
+    public File getTmpFile(){
+        return new File(getFile().getParentFile().getAbsolutePath() + "/" + getFile().getName() + ".tmp");
+    }
 
-    protected NetworksInterface getNetworksInterface(){
+    protected NoteFileInterface getNoteFileInterface(){
         return m_networksData;
     }
-  
-   
 
-    @Override
-    public int hashCode(){
-        return -1;
-    }
 
     public boolean isFile(){
-        return false;
+        File file = getFile();
+        return file != null && file.isFile() && file.length() > 12;
     }
 
     public static URL getResourceURL(String resourceLocation){
@@ -69,60 +73,88 @@ public class NoteFile extends NoteListString {
     }
 
    
+    public void readWriteBytes(PipedOutputStream inParseStream, PipedOutputStream outParseStream, EventHandler<WorkerStateEvent> onFailed) throws IOException{
 
-   /* public Future<?> getNetworksDataStream( EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        NetworksData networksData = m_networksData;
+        PipedOutputStream decryptedOutputStream = new PipedOutputStream();
+        getNoteFileInterface().readEncryptedFile(this, decryptedOutputStream,()->{
+            writeStreamToStream(decryptedOutputStream, inParseStream, getExecService(), onFailed);
 
+            PipedOutputStream writerOutputStream = new PipedOutputStream();
+            writeStreamToStream(inParseStream, writerOutputStream, getExecService(), onFailed);
+
+            getNoteFileInterface().writeEncryptedFile(this, writerOutputStream, onFailed);  
+        }, onFailed);
+
+   
     }
 
-    public Future<?> getResourceStream( EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        URL location = resourceLocation != null ? Utils.class.getResource(resourceLocation) : null;
-        location.openStream()
-    }*/
+    public static void writeStreamToStream(PipedOutputStream decryptedOutputStream, PipedOutputStream inParseStream, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
 
-
-
-     public Future<?> readEncryptedFile(PipedOutputStream pipedOutput, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        NetworksInterface networksData = m_networksData;
-
-        if(networksData != null && byteLength() > 0){
-            return networksData.readEncryptedFile( pipedOutput, onRead->{
-                try {
-                    pipedOutput.close();
-                } catch (IOException e) {
-
+                try(
+                    PipedInputStream decryptedInputStream = new PipedInputStream(decryptedOutputStream, Utils.DEFAULT_BUFFER_SIZE)
+                ){
+  
+                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
+                    int length = 0;
+                    while((length = decryptedInputStream.read(buffer)) != -1){
+                        inParseStream.write(buffer, 0, length);
+                        inParseStream.flush();
+                    }
+                    return null;
                 }
-            }, onReadFailed->{
-                try {
-                    pipedOutput.close();
-                } catch (IOException e) {
+            }
+        };
+        task.setOnFailed(onFailed);
+        execService.submit(task);
+    }
 
+    public void getFileBytes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+                PipedOutputStream outParseStream = new PipedOutputStream();
+                PipedOutputStream inParseStream = new PipedOutputStream();
+                readWriteBytes(inParseStream, outParseStream, onFailed);
+
+                try(
+                    PipedInputStream inputStream = new PipedInputStream(inParseStream);
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                ){
+                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
+                    int length = 0;
+
+                    while((length = inputStream.read(buffer)) != -1){
+                        outParseStream.write(buffer, 0, length);
+                        outParseStream.flush();
+                        byteArrayOutputStream.write(buffer, 0, length);
+                    }
+
+                    return byteArrayOutputStream.toByteArray();
                 }
-       
-                Utils.returnException( onReadFailed.getSource().getException(), m_networksData.getExecService(), onFailed);
-              
-            });
-        }else{
-            return Utils.returnException(NoteConstants.ERROR_INVALID, networksData.getExecService(), onFailed);
-        }
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        getExecService().submit(task);
     }
 
-    public Future<?> writeEncryptedFile(PipedInputStream pipedWriterInput, EventHandler<WorkerStateEvent> onFailed){
-        NetworksInterface networksData = m_networksData;
-        if(networksData != null && byteLength() > 0){
-            return networksData.writeEncryptedFile( pipedWriterInput, onFailed);
-        }else{
-            return Utils.returnException(NoteConstants.ERROR_INVALID, networksData.getExecService(), onFailed);
-        }
+     public Future<?> saveFileBytes(byte[] bytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        return getNoteFileInterface().saveEncryptedFile(this, bytes, onSucceeded, onFailed);
     }
 
-    public interface NetworksInterface{
-        Future<?> getNoteFile(NoteListString path, EventHandler<WorkerStateEvent> onComplete);
+    public interface NoteFileInterface{
         ExecutorService getExecService();
-        Future<?> readEncryptedFile( PipedOutputStream pipedOutput, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
-        Future<?> writeEncryptedFile(PipedInputStream pipedWriterInput, EventHandler<WorkerStateEvent> onFailed);
-        void release();
-
+        Future<?> readEncryptedFile(NoteFile noteFile, PipedOutputStream pipedOutput, Runnable onAquired, EventHandler<WorkerStateEvent> onFailed);
+        Future<?> writeEncryptedFile(NoteFile noteFile, PipedOutputStream pipedOutputStream, EventHandler<WorkerStateEvent> onFailed);
+        Future<?> saveEncryptedFile(NoteFile noteFile, byte[] bytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
+        Future<?> getNoteFile(NoteListString path, EventHandler<WorkerStateEvent> onComplete);
     }
     
 }

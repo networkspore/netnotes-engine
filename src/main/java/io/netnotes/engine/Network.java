@@ -1,35 +1,27 @@
 package io.netnotes.engine;
 
-import java.io.File;
-import java.io.IOException;
 import java.io.PipedOutputStream;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-import javax.imageio.ImageIO;
 
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.WorkerStateEvent;
-import javafx.embed.swing.SwingFXUtils;
 import javafx.event.EventHandler;
 import javafx.scene.control.Button;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.image.WritableImage;
 import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
 
-public class Network extends NoteFile  {
+public class Network {
 
     private int m_connectionStatus = NoteConstants.STOPPED;
     private NoteBytes m_networkId;
@@ -51,16 +43,15 @@ public class Network extends NoteFile  {
 
     private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
 
-    private WritableImage m_icon = null;
+    private Image m_icon = null;
     private Button m_appBtn = null;
     private String m_name = null;
+    private NetworksData m_networksData;
 
-
-    public Network(NoteBytes networkId, String name, NoteListString listString, File file, NetworksInterface networksData) {
-        super(listString, file, networksData);
+    public Network(NoteBytes networkId, String name, NetworksData networksData) {
         m_networkId = networkId;
-        loadDefaultIcon();
-        openFile(file);
+        m_name = name;
+        m_networksData = networksData;
     }
 
     public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
@@ -68,28 +59,10 @@ public class Network extends NoteFile  {
         return null;
     }
 
-    private void loadDefaultIcon(){
-        try{
-            m_icon = SwingFXUtils.toFXImage(ImageIO.read(getResourceURL(DEFAULT_IMAGE_URL)), m_icon);
-        }catch(IOException e){
-            try {
-                Files.writeString(AppConstants.LOG_FILE.toPath(), "network ("+getName()+") default image err:" + e.toString() , StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException e1) {
-                e1.printStackTrace();
-            }
-        }
+
+    public NetworksData getNetworksData(){
+        return m_networksData;
     }
-
-    protected void setIconFromNoteFile(NoteFile noteFile){
-
-    }
-
-
-    protected void openFile(File file){
-
-    }
-
-
 
     public Button getButton(double size){
         if(m_appBtn != null){
@@ -285,7 +258,7 @@ public class Network extends NoteFile  {
     }
 
     public ExecutorService getExecService(){
-        return  getNetworksInterface().getExecService();
+        return getNetworksData().getExecService();
     }
 
 

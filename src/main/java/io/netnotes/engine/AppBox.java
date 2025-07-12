@@ -8,22 +8,23 @@ import javafx.scene.layout.VBox;
 
 public class AppBox extends VBox implements SimpleNoteInterface{
     
-    private String m_appId;
+    private NoteBytes m_appId;
 
     public AppBox(){
         super();
         setId("darkBox");
     }
 
-    public AppBox(String appId){
+
+    public AppBox(NoteBytes appId){
         m_appId = appId;
     }
 
-    public void setAppId(String appId){
+    public void setAppId(NoteBytes appId){
         m_appId = appId;
     }
 
-    public String getAppId(){
+    public NoteBytes getAppId(){
         return m_appId;
     }
 

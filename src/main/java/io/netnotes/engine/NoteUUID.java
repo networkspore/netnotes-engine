@@ -89,9 +89,9 @@ public class NoteUUID extends NoteBytes {
                     @Override
                     public Object call() throws IOException {
                         try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
-                            NoteBytePair[] sources = hardwareInfo.getAsArray();
-                            for(NoteBytePair source : sources){
-                                NoteBytePair[] sourceItems = source.getValue().getAsNotePairTree().getAsArray();
+                            NoteBytesPair[] sources = hardwareInfo.getAsArray();
+                            for(NoteBytesPair source : sources){
+                                NoteBytesPair[] sourceItems = source.getValue().getAsNotePairTree().getAsArray();
                                 int itemsLength = sourceItems.length;
                                 if(itemsLength > 0){
                                     outputStream.write( sourceItems[Utils.getRandomInt(0, itemsLength-1)].getValue().get() );
