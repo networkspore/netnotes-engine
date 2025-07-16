@@ -1,6 +1,5 @@
 package io.netnotes.engine;
 
-import io.netnotes.engine.apps.AppConstants;
 import javafx.scene.control.MenuButton;
 import javafx.scene.image.Image;
 

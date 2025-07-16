@@ -35,9 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import java.util.zip.ZipFile;
 
@@ -58,12 +56,8 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.io.StringReader;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -74,7 +68,6 @@ import java.lang.Double;
 import javafx.animation.PauseTransition;
 import javafx.beans.binding.Binding;
 import javafx.beans.binding.Bindings;
-import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.*;
@@ -97,7 +90,6 @@ import javafx.scene.text.Text;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.Window;
-import oshi.util.tuples.Pair;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.Region;
 import javafx.scene.control.Tooltip;
@@ -107,12 +99,10 @@ import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.input.ReaderInputStream;
-import org.ergoplatform.sdk.SecretString;
 
 import java.io.FilenameFilter;
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
-import io.netnotes.engine.apps.AppConstants;
 import io.netnotes.ove.crypto.digest.Blake2b;
 import scala.util.Try;
 import scorex.util.encode.Base64;
@@ -438,73 +428,6 @@ public class Utils {
 
 
 
-    public static PriceAmount getAmountByString(String text, PriceCurrency priceCurrency) {
-        if (text != null && priceCurrency != null) {
-            text = text.replace(",", ".");
-
-            char[] ch = text.toCharArray();
-
-            for (int i = 0; i < ch.length; ++i) {
-                if (Character.isDigit(ch[i])) {
-                    ch[i] = Character.forDigit(Character.getNumericValue(ch[i]), 10);
-                }
-            }
-
-            text = new String(ch);
-
-            try {
-                double parsedDouble = Double.parseDouble(text);
-                return new PriceAmount(parsedDouble, priceCurrency);
-            } catch (NumberFormatException ex) {
-
-            }
-        }
-        return new PriceAmount(0, priceCurrency);
-    }
-    
-    public static String currencySymbol(String currency){
-         switch (currency) {
-            case "ERG":
-                return "Σ";
-            case "USD":
-                return "$";
-            case "USDT":
-                return "$";
-            case "EUR":
-                return "€‎";
-             
-            case "BTC":
-                return "฿";
-        }
-        return currency;
-    }
-
-    public static String formatCryptoString(BigDecimal price, String target, int precision, boolean valid) {
-       String formatedDecimals = String.format("%."+precision+"f", price);
-        String priceTotal = valid ? formatedDecimals : "-";
-    
-      
-     
-        switch (target) {
-            case "ERG":
-                priceTotal = priceTotal + " ERG";
-                break;
-            case "USD":
-                priceTotal = "$" + priceTotal;
-                break;
-            case "USDT":
-                priceTotal = priceTotal + " USDT";
-                break;
-            case "EUR":
-                priceTotal = "€‎" + priceTotal;
-                break;
-            case "BTC":
-                priceTotal ="฿" + priceTotal;
-                break;
-        }
-
-        return priceTotal;
-    }
 
     public static String formatAddressString(String addressString, double width, double characterSize){
         
@@ -686,35 +609,6 @@ public class Utils {
 
 
 
-    public static String formatCryptoString(PriceAmount priceAmount, boolean valid) {
-         int precision = priceAmount.getCurrency().getFractionalPrecision();
-        DecimalFormat df = new DecimalFormat("0");
-        df.setMaximumFractionDigits(precision);
-
-        String formatedDecimals = df.format(priceAmount.getDoubleAmount());
-        String priceTotal = valid ? formatedDecimals : "-.--";
-
-        
-
-        switch (priceAmount.getCurrency().getSymbol()) {
-            case "ERG":
-                priceTotal = "Σ"+ priceTotal;
-                break;
-            case "USD":
-                priceTotal = "$" + priceTotal;
-                break;
-            case "EUR":
-                priceTotal = "€‎" + priceTotal;
-                break;
-            case "BTC":
-                priceTotal ="฿" + priceTotal;
-                break;
-            default:
-                priceTotal = priceTotal + " " + priceAmount.getCurrency().getSymbol();
-        }
-
-        return priceTotal;
-    }
 
 
     public static long getNowEpochMillis(LocalDateTime now) {
@@ -1783,14 +1677,16 @@ public class Utils {
 
 
 
-    public static byte[] createKeyBytes(SecretString password) throws InvalidKeySpecException, NoSuchAlgorithmException  {
+    public static byte[] createKeyBytes(NoteBytes password) throws InvalidKeySpecException, NoSuchAlgorithmException  {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        KeySpec spec = new PBEKeySpec(password.getData(), ByteDecoding.charsToBytes(password.getData()), 65536, 256);
+        char[] chars = password.getChars();
+        KeySpec spec = new PBEKeySpec(chars, password.get(), 65536, 256);
         SecretKey tmp = factory.generateSecret(spec);
         return tmp.getEncoded();
 
     }
-    public static Object getKeyObject(List<? extends Object> items, String key){
+
+    public static Object getKeyObject(List<? extends Object> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
             if(item instanceof KeyInterface){
@@ -1805,7 +1701,7 @@ public class Utils {
 
 
     public static void removeOldKeys(List<? extends Object> items, long timeStamp){
-        ArrayList<String> keyRemoveList  = new ArrayList<>();
+        ArrayList<NoteBytes> keyRemoveList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
@@ -1817,12 +1713,12 @@ public class Utils {
             }
         }
 
-        for(String key : keyRemoveList){
+        for(NoteBytes key : keyRemoveList){
             removeKey(items, key);
         }
     }
 
-    public static Object removeKey(List<? extends Object> items, String key){
+    public static Object removeKey(List<? extends Object> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
             if(item instanceof KeyInterface){

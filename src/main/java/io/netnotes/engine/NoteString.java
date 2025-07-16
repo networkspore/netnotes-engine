@@ -14,13 +14,19 @@ public class NoteString extends NoteBytes {
     }
 
     public NoteString(char[] key){
-        super(ByteDecoding.charsToBytes(key),ByteDecoding.STRING_UTF8);
+        super(key);
     }
 
     public NoteString(byte[] bytes, ByteDecoding byteDecoding){
         super(bytes, byteDecoding);
     }
 
+    public NoteString(byte[] bytes){
+        super(bytes, ByteDecoding.STRING_UTF8);
+    }
+     public NoteString(){
+        super(new byte[0], ByteDecoding.STRING_UTF8);
+    }
 
     public String getString(){
         return toString();
@@ -34,7 +40,12 @@ public class NoteString extends NoteBytes {
         set(ByteDecoding.charsToByteArray(str.toCharArray(), getByteDecoding()));
     }
 
-  
+    @Override
+    public void set(byte[] bytes, ByteDecoding byteDecoding){
+        super.set(bytes, byteDecoding);
+    }
+
+
     @Override
     public String toString(){
         

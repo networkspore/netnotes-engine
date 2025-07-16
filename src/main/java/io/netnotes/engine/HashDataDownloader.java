@@ -3,8 +3,6 @@ package io.netnotes.engine;
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 
-import io.netnotes.engine.apps.AppConstants;
-import io.netnotes.engine.networks.ergo.ErgoConstants;
 import javafx.application.Platform;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.geometry.Insets;

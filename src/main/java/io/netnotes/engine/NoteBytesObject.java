@@ -150,6 +150,14 @@ public class NoteBytesObject extends NoteBytes{
         add(new NoteBytes(key), value);
     }
 
+    public void add(String key, BigInteger value) {
+        add(new NoteBytes(key), new NoteBigInteger(value));
+    }
+
+    public void add(String key, BigDecimal value) {
+        add(new NoteBytes(key), new NoteBigDecimal(value));
+    }
+
     public void add(String key, String value) {
         add(new NoteBytes(key), new NoteBytes(value));
     }

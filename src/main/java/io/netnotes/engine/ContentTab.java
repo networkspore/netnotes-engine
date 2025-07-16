@@ -1,9 +1,7 @@
 package io.netnotes.engine;
 
-import io.netnotes.engine.apps.AppConstants;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleLongProperty;
-import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -19,11 +17,11 @@ import javafx.scene.layout.Pane;
 public class ContentTab {
 
     private SimpleBooleanProperty m_isCurrent = new SimpleBooleanProperty(false);
-    private SimpleStringProperty m_currentId = new SimpleStringProperty(null);
-    private SimpleLongProperty m_shutdownMilliesProperty = new SimpleLongProperty(0);
+    private SimpleObjectProperty<NoteBytes> m_currentId = new SimpleObjectProperty<>(null);
+    //private SimpleLongProperty m_shutdownMilliesProperty = new SimpleLongProperty(0);
 
-    private String m_id;
-    private String m_parentId;
+    private NoteBytes m_id;
+    private NoteBytes m_parentId;
     private Label m_tabLabel;
     private Pane m_pane;
     private HBox m_tabBox;
@@ -33,7 +31,7 @@ public class ContentTab {
     private Image m_logo;
     private Tooltip m_tabLabelTooltip;
 
-    public ContentTab(String id, String parentId, Image logo, String title, Pane pane){
+    public ContentTab(NoteBytes id, NoteBytes parentId, Image logo, String title, Pane pane){
         m_id = id;
         m_parentId = parentId;
      
@@ -113,7 +111,7 @@ public class ContentTab {
         m_tabImageView.setImage(image);
     }
 
-    public SimpleStringProperty currentIdProperty(){
+    public SimpleObjectProperty<NoteBytes> currentIdProperty(){
         return m_currentId;
     }
 
@@ -136,19 +134,19 @@ public class ContentTab {
         return m_tabLabel;
     }
 
-    public String getId() {
+    public NoteBytes getId() {
         return m_id;
     }
 
-    public void setId(String id) {
+    public void setId(NoteBytes id) {
         this.m_id = id;
     }
 
-    public String getParentId() {
+    public NoteBytes getParentId() {
         return m_parentId;
     }
 
-    public void setParentId(String parentId) {
+    public void setParentId(NoteBytes parentId) {
         this.m_parentId = parentId;
     }
 

@@ -1,20 +1,19 @@
 package io.netnotes.engine;
 
 
-import io.netnotes.friendly_id.FriendlyId;
 import javafx.scene.image.WritableImage;
 
 public class Effects {
 
     private String m_name;
-    private String m_id;
+    private NoteBytes m_id;
 
     public Effects(String name) {
-        m_id = FriendlyId.createFriendlyId();
+        m_id = NoteUUID.createLocalUUID128();
         m_name = name;
     }
 
-    public Effects(String id, String name) {
+    public Effects(NoteBytes id, String name) {
         m_id = id;
         m_name = name;
     }
@@ -27,7 +26,7 @@ public class Effects {
         return m_name;
     }
 
-    public String getId() {
+    public NoteBytes getId() {
         return m_id;
     }
 }

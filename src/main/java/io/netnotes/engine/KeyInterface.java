@@ -1,9 +1,8 @@
 package io.netnotes.engine;
 
-import javafx.collections.ObservableList;
 
 public interface KeyInterface {
-    String getKey();
+    NoteBytes getKey();
     String getValue();
     long getTimeStamp();
    

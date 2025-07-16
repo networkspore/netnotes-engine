@@ -13,7 +13,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.apps.AppConstants;
+import io.netnotes.engine.core.AppData;
 import io.netnotes.javafxsvg.SvgImageLoaderFactory;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -58,7 +58,6 @@ import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
-import org.ergoplatform.sdk.SecretString;
 
 public class Stages {
     public static Font openSansTxt;
@@ -1131,7 +1130,7 @@ public class Stages {
         enter2.setOnAction(e->{
             if (passwordField.getText().equals(createPassField2.getText())) {
 
-                Utils.returnObject(SecretString.create(passwordField.getText()),execService, onSucceeded);
+                Utils.returnObject(new NoteBytes(passwordField.getText()),execService, onSucceeded);
                 createPassField2.setText("");
                 passwordField.setText("");
             } else {
@@ -1265,7 +1264,7 @@ public class Stages {
 
         enter2.setOnAction(e->{
             if (passwordField.getText().equals(createPassField2.getText())) {
-                Utils.returnObject(SecretString.create( passwordField.getText()), execService, onSucceeded);
+                Utils.returnObject(new NoteBytes(passwordField.getText()), execService, onSucceeded);
                 passwordField.setText("");
                 createPassField2.setText("");
             } else {
@@ -1535,7 +1534,7 @@ public class Stages {
 
         passwordField.setOnAction(e -> {
             if(passwordField.getText().length() > 0){
-                Utils.returnObject(SecretString.create( passwordField.getText()), execService, onSucceeded);
+                Utils.returnObject(new NoteBytes( passwordField.getText()), execService, onSucceeded);
                 passwordStage.close();
             }
         });

@@ -11,23 +11,22 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-import io.netnotes.friendly_id.FriendlyId;
 
 public class HashData {
 
     public static String DEFAULT_HASH = "Blake2b-256";
 
-    private String m_id;
+    private NoteBytes m_id;
     private String m_name = DEFAULT_HASH;
     private byte[] m_hashBytes = null;
 
     public HashData(File file) throws  IOException{
-        m_id = FriendlyId.createFriendlyId();
+        m_id = NoteUUID.createLocalUUID128();
         m_hashBytes = Utils.digestFile(file);
     }
 
     public HashData(byte[] bytes) {
-        m_id = FriendlyId.createFriendlyId();
+        m_id = NoteUUID.createLocalUUID128();
         m_hashBytes = bytes;
     }
 
@@ -35,12 +34,12 @@ public class HashData {
         openJson(json);
     }
 
-    public HashData(String id, byte[] bytes){
+    public HashData(NoteBytes id, byte[] bytes){
         m_id = id;
         m_hashBytes = bytes;
     }
 
-    public HashData(String hashId, String name, String hashHex) {
+    public HashData(NoteBytes hashId, String name, String hashHex) {
 
         m_id = hashId;
         m_name = name;
@@ -53,7 +52,7 @@ public class HashData {
         while(reader.hasNext()){
             switch(reader.nextName()){
                 case "id":
-                    m_id = reader.nextString();
+                    m_id = NoteUUID.fromURLSafeString(reader.nextString());
                 break;
                 case "name":
                     m_name = reader.nextString();
@@ -71,7 +70,7 @@ public class HashData {
     public void writeJson(JsonWriter writer) throws IOException{
         writer.beginObject();
         writer.name("id");
-        writer.value(m_id);
+        writer.value(m_id.getAsUrlSafeString());
         writer.name("name");
         writer.value(m_name);
         writer.name("hash");
@@ -90,7 +89,7 @@ public class HashData {
         JsonElement hashStringElement = json.get("hash");
 
         if (idElement != null && idElement.isJsonPrimitive()) {
-            m_id = idElement.getAsString();
+            m_id = NoteUUID.fromURLSafeString(idElement.getAsString());
             
         }
         if (nameElement != null && nameElement.isJsonPrimitive()) {
@@ -104,7 +103,7 @@ public class HashData {
 
     }
 
-    public String getId() {
+    public NoteBytes getId() {
         return m_id;
     }
 
@@ -140,7 +139,7 @@ public class HashData {
 
     public JsonObject getJsonObject() {
         JsonObject json = new JsonObject();
-        json.addProperty("id", m_id);
+        json.addProperty("id", m_id.getAsUrlSafeString());
         json.addProperty("name", m_name);
         if (m_hashBytes != null) {
             json.addProperty("hash", getHashStringHex());

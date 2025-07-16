@@ -6,8 +6,4 @@ public class NoteJsonObject extends NoteString {
     public NoteJsonObject(JsonObject json){
         super(json.toString());
     }
-
-    public JsonObject getAsJsonObject(){
-        return getAsJsonElement().getAsJsonObject();
-    }
 }

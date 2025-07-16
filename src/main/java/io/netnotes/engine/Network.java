@@ -46,11 +46,12 @@ public class Network {
     private Image m_icon = null;
     private Button m_appBtn = null;
     private String m_name = null;
-    private NetworksData m_networksData;
+    private NetworksDataInterface m_networksData;
 
-    public Network(NoteBytes networkId, String name, NetworksData networksData) {
+    public Network(Image image, String name,NoteBytes networkId, NetworksDataInterface networksData) {
         m_networkId = networkId;
         m_name = name;
+        m_icon = image;
         m_networksData = networksData;
     }
 
@@ -60,7 +61,7 @@ public class Network {
     }
 
 
-    public NetworksData getNetworksData(){
+    public NetworksDataInterface getNetworksData(){
         return m_networksData;
     }
 
@@ -116,7 +117,7 @@ public class Network {
     }
 
 
-    public TabInterface getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button networkBtn){
+    public TabAppBox getTab(Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button networkBtn){
         return null;
     }
 
@@ -163,7 +164,7 @@ public class Network {
 
 
 
-    protected void sendMessage(int code, long timeStamp,String networkId, String msg){
+    protected void sendMessage(int code, long timeStamp, NoteBytes networkId, String msg){
         for(int i = 0; i < m_msgListeners.size() ; i++){
             m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, msg);
         }
@@ -260,7 +261,6 @@ public class Network {
     public ExecutorService getExecService(){
         return getNetworksData().getExecService();
     }
-
 
 
     /* 

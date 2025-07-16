@@ -4,10 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-
-import javafx.collections.ObservableList;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Menu;
 
@@ -21,16 +17,16 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
     public static final int DEFAULT_COL_SIZE = 20;
     private int m_colSize =DEFAULT_COL_SIZE;
     private long m_timeStamp = 0;
-    private String m_key = null;
+    private NoteBytes m_key = null;
     private String m_value = null;
 
     private String m_style = KEY_AND_VALUE;
 
-    public KeyMenuItem(String key, String value, long timeStamp, String style){
+    public KeyMenuItem(NoteBytes key, String value, long timeStamp, String style){
         this(key, value, timeStamp, DEFAULT_COL_SIZE, style);
     }
 
-    public KeyMenuItem(String key, String value, long timeStamp, int colSize, String style){
+    public KeyMenuItem(NoteBytes key, String value, long timeStamp, int colSize, String style){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -40,10 +36,11 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         update();
     }
 
-    public KeyMenuItem(String key, String value, long timeStamp){
+  
+    public KeyMenuItem(NoteBytes key, String value, long timeStamp){
         this(key, value, timeStamp, DEFAULT_COL_SIZE);
     }
-    public KeyMenuItem(String key, String value, long timeStamp, int colSize){
+    public KeyMenuItem(NoteBytes key, String value, long timeStamp, int colSize){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -88,7 +85,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         update();
     }
 
-    public String getKey(){
+    public NoteBytes getKey(){
         return m_key;
     }
 
@@ -96,7 +93,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         return m_value;
     }
 
-    public static KeyMenuItem getKeyMenuItem(List<MenuItem> items, String key){
+    public static KeyMenuItem getKeyMenuItem(List<MenuItem> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenuItem){
@@ -110,7 +107,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
     }
 
     public static void removeeOldKeyItems(List<MenuItem> items, long timeStamp){
-         ArrayList<String> removeList  = new ArrayList<>();
+         ArrayList<NoteBytes> removeList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
@@ -122,12 +119,12 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
             }
         }
 
-        for(String key : removeList){
+        for(NoteBytes key : removeList){
             removeKeyItem(items, key);
         }
     }
 
-    public static KeyMenuItem removeKeyItem(List<MenuItem> items, String key){
+    public static KeyMenuItem removeKeyItem(List<MenuItem> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenuItem){
@@ -140,30 +137,33 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         return null;
     }
 
-    public static void updateMenu(Menu menu, JsonObject json){
+    public static void updateMenu(Menu menu, NoteBytesObject obj){
         long timeStamp = System.currentTimeMillis();
-            if(menu.getItems().size() == 0){
-                for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-                    KeyMenuItem item = new KeyMenuItem(entry.getKey(), entry.getValue().toString(), timeStamp);
+        Map<NoteBytes,NoteBytes> map = obj.getAsMap();
+
+        if(menu.getItems().size() == 0){
+            
+            for (Map.Entry<NoteBytes, NoteBytes> entry : map.entrySet()) {
+                KeyMenuItem item = new KeyMenuItem(entry.getKey(), entry.getValue().toString(), timeStamp);
+                menu.getItems().add(item);
+            }
+        }else{
+            for (Map.Entry<NoteBytes, NoteBytes> entry : map.entrySet()) {
+                NoteBytes key =  entry.getKey();
+                String value = entry.getValue().toString();
+
+                KeyMenuItem existingItem =  KeyMenuItem.getKeyMenuItem(menu.getItems(), key);
+                
+                if(existingItem != null){
+                    existingItem.setValue(value, timeStamp);
+                }else{
+                    KeyMenuItem item = new KeyMenuItem(key, value, timeStamp);
                     menu.getItems().add(item);
                 }
-            }else{
-                for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-                    String key =  entry.getKey();
-                    String value = entry.getValue().toString();
-
-                    KeyMenuItem existingItem =  KeyMenuItem.getKeyMenuItem(menu.getItems(), key);
-                    
-                    if(existingItem != null){
-                        existingItem.setValue(value, timeStamp);
-                    }else{
-                        KeyMenuItem item = new KeyMenuItem(key, value, timeStamp);
-                        menu.getItems().add(item);
-                    }
-                }
-
-                KeyMenuItem.removeeOldKeyItems(menu.getItems(), timeStamp);
-
             }
+
+            KeyMenuItem.removeeOldKeyItems(menu.getItems(), timeStamp);
+
+        }
     }
 }

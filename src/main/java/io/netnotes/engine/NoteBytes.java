@@ -4,9 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -15,6 +13,7 @@ import java.util.Arrays;
 import java.util.concurrent.Semaphore;
 
 import com.google.gson.JsonParser;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -131,13 +130,21 @@ public class NoteBytes {
     }
 
     public String getAsString(){
-        return new String(getAsCharsUTF8());
+        return toString();
+    }
+
+    @Override
+    public String toString(){
+        return new String(decodeCharArray());
     }
 
     public char[] decodeCharArray(){
         return m_value.length > 0 ? ByteDecoding.bytesToCharArray(m_value, m_byteDecoding) : new char[0];
     }
 
+    public char[] getChars(){
+        return decodeCharArray();
+    }
 
 
     public CharBuffer getAsCharBuffer(){
@@ -170,10 +177,19 @@ public class NoteBytes {
         return m_byteDecoding != null && m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToDoubleLittleEndian(bytes) : ByteDecoding.bytesToDoubleBigEndian(bytes);
     }
 
-    public int getAsInteger(){
+    public byte getAsByte(){
+        return Arrays.copyOf( m_value, 1)[0];
+    }
+
+    public int getAsInt(){
         byte[] bytes = Arrays.copyOf( m_value, 4);
 
         return m_byteDecoding != null && m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
+    }
+
+    public short getAsShort(){
+        byte[] bytes = Arrays.copyOf( m_value, 2);
+        return m_byteDecoding != null && m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToShortLittleEndian(bytes) : ByteDecoding.bytesToShortBigEndian(bytes);
     }
 
      public int getAsLong(){
@@ -320,6 +336,10 @@ public class NoteBytes {
         return new NoteBytes(readShortBytes(dis));
     }
 
+    @Override
+    public int hashCode(){
+        return m_value.length == 0 ? 0 : ByteHashing.getHashCode(m_value, m_byteDecoding);
+    }
 
     @Override
     public boolean equals(Object obj){
@@ -354,7 +374,7 @@ public class NoteBytes {
         return getBytes().length;
     }
     
-    public NoteBytesObject getAsNotePairTree(){
+    public NoteBytesObject getAsNoteBytesObject(){
         return new NoteBytesObject(getBytes());
     }
 
@@ -368,8 +388,14 @@ public class NoteBytes {
         return new JsonParser().parse(new String(decodeCharArray()));
     }
 
-    @Override
-    public String toString(){
-        return new String(decodeCharArray());
+    public JsonObject getAsJsonObject(){
+        JsonElement element = getAsJsonElement();
+        return element != null && !element.isJsonNull() && element.isJsonObject() ? element.getAsJsonObject() : null;
     }
+
+    public JsonArray getAsJsonArray(){
+        JsonElement element = getAsJsonElement();
+        return element != null && !element.isJsonNull() && element.isJsonArray() ? element.getAsJsonArray() : null;
+    }
+
 }

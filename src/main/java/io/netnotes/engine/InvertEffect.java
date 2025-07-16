@@ -9,8 +9,7 @@ import javafx.scene.image.WritableImage;
 
 public class InvertEffect extends Effects {
 
-   // private static File logFile = new File("InvertEffect-log.txt");
-    public static String NAME = "INVERT";
+    public final static String NAME = "INVERT";
 
     private double m_amount = 1.0;
 
@@ -19,7 +18,7 @@ public class InvertEffect extends Effects {
         m_amount = amount;
     }
 
-    public InvertEffect(String id, double amount) {
+    public InvertEffect(NoteBytes id, double amount) {
         super(id, NAME);
         m_amount = amount;
         

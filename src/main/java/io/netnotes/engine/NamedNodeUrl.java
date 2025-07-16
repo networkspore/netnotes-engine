@@ -4,12 +4,7 @@ import java.time.LocalDateTime;
 
 import org.ergoplatform.appkit.NetworkType;
 
-import com.google.gson.JsonObject;
-
-import io.netnotes.engine.IconButton.IconStyle;
 import javafx.beans.property.SimpleObjectProperty;
-
-import com.google.gson.JsonElement;
 
 public class NamedNodeUrl {
 
@@ -18,10 +13,10 @@ public class NamedNodeUrl {
     public final static String MAINNET_STRING = NetworkType.MAINNET.toString();
     public final static String DEFAULT_NODE_IP = "213.239.193.208";
     public final static int DEFAULT_MAINNET_PORT = 9053;
-    public final static String PULIC_NODE_1 = "PUBLIC_NODE_1";
+    public final static NoteBytes PULIC_NODE_1 = new NoteBytes( "PUBLIC_NODE_1");
     //type
     private int m_port = DEFAULT_MAINNET_PORT;
-    private String m_id = null;
+    private NoteBytes m_id = null;
     private String m_name = null;
     private String m_protocol = "http";
     private String m_ip = DEFAULT_NODE_IP;
@@ -35,35 +30,35 @@ public class NamedNodeUrl {
         this(PULIC_NODE_1, "Public Node #1");
     }
 
-    public NamedNodeUrl(String id, String name) {
+    public NamedNodeUrl(NoteBytes id, String name) {
         m_id = id;
         m_name = name;
     }
 
-    public NamedNodeUrl(JsonObject json) throws Exception {
+    public NamedNodeUrl(NoteBytesObject json) throws Exception {
         if (json != null) {
 
-            JsonElement idElement = json.get("id");
-            JsonElement nameElement = json.get("name");
-            JsonElement ipElement = json.get("ip");
-            JsonElement portElement = json.get("port");
-            JsonElement networkTypeElement = json.get("networkType");
+            NoteBytesPair idElement = json.get("id");
+            NoteBytesPair nameElement = json.get("name");
+            NoteBytesPair ipElement = json.get("ip");
+            NoteBytesPair portElement = json.get("port");
+            NoteBytesPair networkTypeElement = json.get("networkType");
           //  JsonElement nodeTypeElement = json.get("nodeType");
-            JsonElement apiKeyElement = json.get("apiKey");
+            NoteBytesPair apiKeyElement = json.get("apiKey");
 
-            if(!(idElement != null && idElement.isJsonPrimitive() && networkTypeElement != null&& networkTypeElement.isJsonPrimitive() &&  nameElement != null && nameElement.isJsonPrimitive())){
+            if(!(idElement != null && networkTypeElement != null &&  nameElement != null)){
                 throw new Exception("Null data");
             }
-            m_id =  idElement.getAsString();
+            m_id =  idElement.getValue();
 
-            String networkTypeString = networkTypeElement.getAsString();
+            String networkTypeString = networkTypeElement.getValue().getAsString();
             m_networkType = networkTypeString.equals(TESTNET_STRING) ? NetworkType.TESTNET : NetworkType.MAINNET;
         
 
-            m_name = nameElement.getAsString();
-            m_ip = ipElement.getAsString();
-            m_port = portElement.getAsInt();
-            m_apiKey = apiKeyElement != null ? apiKeyElement.getAsString() : "";
+            m_name = nameElement.getValue().getAsString();
+            m_ip = ipElement.getValue().getAsString();
+            m_port = portElement.getValue().getAsInt();
+            m_apiKey = apiKeyElement != null ? apiKeyElement.getValue().getAsString() : "";
                 
             
 
@@ -72,7 +67,7 @@ public class NamedNodeUrl {
         }
     }
 
-    public NamedNodeUrl(String id, String name, String ip, int port, String apiKey, NetworkType networkType) {
+    public NamedNodeUrl(NoteBytes id, String name, String ip, int port, String apiKey, NetworkType networkType) {
         m_id = id;
         m_name = name;
         m_ip = ip;
@@ -81,7 +76,7 @@ public class NamedNodeUrl {
         m_apiKey = apiKey;
     }
 
-    public String getId() {
+    public NoteBytes getId() {
         return m_id;
     }
 
@@ -134,27 +129,20 @@ public class NamedNodeUrl {
         m_apiKey = apiKey;
     }
 
-    public JsonObject getJsonObject() {
-        JsonObject json = new JsonObject();
-        json.addProperty("id", m_id);
-        json.addProperty("name", m_name);
-        json.addProperty("protocol", m_protocol);
-        json.addProperty("ip", m_ip);
-        json.addProperty("port", m_port);
-        if (m_apiKey != null) {
-            json.addProperty("apiKey", m_apiKey);
+    public NoteBytesObject getJsonObject() {
+        NoteBytesObject nbo = new NoteBytesObject();
+        nbo.add("id", m_id);
+        nbo.add("name", m_name);
+        nbo.add("protocol", m_protocol);
+        nbo.add("ip", m_ip);
+        nbo.add("port", m_port);
+        if (m_apiKey != null && m_apiKey.length() > 0) {
+            nbo.add("apiKey", m_apiKey);
         }
-        json.addProperty("networkType", m_networkType == null ? MAINNET_STRING : m_networkType.toString());
-        return json;
+        nbo.add("networkType", m_networkType == null ? MAINNET_STRING : m_networkType.toString());
+        return nbo;
     }
 
-    public IconButton getButton() {
-
-        IconButton btn = new IconButton(null, getRowString(), IconStyle.ROW);
-        btn.setButtonId(m_id);
-        return btn;
-
-    }
 
     public SimpleObjectProperty<LocalDateTime> lastUpdatedProperty() {
         return m_lastUpdated;

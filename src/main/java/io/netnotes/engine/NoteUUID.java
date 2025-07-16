@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -81,7 +82,7 @@ public class NoteUUID extends NoteBytes {
     }
 
     public static void createNotesUUID256(ExecutorService execService, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed ){ 
-        HardwareInfo.getHardwareInfo("nic/hdd", execService, (onHardwareInfo)->{
+        HardwareInfo.getHardwareInfo(new NoteListString("nic","hdd"), execService, (onHardwareInfo)->{
             Object obj = onHardwareInfo.getSource().getValue();
             if(obj != null && obj instanceof HardwareInfo){
                 HardwareInfo hardwareInfo = (HardwareInfo) obj;
@@ -91,7 +92,7 @@ public class NoteUUID extends NoteBytes {
                         try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
                             NoteBytesPair[] sources = hardwareInfo.getAsArray();
                             for(NoteBytesPair source : sources){
-                                NoteBytesPair[] sourceItems = source.getValue().getAsNotePairTree().getAsArray();
+                                NoteBytesPair[] sourceItems = source.getValue().getAsNoteBytesObject().getAsArray();
                                 int itemsLength = sourceItems.length;
                                 if(itemsLength > 0){
                                     outputStream.write( sourceItems[Utils.getRandomInt(0, itemsLength-1)].getValue().get() );
@@ -110,7 +111,9 @@ public class NoteUUID extends NoteBytes {
         }, onFailed);
     }
 
-
+    public static NoteUUID fromURLSafeString(String urlSafeString){
+        return new NoteUUID(Base64.getUrlDecoder().decode(urlSafeString));
+    }
 
 
 	private static byte[] getRandomBytes(int size){

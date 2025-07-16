@@ -1,12 +1,11 @@
 package io.netnotes.engine;
 
-import io.netnotes.engine.apps.AppConstants;
 import javafx.scene.control.Button;
 import javafx.scene.image.Image;
 
 public class BufferedButton extends Button {
 
-    public final static String ON_MOUSE_PRESSED_EFFECT_ID = "onMousePressed";
+    public final static NoteBytes ON_MOUSE_PRESSED_EFFECT_ID = new NoteBytes("onMousePressed");
 
     private BufferedImageView m_imgBufView;
     private boolean m_isPressedEffects = true;

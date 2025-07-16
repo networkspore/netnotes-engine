@@ -22,7 +22,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonArray;
 
-public class JsonParametersBox extends AppBox{
+public class JsonParametersBox extends VBox{
     public final static double DEFAULT_COL_WIDTH = 160;
 
     private HashMap<String, TextInputControl> m_rows = new HashMap<>();
@@ -79,7 +79,7 @@ public class JsonParametersBox extends AppBox{
         return m_paramBoxes;
     }
 
-    @Override
+
     public void shutdown(){
         getChildren().clear();
         m_rows.clear();

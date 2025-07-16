@@ -1,6 +1,7 @@
 package io.netnotes.engine;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Stream;
 
 public class NoteBytesArray extends NoteBytes{
@@ -64,6 +65,10 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytes[] getAsArray(){
         return getAsStream().toArray(NoteBytes[]::new);
+    }
+
+    public List<NoteBytes> getAsList(){
+        return getAsStream().toList();
     }
 
     public NoteBytes getAt(int index){

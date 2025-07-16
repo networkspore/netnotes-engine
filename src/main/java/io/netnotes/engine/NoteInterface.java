@@ -9,7 +9,7 @@ import javafx.event.EventHandler;
 
 public interface NoteInterface {
 
-    String getNetworkId();
+    NoteBytes getNetworkId();
 
     Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
 

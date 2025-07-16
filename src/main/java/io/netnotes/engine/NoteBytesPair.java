@@ -55,8 +55,8 @@ public class NoteBytesPair {
         return m_value;
     }
 
-    public NoteBytesObject getValueAsNotePairTree(){
-        return getValue().getAsNotePairTree();
+    public NoteBytesObject getValueAsNoteBytesObject(){
+        return getValue().getAsNoteBytesObject();
     }
 
     public NoteBytesArray getValueAsNoteBytesArray(){

@@ -3,7 +3,6 @@ package io.netnotes.engine;
 import java.util.ArrayList;
 import java.util.List;
 
-import javafx.collections.ObservableList;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Menu;
 
@@ -18,16 +17,16 @@ public class KeyMenu extends Menu implements KeyInterface{
     public static final int DEFAULT_COL_SIZE = 20;
     private int m_colSize =DEFAULT_COL_SIZE;
     private long m_timeStamp = 0;
-    private String m_key = null;
+    private NoteBytes m_key = null;
     private String m_value = null;
 
     private String m_style = KEY_AND_VALUE;
 
-    public KeyMenu(String key, String value, long timeStamp, String style){
+    public KeyMenu(NoteBytes key, String value, long timeStamp, String style){
         this(key, value, timeStamp, DEFAULT_COL_SIZE, style);
     }
 
-    public KeyMenu(String key, String value, long timeStamp, int colSize, String style){
+    public KeyMenu(NoteBytes key, String value, long timeStamp, int colSize, String style){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -38,10 +37,10 @@ public class KeyMenu extends Menu implements KeyInterface{
     }
 
 
-    public KeyMenu(String key, String value, long timeStamp){
+    public KeyMenu(NoteBytes key, String value, long timeStamp){
         this(key, value, timeStamp, DEFAULT_COL_SIZE);
     }
-    public KeyMenu(String key, String value, long timeStamp, int colSize){
+    public KeyMenu(NoteBytes key, String value, long timeStamp, int colSize){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -87,7 +86,7 @@ public class KeyMenu extends Menu implements KeyInterface{
         update();
     }
 
-    public String getKey(){
+    public NoteBytes getKey(){
         return m_key;
     }
 
@@ -95,7 +94,7 @@ public class KeyMenu extends Menu implements KeyInterface{
         return m_value;
     }
 
-    public static KeyMenu getKeyMenu(List<MenuItem> items, String key){
+    public static KeyMenu getKeyMenu(List<MenuItem> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenu){
@@ -109,7 +108,7 @@ public class KeyMenu extends Menu implements KeyInterface{
     }
 
     public static void removeOldKeyMenus(List<MenuItem> items, long timeStamp){
-         ArrayList<String> removeList  = new ArrayList<>();
+         ArrayList<NoteBytes> removeList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
@@ -121,12 +120,12 @@ public class KeyMenu extends Menu implements KeyInterface{
             }
         }
 
-        for(String key : removeList){
+        for(NoteBytes key : removeList){
             removeKeyMenu(items, key);
         }
     }
 
-    public static KeyMenu removeKeyMenu(List<MenuItem> items, String key){
+    public static KeyMenu removeKeyMenu(List<MenuItem> items, NoteBytes key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenu){

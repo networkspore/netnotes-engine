@@ -1,47 +1,50 @@
 package io.netnotes.engine;
 
-import com.google.gson.JsonObject;
 
+import javafx.beans.property.SimpleStringProperty;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 import javafx.scene.layout.VBox;
 
-public class AppBox extends VBox implements SimpleNoteInterface{
+public class AppBox extends VBox {
     
-    private NoteBytes m_appId;
+    private final NoteBytes m_appId;
+    private SimpleStringProperty m_titleString = new SimpleStringProperty();
+    private final String m_name;
 
-    public AppBox(){
+    public AppBox(NoteBytes appId, String name){
         super();
+        m_appId = appId;
+        m_name = name;
+
+        m_titleString.set(name);
         setId("darkBox");
     }
 
 
-    public AppBox(NoteBytes appId){
-        m_appId = appId;
-    }
 
-    public void setAppId(NoteBytes appId){
-        m_appId = appId;
-    }
 
     public NoteBytes getAppId(){
         return m_appId;
     }
 
-    public boolean sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public boolean sendNote(NoteBytesObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         return false;
     }
 
-    public Object sendNote(JsonObject note){
+    public Object sendNote(NoteBytesObject note){
         return null;
     }
 
-
-    public void sendMessage(int code, long timestamp,String networkId, Number number){
-
+    public SimpleStringProperty titleProperty(){
+        return m_titleString;
     }
 
-    public void sendMessage(int code, long timeStamp,String networkId, String str){
+    public String getName(){
+        return m_name;
+    }
+
+    public void sendMessage(int code, long timeStamp, NoteBytes networkId, String str){
         
     }
 

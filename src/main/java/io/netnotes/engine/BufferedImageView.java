@@ -75,7 +75,7 @@ public class BufferedImageView extends ImageView {
         setPreserveRatio(true);
     }
 
-    public Effects getEffect(String id) {
+    public Effects getEffect(NoteBytes id) {
         if (id != null && m_effects.size() > 0) {
             for (int i = 0; i < m_effects.size(); i++) {
                 Effects effect = m_effects.get(i);
@@ -111,14 +111,14 @@ public class BufferedImageView extends ImageView {
 
     }
 
-    public void applyInvertEffect(String id, double amount) {
+    public void applyInvertEffect(NoteBytes id, double amount) {
         if (getEffect(id) == null) {
             m_effects.add(new InvertEffect(id, amount));
             updateImage();
         }
     }
 
-    public void removeEffect(String id) {
+    public void removeEffect(NoteBytes id) {
         if (id != null && m_effects.size() > 0) {
             for (int i = 0; i < m_effects.size(); i++) {
                 if (m_effects.get(i).getId().equals(id)) {

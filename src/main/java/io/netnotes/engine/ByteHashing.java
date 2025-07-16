@@ -143,7 +143,6 @@ public class ByteHashing  {
                 break;
             case ByteDecoding.LONG_TYPE:
                 code = Long.hashCode(isLittleEndian ?ByteDecoding.bytesToLongLittleEndian(bytes) : ByteDecoding.bytesToLongBigEndian(bytes));
-              
                 break;
             case ByteDecoding.DOUBLE_TYPE:
                 double d = (isLittleEndian ?ByteDecoding.bytesToDoubleBigEndian(bytes) : ByteDecoding.bytesToDoubleLittleEndian(bytes));
@@ -155,10 +154,10 @@ public class ByteHashing  {
                 break;
             case ByteDecoding.BIG_INTEGER_TYPE:
                 code =  bytes.length < 1 ? -1 : new BigInteger(bytes).hashCode();
-            break;
+                break;
             case ByteDecoding.BIG_DECIMAL_TYPE:
                 code = bytes.length < 5 ? -1 : new BigDecimal(new BigInteger(bytes, 4, bytes.length-4), isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes,0) :  ByteDecoding.bytesToIntBigEndian(bytes, 0)).hashCode();
-            break;
+                break;
             case ByteDecoding.STRING_TYPE:
                 switch(byteDecoding.getCharacterEncoding()){
                     case ByteDecoding.UTF_16:
@@ -171,9 +170,9 @@ public class ByteHashing  {
                         code = hashCodeUTF8(bytes);
 
                 }
-                
                 break;
             case ByteDecoding.RAW_BYTES_TYPE:
+            default:
                 code = ByteDecoding.bytesToIntBigEndian(digestBytesToBytes(bytes,4));
               
         }

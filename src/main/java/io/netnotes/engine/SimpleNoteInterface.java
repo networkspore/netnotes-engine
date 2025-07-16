@@ -1,20 +1,16 @@
 package io.netnotes.engine;
 
-import com.google.gson.JsonObject;
-
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 
 public interface SimpleNoteInterface {
 
     
-    boolean sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
+    boolean sendNote(NoteBytesObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
 
-    Object sendNote(JsonObject note);
+    Object sendNote(NoteBytesObject note);
 
-    void sendMessage(int code, long timestamp,String networkId, Number number);
-
-    void sendMessage(int code, long timeStamp,String networkId, String str);
+    void sendMessage(int code, long timeStamp,NoteBytes networkId, String str);
 
 
     void shutdown();

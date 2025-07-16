@@ -8,7 +8,8 @@ import java.io.PipedOutputStream;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+
+import com.google.gson.JsonObject;
 
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
@@ -18,7 +19,6 @@ public class NoteFile extends NoteListString {
 
     private NoteFileInterface m_networksData = null;
     private File m_file;
-    private AtomicBoolean m_isAquired = new AtomicBoolean(false);
 
 
     public NoteFile(NoteListString listString, File file, NoteFileInterface networksData){
@@ -38,12 +38,6 @@ public class NoteFile extends NoteListString {
 
     public ExecutorService getExecService(){
         return m_networksData.getExecService();
-    }
-
-
-
-    public AtomicBoolean isAquired(){
-        return m_isAquired;
     }
 
     public boolean isNetworksData(){
@@ -111,7 +105,8 @@ public class NoteFile extends NoteListString {
         execService.submit(task);
     }
 
-    public void getFileBytes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+
+    public Future<?> getFileBytes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 
         Task<Object> task = new Task<Object>() {
             @Override
@@ -142,19 +137,102 @@ public class NoteFile extends NoteListString {
 
         task.setOnSucceeded(onSucceeded);
 
-        getExecService().submit(task);
+        return getExecService().submit(task);
     }
 
-     public Future<?> saveFileBytes(byte[] bytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+    public Future<?> getFileNoteBytes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+       Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+                PipedOutputStream outParseStream = new PipedOutputStream();
+                PipedOutputStream inParseStream = new PipedOutputStream();
+                readWriteBytes(inParseStream, outParseStream, onFailed);
+
+                try(
+                    PipedInputStream inputStream = new PipedInputStream(inParseStream);
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                ){
+                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
+                    int length = 0;
+
+                    while((length = inputStream.read(buffer)) != -1){
+                        outParseStream.write(buffer, 0, length);
+                        outParseStream.flush();
+                        byteArrayOutputStream.write(buffer, 0, length);
+                    }
+
+                    byte[] bytes = byteArrayOutputStream.toByteArray();
+
+                    return new NoteBytes(bytes);
+                }
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        return getExecService().submit(task);
+    }
+
+    public Future<?> getFileJson(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+                PipedOutputStream outParseStream = new PipedOutputStream();
+                PipedOutputStream inParseStream = new PipedOutputStream();
+                readWriteBytes(inParseStream, outParseStream, onFailed);
+
+                try(
+                    PipedInputStream inputStream = new PipedInputStream(inParseStream);
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                ){
+                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
+                    int length = 0;
+
+                    while((length = inputStream.read(buffer)) != -1){
+                        outParseStream.write(buffer, 0, length);
+                        outParseStream.flush();
+                        byteArrayOutputStream.write(buffer, 0, length);
+                    }
+
+                    byte[] bytes = byteArrayOutputStream.toByteArray();
+
+                    return new NoteBytes(bytes).getAsJsonObject();
+                }
+            }
+        };
+
+        task.setOnFailed(onFailed);
+
+        task.setOnSucceeded(onSucceeded);
+
+        return getExecService().submit(task);
+    }
+
+    public Future<?> saveEncryptedFile(PipedOutputStream pipedOutputStream, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        return getNoteFileInterface().saveEncryptedFile(this, pipedOutputStream, onSucceeded, onFailed);
+    }
+
+    public Future<?> saveFileBytes(byte[] bytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         return getNoteFileInterface().saveEncryptedFile(this, bytes, onSucceeded, onFailed);
     }
+
+    public Future<?> saveFileNoteBytes(NoteBytes noteBytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        return saveFileBytes(noteBytes.get(), onSucceeded, onFailed);
+    }
+
+    public Future<?> saveFileJson(JsonObject json, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
+        return saveFileNoteBytes(new NoteJsonObject(json), onSucceeded, onFailed);
+    }
+
 
     public interface NoteFileInterface{
         ExecutorService getExecService();
         Future<?> readEncryptedFile(NoteFile noteFile, PipedOutputStream pipedOutput, Runnable onAquired, EventHandler<WorkerStateEvent> onFailed);
         Future<?> writeEncryptedFile(NoteFile noteFile, PipedOutputStream pipedOutputStream, EventHandler<WorkerStateEvent> onFailed);
+        Future<?> saveEncryptedFile(NoteFile noteFile, PipedOutputStream pipedOutputStream, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
         Future<?> saveEncryptedFile(NoteFile noteFile, byte[] bytes, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed);
-        Future<?> getNoteFile(NoteListString path, EventHandler<WorkerStateEvent> onComplete);
     }
     
 }

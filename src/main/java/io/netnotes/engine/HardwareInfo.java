@@ -86,11 +86,7 @@ public class HardwareInfo extends NoteBytesObject {
         return pairTree;
     }
 
-    public static Future<?> getHardwareInfo(String request, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
-        
-        return getHardwareInfo(new NoteListString(request), execService,
-            onSucceeded, onFailed);
-    }
+
 
     public static Future<?> getHardwareInfo(NoteListString requestList, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
         
@@ -100,7 +96,7 @@ public class HardwareInfo extends NoteBytesObject {
                 SystemInfo systemInfo = new SystemInfo();
   
                 HardwareInfo notePairTree = new HardwareInfo();
-                List<NoteString> list = requestList.getAsStream().toList();
+                List<NoteBytes> list = requestList.getAsList();
                 if(list.contains(new NoteBytes("nic"))){
                     notePairTree.add("nic", nicBytes(systemInfo));
                 }
