@@ -1,19 +1,21 @@
 package io.netnotes.engine;
 
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-
+import java.util.stream.Stream;
 
 import com.google.gson.JsonObject;
 
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
+import javafx.concurrent.Task;
 import javafx.scene.control.Button;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
@@ -26,6 +28,7 @@ public class Network {
     private int m_connectionStatus = NoteConstants.STOPPED;
     private NoteBytes m_networkId;
     private String m_website = "";
+    private String m_description = null;
 
     private SimpleObjectProperty<LocalDateTime> m_shutdownNow = new SimpleObjectProperty<>(null);
     public final static long EXECUTION_TIME = 500;
@@ -41,27 +44,27 @@ public class Network {
 
     private boolean m_stageMaximized = false;
 
-    private ArrayList<NoteMsgInterface> m_msgListeners = new ArrayList<>();
+    private ArrayList<NoteBytes> m_subscribedIds = new ArrayList<>();
 
     private Image m_icon = null;
     private Button m_appBtn = null;
     private String m_name = null;
     private NetworksDataInterface m_networksData;
 
-    public Network(Image image, String name,NoteBytes networkId, NetworksDataInterface networksData) {
+    public Network(Image image, String name,NoteBytes networkId) {
         m_networkId = networkId;
         m_name = name;
         m_icon = image;
-        m_networksData = networksData;
     }
 
-    public Future<?> sendNote(JsonObject note, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
-
-        return null;
+    public void init( NetworksDataInterface networksData){
+        if(m_networksData == null){
+            m_networksData = networksData;
+        }
     }
 
 
-    public NetworksDataInterface getNetworksData(){
+    protected NetworksDataInterface getNetworksData(){
         return m_networksData;
     }
 
@@ -84,24 +87,82 @@ public class Network {
     }
 
     
-    public void addMsgListener(NoteMsgInterface item) {
-        if (item != null && !m_msgListeners.contains(item)) {
+    protected void addSubscriber(NoteBytes id) {
+        if (id != null && !m_subscribedIds.contains(id)) {
             if(m_connectionStatus != NoteConstants.STARTED){
                 start();
             }
-            m_msgListeners.add(item);
+            m_subscribedIds.add(id);
+        }
+    }
+
+    protected void sendStreamToSubscribers(PipedOutputStream outputStream){
+        for(NoteBytes id : m_subscribedIds){
+            getNetworksData().sendNote(id, outputStream);
         }
     }
 
 
-    public Future<?> sendStream( PipedOutputStream outputStream, int senderType, String senderId){
-
+    protected void sendNoteToSubscribers(NoteBytesObject noteBytesObject){
+      
+        PipedOutputStream outputStream = new PipedOutputStream();
+        sendStreamToSubscribers(outputStream);
+        NoteBytesPair[] pairs = noteBytesObject.getAsArray();
     
-        return null;
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+                try(
+                    DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
+                ){
+                    for(int i = 0; i < pairs.length ;i++){
+                        NoteBytesPair.writeNoteBytePair(pairs[i], dataOutputStream);
+                    }
+                }
+                outputStream.close();
+                return null;
+            }
+        };
+        task.setOnFailed((failed)->{
+            Utils.writeLogMsg("network.sendNoteToSubscribers", failed);
+            try {
+                outputStream.close();
+            } catch (IOException e) {
+                Utils.writeLogMsg("network.sendNoteToSubscribers.close", e.toString());
+            }
 
+        });
+        getExecService().submit(task);
     }
 
-    private String m_description = null;
+
+    public Future<?> receiveNote(PipedOutputStream outputStream){
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+
+                try(
+                    PipedInputStream inputStream = new PipedInputStream(outputStream, Utils.DEFAULT_BUFFER_SIZE)
+                ){
+  
+                   
+                    return null;
+                }
+            }
+        };
+        task.setOnSucceeded((onValue)->{
+            receiveValue(onValue.getSource().getValue());
+        });
+        task.setOnFailed((failed->{
+
+        }));
+
+        return getExecService().submit(task);
+    }
+
+    protected void receiveValue(Object object){
+
+    }
 
     public void setDescpription(String value){
         m_description = value;
@@ -121,11 +182,11 @@ public class Network {
         return null;
     }
 
-    public boolean removeMsgListener(NoteMsgInterface item){
-        if(item != null){
-            boolean removed = m_msgListeners.remove(item);
+    public boolean removeSubscriber(NoteBytes id){
+        if(id != null){
+            boolean removed = m_subscribedIds.remove(id);
             
-            if(m_msgListeners.size() == 0){
+            if(m_subscribedIds.size() == 0){
                 stop();
             }
             
@@ -154,31 +215,15 @@ public class Network {
         
     }
  
-    protected ArrayList<NoteMsgInterface> msgListeners(){
-        return m_msgListeners;
+    protected ArrayList<NoteBytes> subscriberList(){
+        return m_subscribedIds;
     }
 
     protected void start(){
         setConnectionStatus(NoteConstants.STARTED);
     }
 
-
-
-    protected void sendMessage(int code, long timeStamp, NoteBytes networkId, String msg){
-        for(int i = 0; i < m_msgListeners.size() ; i++){
-            m_msgListeners.get(i).sendMessage(code, timeStamp, networkId, msg);
-        }
-    }
-
-    protected NoteMsgInterface getListener(String id) {
-        for (int i = 0; i < m_msgListeners.size(); i++) {
-            NoteMsgInterface listener = m_msgListeners.get(i);
-            if (listener.getId().equals(id)) {
-                return listener;
-            }
-        }
-        return null;
-    }
+  
 
     public String[] getKeyWords() {
         return m_keyWords;
@@ -300,12 +345,12 @@ public class Network {
     public void shutdown() {
         shutdownNowProperty().set(LocalDateTime.now());
         
-        removeAllMsgListeners();
+        removeAllSubscribers();
     }
 
-    public void removeAllMsgListeners(){
-        while(m_msgListeners.size() > 0){
-            removeMsgListener(m_msgListeners.get(0));
+    public void removeAllSubscribers(){
+        while(m_subscribedIds.size() > 0){
+            removeSubscriber(m_subscribedIds.get(0));
         }
     }
 

@@ -936,9 +936,9 @@ public class AppData {
                             pipedOutput.flush();
                         }
                     }
-                    pipedOutput.close();
+                   
                 }
-                
+                pipedOutput.close();
                 return true;
             }
         };
@@ -988,9 +988,10 @@ public class AppData {
                         fileOutputStream.write(outBytes);        
                     }
                 }
-            
+               
                 Files.deleteIfExists(file.toPath());
                 FileUtils.moveFile(tmpFile, file);
+                pipedOutputStream.close();
                 semaphore.release();
                 return true;
             }
@@ -1000,6 +1001,11 @@ public class AppData {
       
 
         task.setOnFailed(failed->{
+            try{
+                pipedOutputStream.close();
+            }catch(IOException e){
+                Utils.writeLogMsg("appData.writeEncryptedFile.pipedOutput.close", e);
+            }
             getExecService().execute(()->{
                 if(tmpFile.isFile()){
                     try{

@@ -24,11 +24,11 @@ public class NetworkLocation{
     }
 
     public boolean isApp(){
-        return m_type == NoteConstants.APPS;
+        return m_type == NoteConstants.UPDATE_APPS;
     }
 
     public boolean isNetwork(){
-        return m_type == NoteConstants.NETWORKS;
+        return m_type == NoteConstants.UPDATE_NETWORKS;
     }
 
     public NetworkInformation getNetworkInformation(){

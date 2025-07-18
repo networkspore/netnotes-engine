@@ -46,9 +46,8 @@ public class NoteConstants {
 
 
 
-    public static final int APPS = 100;
-    public static final int NETWORKS = 101;
-    public static final int REMOTE = 102;
+    public static final int UPDATE_APPS = 100;
+    public static final int UPDATE_NETWORKS = 101;
 
     public static final String STATIC_TYPE = new String("STATIC");
     public static final String STATUS_MINIMIZED = new String("Minimized");

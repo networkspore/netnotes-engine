@@ -71,10 +71,10 @@ public class NoteFile extends NoteListString {
 
         PipedOutputStream decryptedOutputStream = new PipedOutputStream();
         getNoteFileInterface().readEncryptedFile(this, decryptedOutputStream,()->{
-            writeStreamToStream(decryptedOutputStream, inParseStream, getExecService(), onFailed);
+            Utils.writeStreamToStream(decryptedOutputStream, inParseStream, getExecService(), onFailed);
 
             PipedOutputStream writerOutputStream = new PipedOutputStream();
-            writeStreamToStream(inParseStream, writerOutputStream, getExecService(), onFailed);
+            Utils.writeStreamToStream(inParseStream, writerOutputStream, getExecService(), onFailed);
 
             getNoteFileInterface().writeEncryptedFile(this, writerOutputStream, onFailed);  
         }, onFailed);
@@ -82,29 +82,7 @@ public class NoteFile extends NoteListString {
    
     }
 
-    public static void writeStreamToStream(PipedOutputStream decryptedOutputStream, PipedOutputStream inParseStream, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
-        Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws IOException {
-
-                try(
-                    PipedInputStream decryptedInputStream = new PipedInputStream(decryptedOutputStream, Utils.DEFAULT_BUFFER_SIZE)
-                ){
-  
-                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
-                    int length = 0;
-                    while((length = decryptedInputStream.read(buffer)) != -1){
-                        inParseStream.write(buffer, 0, length);
-                        inParseStream.flush();
-                    }
-                    return null;
-                }
-            }
-        };
-        task.setOnFailed(onFailed);
-        execService.submit(task);
-    }
-
+    
 
     public Future<?> getFileBytes(EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed){
 

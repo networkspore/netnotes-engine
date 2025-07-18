@@ -58,6 +58,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.StringReader;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -608,6 +610,36 @@ public class Utils {
     }
 
 
+    public static Future<?> writeStreamToStream(PipedOutputStream decryptedOutputStream, PipedOutputStream inParseStream, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws IOException {
+
+                try(
+                    PipedInputStream decryptedInputStream = new PipedInputStream(decryptedOutputStream, Utils.DEFAULT_BUFFER_SIZE)
+                ){
+  
+                    byte[] buffer = new byte[Utils.DEFAULT_BUFFER_SIZE];
+                    int length = 0;
+                    while((length = decryptedInputStream.read(buffer)) != -1){
+                        inParseStream.write(buffer, 0, length);
+                        inParseStream.flush();
+                    }
+                    inParseStream.close();
+                    return null;
+                }
+            }
+        };
+        task.setOnFailed((failed)->{
+            try {
+                inParseStream.close();
+            } catch (IOException e) {
+                Utils.writeLogMsg("Utils.writeStreamToStream.close", e.toString());
+            }
+            Utils.returnException(failed, execService, onFailed);
+        });
+        return execService.submit(task);
+    }
 
 
 
@@ -801,8 +833,15 @@ public class Utils {
 
     
     public static String getErrorMsg(WorkerStateEvent failedEvent){
-        Throwable throwable =  failedEvent.getSource().getException();
-        return throwable != null ? throwable.getMessage() : NoteConstants.ERROR_NOT_FOUND;
+        return getErrorMsg(failedEvent.getSource().getException());
+    }
+
+    public static String getErrorMsg(Throwable throwable){
+        return throwable != null ? throwable.toString() : NoteConstants.ERROR_NOT_FOUND;
+    }
+
+    public static void writeLogMsg(String scope, Throwable failed){
+        writeLogMsg(scope, getErrorMsg(failed));
     }
 
     public static void writeLogMsg(String scope, WorkerStateEvent failedEvent){
