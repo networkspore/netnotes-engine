@@ -10,10 +10,7 @@ public class NoteConstants {
     public static final byte VALUE_NO_KEY = 0x00;
 
     public final static long POLLING_TIME = 7000;
-    public final static long QUOTE_TIMEOUT = POLLING_TIME*2;
     
-
-
     public static final int DEFAULT = 0;
     public static final int SUCCESS = 1;
     public static final int ERROR = 2;

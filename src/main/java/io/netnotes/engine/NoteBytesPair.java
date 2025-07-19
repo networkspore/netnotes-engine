@@ -6,6 +6,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.math.BigDecimal;
 
 public class NoteBytesPair {
     private NoteBytes m_key;
@@ -108,4 +109,45 @@ public class NoteBytesPair {
     }
 
 
+    public NoteBytesObject getAsNoteBytesObject(){
+        return getValue() != null ? getValueAsNoteBytesObject() : null;
+    }
+
+    public NoteBytesArray getAsNoteBytesArray(){
+        return getValue() != null ? getValueAsNoteBytesArray() : null;
+    }
+
+    public BigDecimal getAsBigDecimal(){
+        return getValue() != null ? getValue().getAsBigDecimal() : null;
+    }
+
+    public long getAsLong(){
+        return getValue() != null ? getValue().getAsLong() : null;
+    }
+
+    public int getAsInt(){
+        return getValue() != null ? getValue().getAsInt() : null;
+    }
+
+    public short getAsShort(){
+        return getValue() != null ? getValue().getAsShort() : null;
+    }
+
+    public byte getAsByte(){
+        return getValue() != null ? getValue().getAsByte() : null;
+    }
+
+    public double getAsDouble(){
+        return getValue() != null ? getValue().getAsDouble() : null;
+    }
+
+    public boolean getAsBoolean(){
+        return getValue() != null ? getValue().getAsBoolean() : null;
+    }
+
+    public String getAsString(){
+        return getValue() != null ? getValue().getAsString() : null;
+    }
+
+    
 }

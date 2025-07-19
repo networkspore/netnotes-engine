@@ -15,6 +15,7 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.core.AppData;
 import io.netnotes.javafxsvg.SvgImageLoaderFactory;
+
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;

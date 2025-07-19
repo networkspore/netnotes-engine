@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.concurrent.Semaphore;
 
@@ -359,19 +360,23 @@ public class NoteBytes {
     }
 
     public boolean equalsString(String str){
-        if(m_byteDecoding.getCharacterEncoding() != ByteDecoding.NO_ENCODING ){
-            byte[] value = m_value;
-            byte[] bytes = ByteDecoding.charsToByteArray(str.toCharArray(), m_byteDecoding);
-            return Arrays.equals(bytes, value);
-        }
-        return false;
+        return str.equals(toString());
     }
 
+    public void destroy(){
+        if(m_value != null && m_value.length > 0){
+            SecureRandom sr = new SecureRandom();
+            sr.nextBytes(m_value);
+            m_value = new byte[0];
+        }
+    }
 
-
+    public boolean isDestroyed(){
+        return byteLength() == 0;
+    }
 
     public int byteLength(){
-        return getBytes().length;
+        return get().length;
     }
     
     public NoteBytesObject getAsNoteBytesObject(){
