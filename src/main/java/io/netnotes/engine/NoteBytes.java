@@ -1,10 +1,5 @@
 package io.netnotes.engine;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -26,8 +21,9 @@ public class NoteBytes {
     private ByteDecoding m_byteDecoding = ByteDecoding.RAW_BYTES;
     private byte[] m_value = null;
 
+
     public NoteBytes( byte[] value){
-        this(value, ByteDecoding.RAW_BYTES);
+        this(value , ByteDecoding.RAW_BYTES);
     }
 
     public NoteBytes( String value){
@@ -43,9 +39,7 @@ public class NoteBytes {
     }
 
     public NoteBytes( byte[] value, ByteDecoding byteDecoding){
-
-        m_byteDecoding = byteDecoding;
-        set(value);
+        set(value, byteDecoding);
     }
 
     public ByteBuffer getByteByffer(){
@@ -220,67 +214,9 @@ public class NoteBytes {
         return ByteDecoding.isoBytesToChars(m_value);
     }
 
-    public static byte[] read255MaxBytes(DataInputStream dis) throws IOException{
-        byte[] bytes = new byte[dis.readUnsignedByte()];
-        dis.read(bytes);
-        return bytes;
-    }
+    
 
 
-    public static byte[] readShortBytes(DataInputStream dataInputStream) throws IOException{
-        int length = dataInputStream.readUnsignedShort();
-        byte[] bytes = new byte[length];
-        dataInputStream.read(bytes);
-        return bytes;
-    }
-
-     public static byte[] readBytes(DataInputStream dataInputStream) throws IOException{
-        int length = dataInputStream.readInt();
-        byte[] bytes = new byte[length];
-        dataInputStream.read(bytes);
-        return bytes;
-    }
-
-    public static byte[] readBytes(ByteArrayInputStream bais) throws IOException{
-        byte[] lengthBytes = new byte[4];
-        bais.read(lengthBytes);
-        int length = ByteDecoding.bytesToIntBigEndian(lengthBytes);
-        byte[] bytes = new byte[length];
-        bais.read(bytes);
-        return bytes;
-    }
-
-
-
-    public static void writeShortBytes( byte[] bytes,  DataOutputStream dos) throws IOException{
-        int length = bytes.length;
-        if(length > MAX_SHORT_INDEX_VALUE){
-            throw new IOException(NoteConstants.ERROR_OUT_OF_RANGE);
-        }
-        dos.writeShort((short) length);
-        dos.write(bytes);
-    }
-
-    public static int writeBytes( byte[] bytes,  DataOutputStream dos) throws IOException{
-        int length = bytes.length;
-        if(length > Integer.MAX_VALUE){
-            throw new IOException(NoteConstants.ERROR_OUT_OF_RANGE);
-        }
-        dos.writeInt(length);
-        dos.write(bytes);
-        return length + 4;
-    }
-
-    public static int writeBytes( byte[] bytes,  ByteArrayOutputStream dos) throws IOException{
-        int length = bytes.length;
-        if(length > Integer.MAX_VALUE){
-            throw new IOException(NoteConstants.ERROR_OUT_OF_RANGE);
-        }
-        byte[] lengthBytes = ByteDecoding.intToBytesBigEndian(length);
-        dos.write(lengthBytes, 0, 4);
-        dos.write(bytes, 0, length);
-        return length + 4;
-    }
 
     public BigInteger getAsBigInteger(){
         int len = byteLength();
@@ -305,21 +241,6 @@ public class NoteBytes {
         }
     }
 
-    public static int writeNote(NoteBytes noteBytes, DataOutputStream dos) throws IOException{
-        return writeBytes(noteBytes.getBytes(),dos);
-    }
-
-    public static int writeNote(NoteBytes noteBytes, ByteArrayOutputStream baos) throws IOException{
-        return writeBytes(noteBytes.getBytes(), baos);
-    }
-  
-    public static NoteBytes readNote(DataInputStream dis) throws IOException{
-        return new NoteBytes(readBytes(dis));
-    }
-
-    public static NoteBytes readNote(ByteArrayInputStream bais) throws IOException{
-         return new NoteBytes(readBytes(bais));
-    }
 
     public static NoteBytes readNote(byte[] bytes, int offset, ByteDecoding byteDecoding){
         int size = byteDecoding.isLittleEndian() ?  ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
@@ -328,14 +249,6 @@ public class NoteBytes {
         return new NoteBytes(dst, byteDecoding);
     }
 
-
-    public static void writeShortNote(NoteBytes noteBytes, DataOutputStream dos) throws IOException{
-        writeShortBytes(noteBytes.getBytes(), dos);
-    }
-
-    public static NoteBytes readShortNote(DataInputStream dis) throws IOException{
-        return new NoteBytes(readShortBytes(dis));
-    }
 
     @Override
     public int hashCode(){
@@ -387,6 +300,9 @@ public class NoteBytes {
         return new NoteBytesArray(get());
     }
 
+    public boolean isEmpty(){
+        return m_value.length == 0;
+    }
 
     public JsonElement getAsJsonElement(){
         

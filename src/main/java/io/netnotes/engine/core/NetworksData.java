@@ -103,12 +103,12 @@ import javafx.event.ActionEvent;
 public class NetworksData extends Network {
 
     public final static long DEFAULT_CYCLE_PERIOD = 7;
-    public final static NoteBytes NETWORK_ID = new NoteBytes("NetworksData");
+    public final static String NETWORK_ID = "NetworksData";
 
-    public final static NoteBytes APPS = new NoteBytes("Apps");
-    public final static NoteBytes NETWORKS = new NoteBytes("Networks");
+    public final static String APPS = "Apps";
+    public final static String NETWORKS = "Networks";
 
-    public final static NoteBytes NO_NETWORK_ID = new NoteBytes("NO_NETWORK");
+    public final static String NO_NETWORK_ID = "NO_NETWORK";
 
     public final static int BTN_IMG_SIZE = 30;
     public final static long EXECUTION_TIME = 500;
@@ -117,9 +117,9 @@ public class NetworksData extends Network {
     
     public static final String UNKNOWN_LOCATION = "Unknown";
 
-    private SimpleObjectProperty<NoteBytes> m_currentNetworkId = new SimpleObjectProperty<>(null);
+    private SimpleObjectProperty<String> m_currentNetworkId = new SimpleObjectProperty<>(null);
 
-    private HashMap<NoteBytes, NetworkLocation>  m_networkLocations = new HashMap<>();
+    private HashMap<String, NetworkLocation>  m_networkLocations = new HashMap<>();
  
     private SimpleStringProperty m_stageIconStyle = new SimpleStringProperty(IconStyle.ICON);
 
@@ -483,7 +483,7 @@ public class NetworksData extends Network {
         return m_appData.getSchedualedExecService();
     }
 
-    public boolean isAppSupported(NoteBytes networkId){
+    public boolean isAppSupported(String networkId){
         if(networkId != null){
             NetworkInformation [] supportedApps = getAppInterface().getSupportedApps();
 
@@ -496,7 +496,7 @@ public class NetworksData extends Network {
         return false;
     }
 
-    public boolean isNetworkSupported(NoteBytes networkId){
+    public boolean isNetworkSupported(String networkId){
         if(networkId != null){
             NetworkInformation [] supportedNetworks = getAppInterface().getSupportedApps();
 
@@ -546,14 +546,14 @@ public class NetworksData extends Network {
                     NoteBytes[] noteBytesArray = jsonNetArrayElement != null  ? jsonNetArrayElement.getValueAsNoteBytesArray().getAsArray() : new NoteBytes[0];
                     
                     for (NoteBytes noteBytes : noteBytesArray) {
-                        Network network = createNetwork(noteBytes);
+                        Network network = createNetwork(noteBytes.getAsString());
                         if(network != null){
                             addNetwork(network, false);
                         }
                     }
                     
                     NoteBytesPair currentNetworkIdPair = networksTree.get("currentNetworkId");
-                    NoteBytes currentNetworkId = currentNetworkIdPair != null && currentNetworkIdPair.getValue().byteLength() > 0 ? currentNetworkIdPair.getValue() : null; 
+                    String currentNetworkId = currentNetworkIdPair != null && currentNetworkIdPair.getValue().byteLength() > 0 ? currentNetworkIdPair.getAsString() : null; 
                 
                     if(currentNetworkId != null && getNetwork(currentNetworkId) != null){
                         
@@ -569,11 +569,12 @@ public class NetworksData extends Network {
                     
                     for (NoteBytes noteBytes : appsArray) {
 
-                        Network app = createApp(noteBytes);
+                        Network app = createApp(noteBytes.getAsString());
                         if(app != null){
                             addApp(app, false);
                         }
                     }
+                  
                     NoteBytesPair stagePair = networksTree.get("stage");
                     
                     if (stagePair != null) {
@@ -614,21 +615,22 @@ public class NetworksData extends Network {
                     } 
                 }
                 initLayout();
+                appUpdated();
             }, (onBytesFailed)->{
                 initLayout();
             });
 
         }else{
 
-            NoteBytes[] appIds = getAppInterface().getDefaultAppIds();
+            String[] appIds = getAppInterface().getDefaultAppIds();
             if(appIds != null){
-                for(NoteBytes appId : appIds){
+                for(String appId : appIds){
                     installApp(appId, false);
                 }
             }
-            NoteBytes[] networkIds = getAppInterface().getDefaultNetworkIds();
+            String[] networkIds = getAppInterface().getDefaultNetworkIds();
             if(networkIds != null){
-                for(NoteBytes networkId : networkIds){
+                for(String networkId : networkIds){
                     installNetwork(networkId, false);
                 }
                 if(networkIds.length == 1){
@@ -645,7 +647,7 @@ public class NetworksData extends Network {
 
   
 
-    protected Future<?> sendNote(NoteBytes toId, PipedOutputStream outputStream){
+    protected Future<?> sendNote(String toId, PipedOutputStream outputStream){
         if(toId != null){
             PipedOutputStream locationOutputStream = getLocationOuputStream(toId);
             
@@ -658,7 +660,7 @@ public class NetworksData extends Network {
         return null;
     }
 
-    protected PipedOutputStream getLocationOuputStream(NoteBytes id){
+    protected PipedOutputStream getLocationOuputStream(String id){
         if(id != null){
             NetworkLocation location = m_networkLocations.get(id);
             if(location != null){
@@ -676,7 +678,7 @@ public class NetworksData extends Network {
         return new NetworksDataInterface() {
 
             @Override
-            public void sendNote(NoteBytes toId, PipedOutputStream outputStream) {
+            public void sendNote(String toId, PipedOutputStream outputStream) {
                  NetworksData.this.sendNote(toId, outputStream);
             }
 
@@ -689,7 +691,7 @@ public class NetworksData extends Network {
     }
 
 
-    private Network createApp(NoteBytes networkId){
+    private Network createApp(String networkId){
         if(getApp(networkId) == null){
 
             Network app = getAppInterface().createApp(networkId);
@@ -701,7 +703,7 @@ public class NetworksData extends Network {
         return null;
     }
 
-    private Network createNetwork(NoteBytes networkId){
+    private Network createNetwork(String networkId){
         if(getNetwork(networkId) == null){
             Network network = getAppInterface().createNetwork(networkId);
             if(network != null){
@@ -772,10 +774,19 @@ public class NetworksData extends Network {
     }
 
 
-    public static NoteBytesObject getNoteDataObject(int type, int code, NoteBytes data){
+    public static NoteBytesObject getNoteDataObject(String type, String code, String... data){
         return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair("type", new NoteInteger(type)),
-            new NoteBytesPair("code", new NoteInteger(code)),
+            new NoteBytesPair("type", type),
+            new NoteBytesPair("code", code),
+            new NoteBytesPair("timeStamp", new NoteLong(System.currentTimeMillis())), 
+            new NoteBytesPair("data", new NoteListString(data))
+        });
+    }
+
+    public static NoteBytesObject getNoteDataObject(String type, String code, NoteBytesArray data){
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair("type", type),
+            new NoteBytesPair("code", code),
             new NoteBytesPair("timeStamp", new NoteLong(System.currentTimeMillis())), 
             new NoteBytesPair("data", data)
         });
@@ -784,16 +795,16 @@ public class NetworksData extends Network {
 
    
     private boolean addApp(Network app, boolean isSave) {
-        NoteBytes networkId = app.getNetworkId();
+        String networkId = app.getNetworkId();
         if (getApp(networkId) == null) {
             
-            NetworkLocation networkLocation = new NetworkLocation(app, NoteConstants.UPDATE_APPS);
+            NetworkLocation networkLocation = new NetworkLocation(app, APPS);
             m_networkLocations.put( networkId, networkLocation);
             
             if(isSave){
                 save();
                 appUpdated();
-                sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_APPS, NoteConstants.LIST_ITEM_ADDED, new NoteBytesArray(new NoteBytes[]{networkId})));
+                sendNoteToSubscribers(getNoteDataObject(APPS, NoteConstants.LIST_ITEM_ADDED, networkId));
 
             }
             return true;
@@ -801,19 +812,19 @@ public class NetworksData extends Network {
         return false;
     }
 
-    protected Map<NoteBytes, NetworkLocation> getNetworkLocations(){
+    protected Map<String, NetworkLocation> getNetworkLocations(){
         return m_networkLocations;
     }
 
     private boolean addNetwork(Network network, boolean isSave) {
-        NoteBytes networkId = network.getNetworkId();
+        String networkId = network.getNetworkId();
         if (getNetwork(networkId) == null) {
-            NetworkLocation networkLocation = new NetworkLocation(network, NoteConstants.UPDATE_NETWORKS);
+            NetworkLocation networkLocation = new NetworkLocation(network, NETWORKS);
             m_networkLocations.put( networkId, networkLocation);
            
             if(isSave){
                 networkUpdated();
-                sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_NETWORKS, NoteConstants.LIST_ITEM_ADDED, new NoteBytesArray(new NoteBytes[]{networkId})));
+                sendNoteToSubscribers(getNoteDataObject(NETWORKS, NoteConstants.LIST_ITEM_ADDED, networkId));
                 save();
             }
 
@@ -822,12 +833,12 @@ public class NetworksData extends Network {
         return false;
     }
 
-    protected NetworkInformation getLocationNetworkInformation(NoteBytes networkId){
+    protected NetworkInformation getLocationNetworkInformation(String networkId){
         NetworkLocation location = m_networkLocations.get(networkId);
         return location != null ? location.getNetworkInformation() : null;
     }
 
-    protected boolean removeNetwork(NoteBytes networkId, boolean isSave){       
+    protected boolean removeNetwork(String networkId, boolean isSave){       
     
         if(networkId != null) {
             NetworkLocation location = m_networkLocations.remove(networkId);
@@ -849,7 +860,7 @@ public class NetworksData extends Network {
                 if(isSave){
                     save();
                     networkUpdated();
-                    sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_NETWORKS, NoteConstants.LIST_ITEM_REMOVED, new NoteBytesArray(new NoteBytes[]{networkId})));
+                    sendNoteToSubscribers(getNoteDataObject(NETWORKS, NoteConstants.LIST_ITEM_REMOVED, networkId));
                 }
 
                 return true;
@@ -860,7 +871,7 @@ public class NetworksData extends Network {
         
     }
 
-    protected SimpleObjectProperty<NoteBytes> currentNetworkIdProperty(){
+    protected SimpleObjectProperty<String> currentNetworkIdProperty(){
         return m_currentNetworkId;
     }
 
@@ -899,7 +910,7 @@ public class NetworksData extends Network {
     }
 
 
-    protected Network getApp(NoteBytes networkId) {
+    protected Network getApp(String networkId) {
         
         NetworkLocation location = m_networkLocations.get(networkId);
 
@@ -908,92 +919,101 @@ public class NetworksData extends Network {
     }
 
 
-    protected void installNetwork(NoteBytes networkId){
-        installNetwork(networkId, true);
+    protected boolean installNetwork(String networkId){
+        return installNetwork(networkId, true);
     }
 
-    protected void installNetwork(NoteBytes networkId, boolean isSave){
+    protected boolean installNetwork(String networkId, boolean isSave){
         if(isNetworkSupported(networkId)){           
-            addNetwork(createNetwork(networkId), isSave);
+            return addNetwork(createNetwork(networkId), isSave);
+
         }
+        return false;
     }
 
-    protected void installApp(NoteBytes networkId){
-        installApp(networkId, true);
+    protected boolean installApp(String networkId){
+        return installApp(networkId, true);
     }
 
-    protected void installApp(NoteBytes networkId, boolean save) {
+    protected boolean installApp(String networkId, boolean save) {
         if(getApp(networkId) == null && isAppSupported(networkId)){
            
-            addApp(createApp(networkId), true);
+            return addApp(createApp(networkId), true);
            
         }
+        return false;
     }
 
 
     private void addAllApps(boolean isSave) {
         NetworkInformation[] supportedApps = getAppInterface().getSupportedApps();
         NoteBytesArray addedArray = new NoteBytesArray();
+
         for (NetworkInformation networkInfo : supportedApps) {
-            NoteBytes networkId = networkInfo.getNetworkId();
-            installApp(networkId, false);
-            addedArray.add(networkId);
-        }
-        if(isSave){
-            save();
-            appUpdated();
-            sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_APPS, NoteConstants.LIST_ITEM_ADDED, addedArray));
-        }
-    }
+            String networkId = networkInfo.getNetworkId();
+            if(installApp(networkId, false)){
 
-    protected void removeAllApps(boolean isSave) {
-        Iterator<Map.Entry<NoteBytes, NetworkLocation>> it =  m_networkLocations.entrySet().iterator();
-        NoteBytesArray removedArray = new NoteBytesArray();
-
-        while (it.hasNext()) {
-            Map.Entry<NoteBytes, NetworkLocation> entry = it.next(); 
-            NetworkLocation location = entry.getValue();
-            if(location.isApp()){
-                NoteBytes id = entry.getKey();
-                removeApp(id, false);
-                removedArray.add(id);
+                addedArray.add(networkId);
             }
         }
         if(isSave){
             save();
             appUpdated();
-            sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_APPS, NoteConstants.LIST_ITEM_REMOVED, removedArray));
+            sendNoteToSubscribers(getNoteDataObject(APPS, NoteConstants.LIST_ITEM_ADDED, addedArray));
+        }
+    }
+
+    protected void removeAllApps(boolean isSave) {
+        Iterator<Map.Entry<String, NetworkLocation>> it =  m_networkLocations.entrySet().iterator();
+        NoteBytesArray removedArray = new NoteBytesArray();
+
+        while (it.hasNext()) {
+            Map.Entry<String, NetworkLocation> entry = it.next(); 
+            NetworkLocation location = entry.getValue();
+            if(location.isApp()){
+                String id = entry.getKey();
+                if(removeApp(id, false)){
+                    removedArray.add(id);
+                }
+            }
+        }
+        if(isSave){
+            save();
+            appUpdated();
+            sendNoteToSubscribers(getNoteDataObject(APPS, NoteConstants.LIST_ITEM_REMOVED, removedArray));
         }
     }
 
     protected void removeAllNetworks(boolean isSave) {
-        Iterator<Map.Entry<NoteBytes, NetworkLocation>> it =  m_networkLocations.entrySet().iterator();
+        Iterator<Map.Entry<String, NetworkLocation>> it =  m_networkLocations.entrySet().iterator();
         NoteBytesArray removedArray = new NoteBytesArray();
 
         while (it.hasNext()) {
-            Map.Entry<NoteBytes, NetworkLocation> entry = it.next(); 
+            Map.Entry<String, NetworkLocation> entry = it.next(); 
             NetworkLocation location = entry.getValue();
             if(location.isNetwork()){
-                NoteBytes id = entry.getKey();
-                removeNetwork(id, false);
-                removedArray.add(id);
+                String id = entry.getKey();
+
+                if(removeNetwork(id, false)){
+                    removedArray.add(id);
+                }
             }
         }
         if(isSave){
             save();
             networkUpdated();
-            sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_NETWORKS, NoteConstants.LIST_ITEM_REMOVED, removedArray));
+            sendNoteToSubscribers(getNoteDataObject(NETWORKS, NoteConstants.LIST_ITEM_REMOVED, removedArray));
         }
     }
 
 
   
-    protected boolean removeApp(NoteBytes networkId) {
+    protected boolean removeApp(String networkId) {
         return removeApp(networkId, true);
     }
 
 
-    protected boolean removeApp(NoteBytes networkId, boolean isSave) {
+    protected boolean removeApp(String networkId, boolean isSave) {
 
         NetworkLocation location = m_networkLocations.get(networkId);
 
@@ -1008,7 +1028,7 @@ public class NetworksData extends Network {
             if(isSave){
                 save();
                 appUpdated();
-                sendNoteToSubscribers(getNoteDataObject(NoteConstants.UPDATE_NETWORKS, NoteConstants.LIST_ITEM_REMOVED, new NoteBytesArray(new NoteBytes[]{networkId})));
+                sendNoteToSubscribers(getNoteDataObject(NETWORKS, NoteConstants.LIST_ITEM_REMOVED, networkId));
             }
             return true;
         }
@@ -1042,21 +1062,21 @@ public class NetworksData extends Network {
         });
     }*/
 
-    protected boolean isAvailable(int type, NoteBytes networkId){
+    protected boolean isAvailable(String type, String networkId){
         NetworkLocation location = m_networkLocations.get(networkId);
         return location != null && location.getLocationType() == type;
     }
 
-    protected Network getNetwork(NoteBytes networkId) {
+    protected Network getNetwork(String networkId) {
         NetworkLocation location = getNetworkLocation(networkId);
         return location != null ? location.getNetwork() : null;
     }
 
-    protected NetworkLocation getNetworkLocation(NoteBytes id){
+    protected NetworkLocation getNetworkLocation(String id){
         return m_networkLocations.get(id);
     }
 
-    private AppBox getLocationTab(NoteBytes networkId){
+    private AppBox getLocationTab(String networkId){
            
         NetworkLocation networkLocation = getNetworkLocation(networkId);
       
@@ -1085,17 +1105,17 @@ public class NetworksData extends Network {
         NoteBytesArray networksArray = new NoteBytesArray();
         NoteBytesArray appsArray = new NoteBytesArray();
 
-        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()) {
+        for (Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()) {
             
             NetworkLocation networkLocation = entry.getValue();
-            int type = networkLocation.getLocationType();
+            String type = networkLocation.getLocationType();
             Network network = networkLocation.getNetwork();
 
             switch(type){
-                case NoteConstants.UPDATE_APPS:
+                case APPS:
                     appsArray.add(network.getNetworkId());
                 break;
-                case NoteConstants.UPDATE_NETWORKS:
+                case NETWORKS:
                     networksArray.add(network.getNetworkId());
                 break;
             }
@@ -1127,10 +1147,10 @@ public class NetworksData extends Network {
         });
     }
 
-    protected void openStatic(NoteBytes networkId){
+    protected void openStatic(String networkId){
         TabAppBox currentTab = m_currentMenuTab.get();
 
-        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             return;
@@ -1148,10 +1168,10 @@ public class NetworksData extends Network {
     }
 
    
-    protected void openNetwork(NoteBytes networkId){
+    protected void openNetwork(String networkId){
         TabAppBox currentTab = m_currentMenuTab.get();
         
-        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             if(currentTab != null){
@@ -1181,10 +1201,10 @@ public class NetworksData extends Network {
         }
     }
 
-    protected void openApp(NoteBytes networkId){
+    protected void openApp(String networkId){
         TabAppBox currentTab = m_currentMenuTab.get();
 
-        NoteBytes currentTabId = currentTab != null ? currentTab.getAppId() : null;
+        String currentTabId = currentTab != null ? currentTab.getAppId() : null;
 
         if(networkId == null || (currentTabId != null &&  currentTabId.equals(networkId))){
             if(currentTab != null){
@@ -1211,17 +1231,17 @@ public class NetworksData extends Network {
     }
   
     public List<NetworkInformation> getAppsContainsAllKeyWords(String... keyWords){
-        return getLocationContainsAllKeyWords(NoteConstants.UPDATE_APPS, keyWords);
+        return getLocationContainsAllKeyWords(APPS, keyWords);
     }
 
     public List<NetworkInformation> getNetworksContainsAllKeyWords(String... keyWords){
-        return getLocationContainsAllKeyWords(NoteConstants.UPDATE_NETWORKS, keyWords);
+        return getLocationContainsAllKeyWords(NETWORKS, keyWords);
     }
 
-    public List<NetworkInformation> getLocationContainsAllKeyWords(int type, String... keyWords){
+    public List<NetworkInformation> getLocationContainsAllKeyWords(String type, String... keyWords){
         ArrayList<NetworkInformation> list = new ArrayList<>();
         
-        for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()) {
+        for (Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()) {
             NetworkLocation location = entry.getValue();
             Network network = location.getNetwork();
             if(location.getLocationType() == type && containsAllKeyWords(network, keyWords)){
@@ -1264,7 +1284,7 @@ public class NetworksData extends Network {
     }
 
     protected boolean isNetworkInstalled(){
-        for(Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()){
+        for(Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()){
             if(entry.getValue().isNetwork()){
                 return true;
             }
@@ -1274,7 +1294,7 @@ public class NetworksData extends Network {
     }
 
     protected boolean isAppInstalled(){
-        for(Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()){
+        for(Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()){
             if(entry.getValue().isApp()){
                 return true;
             }
@@ -1284,26 +1304,25 @@ public class NetworksData extends Network {
     }
 
 
-    private TabAppBox getStaticTab(NoteBytes networkId){
-
+    private TabAppBox getStaticTab(String networkId){
         if(m_currentMenuTab.get() != null && m_currentMenuTab.get().getAppId().equals(networkId)){
             return m_currentMenuTab.get();
-        }else if(networkId.equals( ManageAppsTab.ID)){
-            return new ManageAppsTab(getAppData(), m_appStage, m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
-        }else if(networkId.equals(SettingsTab.ID)){
-            return new SettingsTab(getAppData(), m_appStage, m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
-        }else if(networkId.equals(ManageNetworksTab.ID)){
-            return new ManageNetworksTab(getAppData(), m_appStage,m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
-        }
-     
-                
+        } 
+        switch(networkId){
+            case ManageAppsTab.ID:
+                 return new ManageAppsTab(getAppData(), m_appStage, m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
+            case SettingsTab.ID:
+                return new SettingsTab(getAppData(), m_appStage, m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
+            case ManageNetworksTab.ID:
+                return new ManageNetworksTab(getAppData(), m_appStage,m_staticContentHeight, m_staticContentWidth, m_settingsBtn, this);
+        }      
         return null;
     }
 
     private void networkUpdated(){
         TabAppBox tab = m_currentMenuTab.get();
         if(tab != null){
-            NoteBytes networkId = tab.getAppId();
+            String networkId = tab.getAppId();
             if(networkId.equals(ManageNetworksTab.ID)){
                 ManageNetworksTab manageNetworks = (ManageNetworksTab) tab;
                 manageNetworks.updateNetworkList();
@@ -1314,12 +1333,13 @@ public class NetworksData extends Network {
     private void appUpdated(){
         TabAppBox tab = m_currentMenuTab.get();
         if(tab != null){
-            NoteBytes networkId = tab.getAppId();
+            String networkId = tab.getAppId();
             if(networkId.equals( ManageAppsTab.ID)){
                 ManageAppsTab manageApps = (ManageAppsTab) tab;
                 manageApps.updateAppList();
             }
         }
+        m_appsMenu.updateAppsMenu();
     }
   
     protected SimpleObjectProperty<TabAppBox> menuTabProperty() {
@@ -1486,7 +1506,7 @@ public class NetworksData extends Network {
             Runnable showNetworkMenu = () ->{
     
                 networkContextMenu.getItems().clear();
-                for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()) {
+                for (Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()) {
                     NetworkLocation location = entry.getValue();
 
                     Network network = location.isApp() ? location.getNetwork() : null;
@@ -1603,14 +1623,6 @@ public class NetworksData extends Network {
             
         }
     
- 
-        public void sendMessage(int code, long timestamp, NoteBytes networkId, String msg){
-            if(code == NoteConstants.LIST_ITEM_ADDED || code == NoteConstants.LIST_ITEM_REMOVED || code == NoteConstants.LIST_CHANGED || code == NoteConstants.LIST_UPDATED){
-                if(networkId.equals(NetworksData.APPS)){
-                    updateAppsMenu();
-                }
-            }
-        }
 
         public void updateAppsMenu(){
        
@@ -1623,7 +1635,7 @@ public class NetworksData extends Network {
                     m_appsToolTip = null;
                 }
     
-                for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networkLocations.entrySet()) {
+                for (Map.Entry<String, NetworkLocation> entry : m_networkLocations.entrySet()) {
                     NetworkLocation location = entry.getValue();
 
                     Network app = location.isApp() ? location.getNetwork() : null;
@@ -1730,12 +1742,12 @@ public class NetworksData extends Network {
         }
 
        
-        private HashMap<NoteBytes, ContentTab> m_itemTabs = new HashMap<>();
+        private HashMap<String, ContentTab> m_itemTabs = new HashMap<>();
 
-        private SimpleObjectProperty<NoteBytes> m_currentId = new SimpleObjectProperty<>(null);
-        private SimpleObjectProperty<NoteBytes> m_lastRemovedTabId = new SimpleObjectProperty<>();
+        private SimpleObjectProperty<String> m_currentId = new SimpleObjectProperty<>(null);
+        private SimpleObjectProperty<String> m_lastRemovedTabId = new SimpleObjectProperty<>();
 
-        public ReadOnlyObjectProperty<NoteBytes> lastRemovedTabIdProperty(){
+        public ReadOnlyObjectProperty<String> lastRemovedTabIdProperty(){
             return m_lastRemovedTabId;
         }
         
@@ -1807,7 +1819,7 @@ public class NetworksData extends Network {
 
         public void addContentTab(ContentTab tab){
             Pane tabPane = tab.getPane();
-            NoteBytes id = tab.getId();
+            String id = tab.getId();
             if(tabPane != null && id != null){
                 m_itemTabs.put(id, tab);
                 tab.currentIdProperty().bind(m_currentId);
@@ -1834,7 +1846,7 @@ public class NetworksData extends Network {
         }
 
 
-        public void removeContentTab(NoteBytes id){
+        public void removeContentTab(String id){
             boolean isCurrentTab = m_currentId.get() != null && m_currentId.get().equals(id);
             if(isCurrentTab){
                 m_currentId.set(null);
@@ -1866,7 +1878,7 @@ public class NetworksData extends Network {
 
             if(isCurrentTab){
 
-                for (Map.Entry<NoteBytes, ContentTab> entry : m_itemTabs.entrySet()) {
+                for (Map.Entry<String, ContentTab> entry : m_itemTabs.entrySet()) {
                     
                     m_currentId.set(entry.getKey());
                     if(m_tabsBox.widthProperty().get() > m_tabsScroll.viewportBoundsProperty().get().getWidth()){
@@ -1888,7 +1900,7 @@ public class NetworksData extends Network {
         public ArrayList<ContentTab> getContentTabByParentId(NoteBytes parentId){
             ArrayList<ContentTab> result = new ArrayList<>();
             
-            for (Map.Entry<NoteBytes, ContentTab> entry : m_itemTabs.entrySet()) {
+            for (Map.Entry<String, ContentTab> entry : m_itemTabs.entrySet()) {
                 ContentTab contentTab = entry.getValue();
                 if(parentId != null){   
                     if(contentTab.getParentId() != null && contentTab.getParentId().equals(parentId)){
@@ -1904,8 +1916,8 @@ public class NetworksData extends Network {
             return result;
         }
 
-        public void removeByParentId(NoteBytes id){
-            for (Map.Entry<NoteBytes, ContentTab> entry : m_itemTabs.entrySet()) {
+        public void removeByParentId(String id){
+            for (Map.Entry<String, ContentTab> entry : m_itemTabs.entrySet()) {
                 ContentTab contentTab = entry.getValue();
                 
                 if(contentTab.getParentId().equals(id)){
@@ -1920,7 +1932,7 @@ public class NetworksData extends Network {
 
     public class SettingsTab extends TabAppBox  {
         public final static String NAME = "Settings";
-        public final static NoteBytes ID = new NoteBytes(NAME);
+        public final static String ID = NAME;
     
         private Semaphore m_dataSemaphore;
         private String m_status = NoteConstants.STATUS_STOPPED;
@@ -2335,13 +2347,13 @@ public class NetworksData extends Network {
     public class ManageAppsTab extends TabAppBox  {
     public static final int PADDING = 10;
     public static final String NAME = "Manage Apps";
-    public static final NoteBytes ID = new NoteBytes(NAME);
+    public static final String ID = NAME;
 
     private final String installDefaultText = "(Install App)";
 
     private MenuButton m_installMenuBtn;
 
-    private SimpleObjectProperty<NoteBytes> m_selectedAppId = new SimpleObjectProperty<>(null);
+    private SimpleStringProperty m_selectedAppId = new SimpleStringProperty(null);
     private VBox m_installedListBox = new VBox();
     private VBox m_notInstalledListBox = new VBox();
     private SimpleObjectProperty<NetworkInformation> m_installItemInformation = new SimpleObjectProperty<>(null);
@@ -2449,7 +2461,7 @@ public class NetworksData extends Network {
                 for(int i = 0; i < supportedApps.length; i++){
                     NetworkInformation networkInformation = supportedApps[i];
                 
-                    if(!network.isAvailable(NoteConstants.UPDATE_APPS, networkInformation.getNetworkId()) ){
+                    if(!network.isAvailable(APPS, networkInformation.getNetworkId()) ){
                         ImageView intallItemImgView = new ImageView();
                         intallItemImgView.setPreserveRatio(true);
                         intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
@@ -2527,7 +2539,7 @@ public class NetworksData extends Network {
 
         installBtn.setOnAction(e->{
             NetworkInformation info = m_installItemInformation.get();
-            NoteBytes networkId = info != null ? info.getNetworkId() : null;
+            String networkId = info != null ? info.getNetworkId() : null;
             
             if (networkId != null){
                 m_installItemInformation.set(null);
@@ -2555,7 +2567,7 @@ public class NetworksData extends Network {
 
 
         if(m_networksData.isAppInstalled()){
-            for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networksData.getNetworkLocations().entrySet()) {
+            for (Map.Entry<String, NetworkLocation> entry : m_networksData.getNetworkLocations().entrySet()) {
                 NetworkLocation location = entry.getValue();
                 Network app = location.isApp() ? location.getNetwork() : null;
                 
@@ -2624,7 +2636,7 @@ public class NetworksData extends Network {
             for(int i = 0; i < supportedApps.length; i++){
                 NetworkInformation networkInformation = supportedApps[i];
                 
-                if(! m_networksData.isAvailable(NoteConstants.UPDATE_APPS, networkInformation.getNetworkId())){
+                if(! m_networksData.isAvailable(APPS, networkInformation.getNetworkId())){
 
                     ImageView appImgView = new ImageView();
                     appImgView.setPreserveRatio(true);
@@ -2692,14 +2704,6 @@ public class NetworksData extends Network {
         }
     }
 
-    @Override
-    public void sendMessage(int code, long timestamp, NoteBytes networkId, String msg){
-        if(code == NoteConstants.LIST_ITEM_ADDED || code == NoteConstants.LIST_ITEM_REMOVED || code == NoteConstants.LIST_CHANGED || code == NoteConstants.LIST_UPDATED){
-            if(networkId.equals(NetworksData.APPS)){
-                updateAppList();
-            }
-        }
-    }
 
 
 
@@ -2713,7 +2717,7 @@ public class NetworksData extends Network {
 
     public class ManageNetworksTab extends TabAppBox {
         public static final String NAME = "Manage Networks";
-        public static final NoteBytes ID = new NoteBytes(NAME);
+        public static final String ID = NAME;
         private VBox m_listBox = new VBox();
 
         private SimpleObjectProperty<NetworkInformation> m_installItemInformation = new SimpleObjectProperty<>(null);
@@ -2787,7 +2791,7 @@ public class NetworksData extends Network {
                     for(int i = 0; i < supportedNetworks.length; i++){
                         NetworkInformation networkInformation = supportedNetworks[i];
 
-                        if(!network.isAvailable(NoteConstants.UPDATE_NETWORKS, networkInformation.getNetworkId())){
+                        if(!network.isAvailable(NETWORKS, networkInformation.getNetworkId())){
                             ImageView intallItemImgView = new ImageView();
                             intallItemImgView.setPreserveRatio(true);
                             intallItemImgView.setFitWidth(Stages.MENU_BAR_IMAGE_WIDTH);
@@ -2872,7 +2876,7 @@ public class NetworksData extends Network {
         
             installBtn.setOnAction(e->{
                 NetworkInformation info = m_installItemInformation.get();
-                NoteBytes networkId = info != null ? info.getNetworkId() : null;
+                String networkId = info != null ? info.getNetworkId() : null;
                 
                 if (networkId != null){
                     m_installItemInformation.set(null);
@@ -2885,14 +2889,7 @@ public class NetworksData extends Network {
             
         }
 
-        @Override
-        public void sendMessage(int code, long timestamp, NoteBytes networkId, String msg) {
-             if(code == NoteConstants.LIST_ITEM_ADDED || code == NoteConstants.LIST_ITEM_REMOVED || code == NoteConstants.LIST_CHANGED || code == NoteConstants.LIST_UPDATED){
-            if(networkId.equals(NetworksData.NETWORKS)){
-                updateNetworkList();
-            }
-        }
-        }
+  
 
     
         public void updateNetworkList(){
@@ -2900,7 +2897,7 @@ public class NetworksData extends Network {
             m_listBox.getChildren().clear();
     
             if(m_networksData.isNetworkInstalled()){
-                for (Map.Entry<NoteBytes, NetworkLocation> entry : m_networksData.getNetworkLocations().entrySet()) {
+                for (Map.Entry<String, NetworkLocation> entry : m_networksData.getNetworkLocations().entrySet()) {
                     NetworkLocation location = entry.getValue();
                     Network network = location.isNetwork() ? location.getNetwork() : null;
                     
@@ -2924,7 +2921,7 @@ public class NetworksData extends Network {
                         selectedBtn.setId("lblBtn");
                         
                         selectedBtn.setOnMouseClicked(e->{
-                            NoteBytes currentNetworkId = m_networksData.currentNetworkIdProperty().get();
+                            String currentNetworkId = m_networksData.currentNetworkIdProperty().get();
                             boolean selectedNetwork = currentNetworkId != null && currentNetworkId.equals(network.getNetworkId());         
                         
                             if(selectedNetwork){
@@ -2939,7 +2936,7 @@ public class NetworksData extends Network {
                 
 
                         Runnable updateSelectedSwitch = () ->{
-                            NoteBytes currentNetworkId = m_networksData.currentNetworkIdProperty().get();
+                            String currentNetworkId = m_networksData.currentNetworkIdProperty().get();
                             boolean selectedNetwork = currentNetworkId != null && currentNetworkId.equals(network.getNetworkId());         
                             
                             selectedBtn.setText(selectedNetwork ? "🟊" : "⚝");

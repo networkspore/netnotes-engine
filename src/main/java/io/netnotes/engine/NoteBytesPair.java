@@ -1,11 +1,5 @@
 package io.netnotes.engine;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.EOFException;
-import java.io.IOException;
 import java.math.BigDecimal;
 
 public class NoteBytesPair {
@@ -20,12 +14,16 @@ public class NoteBytesPair {
         this(key.toCharArray(), ByteDecoding.unboxBytes(value));
     }
 
+    public NoteBytesPair(String key, String value){
+        this(key.toCharArray(), value.toCharArray());
+    }
+
     public NoteBytesPair(String key, char[] value){
         this(key.toCharArray(), value);
     }
 
     public NoteBytesPair(char[] key, char[] value){
-        this(key, ByteDecoding.charsToBytes(value));
+        this(ByteDecoding.charsToBytes(key), ByteDecoding.charsToBytes(value));
     }
 
     public NoteBytesPair(char[] key, byte[] value){
@@ -64,17 +62,7 @@ public class NoteBytesPair {
         return getValue().getAsNoteBytesArray();
     }
 
-    public static NoteBytesPair read(DataInputStream dis) throws IOException, EOFException{
-        NoteBytes key = NoteBytes.readNote(dis);
-        NoteBytes value = NoteBytes.readNote(dis);
-        return new NoteBytesPair(key, value);
-    }
 
-    public static NoteBytesPair read(ByteArrayInputStream bais) throws IOException{
-        NoteBytes key = NoteBytes.readNote(bais);
-        NoteBytes value = NoteBytes.readNote(bais);
-        return new NoteBytesPair(key, value);
-    }
 
     public static NoteBytesPair read(byte[] bytes, int offset, ByteDecoding byteDecoding){
         NoteBytes key = NoteBytes.readNote(bytes, offset, byteDecoding);
@@ -83,30 +71,6 @@ public class NoteBytesPair {
     }
 
 
-    public static int writeNoteBytePair(NoteBytesPair pair, ByteArrayOutputStream outputStream) throws IOException{
-        return write(pair.getKey(), pair.getValue(), outputStream);
-    }
-
-    public static int write( NoteBytes key, NoteBytes value, ByteArrayOutputStream outputStream) throws IOException{
-        int len = NoteBytes.writeNote(key, outputStream);
-        len += NoteBytes.writeNote(value, outputStream);
-        return len;
-    }
-
-
-    public static void writeNoteBytePair(NoteBytesPair pair, DataOutputStream outputStream) throws IOException{
-        write(pair.getKey(), pair.getValue(), outputStream);
-    }
-
-
-    public static void write( NoteBytes key, NoteBytes value, DataOutputStream dos) throws IOException{
-        NoteBytes.writeNote(key, dos);
-        NoteBytes.writeNote(value, dos);
-    }
-
-    public void write( DataOutputStream dos) throws IOException{
-        NoteBytesPair.write(this.getKey(), this.getValue(), dos);
-    }
 
 
     public NoteBytesObject getAsNoteBytesObject(){
@@ -149,5 +113,5 @@ public class NoteBytesPair {
         return getValue() != null ? getValue().getAsString() : null;
     }
 
-    
+
 }

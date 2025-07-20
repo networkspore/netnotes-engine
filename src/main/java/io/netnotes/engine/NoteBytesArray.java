@@ -111,6 +111,10 @@ public class NoteBytesArray extends NoteBytes{
         return -1;
     }
 
+    public void add(String str){
+        add(new NoteBytes(str));
+    }
+
     public void add(NoteBytes noteBytes){
         byte[] bytes = get();
         int length = bytes.length;

@@ -67,6 +67,11 @@ public class NoteUUID extends NoteBytes {
     public static NoteUUID createLocalUUID128(){
         return new NoteUUID(createTimeRndBytes());
     }
+
+    public static String createSafeUUID128(){
+        return createLocalUUID128().getAsUrlSafeString();
+    }
+
     public static byte[] createTimeRndBytes(){
 		byte[] nanoTime = littleEndianNanoTimeHash();
 		byte[] randomBytes = getRandomBytes(5);

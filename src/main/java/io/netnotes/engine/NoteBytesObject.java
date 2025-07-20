@@ -1,6 +1,5 @@
 package io.netnotes.engine;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -332,11 +331,5 @@ public class NoteBytesObject extends NoteBytes{
         return index/2;
     }
 
-    public static int writePairs( ByteArrayOutputStream outputStream, NoteBytesPair[] pairs) throws IOException{
-        int len = 0;
-        for(NoteBytesPair pair : pairs){
-            len += NoteBytesPair.writeNoteBytePair(pair, outputStream);
-        }
-        return len;
-    }
+
 }

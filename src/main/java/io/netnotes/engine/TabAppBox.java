@@ -17,7 +17,7 @@ public class TabAppBox extends AppBox{
     private Button m_appBtn = null;
     private MenuButton m_menuBtn = null;
 
-    public TabAppBox(NoteBytes id, String name, Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button btn, Network network){
+    public TabAppBox(String id, String name, Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, Button btn, Network network){
         super(id, name);
         m_network = network;
         m_appStage = appStage;
@@ -26,7 +26,7 @@ public class TabAppBox extends AppBox{
         m_appBtn = btn;
     }
 
-     public TabAppBox(NoteBytes id, String name,Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, MenuButton menuBtn, Network network){
+     public TabAppBox(String id, String name,Stage appStage, SimpleDoubleProperty heightObject, SimpleDoubleProperty widthObject, MenuButton menuBtn, Network network){
         super(id, name );
         m_network = network;
         m_appStage = appStage;

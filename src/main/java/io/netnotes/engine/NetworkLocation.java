@@ -1,34 +1,39 @@
 package io.netnotes.engine;
 
+import io.netnotes.engine.core.NetworksData;
 
 public class NetworkLocation{
 
     private final NoteUUID m_localUUID;
     private final Network m_network;
     private final int m_hashCode;
-    private final int m_type;
+    private final String m_type;
 
-    public NetworkLocation(Network network, int locationType){
+    public NetworkLocation(Network network, String locationType){
         m_type = locationType;
         m_network = network;
         m_localUUID = NoteUUID.createLocalUUID128();
         m_hashCode = m_localUUID.getAsBigInteger().hashCode();
     }
 
-    public NoteBytes getId(){
+    public String getUUID(){
+        return m_localUUID.getAsUrlSafeString();
+    }
+
+    public NoteUUID getNoteUUID(){
         return m_localUUID;
     }
 
-    public int getLocationType(){
+    public String getLocationType(){
         return m_type;
     }
 
     public boolean isApp(){
-        return m_type == NoteConstants.UPDATE_APPS;
+        return m_type.equals(NetworksData.APPS);
     }
 
     public boolean isNetwork(){
-        return m_type == NoteConstants.UPDATE_NETWORKS;
+        return m_type.equals(NetworksData.NETWORKS);
     }
 
     public NetworkInformation getNetworkInformation(){
@@ -40,7 +45,7 @@ public class NetworkLocation{
         return m_hashCode;
     }
 
-    public NoteBytes getNetworkId(){
+    public String getNetworkId(){
         return m_network.getNetworkId();
     }
 

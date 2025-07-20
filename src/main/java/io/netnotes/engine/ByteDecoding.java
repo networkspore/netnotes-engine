@@ -1,8 +1,5 @@
 package io.netnotes.engine;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -79,15 +76,8 @@ public class ByteDecoding{
         m_bytes = bytes;
     }
 
-    public ByteDecoding(DataInputStream dis) throws Exception{
-        m_bytes = NoteBytes.readShortBytes(dis);
-    }
 
-    public ByteDecoding(DataInputStream dis, int len) throws Exception{
-        m_bytes = new byte[len];
-        dis.read(m_bytes, 0, len);
-    }
-
+  
     public byte[] getByteArray(){
         return m_bytes;
     }
@@ -589,10 +579,6 @@ public class ByteDecoding{
         return bytes;
     }
 
-    public static void write(byte[] bytes, DataOutputStream dataOutputStream) throws IOException{
-        dataOutputStream.write(bytes);
-    }
-
     public static byte[] booleanToBytes(boolean value){
         return new byte[] { value ? (byte) 1 : (byte) 0};
     }
@@ -739,6 +725,9 @@ public class ByteDecoding{
         return ByteBuffer.wrap(byteBarray, offset, Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN).getInt();
     }
 
+    public static int bytesToInt(byte [] bytes, ByteDecoding byteDecoding){
+        return byteDecoding.isLittleEndian() ? bytesToIntLittleEndian(bytes) : bytesToShortBigEndian(bytes);
+    }
 
     public static int bytesToIntBigEndian(byte [] byteBarray){
         return ByteBuffer.wrap(byteBarray).order(ByteOrder.BIG_ENDIAN).getInt();

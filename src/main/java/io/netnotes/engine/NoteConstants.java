@@ -11,59 +11,56 @@ public class NoteConstants {
 
     public final static long POLLING_TIME = 7000;
     
-    public static final int DEFAULT = 0;
-    public static final int SUCCESS = 1;
-    public static final int ERROR = 2;
+    public static final String DEFAULT = "Default";
+    public static final String SUCCESS = "Success";
+    public static final String ERROR = "Error";
 
-    public static final int DISABLED = -1;
-    public static final int STARTING = 3;
-    public static final int STARTED = 4;
+    public static final String DISABLED = "Disabled";
+    public static final String STARTING = "Starting";
+    public static final String STARTED = "Started";
 
-    public static final int STOPPING = 5;
-    public static final int STOPPED = 6;
-    public static final int SHUTDOWN = 7;
+    public static final String STOPPING = "Stopping";
+    public static final String STOPPED = "Stopped";
+    public static final String SHUTDOWN = "Shutdown";
 
-    public static final int WARNING = 8;
-    public static final int STATUS = 9;
-    public static final int UPDATING = 10;
-    public static final int UPDATED = 11;
-    public static final int INFO = 12;
-    public static final int CANCEL = 13;
-    public static final int READY = 14;
+    public static final String WARNING = "Warning";
+    public static final String STATUS = "Status";
+    public static final String UPDATING = "Updating";
+    public static final String UPDATED = "Updated";
+    public static final String INFO = "Info";
+    public static final String CANCEL = "Cancel";
+    public static final String READY = "Ready";
 
-    public static final int MSG_SEND_NOTE = 255;
+    public static final String MSG_SEND_NOTE = "Send note";
 
     
-    public static final int LIST_CHANGED = 20;
-    public static final int LIST_CHECKED = 21;
-    public static final int LIST_UPDATED = 22;
-    public static final int LIST_ITEM_ADDED = 23;
-    public static final int LIST_ITEM_REMOVED = 24;
-    public static final int LIST_DEFAULT_CHANGED= 25;
+    public static final String LIST_CHANGED = "List changed";
+    public static final String LIST_CHECKED = "List checked";
+    public static final String LIST_UPDATED = "List updated";
+    public static final String LIST_ITEM_ADDED = "List item added";
+    public static final String LIST_ITEM_REMOVED = "List item removed";
+    public static final String LIST_DEFAULT_CHANGED = "Default item changed";
 
 
 
-    public static final int UPDATE_APPS = 100;
-    public static final int UPDATE_NETWORKS = 101;
-
-    public static final String STATIC_TYPE = new String("STATIC");
-    public static final String STATUS_MINIMIZED = new String("Minimized");
-    public static final String STATUS_UPDATED = new String("Updated");
-    public static final String STATUS_STOPPED = new String("Stopped");
-    public static final String STATUS_STARTED = new String("Started");
-    public static final String STATUS_STARTING = new String("Starting");
-    public static final String STATUS_UNAVAILABLE = new String("Unavailable");
-    public static final String STATUS_AVAILABLE = new String("Available");
-    public static final String STATUS_ERROR = new String("Error");
-    public static final String STATUS_SHUTTING_DOWN = new String("Shutting Down");
-    public static final String STATUS_SHUTDOWN = new String("Shutdown");
-    public static final String STATUS_READY = new String("Ready");
-    public static final String STATUS_TIMED_OUT = new String("Timed Out");
-    public static final String STATUS_DISABLED = new String("Disabled");
-    public static final String STATUS_UNKNOWN = new String("Unknown");
+    public static final String STATIC_TYPE ="STATIC";
+    public static final String STATUS_MINIMIZED ="Minimized";
+    public static final String STATUS_UPDATED ="Updated";
+    public static final String STATUS_STOPPED ="Stopped";
+    public static final String STATUS_STARTED ="Started";
+    public static final String STATUS_STARTING ="Starting";
+    public static final String STATUS_UNAVAILABLE ="Unavailable";
+    public static final String STATUS_AVAILABLE ="Available";
+    public static final String STATUS_ERROR ="Error";
+    public static final String STATUS_SHUTTING_DOWN ="Shutting Down";
+    public static final String STATUS_SHUTDOWN ="Shutdown";
+    public static final String STATUS_READY ="Ready";
+    public static final String STATUS_TIMED_OUT ="Timed Out";
+    public static final String STATUS_DISABLED ="Disabled";
+    public static final String STATUS_UNKNOWN ="Unknown";
     
-    public static final String VERIFIED = new String("Verified");
-    public static final String BLOCKED = new String("Blocked");
+    public static final String VERIFIED ="Verified";
+    public static final String BLOCKED ="Blocked";
 
 
     public static final String ERROR_CLOSING = "Closing";
@@ -78,35 +75,11 @@ public class NoteConstants {
     public static final String SEARCH_SORT_ASC = "asc";
     public static final String SEARCH_SORT_DSC = "dsc";
 
-    public static final NoteBytes CMD_NOT_PRESENT = new NoteBytes("cmd not present");
+    public static final String CMD_NOT_PRESENT = "cmd not present";
 
-    public static final NoteBytes CMD = new NoteBytes("cmd");
+    public static final String CMD = "cmd";
 
 
-    
-
-    public static String getStatusCodeMsg(int status){
-        switch(status){
-            case NoteConstants.READY:
-                return STATUS_READY;
-            case NoteConstants.WARNING:
-                return STATUS_TIMED_OUT;
-            case NoteConstants.STARTING:
-                return STATUS_STARTING;
-            case NoteConstants.DISABLED:
-                return STATUS_DISABLED;
-            case NoteConstants.STOPPING:
-                return STATUS_SHUTTING_DOWN;
-            case NoteConstants.SHUTDOWN:
-                return STATUS_SHUTDOWN;
-            case NoteConstants.STOPPED:
-                return STATUS_STOPPED;
-            case NoteConstants.STARTED:
-                return STATUS_STARTED;
-            default:
-                return STATUS_UNKNOWN;
-        }
-    }
 
 
 

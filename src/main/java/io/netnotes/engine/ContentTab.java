@@ -1,7 +1,7 @@
 package io.netnotes.engine;
 
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -17,11 +17,11 @@ import javafx.scene.layout.Pane;
 public class ContentTab {
 
     private SimpleBooleanProperty m_isCurrent = new SimpleBooleanProperty(false);
-    private SimpleObjectProperty<NoteBytes> m_currentId = new SimpleObjectProperty<>(null);
+    private SimpleStringProperty m_currentId = new SimpleStringProperty();
     //private SimpleLongProperty m_shutdownMilliesProperty = new SimpleLongProperty(0);
 
-    private NoteBytes m_id;
-    private NoteBytes m_parentId;
+    private String m_id;
+    private String m_parentId;
     private Label m_tabLabel;
     private Pane m_pane;
     private HBox m_tabBox;
@@ -31,7 +31,7 @@ public class ContentTab {
     private Image m_logo;
     private Tooltip m_tabLabelTooltip;
 
-    public ContentTab(NoteBytes id, NoteBytes parentId, Image logo, String title, Pane pane){
+    public ContentTab(String id, String parentId, Image logo, String title, Pane pane){
         m_id = id;
         m_parentId = parentId;
      
@@ -111,7 +111,7 @@ public class ContentTab {
         m_tabImageView.setImage(image);
     }
 
-    public SimpleObjectProperty<NoteBytes> currentIdProperty(){
+    public SimpleStringProperty currentIdProperty(){
         return m_currentId;
     }
 
@@ -134,19 +134,19 @@ public class ContentTab {
         return m_tabLabel;
     }
 
-    public NoteBytes getId() {
+    public String getId() {
         return m_id;
     }
 
-    public void setId(NoteBytes id) {
+    public void setId(String id) {
         this.m_id = id;
     }
 
-    public NoteBytes getParentId() {
+    public String getParentId() {
         return m_parentId;
     }
 
-    public void setParentId(NoteBytes parentId) {
+    public void setParentId(String parentId) {
         this.m_parentId = parentId;
     }
 

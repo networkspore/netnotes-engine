@@ -1,6 +1,5 @@
 package io.netnotes.engine;
 
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -8,7 +7,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.stream.Stream;
 
 import com.google.gson.JsonObject;
 
@@ -25,8 +23,8 @@ import javafx.stage.Stage;
 
 public class Network {
 
-    private int m_connectionStatus = NoteConstants.STOPPED;
-    private NoteBytes m_networkId;
+    private String m_connectionStatus = NoteConstants.STOPPED;
+    private String m_networkId;
     private String m_website = "";
     private String m_description = null;
 
@@ -44,14 +42,14 @@ public class Network {
 
     private boolean m_stageMaximized = false;
 
-    private ArrayList<NoteBytes> m_subscribedIds = new ArrayList<>();
+    private ArrayList<String> m_subscribedIds = new ArrayList<>();
 
     private Image m_icon = null;
     private Button m_appBtn = null;
     private String m_name = null;
     private NetworksDataInterface m_networksData;
 
-    public Network(Image image, String name,NoteBytes networkId) {
+    public Network(Image image, String name, String networkId) {
         m_networkId = networkId;
         m_name = name;
         m_icon = image;
@@ -87,7 +85,7 @@ public class Network {
     }
 
     
-    protected void addSubscriber(NoteBytes id) {
+    protected void addSubscriber(String id) {
         if (id != null && !m_subscribedIds.contains(id)) {
             if(m_connectionStatus != NoteConstants.STARTED){
                 start();
@@ -97,7 +95,7 @@ public class Network {
     }
 
     protected void sendStreamToSubscribers(PipedOutputStream outputStream){
-        for(NoteBytes id : m_subscribedIds){
+        for(String id : m_subscribedIds){
             getNetworksData().sendNote(id, outputStream);
         }
     }
@@ -107,20 +105,16 @@ public class Network {
       
         PipedOutputStream outputStream = new PipedOutputStream();
         sendStreamToSubscribers(outputStream);
-        NoteBytesPair[] pairs = noteBytesObject.getAsArray();
+        
     
         Task<Object> task = new Task<Object>() {
             @Override
             public Object call() throws IOException {
                 try(
-                    DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
+                    NoteBytesWriter writer = new NoteBytesWriter(outputStream);
                 ){
-                    for(int i = 0; i < pairs.length ;i++){
-                        NoteBytesPair.writeNoteBytePair(pairs[i], dataOutputStream);
-                    }
+                   return writer.write(noteBytesObject);
                 }
-                outputStream.close();
-                return null;
             }
         };
         task.setOnFailed((failed)->{
@@ -182,7 +176,7 @@ public class Network {
         return null;
     }
 
-    public boolean removeSubscriber(NoteBytes id){
+    public boolean removeSubscriber(String id){
         if(id != null){
             boolean removed = m_subscribedIds.remove(id);
             
@@ -200,11 +194,11 @@ public class Network {
         return null;
     }
 
-    public void setConnectionStatus(int status){
+    public void setConnectionStatus(String status){
         m_connectionStatus = status;
     }
 
-    public int getConnectionStatus(){
+    public String getConnectionStatus(){
         return m_connectionStatus;
     }
 
@@ -215,7 +209,7 @@ public class Network {
         
     }
  
-    protected ArrayList<NoteBytes> subscriberList(){
+    protected ArrayList<String> subscriberList(){
         return m_subscribedIds;
     }
 
@@ -233,11 +227,9 @@ public class Network {
         m_keyWords = value;
     }
 
-    protected void setNetworkId(NoteString id) {
-        m_networkId = id;
-    }
 
-    public NoteBytes getNetworkId() {
+
+    public String getNetworkId() {
         return m_networkId;
     }
 
