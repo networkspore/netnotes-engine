@@ -17,16 +17,16 @@ public class KeyMenu extends Menu implements KeyInterface{
     public static final int DEFAULT_COL_SIZE = 20;
     private int m_colSize =DEFAULT_COL_SIZE;
     private long m_timeStamp = 0;
-    private NoteBytes m_key = null;
+    private String m_key = null;
     private String m_value = null;
 
     private String m_style = KEY_AND_VALUE;
 
-    public KeyMenu(NoteBytes key, String value, long timeStamp, String style){
+    public KeyMenu(String key, String value, long timeStamp, String style){
         this(key, value, timeStamp, DEFAULT_COL_SIZE, style);
     }
 
-    public KeyMenu(NoteBytes key, String value, long timeStamp, int colSize, String style){
+    public KeyMenu(String key, String value, long timeStamp, int colSize, String style){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -37,10 +37,10 @@ public class KeyMenu extends Menu implements KeyInterface{
     }
 
 
-    public KeyMenu(NoteBytes key, String value, long timeStamp){
+    public KeyMenu(String key, String value, long timeStamp){
         this(key, value, timeStamp, DEFAULT_COL_SIZE);
     }
-    public KeyMenu(NoteBytes key, String value, long timeStamp, int colSize){
+    public KeyMenu(String key, String value, long timeStamp, int colSize){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -86,7 +86,7 @@ public class KeyMenu extends Menu implements KeyInterface{
         update();
     }
 
-    public NoteBytes getKey(){
+    public String getKey(){
         return m_key;
     }
 
@@ -108,7 +108,7 @@ public class KeyMenu extends Menu implements KeyInterface{
     }
 
     public static void removeOldKeyMenus(List<MenuItem> items, long timeStamp){
-         ArrayList<NoteBytes> removeList  = new ArrayList<>();
+         ArrayList<String> removeList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
@@ -120,12 +120,12 @@ public class KeyMenu extends Menu implements KeyInterface{
             }
         }
 
-        for(NoteBytes key : removeList){
+        for(String key : removeList){
             removeKeyMenu(items, key);
         }
     }
 
-    public static KeyMenu removeKeyMenu(List<MenuItem> items, NoteBytes key){
+    public static KeyMenu removeKeyMenu(List<MenuItem> items, String key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenu){

@@ -1992,8 +1992,10 @@ public class NetworksData extends Network {
             
                                         Stage statusStage = Stages.getStatusStage("Netnotes - Updating Password...", "Updating Password...");
                                         statusStage.show();
+
+                                  
                                         
-                                        m_updateFuture = updateAppKey(pass, onFinished ->{
+                                        m_updateFuture = getAppData().updateAppKey(pass, onFinished ->{
                                             Object finishedObject = onFinished.getSource().getValue();
                                             statusStage.close();
                                             m_updateFuture = null;
@@ -2308,36 +2310,7 @@ public class NetworksData extends Network {
         
      
             
-        private Future<?> updateAppKey(NoteBytes newPassword, EventHandler<WorkerStateEvent> onFinished){
-
-            Task<Object> task = new Task<Object>() {
-                @Override
-                public Object call() throws InterruptedException, IOException, NoSuchAlgorithmException, InvalidKeySpecException{
-                    if(newPassword.byteLength() > 0){ 
-                        m_dataSemaphore.acquire();
-                        SecretKey oldAppKey = getAppData().getSecretKey();
-                        String hash = Utils.getBcryptHashString(newPassword.getChars());
-                        getAppData().setAppKey(hash);
-                        getAppData().createKey(newPassword);
-                        
-                        getAppData().updateDataEncryption(oldAppKey, getAppData().getSecretKey());
-                        m_dataSemaphore.release();
-                        return true;
-                    }
-                    return false;
-                }
-            };
         
-            task.setOnFailed((onFailed)->{
-                m_dataSemaphore.release();
-                Utils.returnObject(false, getExecService(), onFinished, null);
-            });
-
-            task.setOnSucceeded(onFinished);
-
-            return getExecService().submit(task);
-            
-        }
 
 
     }

@@ -11,6 +11,10 @@ public class NoteBytesReader implements AutoCloseable{
         m_in = is;
     }
 
+    public NoteBytes nextNoteBytes() throws EOFException, IOException{
+        return nextNoteBytes(ByteDecoding.RAW_BYTES);
+    }
+
     public NoteBytes nextNoteBytes(ByteDecoding byteDecoding) throws EOFException, IOException{
         int b = m_in.read();
         if(b != -1){
@@ -26,7 +30,7 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() throws IOException {
         m_in.close();
     }
 }

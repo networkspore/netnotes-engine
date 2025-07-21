@@ -14,6 +14,8 @@ import java.util.stream.Stream;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
+import java.util.HexFormat;
+
 
 public class ByteDecoding{
 
@@ -56,6 +58,7 @@ public class ByteDecoding{
     public final static ByteDecoding RAW_BYTES_BASE16 = rawBytesBase16ISODecoding();
     public final static ByteDecoding STRING_UTF8 = StringUTF8Decoding();
     public final static ByteDecoding STRING_UTF16 = StringUTF16Decoding();
+    public final static ByteDecoding BOOLEAN = booleanDecoding();
     public final static ByteDecoding INTEGER = integerDecoding();
     public final static ByteDecoding DOUBLE = doubleDecoding();
     public final static ByteDecoding LONG = longDecoding();
@@ -108,6 +111,10 @@ public class ByteDecoding{
 
     public static ByteDecoding StringUTF16Decoding(){
         return new ByteDecoding(STRING_TYPE, BIG_ENDIAN, UTF_16);
+    }
+
+     public static ByteDecoding booleanDecoding(){
+        return new ByteDecoding(RAW_BYTES_TYPE, BIG_ENDIAN);
     }
 
     public static ByteDecoding integerDecoding(){
@@ -260,7 +267,7 @@ public class ByteDecoding{
             case ByteDecoding.BASE_32:
                 return Base32.encode(bytes);
             case ByteDecoding.BASE_16:
-                return Hex.encode(bytes);
+                return Hex.decode(bytes);
             case ByteDecoding.BASE_64:
                 return Base64.getEncoder().encode(bytes);
             case ByteDecoding.URL_SAFE:
@@ -299,7 +306,7 @@ public class ByteDecoding{
                 return Base64.getUrlEncoder().encodeToString(bytes);
             default:
             case ByteDecoding.BASE_10:
-                return new String(bytes);
+                return new BigInteger(bytes).toString();
         }
     }
     
@@ -315,7 +322,6 @@ public class ByteDecoding{
             case ByteDecoding.URL_SAFE:
                 return Base64.getUrlDecoder().decode(bytes);
             default:
-            case ByteDecoding.BASE_10:
                 return bytes;
         }
     }

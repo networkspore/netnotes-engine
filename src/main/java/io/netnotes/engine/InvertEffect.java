@@ -18,7 +18,7 @@ public class InvertEffect extends Effects {
         m_amount = amount;
     }
 
-    public InvertEffect(NoteBytes id, double amount) {
+    public InvertEffect(String id, double amount) {
         super(id, NAME);
         m_amount = amount;
         

@@ -3,14 +3,10 @@ package io.netnotes.engine;
 import java.io.File;
 import java.io.IOException;
 
-import org.apache.commons.codec.DecoderException;
-import org.apache.commons.codec.binary.Hex;
-
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-
 
 public class HashData {
 
@@ -18,35 +14,84 @@ public class HashData {
 
     private NoteBytes m_id;
     private String m_name = DEFAULT_HASH;
-    private byte[] m_hashBytes = null;
+    private NoteBytes m_hashBytes = null;
 
     public HashData(File file) throws  IOException{
         m_id = NoteUUID.createLocalUUID128();
-        m_hashBytes = Utils.digestFile(file);
+        m_hashBytes = new NoteBytes(Utils.digestFile(file));
     }
 
     public HashData(byte[] bytes) {
         m_id = NoteUUID.createLocalUUID128();
-        m_hashBytes = bytes;
+        m_hashBytes =  new NoteBytes(bytes);
     }
 
-    public HashData(JsonObject json)  {
-        openJson(json);
+    public HashData(NoteBytesObject nbo)  {
+        init(nbo);
     }
 
-    public HashData(NoteBytes id, byte[] bytes){
+    public HashData(NoteBytes id, NoteBytes hash){
         m_id = id;
-        m_hashBytes = bytes;
+        m_hashBytes =  hash;
     }
 
-    public HashData(NoteBytes hashId, String name, String hashHex) {
+    public HashData(NoteBytes hashId, String name, NoteBytes hash) {
 
         m_id = hashId;
         m_name = name;
-        setHashHex(hashHex);
+        m_hashBytes = hash;
 
     }
 
+    public HashData(JsonObject json){
+        openJson(json);
+    }
+
+
+    public void init(NoteBytesObject nbo)  {
+
+        NoteBytesPair idElement = nbo.get("id");
+        NoteBytesPair nameElement = nbo.get("name");
+        NoteBytesPair hashStringElement = nbo.get("hash");
+
+        m_id = idElement != null ? idElement.getValue() : NoteUUID.createLocalUUID128();         
+        
+        if (nameElement != null) {
+            m_name = nameElement.getAsString();
+          
+        }
+        if (hashStringElement != null) {
+           m_hashBytes = hashStringElement.getValue();
+        }
+
+    }
+
+    public void openJson(JsonObject json)  {
+
+        JsonElement idElement = json.get("id");
+        JsonElement nameElement = json.get("name");
+        JsonElement hashStringElement = json.get("hash");
+
+        m_id = idElement != null ? NoteUUID.fromURLSafeString(idElement.getAsString()) : NoteUUID.createLocalUUID128();         
+        
+        if (nameElement != null) {
+            m_name = nameElement.getAsString();
+          
+        }
+        if (hashStringElement != null) {
+           m_hashBytes = new NoteHex(idElement.getAsString());
+        }
+
+    }
+
+    public void setHashHex(String hex){
+        m_hashBytes = new NoteHex(hex);
+    }
+
+    public String getHashStringHex(){
+        return m_hashBytes.getAsHexString();
+    }
+    
     public HashData(JsonReader reader) throws IOException{
         reader.beginObject();
         while(reader.hasNext()){
@@ -70,40 +115,20 @@ public class HashData {
     public void writeJson(JsonWriter writer) throws IOException{
         writer.beginObject();
         writer.name("id");
-        writer.value(m_id.getAsUrlSafeString());
+        writer.value(getId());
         writer.name("name");
-        writer.value(m_name);
+        writer.value(getHashName());
         writer.name("hash");
         writer.value(getHashStringHex());
         writer.endObject();
     }
 
-    public void openJson(JsonObject json)  {
-        /*json.addProperty("id", m_id);
-        json.addProperty("name", m_name);
-        if (m_hashBytes != null) {
-            json.addProperty("hash", getHashString());
-        }*/
-        JsonElement idElement = json.get("id");
-        JsonElement nameElement = json.get("name");
-        JsonElement hashStringElement = json.get("hash");
 
-        if (idElement != null && idElement.isJsonPrimitive()) {
-            m_id = NoteUUID.fromURLSafeString(idElement.getAsString());
-            
-        }
-        if (nameElement != null && nameElement.isJsonPrimitive()) {
-            m_name = nameElement.getAsString();
-          
-        }
-        if (hashStringElement != null && hashStringElement.isJsonPrimitive()) {
-            setHashHex(hashStringElement.getAsString());
-         
-        }
-
+    public String getId() {
+        return m_id.getAsUrlSafeString();
     }
 
-    public NoteBytes getId() {
+    public NoteBytes getUUID(){
         return m_id;
     }
 
@@ -112,35 +137,31 @@ public class HashData {
     }
 
  
-    public String getHashStringHex() {
-       
-        return  Hex.encodeHexString(m_hashBytes);
-    }
-
-    public byte[] getHashBytes() {
+    public NoteBytes getHashBytes() {
         return m_hashBytes;
     }
 
 
 
-    public void setHashHex(String hashHexString) {
-        
-        try {
-            m_hashBytes = Hex.decodeHex(hashHexString);
-        } catch (DecoderException e) {
-   
-        }
-     
+
+    public void setHash(NoteBytes hashBytes) {
+        m_hashBytes = hashBytes;
     }
 
-    public void setHash(byte[] hashBytes) {
-        m_hashBytes = hashBytes;
+    public NoteBytesObject getNoteBytesObject() {
+        NoteBytesObject nbo = new NoteBytesObject();
+        nbo.add("id", m_id);
+        nbo.add("name", m_name);
+        if (m_hashBytes != null) {
+            nbo.add("hash", m_hashBytes);
+        }
+        return nbo;
     }
 
     public JsonObject getJsonObject() {
         JsonObject json = new JsonObject();
-        json.addProperty("id", m_id.getAsUrlSafeString());
-        json.addProperty("name", m_name);
+        json.addProperty("id", getId());
+        json.addProperty("name", getHashName());
         if (m_hashBytes != null) {
             json.addProperty("hash", getHashStringHex());
         }

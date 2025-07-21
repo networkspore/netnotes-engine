@@ -175,7 +175,7 @@ public class NoteConstants {
         return nbo;
     }
 
-    public static NoteBytesObject getMsgObject(int code, long timeStamp, String networkId){
+    public static NoteBytesObject getMsgObject(String code, long timeStamp, String networkId){
         NoteBytesObject nbo = new NoteBytesObject();
         nbo.add("timeStamp", timeStamp);
         nbo.add("networkId", networkId);
@@ -183,7 +183,7 @@ public class NoteConstants {
         return nbo;
     }
 
-    public static NoteBytesObject getMsgObject(int code, String msg){
+    public static NoteBytesObject getMsgObject(String code, String msg){
         NoteBytesObject nbo = new NoteBytesObject();
         nbo.add("code", code);
         nbo.add("msg", msg);

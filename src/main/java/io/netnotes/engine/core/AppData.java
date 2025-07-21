@@ -14,7 +14,6 @@ import java.nio.file.StandardOpenOption;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-
 import java.security.spec.InvalidKeySpecException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -33,21 +32,22 @@ import javax.security.auth.DestroyFailedException;
 
 import org.apache.commons.io.FileUtils;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.AppConstants;
 import io.netnotes.engine.AppInterface;
+import io.netnotes.engine.ByteDecoding;
 import io.netnotes.engine.GitHubAPI;
 import io.netnotes.engine.HashData;
 import io.netnotes.engine.NetworkInformation;
 import io.netnotes.engine.NoteBytes;
+import io.netnotes.engine.NoteBytesPair;
+import io.netnotes.engine.NoteBytesReader;
+import io.netnotes.engine.NoteBytesWriter;
 import io.netnotes.engine.NoteConstants;
 import io.netnotes.engine.NoteListString;
+import io.netnotes.engine.NoteRandom;
 import io.netnotes.engine.NoteUUID;
 import io.netnotes.engine.UpdateInformation;
 import io.netnotes.engine.Utils;
@@ -55,6 +55,9 @@ import io.netnotes.engine.Version;
 import io.netnotes.engine.GitHubAPI.GitHubAsset;
 import io.netnotes.engine.Stages;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 
 import javafx.application.Platform;
@@ -80,23 +83,27 @@ import javafx.stage.StageStyle;
 
 public class AppData {
    // private static File logFile = new File("netnotes-log.txt");
-    public static final String SETTINGS_FILE_NAME = "settings.conf";
+    public static final String SETTINGS_FILE_NAME = "settings.dat";
     public static final File HOME_DIRECTORY = new File(System.getProperty("user.home"));
     public static final File DESKTOP_DIRECTORY = new File(HOME_DIRECTORY + "/Desktop");
   
+    public static final int SALT_LENGTH = 16;
     private final Semaphore m_dataSemaphore;
 
     private File m_appDir = null;
-    private File m_settingsFile = null;
 
-    private String m_appKey;
+    private NoteBytes m_bcryptKey;
+    private boolean m_updates = false;
+    private NoteBytes m_salt = null;
+
     private AppInterface m_appInterface = null;
     
     private File m_appFile = null;
     private HashData m_appHashData = null;
     private Version m_javaVersion = null;
     private SecretKey m_secretKey = null;
-    private boolean m_updates = false;
+    
+    
     private final ExecutorService m_execService;
     private final ScheduledExecutorService m_schedualedExecutor;
     
@@ -112,9 +119,9 @@ public class AppData {
         m_appFile = Utils.urlToFile(classLocation);
         m_appHashData = new HashData(m_appFile);
         m_appDir = m_appFile.getParentFile();
-        m_settingsFile = new File(m_appDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
-
-        readFile();
+   
+    
+        readSettings();
 
     }
 
@@ -136,16 +143,14 @@ public class AppData {
         m_appFile = Utils.urlToFile(classLocation);
         m_appHashData = new HashData(m_appFile);
         m_appDir = m_appFile.getParentFile();
-        m_settingsFile = new File(m_appDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
 
 
-        m_appKey = Utils.getBcryptHashString(password.getChars());
-   
+
+        NoteBytes bcryptKey = Utils.getBcryptHash(password);
+        NoteBytes salt = new NoteRandom(SALT_LENGTH);
+        setAppKey(bcryptKey, salt);
+        createKey(password, salt);
         
-        
-        
-        save();
-        createKey(password);
    
     }
 
@@ -157,11 +162,43 @@ public class AppData {
         return m_schedualedExecutor;
     }
 
-    private void readFile()throws NullPointerException, JsonParseException, IOException{
 
-        if(m_settingsFile != null && m_settingsFile.isFile()){
+
+    private File getSettingsFile() throws IOException{
+        File dataDir = getDataDir();
         
-            openJson(new JsonParser().parse(Files.readString(m_settingsFile.toPath())).getAsJsonObject());
+        return new File(dataDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
+        
+    }
+
+    private void readSettings()throws NullPointerException, IOException{
+        File settingsFile = getSettingsFile();
+
+        if(settingsFile != null && settingsFile.isFile()){
+          
+            try(
+                NoteBytesReader reader = new NoteBytesReader(new FileInputStream(settingsFile));    
+            ){
+                NoteBytes nextNoteBytes = null;
+                
+                while((nextNoteBytes = reader.nextNoteBytes(ByteDecoding.STRING_UTF8)) != null){
+
+                    switch(nextNoteBytes.getAsString()){
+                        case "appKey":
+                            m_bcryptKey = reader.nextNoteBytes();
+                        break;
+                        case "updates":
+                            m_updates = reader.nextNoteBytes().getAsBoolean();
+                        break;
+                        case "salt":
+                            m_salt = reader.nextNoteBytes();
+                        break;
+                    }
+                }
+               
+            }
+
+            
         }else{
             throw new FileNotFoundException("Settings file not found.");
         }
@@ -169,20 +206,6 @@ public class AppData {
     
     }
 
-
-    private void openJson(JsonObject dataObject) throws NullPointerException, JsonParseException{
-        
-        JsonElement appkeyElement = dataObject.get("appKey");
-        JsonElement updatesElement = dataObject.get("updates");
-        if (appkeyElement != null && appkeyElement.isJsonPrimitive()) {
-
-            m_appKey = appkeyElement.getAsString();
-            m_updates = updatesElement != null && updatesElement.isJsonPrimitive() ? updatesElement.getAsBoolean() : false;
-       } else {
-            throw new JsonParseException("Null appKey");
-        }
-     
-    }
 
     public boolean getUpdates(){
         return m_updates;
@@ -203,18 +226,16 @@ public class AppData {
     }
 
   
-     public void createKey(NoteBytes password) throws InvalidKeySpecException, NoSuchAlgorithmException {
-
-        m_secretKey = new SecretKeySpec(Utils.createKeyBytes(password), "AES");
-
+    public void createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException, IOException {
+        m_secretKey = new SecretKeySpec(Utils.createKeyBytes(password, salt.get()), "AES");
     }
 
-    public Future<?> createKey(NoteBytes password, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
+    /*public Future<?> createKey(NoteBytes password, byte[] salt, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed)  {
         
         Task<Object> task = new Task<Object>() {
             @Override
             public Object call() throws NoSuchAlgorithmException, InvalidKeySpecException {
-                return new SecretKeySpec(Utils.createKeyBytes(password), "AES");
+                return new SecretKeySpec(Utils.createKeyBytes(password, salt), "AES");
             }
         };
 
@@ -222,6 +243,7 @@ public class AppData {
             Object obj = e.getSource().getValue();
             if(obj != null && obj instanceof SecretKey){
                 m_secretKey = (SecretKey) obj;
+                m_salt = new 
                 Utils.returnObject(true, m_execService, onComplete);
             }else{
                 Utils.returnException("Unknown error", m_execService, onFailed);
@@ -232,7 +254,7 @@ public class AppData {
         task.setOnFailed(onFailed);
 
         return m_execService.submit(task);
-    }
+    }*/
 
 
     public Future<?> checkForUpdates(String gitHubUser, String githubProject, SimpleObjectProperty<UpdateInformation> updateInformation){
@@ -285,19 +307,56 @@ public class AppData {
     }
 
     
-    public String getAppKey() {
-        return m_appKey;
+    public NoteBytes getAppKey() {
+        return m_bcryptKey;
     }
 
     public byte[] getAppKeyBytes() {
-        return m_appKey.getBytes();
+        return m_bcryptKey.getBytes();
     }
 
-    public void setAppKey(String keyHash) throws IOException {
-        m_appKey = keyHash;
+    public void setAppKey(NoteBytes hash, NoteBytes salt) throws IOException {
+        m_bcryptKey = hash;
+        m_salt = salt;
         save();
     }
 
+
+    protected Future<?> updateAppKey(NoteBytes newPassword, EventHandler<WorkerStateEvent> onFinished){
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws InterruptedException, IOException, NoSuchAlgorithmException, InvalidKeySpecException{
+                if(newPassword.byteLength() > 0){ 
+                    m_dataSemaphore.acquire();
+                    SecretKey oldAppKey = getSecretKey();
+                    
+                    NoteBytes hash = Utils.getBcryptHash(newPassword);
+                    NoteBytes salt = new NoteRandom(SALT_LENGTH);
+
+                    setAppKey(hash, salt);
+                    createKey(newPassword, salt);
+                    updateDataEncryption(oldAppKey, getSecretKey());
+                    m_dataSemaphore.release();
+                    return true;
+                }
+                return false;
+            }
+        };
+    
+        task.setOnFailed((onFailed)->{
+            Throwable throwable = onFailed.getSource().getException();
+            if(throwable != null && !(throwable instanceof InterruptedException)){
+                m_dataSemaphore.release();
+            }
+            Utils.returnObject(false, getExecService(), onFinished, null);
+        });
+
+        task.setOnSucceeded(onFinished);
+
+        return getExecService().submit(task);
+        
+    }
 
 
     public Version getJavaVersion(){
@@ -320,16 +379,14 @@ public class AppData {
         m_secretKey = secretKey;
     }
 
-    public JsonObject getJson() {
-        JsonObject dataObject = new JsonObject();
-        dataObject.addProperty("appKey", m_appKey);
-        dataObject.addProperty("updates", m_updates);
-        return dataObject;
-    }
+   
 
     public void save() throws IOException {
-        String jsonString = getJson().toString();
-        Files.writeString(m_settingsFile.toPath(), jsonString);
+        try(NoteBytesWriter writer = new NoteBytesWriter(new FileOutputStream(getSettingsFile()))){
+            writer.write(new NoteBytesPair("appKey", m_bcryptKey));
+            writer.write(new NoteBytesPair("updates", m_updates));
+            writer.write(new NoteBytesPair("salt", m_salt));
+        }
     }
 
 
@@ -541,7 +598,7 @@ public class AppData {
     }
 
     
-    public void updateDataEncryption(SecretKey oldval, SecretKey newval){
+    public void updateDataEncryption(SecretKey oldval, SecretKey newval) throws IOException{
         
         File idDataFile = getIdDataFile();
         if(idDataFile != null && idDataFile.isFile()){
@@ -689,19 +746,12 @@ public class AppData {
         return isRemoved.get();
     }
 
-    public File getDataDir(){
+    public File getDataDir() throws IOException{
         File dataDir = new File(getAppDir().getAbsolutePath() + "/data");
         if(!dataDir.isDirectory()){
-            try{
-                Files.createDirectory(dataDir.toPath());
-            }catch(IOException e){
-                try {
-                    Files.writeString(AppConstants.LOG_FILE.toPath(),"\ncannot create data directory: " + e.toString()  , StandardOpenOption.CREATE,StandardOpenOption.APPEND);
-                } catch (IOException e1) {
-
-                }
-                
-            }
+         
+            Files.createDirectory(dataDir.toPath());
+        
         }
         return dataDir;
     }
@@ -714,7 +764,7 @@ public class AppData {
     }
     
 
-    private File getIdDataFile(){
+    private File getIdDataFile() throws IOException{
         File dataDir = getDataDir();
 
         File idDataFile = new File(dataDir.getAbsolutePath() + "/data.dat");

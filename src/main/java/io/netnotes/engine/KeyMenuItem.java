@@ -2,7 +2,6 @@ package io.netnotes.engine;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Menu;
@@ -17,16 +16,16 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
     public static final int DEFAULT_COL_SIZE = 20;
     private int m_colSize =DEFAULT_COL_SIZE;
     private long m_timeStamp = 0;
-    private NoteBytes m_key = null;
+    private String m_key = null;
     private String m_value = null;
 
     private String m_style = KEY_AND_VALUE;
 
-    public KeyMenuItem(NoteBytes key, String value, long timeStamp, String style){
+    public KeyMenuItem(String key, String value, long timeStamp, String style){
         this(key, value, timeStamp, DEFAULT_COL_SIZE, style);
     }
 
-    public KeyMenuItem(NoteBytes key, String value, long timeStamp, int colSize, String style){
+    public KeyMenuItem(String key, String value, long timeStamp, int colSize, String style){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -37,10 +36,10 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
     }
 
   
-    public KeyMenuItem(NoteBytes key, String value, long timeStamp){
+    public KeyMenuItem(String key, String value, long timeStamp){
         this(key, value, timeStamp, DEFAULT_COL_SIZE);
     }
-    public KeyMenuItem(NoteBytes key, String value, long timeStamp, int colSize){
+    public KeyMenuItem(String key, String value, long timeStamp, int colSize){
         super();
         m_colSize = colSize;
         m_key = key;
@@ -85,7 +84,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         update();
     }
 
-    public NoteBytes getKey(){
+    public String getKey(){
         return m_key;
     }
 
@@ -93,7 +92,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
         return m_value;
     }
 
-    public static KeyMenuItem getKeyMenuItem(List<MenuItem> items, NoteBytes key){
+    public static KeyMenuItem getKeyMenuItem(List<MenuItem> items, String key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenuItem){
@@ -107,7 +106,7 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
     }
 
     public static void removeeOldKeyItems(List<MenuItem> items, long timeStamp){
-         ArrayList<NoteBytes> removeList  = new ArrayList<>();
+         ArrayList<String> removeList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
@@ -119,12 +118,12 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
             }
         }
 
-        for(NoteBytes key : removeList){
+        for(String key : removeList){
             removeKeyItem(items, key);
         }
     }
 
-    public static KeyMenuItem removeKeyItem(List<MenuItem> items, NoteBytes key){
+    public static KeyMenuItem removeKeyItem(List<MenuItem> items, String key){
         for(int i = 0; i < items.size(); i++){
             MenuItem item = items.get(i);
             if(item instanceof KeyMenuItem){
@@ -139,18 +138,21 @@ public class KeyMenuItem extends MenuItem implements KeyInterface{
 
     public static void updateMenu(Menu menu, NoteBytesObject obj){
         long timeStamp = System.currentTimeMillis();
-        Map<NoteBytes,NoteBytes> map = obj.getAsMap();
-
+        NoteBytesPair[] pairs = obj.getAsArray();
+        int objSize = pairs.length;
         if(menu.getItems().size() == 0){
             
-            for (Map.Entry<NoteBytes, NoteBytes> entry : map.entrySet()) {
-                KeyMenuItem item = new KeyMenuItem(entry.getKey(), entry.getValue().toString(), timeStamp);
+            for (int i = 0; i < objSize ; i ++) {
+                NoteBytesPair entry = pairs[i];
+                KeyMenuItem item = new KeyMenuItem(entry.getKey().getAsString(), entry.getAsString(), timeStamp);
                 menu.getItems().add(item);
             }
         }else{
-            for (Map.Entry<NoteBytes, NoteBytes> entry : map.entrySet()) {
-                NoteBytes key =  entry.getKey();
-                String value = entry.getValue().toString();
+            for (int i = 0; i < objSize ; i ++) {
+                NoteBytesPair entry = pairs[i];
+
+                String key = entry.getKeyAsString();
+                String value = entry.getAsString();
 
                 KeyMenuItem existingItem =  KeyMenuItem.getKeyMenuItem(menu.getItems(), key);
                 

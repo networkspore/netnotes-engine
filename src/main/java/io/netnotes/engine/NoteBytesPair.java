@@ -27,17 +27,15 @@ public class NoteBytesPair {
     }
 
     public NoteBytesPair(char[] key, byte[] value){
-        this(ByteDecoding.charsToBytes(key), value);
+        this(new NoteBytes(key), new NoteBytes(value));
     }
 
     public NoteBytesPair(byte[] key, byte[] value){
-        m_key = new NoteBytes(key);
-        m_value = new NoteBytes(value);
+        this(new NoteBytes(key), new NoteBytes(value));
     }
 
-     public NoteBytesPair(String key, NoteBytes value){
-        m_key = new NoteBytes(key);
-        m_value = value;
+    public NoteBytesPair(String key, NoteBytes value){
+        this(new NoteBytes(key), value);    
     }
 
     public NoteBytesPair(NoteBytes key, NoteBytes value){
@@ -45,9 +43,17 @@ public class NoteBytesPair {
         m_value = value;
     }
 
+    public NoteBytesPair(String key, boolean value){
+        this(key, new NoteBoolean(value));
+    }
+
 
     public NoteBytes getKey(){
         return m_key;
+    }
+
+    public String getKeyAsString(){
+        return m_key.getAsString();
     }
 
     public NoteBytes getValue(){

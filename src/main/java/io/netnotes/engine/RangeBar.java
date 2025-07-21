@@ -170,7 +170,11 @@ public class RangeBar extends ImageView implements ControlInterface{
         
     }
 
-    public NoteBytes getNetworkId(){
+    public String getNetworkId(){
+        return m_networkId.getAsUrlSafeString();
+    }
+
+    public NoteBytes getUUID(){
         return m_networkId;
     }
 

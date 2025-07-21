@@ -6,14 +6,14 @@ import javafx.scene.image.WritableImage;
 public class Effects {
 
     private String m_name;
-    private NoteBytes m_id;
+    private String m_id;
 
     public Effects(String name) {
-        m_id = NoteUUID.createLocalUUID128();
+        m_id = NoteUUID.createSafeUUID128();
         m_name = name;
     }
 
-    public Effects(NoteBytes id, String name) {
+    public Effects(String id, String name) {
         m_id = id;
         m_name = name;
     }
@@ -26,7 +26,7 @@ public class Effects {
         return m_name;
     }
 
-    public NoteBytes getId() {
+    public String getId() {
         return m_id;
     }
 }

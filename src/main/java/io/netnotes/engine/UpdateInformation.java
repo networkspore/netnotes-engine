@@ -30,7 +30,7 @@ public class UpdateInformation {
         m_releaseInfoJson = releaseInfo;
 
         m_jarHashData = new HashData(
-                m_releaseInfoJson.get("application").getAsJsonObject().get("hashData").getAsJsonObject());
+        m_releaseInfoJson.get("application").getAsJsonObject().get("hashData").getAsJsonObject());
     }
 
     public GitHubAsset[] getAssets() {

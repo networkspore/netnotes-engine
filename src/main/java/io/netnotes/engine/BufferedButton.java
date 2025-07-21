@@ -5,7 +5,7 @@ import javafx.scene.image.Image;
 
 public class BufferedButton extends Button {
 
-    public final static NoteBytes ON_MOUSE_PRESSED_EFFECT_ID = new NoteBytes("onMousePressed");
+    public final static String ON_MOUSE_PRESSED_EFFECT_ID = "onMousePressed";
 
     private BufferedImageView m_imgBufView;
     private boolean m_isPressedEffects = true;

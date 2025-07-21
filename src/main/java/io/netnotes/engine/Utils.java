@@ -22,7 +22,6 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
-import java.text.DecimalFormat;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -193,15 +192,13 @@ public class Utils {
     // Security.addProvider(new Blake2bProvider());
     public final static String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36";
 
-    public static String getBcryptHashString(char[] password) {
+    public static NoteBytes getBcryptHash(NoteBytes password) {
         SecureRandom sr = new SecureRandom();
-    
-
-        return BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hashToString(15, password);
+        return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.getChars()));
     }
 
-    public static boolean verifyBCryptPassword(char[] password, String hash) {
-        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password, hash.getBytes());
+    public static boolean verifyBCryptPassword(NoteBytes password, NoteBytes hash) {
+        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.getChars(), hash.getBytes());
 
         return result.verified;
     }
@@ -1716,16 +1713,16 @@ public class Utils {
 
 
 
-    public static byte[] createKeyBytes(NoteBytes password) throws InvalidKeySpecException, NoSuchAlgorithmException  {
+    public static byte[] createKeyBytes(NoteBytes password, byte[] salt) throws InvalidKeySpecException, NoSuchAlgorithmException  {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
         char[] chars = password.getChars();
-        KeySpec spec = new PBEKeySpec(chars, password.get(), 65536, 256);
+        KeySpec spec = new PBEKeySpec(chars, salt, 65536, 256);
         SecretKey tmp = factory.generateSecret(spec);
         return tmp.getEncoded();
 
     }
 
-    public static Object getKeyObject(List<? extends Object> items, NoteBytes key){
+    public static Object getKeyObject(List<? extends Object> items, String key){
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
             if(item instanceof KeyInterface){
@@ -1740,7 +1737,7 @@ public class Utils {
 
 
     public static void removeOldKeys(List<? extends Object> items, long timeStamp){
-        ArrayList<NoteBytes> keyRemoveList  = new ArrayList<>();
+        ArrayList<String> keyRemoveList  = new ArrayList<>();
 
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
@@ -1752,12 +1749,12 @@ public class Utils {
             }
         }
 
-        for(NoteBytes key : keyRemoveList){
+        for(String key : keyRemoveList){
             removeKey(items, key);
         }
     }
 
-    public static Object removeKey(List<? extends Object> items, NoteBytes key){
+    public static Object removeKey(List<? extends Object> items, String key){
         for(int i = 0; i < items.size(); i++){
             Object item = items.get(i);
             if(item instanceof KeyInterface){

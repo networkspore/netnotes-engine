@@ -8,6 +8,8 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.concurrent.Semaphore;
 
+import org.bouncycastle.util.encoders.Base32;
+
 import com.google.gson.JsonParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
