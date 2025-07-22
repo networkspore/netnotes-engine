@@ -1,6 +1,7 @@
 package io.netnotes.engine;
 
 
+import io.netnotes.engine.noteBytes.NoteUUID;
 import javafx.scene.image.WritableImage;
 
 public class Effects {

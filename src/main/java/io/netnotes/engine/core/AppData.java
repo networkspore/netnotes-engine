@@ -41,18 +41,18 @@ import io.netnotes.engine.ByteDecoding;
 import io.netnotes.engine.GitHubAPI;
 import io.netnotes.engine.HashData;
 import io.netnotes.engine.NetworkInformation;
-import io.netnotes.engine.NoteBytes;
-import io.netnotes.engine.NoteBytesPair;
-import io.netnotes.engine.NoteBytesReader;
-import io.netnotes.engine.NoteBytesWriter;
-import io.netnotes.engine.NoteConstants;
-import io.netnotes.engine.NoteListString;
-import io.netnotes.engine.NoteRandom;
-import io.netnotes.engine.NoteUUID;
 import io.netnotes.engine.UpdateInformation;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.Version;
 import io.netnotes.engine.GitHubAPI.GitHubAsset;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesPair;
+import io.netnotes.engine.noteBytes.NoteBytesReader;
+import io.netnotes.engine.noteBytes.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.NoteConstants;
+import io.netnotes.engine.noteBytes.NoteListString;
+import io.netnotes.engine.noteBytes.NoteRandom;
+import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.Stages;
 
 import com.google.gson.JsonObject;
@@ -119,8 +119,7 @@ public class AppData {
         m_appFile = Utils.urlToFile(classLocation);
         m_appHashData = new HashData(m_appFile);
         m_appDir = m_appFile.getParentFile();
-   
-    
+
         readSettings();
 
     }

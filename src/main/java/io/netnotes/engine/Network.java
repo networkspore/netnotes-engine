@@ -10,6 +10,10 @@ import java.util.concurrent.Future;
 
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.controls.TabAppBox;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.NoteConstants;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;

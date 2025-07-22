@@ -8,6 +8,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesPair;
+import io.netnotes.engine.noteBytes.NoteHex;
+import io.netnotes.engine.noteBytes.NoteUUID;
+
 public class HashData {
 
     public static String DEFAULT_HASH = "Blake2b-256";

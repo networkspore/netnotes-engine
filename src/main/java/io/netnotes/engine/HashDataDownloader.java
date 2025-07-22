@@ -3,6 +3,7 @@ package io.netnotes.engine;
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 
+import io.netnotes.engine.controls.BufferedButton;
 import javafx.application.Platform;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.geometry.Insets;

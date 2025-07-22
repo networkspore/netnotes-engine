@@ -5,6 +5,10 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteListString;
+import io.netnotes.engine.noteBytes.NoteString;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;

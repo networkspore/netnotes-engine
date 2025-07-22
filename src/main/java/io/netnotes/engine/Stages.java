@@ -13,7 +13,11 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.controls.IconButton;
+import io.netnotes.engine.controls.JsonParametersBox;
 import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteConstants;
 import io.netnotes.javafxsvg.SvgImageLoaderFactory;
 
 import javafx.animation.PauseTransition;

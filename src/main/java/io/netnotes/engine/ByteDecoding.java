@@ -14,8 +14,7 @@ import java.util.stream.Stream;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
-import java.util.HexFormat;
-
+import io.netnotes.engine.noteBytes.NoteShort;
 
 public class ByteDecoding{
 

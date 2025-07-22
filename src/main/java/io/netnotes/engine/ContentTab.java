@@ -1,5 +1,6 @@
 package io.netnotes.engine;
 
+import io.netnotes.engine.controls.BufferedButton;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.event.ActionEvent;

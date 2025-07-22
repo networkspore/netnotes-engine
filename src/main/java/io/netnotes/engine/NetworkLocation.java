@@ -1,6 +1,7 @@
 package io.netnotes.engine;
 
 import io.netnotes.engine.core.NetworksData;
+import io.netnotes.engine.noteBytes.NoteUUID;
 
 public class NetworkLocation{
 
@@ -16,11 +17,11 @@ public class NetworkLocation{
         m_hashCode = m_localUUID.getAsBigInteger().hashCode();
     }
 
-    public String getUUID(){
+    public String getId(){
         return m_localUUID.getAsUrlSafeString();
     }
 
-    public NoteUUID getNoteUUID(){
+    public NoteUUID getUUID(){
         return m_localUUID;
     }
 
