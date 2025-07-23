@@ -8,10 +8,8 @@ import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.netnotes.engine.ByteDecoding;
-import io.netnotes.engine.ByteHashing;
-import io.netnotes.engine.HardwareInfo;
 import io.netnotes.engine.Utils;
+import io.netnotes.engine.controls.HardwareInfo;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;

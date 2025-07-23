@@ -4,7 +4,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
-import io.netnotes.engine.ByteDecoding;
 import io.netnotes.engine.Utils;
 
 public class NoteBytesArray extends NoteBytes{

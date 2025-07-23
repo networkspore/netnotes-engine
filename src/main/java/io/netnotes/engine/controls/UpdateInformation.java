@@ -1,8 +1,8 @@
-package io.netnotes.engine;
+package io.netnotes.engine.controls;
 
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.GitHubAPI.GitHubAsset;
+import io.netnotes.engine.controls.GitHubAPI.GitHubAsset;
 
 
 public class UpdateInformation {

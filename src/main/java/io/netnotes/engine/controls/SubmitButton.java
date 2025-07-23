@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.controls;
 
 import javafx.scene.control.Button;
 

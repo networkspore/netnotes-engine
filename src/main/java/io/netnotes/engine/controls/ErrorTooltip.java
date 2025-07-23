@@ -1,5 +1,6 @@
-package io.netnotes.engine;
+package io.netnotes.engine.controls;
 
+import io.netnotes.engine.Utils;
 import javafx.animation.PauseTransition;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Region;

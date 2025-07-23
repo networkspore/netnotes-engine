@@ -8,7 +8,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.netnotes.engine.ControlInterface;
-import io.netnotes.engine.Drawing;
 import io.netnotes.engine.Stages;
 import io.netnotes.engine.Utils;
 import io.netnotes.engine.noteBytes.NoteBytes;

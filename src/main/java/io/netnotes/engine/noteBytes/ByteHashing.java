@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.noteBytes;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;

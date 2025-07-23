@@ -2,6 +2,8 @@ package io.netnotes.engine;
 
 import java.io.IOException;
 
+import io.netnotes.engine.controls.Version;
+
 public interface AppInterface {
     void shutdown();
     String[] getDefaultAppIds();

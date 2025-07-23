@@ -1,11 +1,6 @@
 package io.netnotes.engine;
 
 import java.io.File;
-import java.util.List;
-
-import javafx.collections.ObservableList;
-import javafx.scene.control.MenuItem;
-import javafx.scene.image.Image;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 

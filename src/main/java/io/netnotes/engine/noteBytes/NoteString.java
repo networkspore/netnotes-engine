@@ -3,8 +3,6 @@ package io.netnotes.engine.noteBytes;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-import io.netnotes.engine.ByteDecoding;
-
 public class NoteString extends NoteBytes {
 
     public NoteString(ByteBuffer byteBuffer, ByteDecoding byteDecoding){

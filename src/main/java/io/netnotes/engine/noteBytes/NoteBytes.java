@@ -11,10 +11,6 @@ import java.util.concurrent.Semaphore;
 import org.bouncycastle.util.encoders.Base32;
 
 import com.google.gson.JsonParser;
-
-import io.netnotes.engine.ByteDecoding;
-import io.netnotes.engine.ByteHashing;
-
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

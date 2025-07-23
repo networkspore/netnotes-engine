@@ -2,9 +2,6 @@ package io.netnotes.engine.noteBytes;
 
 import java.math.BigInteger;
 
-import io.netnotes.engine.ByteDecoding;
-import io.netnotes.engine.ByteHashing;
-
 public class NoteHash extends NoteBytes {
 
     private int m_hashSize = 16;

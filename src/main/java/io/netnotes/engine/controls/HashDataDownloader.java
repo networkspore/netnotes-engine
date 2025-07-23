@@ -1,9 +1,11 @@
-package io.netnotes.engine;
+package io.netnotes.engine.controls;
 
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 
-import io.netnotes.engine.controls.BufferedButton;
+import io.netnotes.engine.AppConstants;
+import io.netnotes.engine.Stages;
+import io.netnotes.engine.Utils;
 import javafx.application.Platform;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.geometry.Insets;

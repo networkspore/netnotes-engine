@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.noteBytes;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -14,7 +14,7 @@ import java.util.stream.Stream;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
-import io.netnotes.engine.noteBytes.NoteShort;
+import io.netnotes.engine.Utils;
 
 public class ByteDecoding{
 

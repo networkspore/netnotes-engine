@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.core;
 
 public interface HostServicesInterface {
     void showDocument(String url);

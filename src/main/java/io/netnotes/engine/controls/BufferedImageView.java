@@ -6,10 +6,6 @@ import javafx.scene.image.WritableImage;
 
 import java.util.ArrayList;
 
-import io.netnotes.engine.Drawing;
-import io.netnotes.engine.Effects;
-import io.netnotes.engine.InvertEffect;
-
 public class BufferedImageView extends ImageView {
     private Image m_defaultImg = null;
     private WritableImage m_img;

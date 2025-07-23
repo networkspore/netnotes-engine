@@ -1,6 +1,7 @@
-package io.netnotes.engine;
+package io.netnotes.engine.controls;
 
-import io.netnotes.engine.controls.BufferedButton;
+import io.netnotes.engine.AppConstants;
+import io.netnotes.engine.Stages;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.event.ActionEvent;

@@ -1,7 +1,5 @@
 package io.netnotes.engine.noteBytes;
 
-import io.netnotes.engine.ByteDecoding;
-import io.netnotes.engine.ByteHashing;
 import scorex.util.encode.Base16;
 import scorex.util.encode.Base64;
 
