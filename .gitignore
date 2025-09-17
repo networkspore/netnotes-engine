@@ -1,0 +1,10 @@
+**/target/
+**/.git/
+**/.vscode/
+**/.bloop/
+**/.metals/
+**/.scala-build/
+dependency-reduced-pom.xml
+netnotes-log.txt
+**/*.sh
+**/*.erg
