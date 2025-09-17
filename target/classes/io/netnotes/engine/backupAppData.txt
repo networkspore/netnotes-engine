@@ -1,0 +1,431 @@
+
+    protected CompletableFuture< CompletableFuture<NoteBytesObject>> startRead(PipedOutputStream pipedOutput) {
+
+ 
+        AtomicBoolean lockAcquired = new AtomicBoolean(false);
+        
+        return CompletableFuture
+            .supplyAsync(() -> {
+                try {
+
+                    getDataSemaphore().acquire();
+                    lockAcquired.set(true);
+                   
+                    return getIdDataFile();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                } catch(IOException e){
+                    throw new RuntimeException(e);
+                }
+            }, getExecService())
+            .thenCompose(file -> 
+                CompletableFuture.supplyAsync(() -> 
+                    performDecryption(file, pipedOutput), getExecService())
+
+                )
+            .whenComplete((result, throwable) -> {
+                // Always release semaphore regardless of success or failure
+                if (lockAcquired.getAndSet(false)) {
+                    getDataSemaphore().release();
+                }
+            });
+    }
+
+     
+    public Future<?> getIdDataFile(NoteStringArrayReadOnly path, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
+        final AtomicBoolean isAquired = new AtomicBoolean();
+
+        Task<Object> task = new Task<Object>() {
+            @Override
+            public Object call() throws InterruptedException, IOException, InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidAlgorithmParameterException, BadPaddingException, IllegalBlockSizeException, ShortBufferException  {
+                
+                getDataSemaphore().acquire();
+                isAquired.set(true);
+
+                File idDataFile = getIdDataFile();
+                File dataDir = idDataFile.getParentFile();
+
+                if (idDataFile.isFile()) {
+                    // Set up piped streams for concurrent processing
+                    PipedOutputStream decryptedOutput = new PipedOutputStream();
+                    
+                    //CompletableFuture<NoteBytesObject> <-completion results
+                    performDecryption(idDataFile, decryptedOutput).exceptionally(failedToDecrypt->{
+                        //bubble exception?
+                        return null;
+                    });
+
+                    //returns CompletableFuture<Boolean> <-isComplete or Error
+                    PipedOutputStream parsedOutput = new PipedOutputStream();
+                    parseIdDataFileUpdate(path, dataDir, decryptedOutput, parsedOutput, onSucceeded);
+                   
+                    File tmpFile = new File(idDataFile.getAbsolutePath() + ".tmp");
+                    saveEncryptedFileSwap(idDataFile, tmpFile, parsedOutput).thenAccept((accepted->{
+                        if(isAquired.getAndSet(false)){
+                            getDataSemaphore().release();
+                        }
+                    })).exceptionally(ex->{
+                        
+                        if(isAquired.getAndSet(false)){
+                            getDataSemaphore().release();
+                        }
+                        Utils.writeLogMsg("AppData.geIdDataFile.writeEncryptedDataStream", ex.getCause());
+                        return null;
+                    });
+
+                } else {
+                    File newFile = createNewDataFile(dataDir);
+                    Utils.returnObject(newFile, getExecService(), onSucceeded);
+
+                    // Create initial tree structure
+                    NoteBytesObject treeRoot = new NoteBytesObject();
+                    NoteBytesObject currentNode = treeRoot;
+                    
+                    NoteBytes[] pathList = path.getAsArray();
+                    int pathLength = pathList.length;
+                    for (int i = 0; i < pathLength ; i++) {
+                        NoteBytes bucket = pathList[i];
+                        NoteBytesObject newNode = new NoteBytesObject();
+                        if(i == pathLength - 1){
+                            newNode.add(FILE_PATH, newFile.getAbsolutePath());
+                        }
+                        currentNode.add(bucket, newNode);
+                        currentNode = newNode;
+                    }
+                    
+                    
+                    // Save initial tree
+                    
+                    if(isAquired.getAndSet(false)){
+                        getDataSemaphore().release();
+                    }
+
+                }
+
+                return true;
+            }
+        };
+  
+        task.setOnFailed(idDataFileFailed->{
+            if(isAquired.getAndSet(false)){
+                getDataSemaphore().release();
+            }
+        });
+        return getExecService().submit(task);
+    }
+
+    ///
+    /// *****************File System Parsing Strcture********* 
+    private  CompletableFuture<Boolean> parseIdDataFileUpdate(NoteStringArrayReadOnly path, File dataDir, PipedOutputStream decryptedOutputStream, PipedOutputStream parsedOutputStream, EventHandler<WorkerStateEvent> onSucceeded) {
+        return CompletableFuture
+            .supplyAsync(() -> {
+                // Validate inputs
+                if (path == null || path.byteLength() == 0 || dataDir == null || decryptedOutputStream == null || parsedOutputStream == null) {
+                    throw new IllegalArgumentException("Required parameters cannot be null");
+                }
+                
+                List<NoteBytes> targetPath = path.getAsList();
+                
+                try (
+                    PipedInputStream parsedInputStream = new PipedInputStream(decryptedOutputStream);
+                    NoteBytesReader reader = new NoteBytesReader(parsedInputStream);
+                    NoteBytesWriter writer = new NoteBytesWriter(parsedOutputStream)
+                ) {
+                    // Read root metadata
+                    NoteBytesMetaData rootMetaData = reader.nextMetaData();
+                    if (rootMetaData == null) {
+                        // Empty file case - create new structure
+                        NoteBytesObject rootNode = createPathStructure(targetPath, dataDir, onSucceeded);
+                        writer.write(rootNode);
+                        return true;
+                    }
+                    
+                    // Parse existing tree and look for target path
+                    parseAndWriteTree(reader, writer, rootMetaData, targetPath, dataDir, onSucceeded);
+                    return true;
+                }catch(Exception e){
+                    throw new RuntimeException(e);
+                }
+            });
+
+   
+    }
+
+    private void parseAndWriteTree(NoteBytesReader reader, NoteBytesWriter writer, NoteBytesMetaData rootMetaData, 
+                                List<NoteBytes> targetPath, File dataDir, EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        if (rootMetaData.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+            throw new IOException("Root must be an object");
+        }
+        
+        // Write root metadata
+        writer.write(rootMetaData);
+        
+        // Parse the root object and look for target path
+        parseObjectAndFindPath(reader, writer, rootMetaData.getLength(), targetPath, 0, dataDir, onSucceeded);
+    }
+
+    private boolean parseObjectAndFindPath(NoteBytesReader reader, NoteBytesWriter writer, int objectLen, 
+                                        List<NoteBytes> targetPath, int pathIndex, File dataDir, 
+                                        EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        int bytesRead = 0;
+        boolean foundPath = false;
+        List<NoteBytesPair> pendingPairs = new ArrayList<>();
+        
+        // Read all key-value pairs in this object first
+        while (bytesRead < objectLen) {
+            // Read key metadata
+            NoteBytesMetaData keyMetaData = reader.nextMetaData();
+            if (keyMetaData == null || keyMetaData.getType() != NoteBytesMetaData.STRING_TYPE) {
+                throw new IOException("Expected string key");
+            }
+            
+            // Read key data
+            byte[] keyData = new byte[keyMetaData.getLength()];
+            reader.read(keyData);
+            bytesRead += 5 + keyMetaData.getLength();
+            
+            // Read value metadata
+            NoteBytesMetaData valueMetaData = reader.nextMetaData();
+            if (valueMetaData == null) {
+                throw new IOException("Expected value after key");
+            }
+            
+            // Read value data
+            byte[] valueData = new byte[valueMetaData.getLength()];
+            reader.read(valueData);
+            bytesRead += 5 + valueMetaData.getLength();
+            
+            // Create NoteBytes objects and store the pair
+            NoteBytes key = new NoteBytes(keyData, ByteDecoding.getDecodingFromType(keyMetaData.getType()));
+            NoteBytes value = new NoteBytes(valueData, ByteDecoding.getDecodingFromType(valueMetaData.getType()));
+            pendingPairs.add(new NoteBytesPair(key, value));
+        }
+        
+        // Now process the pairs and look for our target
+        for (NoteBytesPair pair : pendingPairs) {
+            boolean isTargetKey = (pathIndex < targetPath.size()) && 
+                                Arrays.equals(pair.getKey().get(), targetPath.get(pathIndex).get());
+            
+            if (isTargetKey) {
+                foundPath = true;
+                
+                if (pathIndex == targetPath.size() - 1) {
+                    // We're at the final path element - this should contain the file
+                    handleFinalPathElement(writer, pair, onSucceeded);
+                } else {
+                    // Continue down the path
+                    if (pair.getValue().getByteDecoding().getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                        throw new IOException("Expected object for intermediate path element");
+                    }
+                    
+                    // Write the pair
+                    writer.write(pair.getKey());
+                    writer.write(pair.getValue());
+                    
+                    // Parse the nested object
+                    boolean foundInNested = parseNestedObject(writer, pair.getValue().get(), targetPath, pathIndex + 1, dataDir, onSucceeded);
+                    
+                    if (!foundInNested) {
+                        // Path doesn't exist in nested object - need to add it
+                        insertMissingPathInObject(writer, pair.getValue().get(), targetPath, pathIndex + 1, dataDir, onSucceeded);
+                    }
+                }
+            } else {
+                // Not our target key - copy as-is
+                writer.write(pair.getKey());
+                writer.write(pair.getValue());
+            }
+        }
+        
+        // If we didn't find our path at this level, we need to add it
+        if (!foundPath && pathIndex < targetPath.size()) {
+            insertMissingPath(writer, targetPath, pathIndex, dataDir, onSucceeded);
+        }
+        
+        return foundPath;
+    }
+
+    private boolean parseNestedObject(NoteBytesWriter writer, byte[] objectData, List<NoteBytes> targetPath, 
+                                    int pathIndex, File dataDir, EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        // Create a temporary reader for the nested object data
+        ByteArrayInputStream bais = new ByteArrayInputStream(objectData);
+        NoteBytesReader nestedReader = new NoteBytesReader(bais);
+        
+        // Use a ByteArrayOutputStream to capture what we write for the nested object
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        NoteBytesWriter nestedWriter = new NoteBytesWriter(baos);
+        
+        boolean found = parseObjectContent(nestedReader, nestedWriter, objectData.length, targetPath, pathIndex, dataDir, onSucceeded);
+        
+        // Write the processed nested object data
+        byte[] processedData = baos.toByteArray();
+        writer.write(processedData);
+        
+        return found;
+    }
+
+    private boolean parseObjectContent(NoteBytesReader reader, NoteBytesWriter writer, int objectLen,
+                                    List<NoteBytes> targetPath, int pathIndex, File dataDir,
+                                    EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        int bytesRead = 0;
+        boolean foundPath = false;
+        
+        while (bytesRead < objectLen) {
+            // Read key metadata
+            NoteBytesMetaData keyMetaData = reader.nextMetaData();
+            if (keyMetaData == null) break;
+            
+            // Read key data
+            byte[] keyData = new byte[keyMetaData.getLength()];
+            reader.read(keyData);
+            bytesRead += 5 + keyMetaData.getLength();
+            
+            // Read value metadata
+            NoteBytesMetaData valueMetaData = reader.nextMetaData();
+            if (valueMetaData == null) break;
+            
+            // Read value data
+            byte[] valueData = new byte[valueMetaData.getLength()];
+            reader.read(valueData);
+            bytesRead += 5 + valueMetaData.getLength();
+            
+            // Check if this is our target key
+            boolean isTargetKey = (pathIndex < targetPath.size()) && 
+                                Arrays.equals(keyData, targetPath.get(pathIndex).get());
+            
+            if (isTargetKey) {
+                foundPath = true;
+                
+                if (pathIndex == targetPath.size() - 1) {
+                    // Found the final element - extract and return file
+                    File existingFile = extractFilePathFromObjectData(valueData);
+                    Utils.returnObject(existingFile, getExecService(), onSucceeded);
+                    
+                    // Write the existing data as-is
+                    writer.write(keyMetaData);
+                    writer.write(keyData);
+                    writer.write(valueMetaData);
+                    writer.write(valueData);
+                } else {
+                    // Continue down the path
+                    writer.write(keyMetaData);
+                    writer.write(keyData);
+                    writer.write(valueMetaData);
+                    
+                    parseNestedObject(writer, valueData, targetPath, pathIndex + 1, dataDir, onSucceeded);
+                }
+            } else {
+                // Copy as-is
+                writer.write(keyMetaData);
+                writer.write(keyData);
+                writer.write(valueMetaData);
+                writer.write(valueData);
+            }
+        }
+        
+        return foundPath;
+    }
+
+    private void handleFinalPathElement(NoteBytesWriter writer, NoteBytesPair pair, 
+                                    EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        if (pair.getValue().getByteDecoding().getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+            throw new IOException("Expected object for final path element");
+        }
+        
+        // Extract file path from the object data
+        File existingFile = extractFilePathFromObjectData(pair.getValue().get());
+        
+        // Write the pair as-is since we found existing file
+        writer.write(pair.getKey());
+        writer.write(pair.getValue());
+        
+        // Return the existing file
+        Utils.returnObject(existingFile, getExecService(), onSucceeded);
+    }
+
+    private File extractFilePathFromObjectData(byte[] objectData) throws IOException {
+        NoteBytesObject obj = new NoteBytesObject(objectData);
+        NoteBytesPair filePathPair = obj.get(FILE_PATH);
+        
+        if (filePathPair == null || filePathPair.getValue().getByteDecoding().getType() != NoteBytesMetaData.STRING_TYPE) {
+            throw new IOException("No valid filePath found in object");
+        }
+        
+        String filePath = filePathPair.getValue().getAsString();
+        return new File(filePath);
+    }
+
+    private void insertMissingPath(NoteBytesWriter writer, List<NoteBytes> targetPath, int startIndex, 
+                                File dataDir, EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        // Create the missing path structure
+        NoteBytesObject pathStructure = buildPathStructure(targetPath, startIndex, dataDir, onSucceeded);
+        
+        // Write the new structure
+        writer.write(pathStructure);
+    }
+
+    private void insertMissingPathInObject(NoteBytesWriter writer, byte[] existingObjectData, 
+                                        List<NoteBytes> targetPath, int startIndex, File dataDir, 
+                                        EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        // Parse existing object and add new path
+        NoteBytesObject existingObj = new NoteBytesObject(existingObjectData);
+        
+        // Add the remaining path to existing object
+        NoteBytes firstKey = targetPath.get(startIndex);
+        if (startIndex == targetPath.size() - 1) {
+            // This is the final element
+            File newFile = createNewDataFile(dataDir);
+            NoteBytesObject fileObj = new NoteBytesObject();
+            fileObj.add(FILE_PATH, new NoteBytes(newFile.getCanonicalPath()));
+            fileObj.add(CREATED, new NoteBytes(System.currentTimeMillis()));
+            existingObj.add(firstKey, fileObj);
+            Utils.returnObject(newFile, getExecService(), onSucceeded);
+        } else {
+            // Add nested structure
+            existingObj.add(firstKey, buildPathStructure(targetPath, startIndex + 1, dataDir, onSucceeded));
+        }
+        
+        // Write the modified object data
+        byte[] modifiedData = existingObj.get();
+        writer.write(modifiedData);
+    }
+
+    private NoteBytesObject buildPathStructure(List<NoteBytes> targetPath, int startIndex, File dataDir,
+                                            EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        
+        if (startIndex >= targetPath.size()) {
+            return new NoteBytesObject();
+        }
+        
+        NoteBytesObject currentObj = new NoteBytesObject();
+        NoteBytes currentKey = targetPath.get(startIndex);
+        
+        if (startIndex == targetPath.size() - 1) {
+            // Final element - create file object
+            File newFile = createNewDataFile(dataDir);
+            NoteBytesObject fileObj = new NoteBytesObject();
+            fileObj.add(FILE_PATH, new NoteBytes(newFile.getCanonicalPath()));
+            fileObj.add(CREATED, new NoteBytes(System.currentTimeMillis()));
+            currentObj.add(currentKey, fileObj);
+            Utils.returnObject(newFile, getExecService(), onSucceeded);
+        } else {
+            // Intermediate element - create nested structure
+            NoteBytesObject nestedObj = buildPathStructure(targetPath, startIndex + 1, dataDir, onSucceeded);
+            currentObj.add(currentKey, nestedObj);
+        }
+        
+        return currentObj;
+    }
+
+    private NoteBytesObject createPathStructure(List<NoteBytes> targetPath, File dataDir, 
+                                            EventHandler<WorkerStateEvent> onSucceeded) throws IOException {
+        return buildPathStructure(targetPath, 0, dataDir, onSucceeded);
+    }

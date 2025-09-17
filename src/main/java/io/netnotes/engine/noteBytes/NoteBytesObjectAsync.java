@@ -1,0 +1,510 @@
+package io.netnotes.engine.noteBytes;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger; 
+import java.util.Arrays;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+
+
+public class NoteBytesObjectAsync extends NoteBytesAsync{
+
+
+    public NoteBytesObjectAsync(){
+        super(new byte[0], ByteDecoding.NOTE_BYTES_OBJECT);
+    }
+
+    public NoteBytesObjectAsync(byte[] bytes){
+        super(bytes, ByteDecoding.NOTE_BYTES_OBJECT);        
+    }
+
+    public NoteBytesObjectAsync(NoteBytesPair[] pairs){
+        this(noteBytePairsToByteArray(pairs));
+    }
+
+
+
+    public static byte[] noteBytePairsToByteArray(NoteBytesPair[] pairs) {
+        byte[] bytes = new byte[0];
+        int offset = 0;
+        for(NoteBytesPair pair : pairs) {
+            int length = bytes.length;
+            byte[] dstBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
+            offset = NoteBytes.writeNote(pair.getKey(), dstBytes, offset);
+            offset = NoteBytes.writeNote(pair.getValue(), dstBytes, offset);
+            bytes = dstBytes;
+        }
+        return bytes;
+    }
+
+    public Stream<NoteBytesPair> getAsStream() {
+        try {
+            acquireLock();
+            try {
+                byte[] bytes = get();
+                Stream.Builder<NoteBytesPair> noteBytesBuilder = Stream.builder();
+                int length = bytes.length;
+                int offset = 0;
+            
+                while(offset < length) {
+                    NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+                    noteBytesBuilder.accept(pair);
+                    offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength(); // 2 bytes type + 8 bytes length
+                }
+                return noteBytesBuilder.build();
+            } finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Stream.empty();
+        }
+    }
+
+    public NoteBytesPair[] getAsArray(){
+        return getAsStream().toArray(NoteBytesPair[]::new);
+    }
+
+
+    public Map<NoteBytes, NoteBytes> getAsMap(){
+        return getAsStream().collect(Collectors.toMap(NoteBytesPair::getKey, NoteBytesPair::getValue));
+    }
+
+    @Override
+    public void clear() {
+         try {
+            acquireLock();
+            try{
+                set(new byte[0]);
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } 
+    }
+
+    public NoteBytesPair get(String keyString){
+        return get(new NoteBytes(keyString));
+    }
+
+    public NoteBytesPair get(NoteBytes key) {
+        try {
+            acquireLock();
+            try {
+                byte[] bytes = get();
+                int length = bytes.length;
+                
+                if(bytes != null && length > 0) {
+                    int offset = 0;
+                    while(offset < length) {
+                        NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+                        if(pair.getKey().equals(key)) {
+                            return pair;
+                        }
+                        offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength();
+                    }
+                }
+                return null;
+            } finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+
+
+    public NoteBytesPair getFirst(){
+        return getAtIndex(0);
+    }
+
+    public NoteBytesPair getAtIndex(int index){
+        try {
+            acquireLock();
+            try {
+                byte[] bytes = get();
+                int length = bytes.length;
+                if(bytes != null && length > 0){
+                    int offset = 0;
+                    int i = 0;
+                    while(offset < length){
+                        NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+                        if(i == index){
+                            return pair;
+                        }
+                        offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength();
+                        i++;
+                    }
+                }
+                return null;
+            } finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+
+    public boolean isEmpty() {
+        return get().length == 0;
+    }
+
+    public void add(NoteBytesPair pair) {
+
+         try {
+            acquireLock();
+            try{
+                byte[] bytes = getBytes();
+                int length = bytes.length;
+                byte[] newBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
+                int offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
+                NoteBytes.writeNote(pair.getValue(), newBytes, offset);
+                set(newBytes);
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } 
+    }
+
+    public void add(String key, Object value){
+        add(new NoteBytesPair(key, value));
+    }
+
+    public void add(NoteBytes key, NoteBytes value) {
+        add(new NoteBytesPair(key, value));       
+    }
+
+    public void add(String key, NoteBytes value) {
+        add(new NoteBytes(key), value);
+    }
+
+    public void add(String key, BigInteger value) {
+        add(new NoteBytes(key), new NoteBigInteger(value));
+    }
+
+    public void add(String key, BigDecimal value) {
+        add(new NoteBytes(key), new NoteBigDecimal(value));
+    }
+
+    public void add(String key, String value) {
+        add(new NoteBytes(key), new NoteBytes(value));
+    }
+
+    public void add(String key, double value) {
+        add(new NoteBytes(key), new NoteDouble(value));
+    }
+
+    public void add(String key, long value) {
+        add(new NoteBytes(key), new NoteLong(value));
+    }
+
+    public void add(String key, boolean value) {
+        add(new NoteBytes(key), new NoteBoolean(value));
+    }
+
+    public void add(String key, int value) {
+        add(new NoteBytes(key), new NoteInteger(value));
+    }
+
+    public void add(String key, byte[] value) {
+        add(new NoteBytes(key), new NoteBytes(value));
+    }
+
+    public void add(char[] key, byte[] value) {
+        add(new NoteBytes(key), new NoteBytes(value));
+    }
+
+    public void add(char[] key, BigInteger value) {
+        add(new NoteBytes(key), new NoteBigInteger(value));
+    }
+
+    public void add(char[] key, BigDecimal value) {
+        add(new NoteBytes(key), new NoteBigDecimal(value));
+    }
+
+    public void add(String key, NoteBytesObject value) {
+        add(new NoteBytes(key), value, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
+    }
+    public void add(String key, NoteBytesArray value) {
+        add(new NoteBytes(key), value, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
+    }
+
+    public void add(NoteBytes key, NoteBytes value, byte type) {
+        add(new NoteBytesPair(key, value, type));       
+    }
+
+
+    public void addAll(Map<? extends NoteBytes, ? extends NoteBytes> m) {
+         try {
+            acquireLock();
+            try{
+                for(Map.Entry<? extends NoteBytes, ? extends NoteBytes> pair : m.entrySet()){
+                    byte[] bytes = getBytes();
+                    int length = bytes.length;
+                    byte[] newBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
+                    int offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
+                    NoteBytes.writeNote(pair.getValue(), newBytes, offset);
+                    set(newBytes);
+                }
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } 
+    }
+
+    public NoteBytesPair remove(String keyString) {
+        return remove(new NoteBytes(keyString));
+    }
+
+    public NoteBytesPair remove(NoteBytes key) {
+        try {
+            acquireLock();
+            byte[] bytes = get();
+            int length = bytes.length;
+            if (bytes == null || length == 0) {
+                return null;
+            }
+            
+            try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream(length);) {
+               
+                NoteBytesPair removedPair = null;
+                int offset = 0;
+                
+                while (offset < length) {
+                    byte type = bytes[offset];
+                    int keySize = ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
+                    
+                    byte[] keyBytes = new byte[keySize];
+                    System.arraycopy(bytes, offset + 5, keyBytes, 0, keySize);
+                    
+                    int valueOffset = offset + 5 + keySize;
+                    byte valueType = bytes[valueOffset];
+                    int valueSize = ByteDecoding.bytesToIntBigEndian(bytes, valueOffset + 1);
+                    
+                    byte[] valueBytes = new byte[valueSize];
+                    System.arraycopy(bytes, valueOffset + 5, valueBytes, 0, valueSize);
+                    
+                    NoteBytes currentKey = new NoteBytes(keyBytes);
+                    if (removedPair == null && currentKey.equals(key)) {
+                        removedPair = new NoteBytesPair(currentKey, new NoteBytes(valueBytes, valueType));
+                    } else {
+                        outputStream.write(type);
+                        outputStream.write(ByteDecoding.intToBytesBigEndian(keySize), 0, 4);
+                        outputStream.write(keyBytes, 0, keySize);
+                        
+                        outputStream.write(valueType);
+                        outputStream.write(ByteDecoding.intToBytesBigEndian(valueSize), 0, 4);
+                        outputStream.write(valueBytes, 0, valueSize);
+                    }
+                    offset = valueOffset + 5 + valueSize;
+                }
+                
+                set(outputStream.toByteArray());
+                return removedPair;
+            } catch (IOException e) {
+                return null;
+            }finally {
+                releaseLock(); 
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } 
+    }
+
+    
+
+    public NoteBytesPair removeAt(int pairIndex) {
+        try {
+            acquireLock();
+            try{
+                byte[] bytes = get();
+                if (bytes == null || bytes.length == 0) {
+                    return null;
+                }
+                try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream(bytes.length)) {
+                    NoteBytesPair removedPair = null;
+                    int offset = 0;
+                    int currentIndex = 0;
+                    
+                    while (offset < bytes.length) {
+                        // Read key header (type + length)
+                        byte type = bytes[offset];
+                        int keySize = ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
+                        
+                        // Read key bytes
+                        byte[] keyBytes = new byte[keySize];
+                        System.arraycopy(bytes, offset + 5, keyBytes, 0, keySize);
+                        
+                        // Read value header
+                        int valueOffset = offset + 5 + keySize;
+                        byte valueType = bytes[valueOffset];
+                        int valueSize = ByteDecoding.bytesToIntBigEndian(bytes, valueOffset + 1);
+                        
+                        // Read value bytes
+                        byte[] valueBytes = new byte[valueSize];
+                        System.arraycopy(bytes, valueOffset + 5, valueBytes, 0, valueSize);
+                        
+                        // Check if this is the pair to remove
+                        if (currentIndex == pairIndex) {
+                            removedPair = new NoteBytesPair(
+                                new NoteBytes(keyBytes),
+                                new NoteBytes(valueBytes, ByteDecoding.getDecodingFromType(valueType))
+                            );
+                        } else {
+                            // Write key
+                            outputStream.write(type);
+                            outputStream.write(ByteDecoding.intToBytesBigEndian(keySize));
+                            outputStream.write(keyBytes);
+                            
+                            // Write value
+                            outputStream.write(valueType);
+                            outputStream.write(ByteDecoding.intToBytesBigEndian(valueSize));
+                            outputStream.write(valueBytes);
+                        }
+                        offset = valueOffset + 5 + valueSize;
+                        currentIndex++;
+                    }
+                    
+                    set(outputStream.toByteArray());
+                    return removedPair;
+                }catch (IOException e) {
+                    return null;
+                }
+            } finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } 
+    }
+
+    public int size() {
+        try {
+            acquireLock();
+            try{
+                byte[] bytes = get();
+                if (bytes == null || bytes.length == 0) {
+                    return 0;
+                }
+                int length = bytes.length;
+                int offset = 0;
+                int counter = 0;
+                
+                while (offset < length) {
+                    NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
+                    offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content
+                    counter++;
+                }
+                return counter;
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        } 
+    }
+
+    @Override
+    public JsonElement getAsJsonElement(){
+        return getAsJsonObject();
+    }
+    
+    @Override
+    public JsonArray getAsJsonArray(){
+
+        try {
+            acquireLock();
+            try{
+                byte[] bytes = get();
+                if(bytes == null){
+                    return null;
+                }
+                
+                JsonArray jsonArray = new JsonArray();
+                if(bytes.length == 0){
+                    return jsonArray;
+                }
+                int length = bytes.length;
+                int offset = 0;
+                while(offset < length){
+                    NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
+                    jsonArray.add(noteBytes.getAsJsonElement());
+                    offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content
+                }
+                
+                return jsonArray;
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new JsonArray();
+        } 
+    }
+
+    @Override
+    public JsonObject getAsJsonObject() {
+        try {
+            acquireLock();
+            try{
+                byte[] bytes = get();
+                if(bytes != null){
+                    if(bytes.length == 0){
+                        return new JsonObject();
+                    }
+                    JsonObject jsonObject = new JsonObject();
+                    int length = bytes.length;
+                    int offset = 0;
+
+                    while(offset < length){
+                        NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+                        NoteBytes value = pair.getValue();
+                        byte type = value.getByteDecoding().getType();
+                        
+                        if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+                            jsonObject.add(pair.getKeyAsString(), value.getAsJsonArray());
+                        } else if(type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                            jsonObject.add(pair.getKeyAsString(), value.getAsJsonObject());
+                        } else {
+                            jsonObject.add(pair.getKeyAsString(), value.getAsJsonElement());
+                        }
+                        offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength();
+                    }
+                    return jsonObject;
+                }
+                return null;
+            }finally {
+                releaseLock();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new JsonObject();
+        } 
+    }
+
+    @Override 
+    public String toString(){
+        return getAsJsonObject().toString();
+    }
+    
+}
