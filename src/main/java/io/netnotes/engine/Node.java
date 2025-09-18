@@ -2,165 +2,18 @@ package io.netnotes.engine;
 
 import java.io.IOException;
 import java.io.PipedOutputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
+
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteStringArray;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
-import javafx.scene.image.Image;
 
-public class Node extends NodeInformation{
-
-    public static final NoteBytesReadOnly PUBLIC_CRYPTO_KEY = new NoteBytesReadOnly("publicKey");
-    public static final NoteBytesReadOnly PRIVATE_CRYPTO_KEY = new NoteBytesReadOnly("publicKey");
-
-    public final static long EXECUTION_TIME = 500;
-    public final static String DEFAULT_IMAGE_URL = "/assets/globe-outline-white-30.png";
-
-    private String m_connectionStatus = NoteMessaging.Status.STOPPED;
-    private String[] m_keyWords = null;
-    private boolean m_stageMaximized = false;
-    private NoteStringArray m_subscribedIds = new NoteStringArray();
-    private NetworksDataInterface m_networksData;
-
-
-    public Node(NoteBytesReadOnly nodeId, NoteBytesReadOnly name, Image icon, Image smallIcon, NoteBytesReadOnly description, NoteBytesReadOnly securityLevel, NoteBytesArrayReadOnly keywords) throws IOException {
-        super(nodeId, name, icon, smallIcon, securityLevel, securityLevel, keywords);
-
-    }
-
-   public Node(String nodeId, String name, Image icon, Image smallIcon, String description,  NetworksDataInterface networksData) throws IOException {
-        super(nodeId, name, icon, smallIcon, description);
-   
-        m_networksData = networksData;
-    }
-
-    public void init( NetworksDataInterface networksData){
-        if(m_networksData == null){
-            m_networksData = networksData;
-        }
-    }
-
-    protected NetworksDataInterface getNetworksData(){
-        return m_networksData;
-    }
-
-
+public interface Node {
+    NoteBytesReadOnly getNodeId();
     
-    protected void addSubscriber(String id) {
-        if (id != null && !m_subscribedIds.contains(id)) {
-            if(m_connectionStatus != NoteMessaging.Status.STARTED){
-                start();
-            }
-            m_subscribedIds.add(id);
-        }
-    }
-
-    protected void sendStreamToSubscribers(PipedOutputStream outputStream, PipedOutputStream responseStream, EventHandler<WorkerStateEvent> onFailed){
-        
-        getNetworksData().sendNote(m_subscribedIds, outputStream, responseStream, onFailed);
-        
-    }
-
-
+    // Receives any kind of message stream - node decides how to handle based on header
+    CompletableFuture<Void> receiveRawMessage(PipedOutputStream messageStream, PipedOutputStream replyStream) throws IOException;
     
-
-    public Future<?> receiveNote(PipedOutputStream outputStream, PipedOutputStream responseStream){
-        return null;        
-    }
-
-
-
-
-    protected NoteBytes removeSubscriber(String id){
-        if(id != null){
-            NoteBytes removed = m_subscribedIds.remove(id);
-            
-            if(m_subscribedIds.size() == 0){
-                stop();
-            }
-            
-            return removed;
-        }
-
-        return null;
-    }
-
-
-
-    public void setConnectionStatus(String status){
-        m_connectionStatus = status;
-    }
-
-    public String getConnectionStatus(){
-        return m_connectionStatus;
-    }
-
-
-    protected void stop(){
-        
-        setConnectionStatus(NoteMessaging.Status.STOPPED);
-        
-    }
- 
-    protected NoteStringArray subscriberList(){
-        return m_subscribedIds;
-    }
-
-    protected void start(){
-        setConnectionStatus(NoteMessaging.Status.STARTED);
-    }
-
-  
-
-    public String[] getKeyWords() {
-        return m_keyWords;
-    }
-
-    public void setKeyWords(String[] value){
-        m_keyWords = value;
-    }
-
-
-
-    public boolean getStageMaximized() {
-        return m_stageMaximized;
-    }
-
-    public void setStageMaximized(boolean value) {
-        m_stageMaximized = value;
-    }
-
-
-    public ExecutorService getExecService(){
-        return getNetworksData().getExecService();
-    }
-
-
-    public void shutdown() {
-        removeAllSubscribers();
-    }
-
-    public void removeAllSubscribers(){
-        while(m_subscribedIds.size() > 0){
-
-            m_subscribedIds.clear();
-        }
-
-        if(m_subscribedIds.size() == 0){
-            stop();
-        }
-        
-    }
-
-
-    public NodeInformation getNodeInformation(){
-        return new NodeInformation(getNodeId(), get());
-    }
-
+    // Lifecycle
+    CompletableFuture<Void> shutdown();
+    boolean isActive();
 }

@@ -88,6 +88,22 @@ public class NoteBytesObject extends NoteBytes{
         return get(new NoteBytes(keyString));
     }
 
+    public boolean contains(NoteBytes key){
+        byte[] bytes = get();
+        int length = bytes.length;
+        
+        if(bytes != null && length > 0) {
+            int offset = 0;
+            while(offset < length) {
+                NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+                if(pair.getKey().equals(key)) {
+                    return true;
+                }
+                offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength();
+            }
+        }
+        return false;
+    }
     public NoteBytesPair get(NoteBytes key) {
       
         byte[] bytes = get();

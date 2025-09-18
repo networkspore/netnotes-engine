@@ -5,22 +5,17 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import io.netnotes.engine.NetworksDataInterface;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReader;
 import io.netnotes.engine.noteBytes.NoteBytesWriter;
-import io.netnotes.engine.noteBytes.NoteStringArray;
-import io.netnotes.engine.utils.Utils;
-import javafx.concurrent.Task;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
-
 
 
 public class StreamUtils {
@@ -45,81 +40,6 @@ public class StreamUtils {
         }
     }
 
-
-    public static Future<?> writeStreamToStream(PipedOutputStream decryptedOutputStream, PipedOutputStream inParseStream, ExecutorService execService, EventHandler<WorkerStateEvent> onFailed){
-        Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws IOException {
-
-                try(
-                    PipedInputStream decryptedInputStream = new PipedInputStream(decryptedOutputStream, PIPE_BUFFER_SIZE)
-                ){
-  
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int length = 0;
-                    while((length = decryptedInputStream.read(buffer)) != -1){
-                        inParseStream.write(buffer, 0, length);
-                        inParseStream.flush();
-                    }
-                    inParseStream.close();
-                    return null;
-                }
-            }
-        };
-        task.setOnFailed((failed)->{
-            try {
-                inParseStream.close();
-            } catch (IOException e) {
-                Utils.writeLogMsg("Utils.writeStreamToStream.close", e.toString());
-            }
-            Utils.returnException(failed, execService, onFailed);
-        });
-        return execService.submit(task);
-    }
-
-    
-    public static Future<?> readBroadcastReplyObjects(PipedOutputStream outputStream, ExecutorService execService,  EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed) {
-         Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws IOException {
-                try(
-                    NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(outputStream));
-                ){
-                    NoteBytesObject repliesObject = new NoteBytesObject();
-                    NoteBytes nextNoteBytes = null;
-                        
-                    while((nextNoteBytes = reader.nextNoteBytes()) != null){
-                        repliesObject.add(nextNoteBytes, reader.nextNoteBytes());
-
-                    }
-                    return repliesObject;
-                }
-            }
-        };
-        task.setOnSucceeded(onSucceeded);
-        task.setOnFailed(onFailed);
-        return execService.submit(task);
-    }
-
-      protected boolean broadcastNoteToSubscribers(NoteStringArray ids, NoteBytesObject noteBytesObject, NetworksDataInterface dataInterface, ExecutorService execService, EventHandler<WorkerStateEvent> onSent, EventHandler<WorkerStateEvent> onReplyComplete, EventHandler<WorkerStateEvent> onFailed){
-    
-        if(dataInterface != null){
-    
-            PipedOutputStream sendData = new PipedOutputStream();
-            PipedOutputStream replyData = new PipedOutputStream();
-        
-            dataInterface.sendNote(ids, sendData, replyData, onFailed);
-            
-            byte[] objectBytes = noteBytesObject.get();
-
-            
-            readBroadcastReplyObjects(replyData, execService, onReplyComplete, onFailed);
-            return true;
-        }else{
-            return false;
-        }
-        
-    }
 
 
     public static void streamCopy(InputStream input, OutputStream output, 
@@ -159,6 +79,18 @@ public class StreamUtils {
         }
     }
 
+    /**
+     * Write error message to reply stream
+     */
+    public static void writeMessageToStreamAndClose(PipedOutputStream stream, NoteBytes message) throws IOException {
+        try( 
+            NoteBytesEphemeral errorReply = message instanceof NoteBytesEphemeral ? (NoteBytesEphemeral) message : new NoteBytesEphemeral(message);
+            NoteBytesWriter writer = new NoteBytesWriter(stream);
+        ) {
+
+            writer.write(errorReply);
+        }
+    }
 
 
     public static void safeClose(AutoCloseable resource) {
@@ -170,5 +102,51 @@ public class StreamUtils {
                 System.err.println("Warning: Error closing resource: " + e.getMessage());
             }
         }
+    }
+
+
+    public static CompletableFuture<Void> readMessageHeaderExample(
+            NoteBytesReadOnly identityPrivateKey,
+            PipedOutputStream encryptedInputStream,
+            PipedOutputStream decryptedOutputStream,
+            ExecutorService execService
+        ) throws IOException {
+
+        PipedInputStream inputStream = new PipedInputStream(encryptedInputStream, StreamUtils.PIPE_BUFFER_SIZE);
+
+        CompletableFuture<MessageHeader> headerFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                NoteBytesReader reader = new NoteBytesReader(inputStream);
+                return MessageHeader.readHeader(reader);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }, execService);
+
+        
+        return headerFuture.thenCompose(header -> {
+            if (header instanceof SecureMessageV1) {
+                return SecureMessageV1.decryptStreamToStream(
+                    (SecureMessageV1) header,
+                    identityPrivateKey,
+                    inputStream,
+                    decryptedOutputStream,
+                    null,
+                    execService
+                );
+            } else {
+                // unsupported header → fail fast
+                CompletableFuture<Void> failed = new CompletableFuture<>();
+                failed.completeExceptionally(
+                        new IllegalArgumentException("No compatible header found: " + header));
+                return failed;
+            }
+        }).whenComplete((result, error) -> {
+            // cleanup
+      
+            StreamUtils.safeClose(encryptedInputStream);
+            StreamUtils.safeClose(decryptedOutputStream);
+            
+        });
     }
 }

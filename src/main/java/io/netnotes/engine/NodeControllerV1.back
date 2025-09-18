@@ -84,7 +84,7 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.event.ActionEvent;
 
-public class NetworksData {
+public class NodeController {
 
     public final static long DEFAULT_CYCLE_PERIOD = 7;
     public final static String NETWORK_ID = "NetworksData";
@@ -108,7 +108,7 @@ public class NetworksData {
 
     private final AppInterface m_appInterface;
 
-    public NetworksData(AppInterface appInteface, NoteBytesObject data) {
+    public NodeController(AppInterface appInteface, NoteBytesObject data) {
         m_appInterface = appInteface;
         initData(data);
     }
@@ -406,12 +406,12 @@ public class NetworksData {
 
 
 
-    protected NetworksDataInterface getNetworksDataInteface(NoteBytes nodeId){
-        return new NetworksDataInterface() {
+    protected NodeControllerInterface getNodeControllerInteface(NoteBytes nodeId){
+        return new NodeControllerInterface() {
 
             @Override
             public void sendNote(NoteBytes toId, PipedOutputStream outputStream, PipedOutputStream responseStream, EventHandler<WorkerStateEvent> onFailed) {
-                 Future<?> future = NetworksData.this.sendNote(toId, outputStream, responseStream);
+                 Future<?> future = NodeController.this.sendNote(toId, outputStream, responseStream);
                  if(future == null && onFailed != null){
                      Utils.returnException("Invalid network id: " + toId, getExecService(), onFailed);
                  }
@@ -419,7 +419,7 @@ public class NetworksData {
 
             @Override
             public void sendNote(NoteStringArrayReadOnly toId, PipedOutputStream sendData, PipedOutputStream replyData, EventHandler<WorkerStateEvent> onFailed) {
-                Future<?> future = NetworksData.this.sendNote(toId, sendData, replyData);
+                Future<?> future = NodeController.this.sendNote(toId, sendData, replyData);
                 if(future == null && onFailed != null){
                     Utils.returnException("Invalid network ids", getExecService(), onFailed); 
                 }
@@ -446,7 +446,7 @@ public class NetworksData {
 
             Node app = getAppInterface().createNode(nodeId);
             if(app != null){
-                app.init(getNetworksDataInteface(nodeId));
+                app.init(getNodeControllerInteface(nodeId));
                 return app;
             }
         }

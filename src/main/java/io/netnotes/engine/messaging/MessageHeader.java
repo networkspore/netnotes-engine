@@ -19,6 +19,12 @@ public class MessageHeader {
 
     private final NoteBytesReadOnly m_headerType;
 
+
+    
+    public static final NoteBytesReadOnly SENDER_ID_KEY = new NoteBytesReadOnly(new byte[]{0x01});
+    public static final NoteBytesReadOnly TIME_STAMP_KEY = new NoteBytesReadOnly(new byte[]{0x02});
+    public static final NoteBytesReadOnly MESSAGE_ID_KEY = new NoteBytesReadOnly(new byte[]{0x01});
+
     public MessageHeader(NoteBytesReadOnly headerType){
         m_headerType = headerType;
     }
@@ -28,13 +34,16 @@ public class MessageHeader {
     }
 
     public static MessageHeader readHeader( NoteBytesReader reader) throws EOFException, IOException{
-
-        if(reader.nextNoteBytes().equals(SecurityHeaderV1.HEADER_KEY)){
-            return new SecurityHeaderV1(reader);
-            
+        NoteBytes header = reader.nextNoteBytes();
+        if(header.equals(SecureMessageV1.HEADER_KEY)){
+            return new SecureMessageV1(reader);
+        }else if(header.equals(DiscoveryPackageV1.HEADER_KEY)){
+            return new DiscoveryPackageV1(reader);
+        }else if(header.equals(BasicMessageHandlerV1.HEADER_KEY)){
+            return new BasicMessageHandlerV1(reader);
         }
 
-        throw new IOException("Only SecurityHeaderV1 currently supported");
+        throw new IOException("Only MessageHandlerV1 currently supported");
     }
 
 

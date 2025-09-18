@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,7 +19,7 @@ import javafx.event.EventHandler;
 
 public class NoteUUID extends NoteBytes {
 
-    private static volatile AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(getRandomBytes(4)));
+    private static volatile AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
 
     private boolean m_isInit = false;
 
@@ -82,7 +83,7 @@ public class NoteUUID extends NoteBytes {
 
     public static byte[] createTimeRndBytes(){
 		byte[] nanoTime = littleEndianNanoTimeHash();
-		byte[] randomBytes = getRandomBytes(5);
+		byte[] randomBytes = RandomService.getRandomBytes(5);
 		byte[] currentTime = littleEndianCurrentTime();
         byte[] bytes = new byte[] {
             nanoTime[2], randomBytes[0], currentTime[3], randomBytes[2],
@@ -129,12 +130,7 @@ public class NoteUUID extends NoteBytes {
     }
 
 
-	private static byte[] getRandomBytes(int size){
-        SecureRandom sr = new SecureRandom();
-        byte[] randomBytes = new byte[size];
-        sr.nextBytes(randomBytes);
-        return randomBytes;
-    }
+
 
     @Override
     public String toString(){

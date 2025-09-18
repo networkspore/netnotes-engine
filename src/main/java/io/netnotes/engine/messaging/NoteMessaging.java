@@ -38,9 +38,12 @@ public class NoteMessaging {
         public static final String VERIFIED = "Verified";
         public static final String BLOCKED = "Blocked";
         public static final String INCOMPLETE = "Incomplete";
+        public static final String BROADCAST_RESULT = "Broadcast"; 
+        public static final String BROADCAST = "Broadcast Result";
     }
 
     public static class Headings {
+
         public static final NoteBytesReadOnly UUID_128 = new NoteBytesReadOnly("uuid_128");
         public static final NoteBytesReadOnly UUID_256 = new NoteBytesReadOnly("uuid_256");
         public static final NoteBytesReadOnly TIME_STAMP = new NoteBytesReadOnly("timeStamp");

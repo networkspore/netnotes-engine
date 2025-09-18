@@ -32,26 +32,24 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReader;
 import io.netnotes.engine.noteBytes.NoteBytesWriter;
 
-public class SecurityHeaderV1 extends MessageHeader {
+public class SecureMessageV1 extends MessageHeader {
 
     public static class SecurityLevel{
-        public static final NoteBytesReadOnly SECURITY_PLAINTEXT = new NoteBytesReadOnly(new byte[]{0x00});
         public static final NoteBytesReadOnly SECURITY_SIGNED = new NoteBytesReadOnly(new byte[]{0x01});
         public static final NoteBytesReadOnly SECURITY_SEALED = new NoteBytesReadOnly(new byte[]{0x02});
     }
 
     public static final NoteBytesReadOnly HEADER_KEY = new NoteBytesReadOnly(new byte[]{ 0x53, 0x48, 0x44, 0x52, 0x01}); // "SHDR1"
 
-    public static final NoteBytesReadOnly SENDER_ID_KEY = new NoteBytesReadOnly(new byte[]{0x01});
-    public static final NoteBytesReadOnly SECURITY_LEVEL_KEY = new NoteBytesReadOnly(new byte[]{0x02});
-    public static final NoteBytesReadOnly TIME_STAMP_KEY = new NoteBytesReadOnly(new byte[]{0x03});
-    public static final NoteBytesReadOnly SENDER_PUBLIC_KEY =  new NoteBytesReadOnly(new byte[]{0x04});
-    public static final NoteBytesReadOnly SIGNATURE_KEY = new NoteBytesReadOnly(new byte[]{0x05});
-    public static final NoteBytesReadOnly DATA_LENGTH = new NoteBytesReadOnly(new byte[]{0x06});
-    public static final NoteBytesReadOnly EPHEMERAL_PUBLIC_KEY = new NoteBytesReadOnly(new byte[]{0x07});
-    public static final NoteBytesReadOnly NONCE_KEY = new NoteBytesReadOnly(new byte[]{0x08});
-    public static final NoteBytesReadOnly ALGORITHM_KEY = new NoteBytesReadOnly(new byte[]{0x09});
-    public static final NoteBytesReadOnly SALT_KEY = new NoteBytesReadOnly(new byte[]{0x10});
+
+    public static final NoteBytesReadOnly SECURITY_LEVEL_KEY = new NoteBytesReadOnly(new byte[]{0x13});
+    public static final NoteBytesReadOnly SENDER_PUBLIC_KEY =  new NoteBytesReadOnly(new byte[]{0x14});
+    public static final NoteBytesReadOnly SIGNATURE_KEY = new NoteBytesReadOnly(new byte[]{0x15});
+    public static final NoteBytesReadOnly DATA_LENGTH = new NoteBytesReadOnly(new byte[]{0x16});
+    public static final NoteBytesReadOnly EPHEMERAL_PUBLIC_KEY = new NoteBytesReadOnly(new byte[]{0x17});
+    public static final NoteBytesReadOnly NONCE_KEY = new NoteBytesReadOnly(new byte[]{0x18});
+    public static final NoteBytesReadOnly ALGORITHM_KEY = new NoteBytesReadOnly(new byte[]{0x19});
+    public static final NoteBytesReadOnly SALT_KEY = new NoteBytesReadOnly(new byte[]{0x20});
 
     private NoteBytesReadOnly m_timeStamp = null;
     private NoteBytesReadOnly m_senderPublicKey = null;
@@ -63,7 +61,7 @@ public class SecurityHeaderV1 extends MessageHeader {
     private NoteBytesReadOnly m_salt = null;
     private NoteBytesReadOnly m_algorithm = null;
 
-    public SecurityHeaderV1(NoteBytesReader reader) throws EOFException, IOException{
+    public SecureMessageV1(NoteBytesReader reader) throws EOFException, IOException{
         super(HEADER_KEY);
         NoteBytesMetaData headerMetaData = reader.nextMetaData();
 
@@ -234,14 +232,6 @@ public class SecurityHeaderV1 extends MessageHeader {
 
 
 
-    public static NoteBytesPair getPlainTextHeader(NoteBytes senderId){
-        NoteBytesObject header = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(SENDER_ID_KEY, senderId),
-            new NoteBytesPair(SECURITY_LEVEL_KEY, SecurityLevel.SECURITY_PLAINTEXT),
-            new NoteBytesPair(TIME_STAMP_KEY, System.currentTimeMillis()),
-        });
-        return new NoteBytesPair(HEADER_KEY, header);
-    }
 
     public static NoteBytesPair getSecuritySignedHeader(NoteBytes senderId, Ed25519PublicKeyParameters senderPublicKey, int dataLength){
         NoteBytesObject header = new NoteBytesObject(new NoteBytesPair[]{
@@ -310,26 +300,6 @@ public class SecurityHeaderV1 extends MessageHeader {
     }
 
 
-    public static CompletableFuture<Void> beginUnencryptedStream(
-        NoteBytes senderId,
-        PipedOutputStream startStream,
-        PipedOutputStream outputEncryptedStream,
-        ExecutorService execService
-    ){
-        return CompletableFuture.runAsync(() -> {
-            NoteBytesPair header = getPlainTextHeader(senderId);
-        
-            try(
-                PipedInputStream inputStream = new PipedInputStream(startStream, StreamUtils.PIPE_BUFFER_SIZE);
-                NoteBytesWriter writer = new NoteBytesWriter(outputEncryptedStream);
-            ){
-                writer.write(header);
-                StreamUtils.streamCopy(inputStream, outputEncryptedStream, null);
-            }catch(IOException e){
-                throw new RuntimeException("Unencrypted stream failed", e);
-            }
-        });
-    }
 
     public static CompletableFuture<Void> beginSignedStream(
         NoteBytes senderId,
@@ -423,7 +393,7 @@ public class SecurityHeaderV1 extends MessageHeader {
 
 
     public static CompletableFuture<Void> decryptStreamToStream(
-            SecurityHeaderV1 header,
+            SecureMessageV1 header,
             NoteBytesReadOnly privateKey,
             InputStream encryptedInputStream,
             OutputStream decryptedOutputStream,
@@ -434,13 +404,11 @@ public class SecurityHeaderV1 extends MessageHeader {
         return CompletableFuture.runAsync(() -> {
 
             try {
-                if(header.getHeaderType().equals(SecurityHeaderV1.HEADER_KEY)){
-                    SecurityHeaderV1 securityHeaderV1 = (SecurityHeaderV1) header;
+                if(header.getHeaderType().equals(SecureMessageV1.HEADER_KEY)){
+                    SecureMessageV1 securityHeaderV1 = (SecureMessageV1) header;
                     NoteBytesReadOnly securityLevel = securityHeaderV1.getSecurityLevel();
 
-                    if (securityLevel.equals(SecurityLevel.SECURITY_PLAINTEXT)) {
-                        StreamUtils.streamCopy(encryptedInputStream, decryptedOutputStream, progressTracker);
-                    }  else if (securityLevel.equals(SecurityLevel.SECURITY_SIGNED)) {
+                    if (securityLevel.equals(SecurityLevel.SECURITY_SIGNED)) {
                         processSignedDecryption(header,encryptedInputStream,decryptedOutputStream,progressTracker);
                     }  else if (securityLevel.equals(SecurityLevel.SECURITY_SEALED)) {
                         processSealedDecryption(header, encryptedInputStream, decryptedOutputStream, privateKey, progressTracker);
@@ -463,7 +431,7 @@ public class SecurityHeaderV1 extends MessageHeader {
 
                 
     public static void processSignedDecryption(
-        SecurityHeaderV1 header,
+        SecureMessageV1 header,
         InputStream input,
         OutputStream output,
         StreamProgressTracker progressTracker
@@ -522,7 +490,7 @@ public class SecurityHeaderV1 extends MessageHeader {
     }
     
     public static void processSealedDecryption(
-        SecurityHeaderV1 header,
+        SecureMessageV1 header,
         InputStream input,
         OutputStream output,
         NoteBytesReadOnly identityPrivateKey,

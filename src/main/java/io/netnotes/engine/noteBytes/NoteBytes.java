@@ -318,6 +318,10 @@ public class NoteBytes {
         }
     }
 
+      public NoteBytes copy(){
+        return new NoteBytes(Arrays.copyOf(get(), byteLength()), getByteDecoding());
+    }
+
     public static void writeNote(NoteBytes noteBytes, ByteArrayOutputStream outputStream) throws IOException {
         byte type = noteBytes.getByteDecoding().getType();
         outputStream.write(type);
