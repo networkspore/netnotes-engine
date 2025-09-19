@@ -2,15 +2,15 @@ package io.netnotes.engine.noteBytes;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.utils.HardwareInfo;
 import io.netnotes.engine.utils.Utils;
 import javafx.concurrent.Task;

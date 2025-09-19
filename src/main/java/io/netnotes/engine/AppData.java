@@ -1,6 +1,11 @@
 package io.netnotes.engine;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -49,13 +54,10 @@ import io.netnotes.engine.crypto.FileStreamUtils.ProgressUpdate;
 import io.netnotes.engine.crypto.HashData;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.noteBytes.ByteDecoding;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesPair;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
-import io.netnotes.engine.noteBytes.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteRandom;
 import io.netnotes.engine.noteBytes.NoteUUID;
@@ -64,7 +66,6 @@ import io.netnotes.engine.utils.UpdateInformation;
 import io.netnotes.engine.utils.Utils;
 import io.netnotes.engine.utils.Version;
 import io.netnotes.engine.utils.GitHubAPI.GitHubAsset;
-import io.netnotes.engine.noteBytes.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 
 import javafx.beans.property.SimpleObjectProperty;

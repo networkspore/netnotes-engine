@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.processing;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
+import io.netnotes.engine.noteBytes.NoteShort;
 import io.netnotes.engine.utils.Utils;
 
 public class ByteDecoding{

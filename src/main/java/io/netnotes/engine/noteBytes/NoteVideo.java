@@ -1,10 +1,11 @@
 package io.netnotes.engine.noteBytes;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public  class NoteVideo extends NoteBytes {
     public NoteVideo(byte[] videoData) {

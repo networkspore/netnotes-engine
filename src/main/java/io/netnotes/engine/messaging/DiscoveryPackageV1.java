@@ -2,13 +2,13 @@ package io.netnotes.engine.messaging;
 
 import java.io.IOException;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesMap;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesPair;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
 
 
 public class DiscoveryPackageV1 extends MessageHeader {

@@ -14,8 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
-import io.netnotes.engine.noteBytes.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 
 public class StreamUtils {

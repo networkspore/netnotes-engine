@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -7,7 +7,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>, AutoCloseable{
     private ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> m_pairs = null;

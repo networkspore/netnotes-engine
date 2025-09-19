@@ -1,5 +1,5 @@
 
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -8,7 +8,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesArrayList implements List<NoteBytes>{
     private ArrayList<NoteBytes> m_list = null;

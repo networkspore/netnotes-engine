@@ -16,10 +16,10 @@ import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.TaskMessages;
 import io.netnotes.engine.messaging.NoteMessaging.General;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 
 public class NodeBroadcaster {
     public static final long MAX_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB default

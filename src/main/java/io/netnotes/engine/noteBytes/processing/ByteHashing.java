@@ -1,10 +1,10 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.processing;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.ove.crypto.digest.Blake2b;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
 public class ByteHashing  {
     
 

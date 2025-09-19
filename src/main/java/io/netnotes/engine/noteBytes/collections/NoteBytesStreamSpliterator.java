@@ -1,9 +1,12 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.util.Spliterator;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesPair;
 
 public class NoteBytesStreamSpliterator implements Spliterator<NoteBytesPair> {
     private final Spliterator<NoteBytes> source;

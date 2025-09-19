@@ -1,28 +1,34 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
-public class NoteBytesTree extends NoteBytes {
+
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesAsync;
+import io.netnotes.engine.noteBytes.NoteBytesNode;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+public class NoteBytesTreeAsync extends NoteBytesAsync {
     
     private NoteBytesNode m_root = null;
-
     private int m_size = 0;
+
     
-    public NoteBytesTree() {
+    public NoteBytesTreeAsync() {
         this(new byte[0]);
     }
 
-    public NoteBytesTree(byte[] bytes) {
+
+    public NoteBytesTreeAsync(byte[] bytes) {
         super(bytes, ByteDecoding.NOTE_BYTES_TREE);
     }
-
 
 
     @Override
@@ -30,18 +36,33 @@ public class NoteBytesTree extends NoteBytes {
         set(bytes, ByteDecoding.NOTE_BYTES_TREE);
     }
 
+
+
+
     @Override
     public void set(byte[] bytes, ByteDecoding byteDecoding) {
-        deserialize(bytes);
-        super.set(new byte[0], byteDecoding);
+        setByteDecoding(byteDecoding);
+        try {
+            acquireLock();
+            deserialize(bytes);
+            super.set(new byte[0], byteDecoding);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            releaseLock();
+        }
     }
 
-   
+
     public void insert(NoteBytes data) throws InterruptedException {
-     
-        m_root = insertRec(m_root, data);
-        m_size++;
-        
+        acquireLock();
+        try {
+            m_root = insertRec(m_root, data);
+            m_size++;
+            
+        } finally {
+            releaseLock();
+        }
     }
 
     private NoteBytesNode insertRec(NoteBytesNode root, NoteBytes data) {
@@ -72,9 +93,12 @@ public class NoteBytesTree extends NoteBytes {
         return Integer.compare(bytesA.length, bytesB.length);
     }
     public boolean contains(NoteBytes data) throws InterruptedException {
-     
-        return containsRec(m_root, data);
-        
+        acquireLock();
+        try {
+            return containsRec(m_root, data);
+        } finally {
+            releaseLock();
+        }
     }
     private boolean containsRec(NoteBytesNode root, NoteBytes data) {
         if (root == null) {
@@ -91,7 +115,12 @@ public class NoteBytesTree extends NoteBytes {
     }
 
     public void remove(NoteBytes data) throws InterruptedException {
-        m_root = removeRec(m_root, data); 
+        acquireLock();
+        try {
+            m_root = removeRec(m_root, data);
+        } finally {
+            releaseLock();
+        }
     }
 
     private NoteBytesNode removeRec(NoteBytesNode root, NoteBytes data) {
@@ -126,9 +155,12 @@ public class NoteBytesTree extends NoteBytes {
     }
     public List<NoteBytes> inOrderTraversal() throws InterruptedException {
         List<NoteBytes> result = new ArrayList<>();
-      
-        inOrderRec(m_root, result);
-       
+        acquireLock();
+        try {
+            inOrderRec(m_root, result);
+        } finally {
+            releaseLock();
+        }
         return result;
     }
     private void inOrderRec(NoteBytesNode root, List<NoteBytes> result) {
@@ -332,9 +364,15 @@ public class NoteBytesTree extends NoteBytes {
 
     @Override
     public void clear() {
-     
-        m_root = null;
-        m_size = 0;
-        super.clear(); 
+        try {
+            acquireLock();
+            m_root = null;
+            m_size = 0;
+            super.clear();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            releaseLock();
+        }
     }
 }

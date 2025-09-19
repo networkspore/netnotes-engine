@@ -1,10 +1,15 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.processing;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesPair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesWriter implements AutoCloseable {
     private final DataOutputStream m_out;

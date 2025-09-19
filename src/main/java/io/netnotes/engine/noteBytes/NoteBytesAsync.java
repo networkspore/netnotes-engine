@@ -3,7 +3,8 @@ package io.netnotes.engine.noteBytes;
 import java.nio.CharBuffer;
 import java.util.concurrent.locks.ReentrantLock;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesAsync extends NoteBytes{
 

@@ -1,25 +1,33 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
-public class NoteBytesTreeAsync extends NoteBytesAsync {
+
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesNode;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteHashing;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+public class NoteBytesMerkleTree extends NoteBytes {
     
     private NoteBytesNode m_root = null;
     private int m_size = 0;
-
+    private final int HASH_SIZE = 32;
+    private byte[] m_merkleRoot = new byte[HASH_SIZE];;
     
-    public NoteBytesTreeAsync() {
+    public NoteBytesMerkleTree() {
         this(new byte[0]);
     }
-
-
-    public NoteBytesTreeAsync(byte[] bytes) {
+    
+    public NoteBytesMerkleTree(byte[] bytes) {
         super(bytes, ByteDecoding.NOTE_BYTES_TREE);
     }
 
@@ -29,33 +37,48 @@ public class NoteBytesTreeAsync extends NoteBytesAsync {
         set(bytes, ByteDecoding.NOTE_BYTES_TREE);
     }
 
-
-
-
     @Override
     public void set(byte[] bytes, ByteDecoding byteDecoding) {
-        setByteDecoding(byteDecoding);
-        try {
-            acquireLock();
-            deserialize(bytes);
-            super.set(new byte[0], byteDecoding);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            releaseLock();
-        }
+        deserialize(bytes);
+        updateMerkleRoot();
+        super.set(new byte[0], byteDecoding);
     }
 
 
-    public void insert(NoteBytes data) throws InterruptedException {
-        acquireLock();
-        try {
-            m_root = insertRec(m_root, data);
-            m_size++;
-            
-        } finally {
-            releaseLock();
+    private void updateMerkleRoot() {
+        m_merkleRoot = calculateMerkleRoot(m_root);
+    }
+
+    private byte[] calculateMerkleRoot(NoteBytesNode node) {
+        if (node == null || m_size == 0) {
+            return new byte[HASH_SIZE];
         }
+        byte[] nodeHash = ByteHashing.digestBytesToBytes(node.getData().get(), HASH_SIZE);
+        
+        if (node.getLeft() == null && node.getRight() == null) {
+            return nodeHash;
+        }
+        byte[] leftHash = calculateMerkleRoot(node.getLeft());
+        byte[] rightHash = calculateMerkleRoot(node.getRight());
+        // Combine and hash the child hashes
+        byte[] combined = new byte[leftHash.length + rightHash.length];
+        System.arraycopy(leftHash, 0, combined, 0, leftHash.length);
+        System.arraycopy(rightHash, 0, combined, leftHash.length, rightHash.length);
+        
+        return ByteHashing.digestBytesToBytes(combined, HASH_SIZE);
+    }
+
+    public byte[] getMerkleRoot() {
+        return m_merkleRoot.clone();
+    }
+
+   
+    public void insert(NoteBytes data) throws InterruptedException {
+     
+        m_root = insertRec(m_root, data);
+        m_size++;
+        updateMerkleRoot();
+        
     }
 
     private NoteBytesNode insertRec(NoteBytesNode root, NoteBytes data) {
@@ -86,12 +109,9 @@ public class NoteBytesTreeAsync extends NoteBytesAsync {
         return Integer.compare(bytesA.length, bytesB.length);
     }
     public boolean contains(NoteBytes data) throws InterruptedException {
-        acquireLock();
-        try {
-            return containsRec(m_root, data);
-        } finally {
-            releaseLock();
-        }
+    
+        return containsRec(m_root, data);
+       
     }
     private boolean containsRec(NoteBytesNode root, NoteBytes data) {
         if (root == null) {
@@ -108,12 +128,12 @@ public class NoteBytesTreeAsync extends NoteBytesAsync {
     }
 
     public void remove(NoteBytes data) throws InterruptedException {
-        acquireLock();
-        try {
-            m_root = removeRec(m_root, data);
-        } finally {
-            releaseLock();
+      
+        m_root = removeRec(m_root, data);
+        if (m_size > 0) {
+            updateMerkleRoot();
         }
+       
     }
 
     private NoteBytesNode removeRec(NoteBytesNode root, NoteBytes data) {
@@ -148,12 +168,9 @@ public class NoteBytesTreeAsync extends NoteBytesAsync {
     }
     public List<NoteBytes> inOrderTraversal() throws InterruptedException {
         List<NoteBytes> result = new ArrayList<>();
-        acquireLock();
-        try {
-            inOrderRec(m_root, result);
-        } finally {
-            releaseLock();
-        }
+        
+        inOrderRec(m_root, result);
+        
         return result;
     }
     private void inOrderRec(NoteBytesNode root, List<NoteBytes> result) {
@@ -357,15 +374,11 @@ public class NoteBytesTreeAsync extends NoteBytesAsync {
 
     @Override
     public void clear() {
-        try {
-            acquireLock();
-            m_root = null;
-            m_size = 0;
-            super.clear();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            releaseLock();
-        }
+     
+        m_root = null;
+        m_size = 0;
+        m_merkleRoot = new byte[HASH_SIZE]; // Reset merkle root
+        super.clear();
+       
     }
 }

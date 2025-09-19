@@ -10,6 +10,10 @@ import java.util.Arrays;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.crypto.RandomService;
+import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 
 public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
     private static final Cleaner cleaner = Cleaner.create();

@@ -1,5 +1,7 @@
 package io.netnotes.engine.noteBytes;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteHashing;
 
 public class NoteShort extends NoteBytes{
     public static final int UNSIGNED_MAX = 65535;

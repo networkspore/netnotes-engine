@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.processing;
 
 /*
  * Secure version of ByteDecoding with strict validation.

@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.processing;
 
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -6,7 +6,9 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 public class NoteBytesReader implements AutoCloseable{
     private final InputStream m_in;
     

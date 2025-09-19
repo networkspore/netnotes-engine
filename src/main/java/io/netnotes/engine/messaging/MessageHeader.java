@@ -8,7 +8,7 @@ import java.util.concurrent.Executor;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 
 public class MessageHeader {
 

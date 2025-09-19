@@ -9,8 +9,9 @@ import java.util.stream.Stream;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
-import io.netnotes.engine.utils.Utils;
+
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesArray extends NoteBytes{
 

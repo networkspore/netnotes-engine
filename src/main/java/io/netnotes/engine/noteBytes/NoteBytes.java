@@ -16,7 +16,14 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesTree;
+import io.netnotes.engine.noteBytes.collections.NoteBytesTreeAsync;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteHashing;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import javafx.scene.image.Image;
 
 import com.google.gson.JsonArray;

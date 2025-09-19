@@ -2,6 +2,8 @@ package io.netnotes.engine.noteBytes;
 
 import java.math.BigDecimal;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteBytesPair {
     private NoteBytes m_key;
     private NoteBytes m_value;

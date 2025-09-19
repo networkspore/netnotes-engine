@@ -3,6 +3,8 @@ package io.netnotes.engine.noteBytes;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteBytesArrayReadOnly extends NoteBytesArray{
 
  

@@ -6,10 +6,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.ByteDecoding;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArray;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.NoteString;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;

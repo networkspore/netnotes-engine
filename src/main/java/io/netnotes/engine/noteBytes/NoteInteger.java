@@ -1,5 +1,7 @@
 package io.netnotes.engine.noteBytes;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteInteger extends NoteBytes  {
 
     public NoteInteger(int integer){

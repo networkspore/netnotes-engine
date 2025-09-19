@@ -4,6 +4,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
 
     public final static String DEFAULT_DELIMITER = "/";

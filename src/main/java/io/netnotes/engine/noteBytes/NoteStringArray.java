@@ -4,6 +4,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteStringArray extends NoteBytesArray {
 
     public final static String DELIMITER = ",";

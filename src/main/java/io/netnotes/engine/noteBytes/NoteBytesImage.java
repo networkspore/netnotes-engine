@@ -33,7 +33,7 @@ import javafx.scene.image.WritablePixelFormat;
 import javafx.concurrent.Task;
 import javafx.event.EventHandler;
 import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 public class NoteBytesImage extends NoteBytes {
     public final static int EMPTY_ARGB = 0x00000000;
     public static final String UNKNWON_IMG_URL = "/assets/unknown-unit.png";

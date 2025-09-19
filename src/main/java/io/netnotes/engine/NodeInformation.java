@@ -9,8 +9,8 @@ import io.netnotes.engine.noteBytes.NoteBytesImage;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesPair;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
-import io.netnotes.engine.noteBytes.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import javafx.scene.image.Image;
 
 public class NodeInformation {

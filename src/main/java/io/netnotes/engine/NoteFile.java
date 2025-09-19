@@ -23,13 +23,14 @@ import io.netnotes.engine.messaging.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReader;
-import io.netnotes.engine.noteBytes.NoteBytesTree;
-import io.netnotes.engine.noteBytes.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.NoteJsonObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.collections.NoteBytesTree;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.utils.Utils;

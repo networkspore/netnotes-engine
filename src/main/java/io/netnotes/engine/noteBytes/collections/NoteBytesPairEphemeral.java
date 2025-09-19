@@ -1,5 +1,7 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 
 public class NoteBytesPairEphemeral implements AutoCloseable {
     private NoteBytes m_key;

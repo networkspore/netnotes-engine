@@ -1,10 +1,14 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 
 public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>, AutoCloseable{
     private HashMap<NoteBytes, NoteBytesEphemeral> m_pairs = null;

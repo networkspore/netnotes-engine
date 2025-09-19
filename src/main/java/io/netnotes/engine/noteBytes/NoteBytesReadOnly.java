@@ -2,6 +2,8 @@ package io.netnotes.engine.noteBytes;
 
 import java.util.Arrays;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
 public class NoteBytesReadOnly extends NoteBytes {
     
 

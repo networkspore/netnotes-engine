@@ -2,7 +2,9 @@ package io.netnotes.engine.noteBytes;
 
 import java.util.Arrays;
 
-import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecodingSecure;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 /*
  * =========================================================================
