@@ -16,6 +16,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 import io.netnotes.engine.crypto.RandomService;
+import io.netnotes.engine.noteBytes.collections.NoteBytesArrayList;
 import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
@@ -70,7 +71,7 @@ public class NoteBytes {
     }
 
     public NoteBytes( byte[] value, byte type){
-        this(value, ByteDecoding.getDecodingFromType(type));
+        this(value, ByteDecoding.of(type));
     }
 
     
@@ -302,17 +303,20 @@ public class NoteBytes {
 
     public static int writeNote(NoteBytes noteBytes, byte[] dst, int dstOffset){
         int dstLength = dst.length;
-        
+        final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
         byte[] src = noteBytes.get(); 
         int srcLength = src.length;
-        if(dstLength > dstOffset + 5 + srcLength){
+
+        if(dstLength >= dstOffset + metaDataSize + srcLength){
             dst[dstOffset] = noteBytes.getByteDecoding().getType();
-            byte[] srcLengthBytes = ByteDecoding.intToBytesBigEndian(srcLength);
-            System.arraycopy(srcLengthBytes, 0, dst, dstOffset + 1, 4);
-            System.arraycopy(src, 0, dst, dstOffset + 5, srcLength);
-            return dstOffset + 5 + srcLength;
+            dst[dstOffset + 1] = (byte) (srcLength >>> 24);
+            dst[dstOffset + 2] = (byte) (srcLength >>> 16);
+            dst[dstOffset + 3] = (byte) (srcLength >>> 8);
+            dst[dstOffset + 4] = (byte) (srcLength);
+            System.arraycopy(src, 0, dst, dstOffset + metaDataSize, srcLength);
+            return dstOffset + metaDataSize + srcLength;
         }else{
-            throw new RuntimeException("insufficient destination length");
+            throw new IndexOutOfBoundsException("insufficient destination length");
         }
     }
 
@@ -327,8 +331,33 @@ public class NoteBytes {
         outputStream.write(noteBytes.get());
     }
 
-    public static NoteBytes readNote(byte[] bytes, int offset){
-        return readNote(bytes, offset, false);
+    public static NoteBytes readNote(byte[] src, int srcOffset){
+        final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
+
+        if (src.length < srcOffset + metaDataSize) {
+            throw new IndexOutOfBoundsException("insufficient source length for metadata");
+        }
+
+        // 1. Read type
+        byte type = src[srcOffset];
+
+        // 2. Read length (4 bytes big-endian)
+        int length = ((src[srcOffset + 1] & 0xFF) << 24) |
+                    ((src[srcOffset + 2] & 0xFF) << 16) |
+                    ((src[srcOffset + 3] & 0xFF) << 8)  |
+                    (src[srcOffset + 4] & 0xFF);
+
+        if (src.length < srcOffset + metaDataSize + length) {
+            throw new IndexOutOfBoundsException("insufficient source length for data");
+        }
+
+        // 3. Copy payload
+        byte[] data = new byte[length];
+        System.arraycopy(src, srcOffset + metaDataSize, data, 0, length);
+
+        // 4. Construct NoteBytes
+        ByteDecoding decoding = ByteDecoding.of(type);
+        return new NoteBytes(data, decoding);
     }
 
     public static NoteBytes readNote(byte[] bytes, int offset, boolean isLittleEndian){
@@ -337,7 +366,7 @@ public class NoteBytes {
         int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytes(dst, ByteDecoding.getDecodingFromType(type));
+        return new NoteBytes(dst, ByteDecoding.of(type));
     }
 
 
@@ -622,11 +651,29 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
+    public static NoteBytes create(byte[] bytes, byte type) {
+        switch(type) {
+            case NoteBytesMetaData.STRING_TYPE: return new NoteString(bytes); 
+            case NoteBytesMetaData.STRING_UTF16_TYPE: return new NoteString(bytes, ByteDecoding.STRING_UTF16);
+            case NoteBytesMetaData.BOOLEAN_TYPE: return new NoteBoolean(bytes);
+            case NoteBytesMetaData.INTEGER_TYPE: return new NoteInteger(bytes);
+            case NoteBytesMetaData.DOUBLE_TYPE: return new NoteDouble(bytes);
+            case NoteBytesMetaData.LONG_TYPE: return new NoteLong(bytes);
+            case NoteBytesMetaData.FLOAT_TYPE: return new NoteFloat(bytes);
+            case NoteBytesMetaData.SHORT_TYPE: return new NoteShort(bytes);
+            case NoteBytesMetaData.BIG_INTEGER_TYPE: return new NoteBigInteger(bytes);
+            case NoteBytesMetaData.BIG_DECIMAL_TYPE: return new NoteBigDecimal(bytes);
+            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE: return new NoteBytesArray(bytes);
+            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE: return new NoteBytesObject(bytes);
+            case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE: return new NoteSerializable(bytes);
+            default: return new NoteBytes(bytes, ByteDecoding.of(type));
+        }
+
+    }
+
     public static NoteBytes createNoteBytes(Object obj) {
         if (obj == null) {
             throw new NullPointerException("Cannot create NoteBytes from null object");
-        }else if(obj instanceof NoteBytes){
-            return (NoteBytes) obj;
         }else if (obj instanceof Boolean) {
             return new NoteBoolean((Boolean) obj);
         } else if (obj instanceof Integer) {
@@ -659,6 +706,12 @@ public class NoteBytes {
             return ((NoteBytesConcurrentMapEphemeral) obj).getNoteBytesEphemeral();
         } else if(obj instanceof NoteBytesMap){
             return ((NoteBytesMap)obj).getNoteBytesObject();
+        }else if(obj instanceof NoteSerializable){
+            return (NoteSerializable) obj;
+        }else if(obj instanceof NoteBytesArrayList){
+            return ((NoteBytesArrayList) obj).getNoteBytesArray();
+        }else if(obj instanceof NoteBytes){
+            return (NoteBytes) obj;
         }else if(obj instanceof Serializable){
             try{
                 return new NoteSerializable(obj);

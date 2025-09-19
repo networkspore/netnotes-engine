@@ -43,7 +43,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
 
    
     public NoteBytesSecure( byte[] value, byte type){
-        this(value, ByteDecodingSecure.getDecodingFromType(type));
+        this(value, ByteDecodingSecure.of(type));
     }
     
     public NoteBytesSecure( byte[] value, ByteDecoding byteDecoding){

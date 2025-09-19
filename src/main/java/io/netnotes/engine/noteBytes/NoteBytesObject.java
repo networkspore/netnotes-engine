@@ -346,7 +346,7 @@ public class NoteBytesObject extends NoteBytes{
                 if (currentIndex == pairIndex) {
                     removedPair = new NoteBytesPair(
                         new NoteBytes(keyBytes),
-                        new NoteBytes(valueBytes, ByteDecoding.getDecodingFromType(valueType))
+                        new NoteBytes(valueBytes, ByteDecoding.of(valueType))
                     );
                 } else {
                     // Write key

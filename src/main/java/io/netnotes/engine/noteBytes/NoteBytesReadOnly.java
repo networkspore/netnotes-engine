@@ -20,7 +20,7 @@ public class NoteBytesReadOnly extends NoteBytes {
     }
 
     public NoteBytesReadOnly( byte[] value, byte type){
-        this(value, ByteDecoding.getDecodingFromType(type));
+        this(value, ByteDecoding.of(type));
     }
 
     public static NoteBytesReadOnly readNote(byte[] bytes, int offset){
@@ -33,7 +33,7 @@ public class NoteBytesReadOnly extends NoteBytes {
         int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytesReadOnly(dst, ByteDecoding.getDecodingFromType(type));
+        return new NoteBytesReadOnly(dst, ByteDecoding.of(type));
     }
     
     @Override

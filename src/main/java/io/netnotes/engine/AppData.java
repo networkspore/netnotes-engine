@@ -871,8 +871,8 @@ public class AppData {
             bytesRead += 5 + valueMetaData.getLength();
             
             // Create NoteBytes objects and store the pair
-            NoteBytes key = new NoteBytes(keyData, ByteDecoding.getDecodingFromType(keyMetaData.getType()));
-            NoteBytes value = new NoteBytes(valueData, ByteDecoding.getDecodingFromType(valueMetaData.getType()));
+            NoteBytes key = new NoteBytes(keyData, ByteDecoding.of(keyMetaData.getType()));
+            NoteBytes value = new NoteBytes(valueData, ByteDecoding.of(valueMetaData.getType()));
             pendingPairs.add(new NoteBytesPair(key, value));
         }
         

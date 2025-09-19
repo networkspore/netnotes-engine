@@ -87,9 +87,9 @@ public class OSGiNodePluginFactory {
 
                 NoteBytes value = reader.nextNoteBytes();
 
-                while(value != null){
+                while(value != null && value.byteLength() > 0 && value.getByteDecoding().getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
 
-                    builder.accept(new PluginMetaData(value));
+                    builder.accept(new PluginMetaData(value.getAsNoteBytesObject()));
 
                     value = reader.nextNoteBytes();
 

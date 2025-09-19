@@ -78,7 +78,7 @@ public class NoteBytesArray extends NoteBytes{
         while(offset < length){
             NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
             noteBytesBuilder.accept(noteBytes);
-            offset += (5 + noteBytes.byteLength());
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
         }
         return noteBytesBuilder.build();
            
@@ -110,7 +110,7 @@ public class NoteBytesArray extends NoteBytes{
             if(counter == index){
                 byte[] dst = new byte[size];
                 System.arraycopy(bytes, offset, dst, 0, size);
-                return new NoteBytes(dst, ByteDecoding.getDecodingFromType(type));
+                return new NoteBytes(dst, ByteDecoding.of(type));
             }
             offset += size;
             counter++;
@@ -220,7 +220,7 @@ public class NoteBytesArray extends NoteBytes{
                 System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
                 
                 if (removedBytes == null && Arrays.equals(contentBytes, noteBytes.get())) {
-                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.getDecodingFromType(type));
+                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
                 } else {
                     outputStream.write(type);
                     outputStream.write(getByteDecoding().isLittleEndian() ? ByteDecoding.intToBytesLittleEndian(size) : ByteDecoding.intToBytesBigEndian(size));
@@ -267,7 +267,7 @@ public class NoteBytesArray extends NoteBytes{
                     // Store the bytes being removed
                     byte[] contentBytes = new byte[size];
                     System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
-                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.getDecodingFromType(type));
+                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
                 } else {
                     // Write metadata
                     outputStream.write(type);

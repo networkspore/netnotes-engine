@@ -9,5 +9,11 @@ public class NoteSerializable extends NoteBytes {
         super(ByteDecoding.serializeObject(obj), ByteDecoding.SERIALIZABLE_OBJECT);
     }
 
+    public NoteSerializable(byte[] bytes){
+        super(bytes, ByteDecoding.SERIALIZABLE_OBJECT);
+    }
     
+    public NoteSerializable(Byte[] bytes){
+        super(ByteDecoding.unboxBytes(bytes), ByteDecoding.SERIALIZABLE_OBJECT);
+    }
 }

@@ -59,7 +59,7 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
     }
 
     public NoteBytesEphemeral( byte[] value, byte type){
-        super(value , ByteDecoding.getDecodingFromType(type));
+        super(value , ByteDecoding.of(type));
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
 
@@ -83,7 +83,7 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
         int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytesEphemeral(dst, ByteDecoding.getDecodingFromType(type));
+        return new NoteBytesEphemeral(dst, ByteDecoding.of(type));
     }
 
 

@@ -100,7 +100,7 @@ public class NoteStringArray extends NoteBytesArray {
             byte type = bytes[offset++];
             int size = byteDecoding.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
             offset += 4;
-            NoteBytes noteBytes = new NoteBytes(Arrays.copyOfRange(bytes, offset, offset + size), ByteDecoding.getDecodingFromType(type));
+            NoteBytes noteBytes = new NoteBytes(Arrays.copyOfRange(bytes, offset, offset + size), ByteDecoding.of(type));
             noteBytesBuilder.accept(noteBytes.getAsString());
             offset += size;
         }

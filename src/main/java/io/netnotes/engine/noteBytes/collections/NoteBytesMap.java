@@ -18,7 +18,7 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
     private HashMap<NoteBytes, NoteBytes> m_pairs = null;
 
 
-    public NoteBytesMap(byte[] bytes) throws IOException{
+    public NoteBytesMap(byte[] bytes) {
         init(bytes);
     }
 
@@ -26,7 +26,7 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
         m_pairs = new HashMap<>();
     }
 
-    public NoteBytesMap(NoteBytes noteBytes){
+    public NoteBytesMap(NoteBytesObject noteBytes){
         init(noteBytes.get());
     }
 
@@ -97,9 +97,9 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
             int offset = 0;
             while(offset < length) {
                 NoteBytes key = NoteBytes.readNote(bytes, offset);
-                offset += (5 + key.byteLength()); // 1 byte type + 4 bytes length
+                offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + key.byteLength()); 
                 NoteBytes value = NoteBytes.readNote(bytes, offset);
-                offset += (5 + value.byteLength()); // 1 byte type + 4 bytes length
+                offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + value.byteLength());
                 map.put(key, value);
             }
            
@@ -143,7 +143,7 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
     public int byteLength_w_MetaData(){
         int length = 0; 
         for(Map.Entry<NoteBytes, NoteBytes> entry : m_pairs.entrySet()) {
-            length += (entry.getKey().byteLength() + entry.getValue().byteLength()  + 10);
+            length += (entry.getKey().byteLength() + entry.getValue().byteLength()  + (NoteBytesMetaData.STANDARD_META_DATA_SIZE *2));
         }
         return length;
     }

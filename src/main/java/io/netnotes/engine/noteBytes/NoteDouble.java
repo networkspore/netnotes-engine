@@ -7,5 +7,9 @@ public class NoteDouble extends NoteBytes {
         super(ByteDecoding.doubleToBytesBigEndian(value), ByteDecoding.DOUBLE);
     }
 
+    public NoteDouble(byte[] bytes){
+        super(bytes, ByteDecoding.DOUBLE);
+    }
+
 
 }

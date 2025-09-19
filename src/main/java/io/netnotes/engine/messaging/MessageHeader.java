@@ -51,10 +51,8 @@ public class MessageHeader {
         NoteBytes header = reader.nextNoteBytes();
         if(header.equals(SecureMessageV1.HEADER_KEY)){
             return new SecureMessageV1(reader);
-        }else if(header.equals(DiscoveryPackageV1.HEADER_KEY)){
-            return new DiscoveryPackageV1(reader);
-        }else if(header.equals(BasicMessageHandlerV1.HEADER_KEY)){
-            return new BasicMessageHandlerV1(reader);
+        }else if(header.equals(TypedMessageMap.HEADER_KEY)){
+            return new TypedMessageMap(reader);
         }
 
         throw new IOException("Unknown header key");

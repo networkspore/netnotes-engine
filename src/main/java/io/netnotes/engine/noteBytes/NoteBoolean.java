@@ -4,8 +4,11 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 
 public class NoteBoolean extends NoteBytes {
     public NoteBoolean(boolean value){
-        super(ByteDecoding.booleanToBytes(value));
+        super(ByteDecoding.booleanToBytes(value), ByteDecoding.BOOLEAN);
     }
 
+    public NoteBoolean(byte[] bytes){
+        super(bytes, ByteDecoding.BOOLEAN);
+    }
 
 }

@@ -135,7 +135,7 @@ public class NoteBytesArrayList implements List<NoteBytes>{
         return new NoteBytes(bytes, ByteDecoding.NOTE_BYTES_ARRAY);
     }
 
-    public NoteBytes getNoteBytesArray() {
+    public NoteBytesArray getNoteBytesArray() {
 
         byte[] bytes = new byte[byteLength_w_MetaData()];
         int offset = 0;

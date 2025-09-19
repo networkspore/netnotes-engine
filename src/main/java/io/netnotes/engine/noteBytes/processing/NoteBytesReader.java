@@ -7,6 +7,7 @@ import java.io.InputStream;
 
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 public class NoteBytesReader implements AutoCloseable{
@@ -21,20 +22,35 @@ public class NoteBytesReader implements AutoCloseable{
         if(type != -1){
             byte[] fourBytes = new byte[4];
             m_in.read(fourBytes);
-            ByteDecoding byteDecoding = ByteDecoding.getDecodingFromType((byte)type);
-            int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
+            int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
             byte[] data = readByteAmount(len);
-            return new NoteBytes(data, byteDecoding);
+     
+            return NoteBytes.create(data, (byte)type);
         }
         return null;
     }
+
+    public NoteBytesEphemeral nextNoteBytesEphemeral() throws EOFException, IOException{
+        int type = m_in.read();
+        if(type != -1){
+            byte[] fourBytes = new byte[4];
+            m_in.read(fourBytes);
+            ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
+            int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
+            byte[] data = readByteAmount(len);
+     
+            return new NoteBytesEphemeral(data, byteDecoding);
+        }
+        return null;
+    }
+
 
     public NoteBytesReadOnly nextNoteBytesReadOnly() throws EOFException, IOException{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
             m_in.read(fourBytes);
-            ByteDecoding byteDecoding = ByteDecoding.getDecodingFromType((byte)type);
+            ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
             int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
             byte[] data = readByteAmount(len);
             return new NoteBytesReadOnly(data, byteDecoding);

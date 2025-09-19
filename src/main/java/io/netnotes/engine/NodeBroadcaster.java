@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-import io.netnotes.engine.messaging.BasicMessageHandlerV1;
+import io.netnotes.engine.messaging.TypedMessageMap;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.TaskMessages;
@@ -96,7 +96,7 @@ public class NodeBroadcaster {
                         NoteBytesEphemeral mapEphemeral = map.getNoteBytesEphemeral();
                     ) {
                         // Serialize the result map
-                            NoteBytesObject object = BasicMessageHandlerV1.createHeader(
+                            NoteBytesObject object = TypedMessageMap.createHeader(
                                 this.broadcasterId, 
                                 NoteMessaging.General.BROADCAST_RESULT, 
                                 mapEphemeral
@@ -106,7 +106,7 @@ public class NodeBroadcaster {
                     } catch (Exception e) {
                         // If there's an error, try to write error response
                         try {
-                                NoteBytesObject object = BasicMessageHandlerV1.createHeader(
+                                NoteBytesObject object = TypedMessageMap.createHeader(
                                 this.broadcasterId, 
                                 NoteMessaging.General.ERROR, 
                                 TaskMessages.createErrorMessage(

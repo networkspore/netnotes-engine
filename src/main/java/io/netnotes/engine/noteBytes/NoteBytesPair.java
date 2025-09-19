@@ -40,12 +40,12 @@ public class NoteBytesPair {
 
     public NoteBytesPair(String key, Byte[] value, byte type){
         m_key = new NoteBytes(key);
-        m_value = new NoteBytes(ByteDecoding.unboxBytes(value), ByteDecoding.getDecodingFromType(type));
+        m_value = new NoteBytes(ByteDecoding.unboxBytes(value), ByteDecoding.of(type));
     }
 
     public NoteBytesPair(NoteBytes key, NoteBytes value, byte type){
         m_key = key;
-        m_value = new NoteBytes(value.get(), ByteDecoding.getDecodingFromType(type));
+        m_value = new NoteBytes(value.get(), ByteDecoding.of(type));
     }
 
     public NoteBytesPair(NoteBytes key, NoteBytes value, ByteDecoding byteDecoding){

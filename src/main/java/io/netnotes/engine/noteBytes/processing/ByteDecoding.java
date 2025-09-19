@@ -76,7 +76,7 @@ public class ByteDecoding{
         }
 
         public void setLen(byte[] bytes) {
-            m_len = ByteDecoding.bytesToInt(bytes, ByteDecoding.getDecodingFromType(m_type));
+            m_len = ByteDecoding.bytesToInt(bytes, ByteDecoding.of(m_type));
         }
 
         public void setType(byte type) {
@@ -141,7 +141,7 @@ public class ByteDecoding{
     }
 
 
-    public static ByteDecoding getDecodingFromType(byte type) {
+    public static ByteDecoding of(byte type) {
         switch(type) {
             case NoteBytesMetaData.STRING_TYPE: return STRING_UTF8;
             case NoteBytesMetaData.STRING_UTF16_TYPE: return STRING_UTF16;
@@ -160,6 +160,7 @@ public class ByteDecoding{
             default: return RAW_BYTES;
         }
     }
+
 
     
 

@@ -9,4 +9,8 @@ public class NoteBigDecimal extends NoteBytes {
         super(ByteDecoding.bigDecimalToScaleAndBigInteger(bigDecimal), ByteDecoding.BIG_DECIMAL);
     }
 
+    public NoteBigDecimal(byte[] bytes){
+        super(bytes, ByteDecoding.BIG_DECIMAL);
+    }
+
 }

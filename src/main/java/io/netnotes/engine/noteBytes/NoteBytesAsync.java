@@ -49,7 +49,7 @@ public class NoteBytesAsync extends NoteBytes{
     }
 
     public NoteBytesAsync( byte[] value, byte type){
-        this(value, ByteDecoding.getDecodingFromType(type));
+        this(value, ByteDecoding.of(type));
     }
 
     protected void acquireLock() throws InterruptedException {

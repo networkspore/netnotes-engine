@@ -1,7 +1,5 @@
 package io.netnotes.engine.plugins;
 
-import java.io.IOException;
-
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -19,9 +17,10 @@ public class PluginMetaData {
     private boolean m_enabled;
     private NoteBytesReadOnly m_id;
 
-    public PluginMetaData(NoteBytes noteBytes){
-        this(new NoteBytesMap(noteBytes));
+    public PluginMetaData(NoteBytesObject noteBytesObject){
+        this(new NoteBytesMap(noteBytesObject));
     }
+
     public PluginMetaData(NoteBytesMap map){
 
         NoteBytes enabledValue = map.get(ENABLED_KEY);
@@ -34,8 +33,8 @@ public class PluginMetaData {
         }
 
         m_notePath = new NoteStringArrayReadOnly(pathValue);
-        m_version = versionValue.getAsString();
-        m_enabled = enabledValue.getAsBoolean();
+        m_version = versionValue != null ? versionValue.getAsString() : "0.0.0";
+        m_enabled = enabledValue != null ? enabledValue.getAsBoolean() : false;
         m_id = new NoteBytesReadOnly(idValue);
     }
 

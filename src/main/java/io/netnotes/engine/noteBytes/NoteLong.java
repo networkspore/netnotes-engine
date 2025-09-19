@@ -7,4 +7,7 @@ public class NoteLong extends NoteBytes{
         super(ByteDecoding.longToBytesBigEndian(l), ByteDecoding.LONG);
     }
 
+    public NoteLong(byte[] bytes){
+        super(bytes, ByteDecoding.LONG);
+    }
 }
