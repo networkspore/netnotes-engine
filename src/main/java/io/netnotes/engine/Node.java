@@ -9,7 +9,8 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public interface Node {
     NoteBytesReadOnly getNodeId();
-    
+    CompletableFuture<Void> initialize(AppDataInterface appInterface);
+    void setNodeControllerInterface(NodeControllerInterface nodeControllerInterface);
     // Receives any kind of message stream - node decides how to handle based on header
     CompletableFuture<Void> receiveRawMessage(PipedOutputStream messageStream, PipedOutputStream replyStream) throws IOException;
     

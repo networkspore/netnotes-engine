@@ -36,22 +36,14 @@ public class NoteBytes {
         this(value , ByteDecoding.RAW_BYTES);
     }
     
-    public NoteBytes( String value){
-        this(value.toCharArray());
+    public NoteBytes( Object value){
+         this(createNoteBytes(value));
     }
 
-    public NoteBytes(long _long){
-        this(ByteDecoding.longToBytesBigEndian(_long), ByteDecoding.LONG);
+    public NoteBytes( NoteBytes value){
+         this(value.get(), value.getByteDecoding());
     }
 
-    public NoteBytes( Byte[] value){
-        this(ByteDecoding.unboxBytes(value));
-    }
-
-    public NoteBytes( char[] value){
-        this( ByteDecoding.charsToBytes(value), ByteDecoding.STRING_UTF8);
-    }
-    
     public NoteBytes( String value, ByteDecoding byteDecoding){
         this(ByteDecoding.charsToByteArray(CharBuffer.wrap(value), byteDecoding), byteDecoding);
     }
@@ -73,7 +65,6 @@ public class NoteBytes {
     public NoteBytes( byte[] value, byte type){
         this(value, ByteDecoding.getDecodingFromType(type));
     }
-
 
     
 
@@ -645,6 +636,8 @@ public class NoteBytes {
             return new NoteString((String) obj);
         } else if (obj instanceof byte[]) {
             return new NoteBytes((byte[]) obj);
+        }else if(obj instanceof Byte[]){
+            return new NoteBytes(ByteDecoding.unboxBytes((Byte[]) obj));
         } else if (obj instanceof char[]) {
             return new NoteBytes((char[]) obj);
         } else if (obj instanceof JsonObject) {
@@ -655,7 +648,11 @@ public class NoteBytes {
             return new NoteBytesObject((NoteBytesPair[]) obj);
         } else if( obj instanceof NoteBytesMapEphemeral){
             return ((NoteBytesMapEphemeral) obj).getNoteBytesEphemeral();
-        } else if(obj instanceof Serializable){
+        }else if( obj instanceof NoteBytesConcurrentMapEphemeral){
+            return ((NoteBytesConcurrentMapEphemeral) obj).getNoteBytesEphemeral();
+        } else if(obj instanceof NoteBytesMap){
+            return ((NoteBytesMap)obj).getNoteBytesObject();
+        }else if(obj instanceof Serializable){
             try{
                 return new NoteSerializable(obj);
             }catch(IOException e){

@@ -1,5 +1,6 @@
 package io.netnotes.engine.noteBytes;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -13,7 +14,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
         m_pairs = new HashMap<>();
     }
 
-    public NoteBytesMapEphemeral(NoteBytesEphemeral noteBytes) throws Exception{
+    public NoteBytesMapEphemeral(NoteBytesEphemeral noteBytes) throws IOException{
         init(noteBytes.get());
     }
 
@@ -25,7 +26,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
     }
 
 
-    public static HashMap<NoteBytes, NoteBytesEphemeral> getHashMap(byte[] bytes) throws Exception{
+    public static HashMap<NoteBytes, NoteBytesEphemeral> getHashMap(byte[] bytes) throws IOException{
         int length = bytes.length;
         HashMap<NoteBytes, NoteBytesEphemeral> map = new HashMap<>();
         if(length > 0){
@@ -41,7 +42,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
         }
         return map;
     }
-    public void init(byte[] bytes) throws Exception{
+    public void init(byte[] bytes) throws IOException{
         if(m_pairs != null){
             close();
         }
@@ -73,7 +74,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
             offset = NoteBytes.writeNote(entry.getKey(), bytes, offset);
             offset = NoteBytes.writeNote(entry.getValue(), bytes, offset);
         }
-        return new NoteBytesEphemeral(bytes);
+        return new NoteBytesEphemeral(bytes, ByteDecoding.NOTE_BYTES_OBJECT);
     }
 
 
@@ -143,7 +144,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
     }
     
     @Override
-    public void close() throws Exception {
+    public void close() throws IOException {
         for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             entry.getKey().clear();
             entry.getValue().close();
@@ -157,7 +158,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
     public void clear() {
         try {
             close();
-        } catch (Exception e) {
+        } catch (IOException e) {
 
         }
     }

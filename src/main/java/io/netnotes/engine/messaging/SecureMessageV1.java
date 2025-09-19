@@ -51,7 +51,7 @@ public class SecureMessageV1 extends MessageHeader {
     public static final NoteBytesReadOnly ALGORITHM_KEY = new NoteBytesReadOnly(new byte[]{0x19});
     public static final NoteBytesReadOnly SALT_KEY = new NoteBytesReadOnly(new byte[]{0x20});
 
-    private NoteBytesReadOnly m_timeStamp = null;
+
     private NoteBytesReadOnly m_senderPublicKey = null;
     private NoteBytesReadOnly m_signature = null;
     private NoteBytesReadOnly m_dataLength = null;
@@ -71,7 +71,7 @@ public class SecureMessageV1 extends MessageHeader {
 
         int size = headerMetaData.getLength();
         
-        if(size < 33){
+        if(size < (NoteBytesMetaData.STANDARD_META_DATA_SIZE *4) +2 ){
             throw new IOException("Header contents too small: " + size);
         }
 
@@ -85,7 +85,7 @@ public class SecureMessageV1 extends MessageHeader {
             }
             updateData(key, value);
 
-            bytesRemaining -= (key.byteLength() + value.byteLength() + 10);
+            bytesRemaining -= (key.byteLength() + value.byteLength() + (NoteBytesMetaData.STANDARD_META_DATA_SIZE *2));
         }
 
         if(bytesRemaining < 0){
@@ -112,10 +112,12 @@ public class SecureMessageV1 extends MessageHeader {
     }
 
     public NoteBytesReadOnly getData(NoteBytesReadOnly key){
-        if(key.equals(SECURITY_LEVEL_KEY)){
-            return m_securityLevel;
+        if(key.equals(SENDER_ID_KEY)){
+            return getSenderId();
         }else if(key.equals(TIME_STAMP_KEY)){
-            return m_timeStamp ;
+            return getTimeStamp() ;
+        }else if(key.equals(SECURITY_LEVEL_KEY)){
+            return m_securityLevel;
         }else if(key.equals(SENDER_PUBLIC_KEY)){
             return m_senderPublicKey;
         }else if(key.equals(SIGNATURE_KEY)){
@@ -137,10 +139,12 @@ public class SecureMessageV1 extends MessageHeader {
 
 
     public void updateData(NoteBytesReadOnly key, NoteBytesReadOnly value){
-        if(key.equals(SECURITY_LEVEL_KEY)){
+        if(key.equals(SENDER_ID_KEY)){
+            setSenderId(value);
+        }else if(key.equals(SECURITY_LEVEL_KEY)){
             m_securityLevel = value;
         }else if(key.equals(TIME_STAMP_KEY)){
-            m_timeStamp = value;
+            setTimeStamp(value);
         }else if(key.equals(SENDER_PUBLIC_KEY)){
             m_senderPublicKey = value;
         }else if(key.equals(SIGNATURE_KEY)){
@@ -158,76 +162,69 @@ public class SecureMessageV1 extends MessageHeader {
         }
     }
 
-    public NoteBytesReadOnly getTimeStamp() {
-        return m_timeStamp;
-    }
-
-    public void setTimeStamp(NoteBytesReadOnly m_timeStamp) {
-        this.m_timeStamp = m_timeStamp;
-    }
 
     public NoteBytesReadOnly getSenderPublicKey() {
         return m_senderPublicKey;
     }
 
-    public void setSenderPublicKey(NoteBytesReadOnly m_senderPublicKey) {
-        this.m_senderPublicKey = m_senderPublicKey;
+    public void setSenderPublicKey(NoteBytesReadOnly senderPublicKey) {
+        this.m_senderPublicKey = senderPublicKey;
     }
 
     public NoteBytesReadOnly getSignature() {
         return m_signature;
     }
 
-    public void setSignature(NoteBytesReadOnly m_signature) {
-        this.m_signature = m_signature;
+    public void setSignature(NoteBytesReadOnly signature) {
+        this.m_signature = signature;
     }
 
     public NoteBytesReadOnly getDataLength() {
         return m_dataLength;
     }
 
-    public void setDataLength(NoteBytesReadOnly m_dataLength) {
-        this.m_dataLength = m_dataLength;
+    public void setDataLength(NoteBytesReadOnly dataLength) {
+        this.m_dataLength = dataLength;
     }
 
     public NoteBytesReadOnly getSecurityLevel() {
         return m_securityLevel;
     }
 
-    public void setSecurityLevel(NoteBytesReadOnly m_securityLevel) {
-        this.m_securityLevel = m_securityLevel;
+    public void setSecurityLevel(NoteBytesReadOnly securityLevel) {
+        this.m_securityLevel = securityLevel;
     }
 
     public NoteBytesReadOnly getEphemeralPublicKey() {
         return m_ephemeralPublicKey;
     }
 
-    public void setEphemeralPublicKey(NoteBytesReadOnly m_ephemeralPublicKey) {
-        this.m_ephemeralPublicKey = m_ephemeralPublicKey;
+    public void setEphemeralPublicKey(NoteBytesReadOnly ephemeralPublicKey) {
+        this.m_ephemeralPublicKey = ephemeralPublicKey;
     }
 
     public NoteBytesReadOnly getNonce() {
         return m_nonce;
     }
 
-    public void setNonce(NoteBytesReadOnly m_nonce) {
-        this.m_nonce = m_nonce;
+    public void setNonce(NoteBytesReadOnly nonce) {
+        this.m_nonce = nonce;
     }
 
     public NoteBytesReadOnly getSalt() {
         return m_salt;
     }
 
-    public void setSalt(NoteBytesReadOnly m_salt) {
-        this.m_salt = m_salt;
+    public void setSalt(NoteBytesReadOnly salt) {
+        this.m_salt = salt;
     }
 
     public NoteBytesReadOnly getAlgorithm() {
         return m_algorithm;
     }
 
-    public void setAlgorithm(NoteBytesReadOnly m_algorithm) {
-        this.m_algorithm = m_algorithm;
+    public void setAlgorithm(NoteBytesReadOnly algorithm) {
+        this.m_algorithm = algorithm;
     }
 
 

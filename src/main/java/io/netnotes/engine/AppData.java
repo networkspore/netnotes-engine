@@ -20,7 +20,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -51,6 +53,7 @@ import io.netnotes.engine.noteBytes.ByteDecoding;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesPair;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReader;
 import io.netnotes.engine.noteBytes.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
@@ -85,7 +88,7 @@ public class AppData {
     private boolean m_updates = false;
     private NoteBytes m_salt = null;
 
-    private AppInterface m_appInterface = null;
+    private AppDataInterface m_appInterface = null;
     
     private File m_appFile = null;
     private HashData m_appHashData = null;
@@ -101,9 +104,10 @@ public class AppData {
     private SecretKey m_oldKey = null;
 
     private final NoteFileRegistry m_noteFileRegistry;
+    private final Map<NoteBytesReadOnly, Node> m_nodeRegistry = new ConcurrentHashMap<>();
 
 
-    public AppData(AppInterface appInteface) throws Exception{
+    public AppData(AppDataInterface appInteface) throws Exception{
         m_execService = Executors.newVirtualThreadPerTaskExecutor();
         ThreadFactory factory = Thread.ofVirtual().factory();
         m_schedualedExecutor = Executors.newScheduledThreadPool(0, factory);
@@ -120,7 +124,7 @@ public class AppData {
     }
 
 
-    public AppData(AppInterface appInterface, NoteBytes password, ExecutorService execService, ScheduledExecutorService schedualedExecService) throws Exception{
+    public AppData(AppDataInterface appInterface, NoteBytes password, ExecutorService execService, ScheduledExecutorService schedualedExecService) throws Exception{
         m_appInterface = appInterface;
 
         m_execService = execService;
@@ -147,6 +151,10 @@ public class AppData {
         return m_schedualedExecutor;
     }
 
+    public Map<NoteBytesReadOnly, Node> nodeRegistry(){
+        return m_nodeRegistry;
+    }
+
     public NoteBytes getSalt(){
         return m_salt;
     }
@@ -155,7 +163,7 @@ public class AppData {
         return m_dataSemaphore;
     }
 
-    public AppInterface getAppInterface(){
+    public AppDataInterface getAppInterface(){
         return m_appInterface;
     }
 

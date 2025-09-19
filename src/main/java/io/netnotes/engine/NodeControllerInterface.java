@@ -11,8 +11,7 @@ import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 
 public interface NodeControllerInterface {
     // Basic services
-    ExecutorService getExecService();
-    CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path);
+
     NoteBytesReadOnly getControllerId();
     
     // Direct messaging

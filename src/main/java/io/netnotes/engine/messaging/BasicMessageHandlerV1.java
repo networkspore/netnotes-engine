@@ -2,6 +2,7 @@ package io.netnotes.engine.messaging;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.netnotes.engine.noteBytes.ByteDecoding.NoteBytesMetaData;
@@ -18,7 +19,7 @@ public class BasicMessageHandlerV1 extends MessageHeader {
     public static final NoteBytesReadOnly TYPE_KEY = new NoteBytesReadOnly(new byte[]{ 0x11});
     public static final NoteBytesReadOnly DATA_KEY = new NoteBytesReadOnly(new byte[]{ 0x12}); 
 
-        private ConcurrentHashMap<NoteBytesReadOnly, NoteBytesReadOnly> m_values = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<NoteBytesReadOnly, NoteBytesReadOnly> m_values = new ConcurrentHashMap<>();
     
     public BasicMessageHandlerV1(NoteBytesReader reader) throws EOFException, IOException {
         super(HEADER_KEY);
@@ -50,10 +51,6 @@ public class BasicMessageHandlerV1 extends MessageHeader {
         return m_values.get(key);
     }
     
- 
-    public NoteBytes getSenderId() {
-        return getValue(SENDER_ID_KEY);
-    }
 
     public NoteBytesReadOnly getTimestamp() {
         return getValue(TIME_STAMP_KEY);
@@ -80,6 +77,8 @@ public class BasicMessageHandlerV1 extends MessageHeader {
             new NoteBytesPair(HEADER_KEY, result)
         });
     }
+
+  
 }
 
 

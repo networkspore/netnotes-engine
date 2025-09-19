@@ -1,0 +1,129 @@
+/**
+ * Simple broadcast method that sends a message to multiple nodes and collects replies
+ * @param fromId The sender's ID
+ * @param toIds Array of recipient IDs
+ * @param messageBytes The message content as byte array
+ * @return CompletableFuture containing a map of recipient ID -> reply/error
+ */
+private CompletableFuture<NoteBytesConcurrentMapEphemeral> broadcastMessage(
+        NoteBytesReadOnly fromId, 
+        NoteBytesArrayReadOnly toIds, 
+        byte[] messageBytes) {
+    
+    NoteBytesReadOnly[] recipients = toIds.getAsReadOnlyArray();
+    NoteBytesConcurrentMapEphemeral resultMap = new NoteBytesConcurrentMapEphemeral();
+    
+    // Create futures for each recipient
+    List<CompletableFuture<Void>> recipientFutures = new ArrayList<>();
+    
+    for (NoteBytesReadOnly recipientId : recipients) {
+        CompletableFuture<Void> recipientFuture = CompletableFuture.runAsync(() -> {
+            try {
+                Node targetNode = nodeRegistry.get(recipientId);
+                
+                if (targetNode != null) {
+                    // Send message to this recipient
+                    NoteBytesEphemeral reply = sendMessageToNode(targetNode, messageBytes);
+                    resultMap.put(recipientId.copy(), reply);
+                } else {
+                    // Node not found - create error response
+                    NoteBytesEphemeral errorReply = createErrorReply("Node not found: " + recipientId);
+                    resultMap.put(recipientId.copy(), errorReply);
+                }
+            } catch (Exception e) {
+                // Handle any other errors during message sending
+                NoteBytesEphemeral errorReply = createErrorReply("Error sending to " + recipientId + ": " + e.getMessage());
+                resultMap.put(recipientId.copy(), errorReply);
+            }
+        });
+        
+        recipientFutures.add(recipientFuture);
+    }
+    
+    // Wait for all recipients to complete and return the result map
+    return CompletableFuture.allOf(recipientFutures.toArray(new CompletableFuture[0]))
+            .thenApply(v -> resultMap);
+}
+
+/**
+ * Helper method to send message to a specific node
+ * @param targetNode The target node to send to
+ * @param messageBytes The message content
+ * @return The reply from the node
+ * @throws IOException If there's an error during communication
+ */
+private NoteBytesEphemeral sendMessageToNode(Node targetNode, byte[] messageBytes) throws IOException {
+    // Create streams for this specific recipient
+    try (PipedOutputStream messageOut = new PipedOutputStream();
+         PipedInputStream messageIn = new PipedInputStream(messageOut);
+         PipedOutputStream replyOut = new PipedOutputStream();
+         PipedInputStream replyIn = new PipedInputStream(replyOut)) {
+        
+        // Write message bytes to the output stream
+        messageOut.write(messageBytes);
+        messageOut.close();
+        
+        // Send to target node
+        CompletableFuture<NoteBytesObject> nodeResponse = targetNode.receiveRawMessage(messageOut, replyOut);
+        NoteBytesObject reply = nodeResponse.get();
+        
+        // Convert reply to ephemeral format
+        return convertToEphemeral(reply);
+        
+    } catch (Exception e) {
+        throw new IOException("Failed to send message to node", e);
+    }
+}
+
+/**
+ * Creates an error reply in ephemeral format
+ */
+private NoteBytesEphemeral createErrorReply(String errorMessage) {
+    // This depends on your specific implementation of NoteBytesEphemeral
+    // Assuming you can create one from a string/byte array
+    return new NoteBytesEphemeral(errorMessage.getBytes());
+}
+
+/**
+ * Converts a NoteBytesObject to NoteBytesEphemeral
+ */
+private NoteBytesEphemeral convertToEphemeral(NoteBytesObject obj) {
+    // Implementation depends on your specific classes
+    // This is a placeholder for the conversion logic
+    return new NoteBytesEphemeral(obj.getBytes());
+}
+
+/**
+ * Usage example method showing how to use the broadcast and serialize results
+ */
+public CompletableFuture<byte[]> broadcastAndSerialize(
+        NoteBytesReadOnly fromId,
+        NoteBytesArrayReadOnly toIds,
+        byte[] messageBytes) {
+    
+    return broadcastMessage(fromId, toIds, messageBytes)
+            .thenApply(resultMap -> {
+                try {
+                    // Serialize the result map
+                    byte[] serializedResults = resultMap.serialize();
+                    
+                    // Don't forget to close the map when done
+                    resultMap.close();
+                    
+                    return serializedResults;
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to serialize broadcast results", e);
+                }
+            });
+}
+
+/**
+ * Alternative that returns the map directly for further processing
+ */
+public CompletableFuture<NoteBytesConcurrentMapEphemeral> broadcast(
+        NoteBytesReadOnly fromId,
+        NoteBytesArrayReadOnly toIds,
+        byte[] messageBytes) {
+    
+    return broadcastMessage(fromId, toIds, messageBytes);
+}

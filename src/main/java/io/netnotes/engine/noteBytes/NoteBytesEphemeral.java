@@ -115,6 +115,10 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
             return new NoteBytesEphemeral((NoteBytes) obj);
         }else if(obj instanceof NoteBytesMapEphemeral){
             return ((NoteBytesMapEphemeral) obj).getNoteBytesEphemeral();
+        }else if(obj instanceof NoteBytesConcurrentMapEphemeral){
+            return ((NoteBytesConcurrentMapEphemeral) obj).getNoteBytesEphemeral();
+        }else if(obj instanceof NoteBytesMap){
+            return new NoteBytesEphemeral( ((NoteBytesMap) obj).getNoteBytesObject());
         }else if (obj instanceof Boolean) {
             return new NoteBytesEphemeral(new NoteBoolean((Boolean) obj).get());
         } else if (obj instanceof Integer) {

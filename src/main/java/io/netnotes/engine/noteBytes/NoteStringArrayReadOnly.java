@@ -8,15 +8,12 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
 
     public final static String DEFAULT_DELIMITER = "/";
 
-
+    public NoteStringArrayReadOnly(NoteBytes noteBytes){
+        super(noteBytes.get(), noteBytes.getByteDecoding());
+    }
 
     public NoteStringArrayReadOnly(String... str){
         super(stringArrayToNoteBytes(str));
-    }
-
-
-    public NoteStringArrayReadOnly(NoteBytes... noteBytes){
-        super(noteBytes);
     }
 
     public static NoteBytes[] stringArrayToNoteBytes(String[] array){

@@ -113,8 +113,7 @@ public class NoteFile implements AutoCloseable  {
                 }
             }).whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
     }
-    
-    
+
  
 
 
@@ -132,7 +131,7 @@ public class NoteFile implements AutoCloseable  {
     
     // Functional approach inspired by Files.newOutputStream - no session objects created
     public <T> CompletableFuture<T> withExclusiveAccess(Function<NoteFileInterface, CompletableFuture<T>> operation) {
-        checkNotClosed();
+   
         return m_noteFileInterface.acquireLock()
             .thenCompose(v -> operation.apply(m_noteFileInterface))
             .whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
@@ -142,7 +141,6 @@ public class NoteFile implements AutoCloseable  {
     public CompletableFuture<NoteBytesObject> readWriteLock(
             PipedOutputStream inParseStream, 
             PipedOutputStream modifiedInParseStream) {
-        checkNotClosed();
         return withExclusiveAccess(fileInterface -> 
             fileInterface.readWriteFile(inParseStream, modifiedInParseStream));
     }

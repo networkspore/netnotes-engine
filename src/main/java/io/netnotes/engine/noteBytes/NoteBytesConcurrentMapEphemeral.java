@@ -1,5 +1,6 @@
 package io.netnotes.engine.noteBytes;
 
+import java.io.IOException;
 import java.util.Collection;
 
 import java.util.Map;
@@ -16,7 +17,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
         m_pairs = new ConcurrentHashMap<>();
     }
 
-    public NoteBytesConcurrentMapEphemeral(NoteBytesEphemeral noteBytes) throws Exception{
+    public NoteBytesConcurrentMapEphemeral(NoteBytesEphemeral noteBytes) throws IOException{
         init(noteBytes.get());
     }
 
@@ -28,7 +29,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
     }
 
 
-    public static ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> getConcurrentHashMap(byte[] bytes) throws Exception{
+    public static ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> getConcurrentHashMap(byte[] bytes) throws IOException{
         int length = bytes.length;
         ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> map = new ConcurrentHashMap<>();
         if(length > 0){
@@ -44,7 +45,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
         }
         return map;
     }
-    public void init(byte[] bytes) throws Exception{
+    public void init(byte[] bytes) throws IOException{
         if(m_pairs != null){
             close();
         }
@@ -146,7 +147,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
     }
     
     @Override
-    public void close() throws Exception {
+    public void close() throws IOException {
         for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             entry.getKey().clear();
             entry.getValue().close();
@@ -160,7 +161,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
     public void clear() {
         try {
             close();
-        } catch (Exception e) {
+        } catch (IOException e) {
 
         }
     }

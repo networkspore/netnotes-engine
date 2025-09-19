@@ -29,6 +29,8 @@ public class ByteDecoding{
     
 
     public static class NoteBytesMetaData {
+        public final static int STANDARD_META_DATA_SIZE = 5;
+
         public final static byte VIDEO_TYPE = 0x54;
         public final static byte IMAGE_TYPE = 0x53;
         public final static byte NOTE_BYTES_TREE_TYPE = 0x52;

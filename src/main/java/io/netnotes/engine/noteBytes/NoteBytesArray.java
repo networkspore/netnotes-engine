@@ -26,25 +26,29 @@ public class NoteBytesArray extends NoteBytes{
         this(getBytesFromArray(noteBytes));
     }
 
+    public NoteBytesArray(Stream<NoteBytes> stream){
+        this(getBytesFromStream(stream));
+    }
+
     public NoteBytesArray(byte[] bytes, ByteDecoding byteDecoding){
         super(bytes,byteDecoding);
+    }
+
+    public static byte[]  getBytesFromStream(Stream<NoteBytes> stream){
+        NoteBytes[] noteBytesArray = stream.toArray(NoteBytes[]::new);
+        return getBytesFromArray(noteBytesArray);
     }
     
     public static byte[] getBytesFromArray(NoteBytes[] noteBytesArray){
         int length = noteBytesArray != null && noteBytesArray.length > 0 ? noteBytesArray.length : 0;
         if(length > 0){
-            byte[] dstBytes = new byte[getByteLength(noteBytesArray)];
-            int dstOffset = 0;
-            for(int i = 0; i < noteBytesArray.length; i ++){
-                NoteBytes noteBytes = noteBytesArray[i];
-                byte type = noteBytes.getByteDecoding().getType();
-                byte[] intBytes = ByteDecoding.intToBytesBigEndian(noteBytes.byteLength());
-                byte[] buffer = noteBytes.get();                
-                dstBytes[dstOffset++] = type;
-                dstOffset = Utils.arrayCopy(intBytes, 0, dstBytes, dstOffset, 4);
-                dstOffset = Utils.arrayCopy(buffer, 0, dstBytes, dstOffset, buffer.length);
+
+            int size = getByteLength(noteBytesArray);
+            byte[] bytes = new byte[size];
+            int offset = 0;
+            for(NoteBytes value : noteBytesArray) {
+                offset = NoteBytes.writeNote(value, bytes, offset);
             }
-            return dstBytes;
         }
         return new byte[0];
     }
@@ -53,7 +57,7 @@ public class NoteBytesArray extends NoteBytes{
         int size = 0;
         for(int i = 0; i < noteBytesArray.length; i ++){
             NoteBytes noteBytes = noteBytesArray[i];
-            size += (5 + noteBytes.byteLength());
+            size += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
         }
         return size;
     }

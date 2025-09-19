@@ -2,28 +2,25 @@ package io.netnotes.engine.messaging;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
+import java.io.InputStream;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReader;
-import io.netnotes.engine.utils.Utils;
-import javafx.concurrent.Task;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
 
 public class MessageHeader {
 
     private final NoteBytesReadOnly m_headerType;
 
-
-    
     public static final NoteBytesReadOnly SENDER_ID_KEY = new NoteBytesReadOnly(new byte[]{0x01});
     public static final NoteBytesReadOnly TIME_STAMP_KEY = new NoteBytesReadOnly(new byte[]{0x02});
-    public static final NoteBytesReadOnly MESSAGE_ID_KEY = new NoteBytesReadOnly(new byte[]{0x01});
+
+    private NoteBytesReadOnly m_senderId;
+
+
+    private NoteBytesReadOnly m_timeStamp;
 
     public MessageHeader(NoteBytesReadOnly headerType){
         m_headerType = headerType;
@@ -32,6 +29,23 @@ public class MessageHeader {
     public NoteBytesReadOnly getHeaderType(){
         return m_headerType;
     }
+
+    public NoteBytesReadOnly getSenderId() {
+        return m_senderId;
+    }
+
+    public void setSenderId(NoteBytesReadOnly m_senderId) {
+        this.m_senderId = m_senderId;
+    }
+
+    public NoteBytesReadOnly getTimeStamp() {
+        return m_timeStamp;
+    }
+
+    public void setTimeStamp(NoteBytesReadOnly m_timeStamp) {
+        this.m_timeStamp = m_timeStamp;
+    }
+
 
     public static MessageHeader readHeader( NoteBytesReader reader) throws EOFException, IOException{
         NoteBytes header = reader.nextNoteBytes();
@@ -43,33 +57,20 @@ public class MessageHeader {
             return new BasicMessageHandlerV1(reader);
         }
 
-        throw new IOException("Only MessageHandlerV1 currently supported");
+        throw new IOException("Unknown header key");
     }
 
 
-
-    public static Future<?> readHeader(
-        PipedInputStream inputStream,
-        ExecutorService execService,
-        EventHandler<WorkerStateEvent> onSucceeded,
-        EventHandler<WorkerStateEvent> onFailed
-    ){
-           Task<Object> task = new Task<Object>() {
-            @Override
-            public Object call() throws Exception {
-
+    public static CompletableFuture<MessageHeader> readHeader(InputStream inputStream, Executor exec) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
                 NoteBytesReader reader = new NoteBytesReader(inputStream);
-
                 return readHeader(reader);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read header", e);
             }
-        };
-
-        task.setOnFailed(onFailed);
-
-        task.setOnSucceeded(onSucceeded);
-
-        return execService.submit(task);
+        }, exec);
     }
 
-    
+
 }
