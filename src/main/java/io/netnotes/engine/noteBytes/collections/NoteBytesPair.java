@@ -1,7 +1,12 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.noteBytes.collections;
 
 import java.math.BigDecimal;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 
 public class NoteBytesPair {
@@ -27,10 +32,10 @@ public class NoteBytesPair {
     }
 
     public NoteBytesPair(String key, Object value){
-        this(new NoteBytes(key), NoteBytes.createNoteBytes(value));    
+        this(new NoteBytes(key), NoteBytes.of(value));    
     }
     public NoteBytesPair(NoteBytes key, Object value){
-        this(key, NoteBytes.createNoteBytes(value));    
+        this(key, NoteBytes.of(value));    
     }
 
     public NoteBytesPair(NoteBytes key, NoteBytes value){
@@ -63,6 +68,13 @@ public class NoteBytesPair {
 
     public NoteBytes getValue(){
         return m_value;
+    }
+
+    public void setKey(NoteBytes key){
+        m_key = key;
+    }
+    public void setValue(NoteBytes value){
+        m_value = value;
     }
 
     public NoteBytesReadOnly getValueAsReadOnly(){

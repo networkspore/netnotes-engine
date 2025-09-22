@@ -6,8 +6,8 @@ import java.io.Serializable;
 import io.netnotes.engine.messaging.NoteMessaging.General;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesPair;
 import io.netnotes.engine.noteBytes.NoteSerializable;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.utils.Utils;
 import javafx.concurrent.WorkerStateEvent;
 

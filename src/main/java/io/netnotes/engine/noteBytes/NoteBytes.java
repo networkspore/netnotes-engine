@@ -20,6 +20,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesArrayList;
 import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesTree;
 import io.netnotes.engine.noteBytes.collections.NoteBytesTreeAsync;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
@@ -45,7 +46,7 @@ public class NoteBytes {
     }
     
     public NoteBytes( Object value){
-         this(createNoteBytes(value));
+         this(of(value));
     }
 
     public NoteBytes( NoteBytes value){
@@ -392,13 +393,13 @@ public class NoteBytes {
             if(noteBytesObj.isRuined()){
                 return false;
             }
-            byte[] objValue = noteBytesObj.get();
-            if(byteLength() != objValue.length){
-                return false;
-            }
             byte objType = noteBytesObj.getByteDecoding().getType();
             byte thisType = getByteDecoding().getType();
             if(objType != thisType){
+                return false;
+            }
+            byte[] objValue = noteBytesObj.get();
+            if(byteLength() != objValue.length){
                 return false;
             }
             return compareBytes(objValue);
@@ -651,7 +652,8 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
-    public static NoteBytes create(byte[] bytes, byte type) {
+    public static NoteBytes of(byte[] bytes, byte type) {
+        
         switch(type) {
             case NoteBytesMetaData.STRING_TYPE: return new NoteString(bytes); 
             case NoteBytesMetaData.STRING_UTF16_TYPE: return new NoteString(bytes, ByteDecoding.STRING_UTF16);
@@ -671,7 +673,7 @@ public class NoteBytes {
 
     }
 
-    public static NoteBytes createNoteBytes(Object obj) {
+    public static NoteBytes of(Object obj) {
         if (obj == null) {
             throw new NullPointerException("Cannot create NoteBytes from null object");
         }else if (obj instanceof Boolean) {

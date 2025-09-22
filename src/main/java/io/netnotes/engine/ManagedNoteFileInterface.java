@@ -14,10 +14,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.noteFile.NoteFile;
+import io.netnotes.engine.noteFile.NoteFileRegistry;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File file;
-    private final AppData appData;
     private final Semaphore semaphore = new Semaphore(1);
     private final AtomicBoolean locked = new AtomicBoolean(false);
 
@@ -25,9 +26,8 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final NoteFileRegistry registry;
     private final NoteStringArrayReadOnly registryKey;
     
-   public ManagedNoteFileInterface(File file, AppData appData, NoteFileRegistry registry, NoteStringArrayReadOnly registryKey) {
+   public ManagedNoteFileInterface(File file, NoteFileRegistry registry, NoteStringArrayReadOnly registryKey) {
         this.file = file;
-        this.appData = appData;
         this.registry = registry;
         this.registryKey = registryKey;   
     }
@@ -85,7 +85,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         //CompletableFuture<NoteBytesObject> readFuture = 
         decryptFile(inParseStream);
         // Write operation: encrypt from modifiedInParseStream to temp file, then swap
-        CompletableFuture<NoteBytesObject> writeFuture = appData.saveEncryptedFileSwap(file, modifiedInParseStream);
+        CompletableFuture<NoteBytesObject> writeFuture =  this.registry.saveEncryptedFileSwap(file, modifiedInParseStream);
         
         // Both operations run concurrently through the piped streams
         // The write will naturally wait for read data to be available through the pipes
@@ -95,20 +95,20 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     
     @Override
     public ExecutorService getExecService() {
-        return appData.getExecService();
+        return  this.registry.getExecService();
     }
     
     @Override
     public CompletableFuture<NoteBytesObject> decryptFile(PipedOutputStream pipedOutput) {
         // These low-level operations assume lock is already held
-        return appData.performDecryption(file, pipedOutput);
+        return  this.registry.performDecryption(file, pipedOutput);
     }
     
 
     @Override
     public CompletableFuture<NoteBytesObject> encryptFile(PipedOutputStream pipedOutputStream) {
         // These low-level operations assume lock is already held
-        return appData.saveEncryptedFileSwap(file, pipedOutputStream);
+        return  this.registry.saveEncryptedFileSwap(file, pipedOutputStream);
     }
     
     @Override

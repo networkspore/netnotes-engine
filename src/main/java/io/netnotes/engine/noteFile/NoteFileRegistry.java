@@ -1,34 +1,39 @@
-package io.netnotes.engine;
+package io.netnotes.engine.noteFile;
 
+import io.netnotes.engine.ManagedNoteFileInterface;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateConfig;
+import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateResult;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 
-public class NoteFileRegistry {
+public class NoteFileRegistry extends DataFactory {
     private final Map<NoteStringArrayReadOnly, ManagedNoteFileInterface> m_registry = new ConcurrentHashMap<>();
-    private final AppData m_appData;
-    
-    public NoteFileRegistry(AppData appData) {
-        this.m_appData = appData;
+
+    public NoteFileRegistry(SettingsData settingsData) {
+        super(settingsData);
     }
     
     public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path) {
-        return m_appData.getIdDataFile(path)
+        return getIdDataFile(path)
             .thenApply(file -> {
                 ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path, 
-                    k -> new ManagedNoteFileInterface(file, m_appData, this, path));
+                    k -> new ManagedNoteFileInterface(file, this, path));
                 return new NoteFile(path, noteFileInterface);
             });
     }
     
     // Called by ManagedNoteFileInterface when it has no more references
-    void cleanupInterface(NoteStringArrayReadOnly path, ManagedNoteFileInterface expectedInterface) {
+    public void cleanupInterface(NoteStringArrayReadOnly path, ManagedNoteFileInterface expectedInterface) {
         // Use atomic remove to ensure we only remove the expected interface
         m_registry.remove(path, expectedInterface);
     }
@@ -77,4 +82,27 @@ public class NoteFileRegistry {
                 entry -> entry.getValue().getReferenceCount()
             ));
     }
+
+    @Override
+    public CompletableFuture<BulkUpdateResult> updateAllFileEncryptionWithProgress(
+            NoteBytesEphemeral oldPassword,
+            NoteBytesEphemeral newPassword,
+            BulkUpdateConfig config,
+            Consumer<ProgressUpdate> progressCallback,
+            ExecutorService execService
+    ) {
+        return prepareAllForKeyUpdate()
+            .thenCompose(v -> 
+                super.updateAllFileEncryptionWithProgress(
+                    oldPassword, newPassword, config, progressCallback, execService
+                )
+            )
+            .whenComplete((result, throwable) -> {
+                // always run, success or failure
+                completeKeyUpdateForAll();
+            });
+    }
+        
+        
+                
 }

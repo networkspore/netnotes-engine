@@ -8,7 +8,7 @@ public class NoteBytesReadOnly extends NoteBytes {
     
 
     public NoteBytesReadOnly( Object value){
-        this(NoteBytes.createNoteBytes(value));
+        this(NoteBytes.of(value));
     }
 
     public NoteBytesReadOnly(NoteBytes value){

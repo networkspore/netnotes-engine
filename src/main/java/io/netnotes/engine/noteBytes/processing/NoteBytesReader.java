@@ -25,7 +25,7 @@ public class NoteBytesReader implements AutoCloseable{
             int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
             byte[] data = readByteAmount(len);
      
-            return NoteBytes.create(data, (byte)type);
+            return NoteBytes.of(data, (byte)type);
         }
         return null;
     }
@@ -76,17 +76,19 @@ public class NoteBytesReader implements AutoCloseable{
             byte[] buffer = new byte[bufferSize];
             int length = 0;
             int remaining = size;
-
             while(remaining > 0 && ((length = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
                 byteOutput.write(buffer, 0, length);
                 remaining -= length;
             }
-            if(length == -1){
-                throw new IOException("Reached pre-mature end of stream: " + length + " expected: " + size);
+            if(remaining > 0){
+                throw new IOException("Reached pre-mature end of stream expected: " + size);
             }
             return byteOutput.toByteArray();
         }
     }
+
+
+
 
     
    public int skipData(byte[] buffer, int count, int length) throws EOFException, IOException{
@@ -103,6 +105,10 @@ public class NoteBytesReader implements AutoCloseable{
 
     public int read(byte[] buffer, int off, int len) throws IOException{
         return m_in.read(buffer, off, len);
+    }
+
+    public int read(byte[] buffer) throws IOException{
+        return m_in.read(buffer);
     }
 
 

@@ -9,7 +9,7 @@ public class NoteBytesPairEphemeral implements AutoCloseable {
 
 
     public NoteBytesPairEphemeral(Object key, Object value){
-        m_key = NoteBytes.createNoteBytes(key);
+        m_key = NoteBytes.of(key);
         m_value = NoteBytesEphemeral.create(value);
     }
 

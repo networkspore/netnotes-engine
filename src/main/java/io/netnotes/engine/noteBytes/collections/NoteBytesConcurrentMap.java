@@ -2,9 +2,10 @@ package io.netnotes.engine.noteBytes.collections;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -13,49 +14,49 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
-public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
-    private HashMap<NoteBytes, NoteBytes> m_pairs = null;
+public class NoteBytesConcurrentMap implements ConcurrentMap<NoteBytes, NoteBytes>{
+    private ConcurrentHashMap<NoteBytes, NoteBytes> m_pairs = null;
 
 
-    public NoteBytesMap(byte[] bytes) {
+    public NoteBytesConcurrentMap(byte[] bytes) {
         init(bytes);
     }
 
-    public NoteBytesMap(){
-        m_pairs = new HashMap<>();
+    public NoteBytesConcurrentMap(){
+        m_pairs = new ConcurrentHashMap<>();
     }
 
-    public NoteBytesMap(NoteBytesObject noteBytes){
+    public NoteBytesConcurrentMap(NoteBytesObject noteBytes){
         init(noteBytes.get());
     }
 
-    public NoteBytesMap(NoteBytesPair[] pairs){
-        m_pairs = new HashMap<>();
+    public NoteBytesConcurrentMap(NoteBytesPair[] pairs){
+        m_pairs = new ConcurrentHashMap<>();
         for(NoteBytesPair pair : pairs){
             m_pairs.put(pair.getKey(), pair.getValue());
         }
     }
 
-    public NoteBytesMap(Stream<NoteBytesPair> stream){
+    public NoteBytesConcurrentMap(Stream<NoteBytesPair> stream){
         init(stream);
     }
 
-    public NoteBytesMap(NoteBytesReader reader, int length) throws IOException{
+    public NoteBytesConcurrentMap(NoteBytesReader reader, int length) throws IOException{
         init(reader, length);
     }
 
-    public NoteBytesMap(NoteBytesReader reader) throws IOException{
+    public NoteBytesConcurrentMap(NoteBytesReader reader) throws IOException{
         init(reader);
     }
 
-    public static HashMap<NoteBytes, NoteBytes> getHashMap(Stream<NoteBytesPair> stream){
-        return stream.collect(Collectors.toMap(NoteBytesPair::getKey, NoteBytesPair::getValue,(existing, replacement) -> existing, HashMap::new));
+    public static ConcurrentHashMap<NoteBytes, NoteBytes> getHashMap(Stream<NoteBytesPair> stream){
+        return stream.collect(Collectors.toMap(NoteBytesPair::getKey, NoteBytesPair::getValue,(existing, replacement) -> existing, ConcurrentHashMap::new));
     }
 
-    public static HashMap<NoteBytes, NoteBytes> getHashMap(NoteBytesReader reader) throws IOException{
+    public static ConcurrentHashMap<NoteBytes, NoteBytes> getHashMap(NoteBytesReader reader) throws IOException{
          // Parse plugin entries
  
-        HashMap<NoteBytes, NoteBytes> map = new HashMap<>();
+        ConcurrentHashMap<NoteBytes, NoteBytes> map = new ConcurrentHashMap<>();
         NoteBytes key = reader.nextNoteBytes();
         NoteBytes value = reader.nextNoteBytes();
 
@@ -69,10 +70,10 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
         return map;
     }
 
-    public static HashMap<NoteBytes, NoteBytes> getHashMap(NoteBytesReader reader, int length) throws IOException{
+    public static ConcurrentHashMap<NoteBytes, NoteBytes> getHashMap(NoteBytesReader reader, int length) throws IOException{
          // Parse plugin entries
         int bytesRemaining = length;
-        HashMap<NoteBytes, NoteBytes> map = new HashMap<>();
+        ConcurrentHashMap<NoteBytes, NoteBytes> map = new ConcurrentHashMap<>();
         while (bytesRemaining > 0) {
             NoteBytes key = reader.nextNoteBytes();
             NoteBytes value = reader.nextNoteBytes();
@@ -89,9 +90,9 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
         return map;
     }
 
-    public static HashMap<NoteBytes, NoteBytes> getHashMap(byte[] bytes) {
+    public static ConcurrentHashMap<NoteBytes, NoteBytes> getHashMap(byte[] bytes) {
         int length = bytes.length;
-        HashMap<NoteBytes, NoteBytes> map = new HashMap<>();
+        ConcurrentHashMap<NoteBytes, NoteBytes> map = new ConcurrentHashMap<>();
         if(length > 0){
             int offset = 0;
             while(offset < length) {
@@ -283,5 +284,25 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
     @Override
     public Collection<NoteBytes> values() {
         return m_pairs.values();
+    }
+
+    @Override
+    public NoteBytes putIfAbsent(NoteBytes key, NoteBytes value) {
+        return m_pairs.putIfAbsent(key, value);
+    }
+
+    @Override
+    public boolean remove(Object key, Object value) {
+        return m_pairs.remove(key, value);
+    }
+
+    @Override
+    public NoteBytes replace(NoteBytes key, NoteBytes value) {
+        return m_pairs.replace(key, value);
+    }
+
+    @Override
+    public boolean replace(NoteBytes key, NoteBytes oldValue, NoteBytes newValue) {
+        return m_pairs.replace(key, oldValue, newValue);
     }
 }

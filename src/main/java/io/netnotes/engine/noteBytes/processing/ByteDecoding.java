@@ -60,7 +60,7 @@ public class ByteDecoding{
 
         public NoteBytesMetaData(byte type, byte[] byteLen) {
             this.m_type = type;
-            setLen(byteLen);
+            setLength(byteLen);
         }
 
         public byte getType() {
@@ -75,7 +75,7 @@ public class ByteDecoding{
             this.m_len = len;
         }
 
-        public void setLen(byte[] bytes) {
+        public void setLength(byte[] bytes) {
             m_len = ByteDecoding.bytesToInt(bytes, ByteDecoding.of(m_type));
         }
 

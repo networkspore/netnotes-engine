@@ -10,9 +10,9 @@ import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesPair;
 import io.netnotes.engine.noteBytes.NoteHex;
 import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 public class HashData {
 
     public static String DEFAULT_HASH = "Blake2b-256";

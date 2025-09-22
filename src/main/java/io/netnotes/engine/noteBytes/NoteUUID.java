@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.utils.HardwareInfo;

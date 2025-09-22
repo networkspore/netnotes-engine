@@ -185,7 +185,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
     @Override
     public NoteBytesEphemeral get(Object key) {
-        return m_pairs.get(NoteBytes.createNoteBytes(key));
+        return m_pairs.get(NoteBytes.of(key));
     }
 
     @Override
@@ -196,7 +196,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
     public NoteBytesEphemeral put(Object key, Object value) {
         
-        return m_pairs.put(NoteBytes.createNoteBytes(key), NoteBytesEphemeral.create(value));
+        return m_pairs.put(NoteBytes.of(key), NoteBytesEphemeral.create(value));
     }
 
     @Override

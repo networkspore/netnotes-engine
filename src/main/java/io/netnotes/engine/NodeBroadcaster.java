@@ -16,10 +16,10 @@ import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.TaskMessages;
 import io.netnotes.engine.messaging.NoteMessaging.General;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMap;
 
 public class NodeBroadcaster {
     public static final long MAX_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB default
@@ -92,14 +92,15 @@ public class NodeBroadcaster {
             .thenCompose(resultMap -> {
                 // Serialize and write response to reply stream
                 return CompletableFuture.runAsync(() -> {
-                    try(NoteBytesConcurrentMapEphemeral map = resultMap; 
-                        NoteBytesEphemeral mapEphemeral = map.getNoteBytesEphemeral();
-                    ) {
+                    try{
+                        NoteBytesConcurrentMap map = resultMap; 
+                        NoteBytes noteBytes = map.getNoteBytesObject();
+                    
                         // Serialize the result map
                             NoteBytesObject object = TypedMessageMap.createHeader(
                                 this.broadcasterId, 
                                 NoteMessaging.General.BROADCAST_RESULT, 
-                                mapEphemeral
+                                noteBytes
                                 );
                         StreamUtils.writeMessageToStreamAndClose(replyStream, object);
                         
@@ -124,13 +125,13 @@ public class NodeBroadcaster {
             });
     }
 
-    private CompletableFuture<NoteBytesConcurrentMapEphemeral> broadcastMessage(
+    private CompletableFuture<NoteBytesConcurrentMap> broadcastMessage(
             NoteBytesReadOnly fromId,
             NoteBytesArrayReadOnly toIds,
             byte[] messageBytes) {
 
         NoteBytesReadOnly[] recipients = toIds.getAsReadOnlyArray();
-        NoteBytesConcurrentMapEphemeral resultMap = new NoteBytesConcurrentMapEphemeral();
+        NoteBytesConcurrentMap resultMap = new NoteBytesConcurrentMap();
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (NoteBytesReadOnly recipientId : recipients) {
@@ -144,7 +145,7 @@ public class NodeBroadcaster {
     private CompletableFuture<Void> processRecipient(
             NoteBytesReadOnly recipientId,
             byte[] messageBytes,
-            NoteBytesConcurrentMapEphemeral resultMap) {
+            NoteBytesConcurrentMap resultMap) {
 
         Node targetNode = nodeRegistry.get(recipientId);
 
@@ -156,7 +157,7 @@ public class NodeBroadcaster {
         try {
             PipedOutputStream messageOut = new PipedOutputStream();
             PipedOutputStream replyOut   = new PipedOutputStream();
-            PipedInputStream replyIn     = new PipedInputStream(replyOut);
+         
 
             CompletableFuture<Void> sendFuture = CompletableFuture.runAsync(() -> {
                 try {
@@ -176,8 +177,8 @@ public class NodeBroadcaster {
 
             CompletableFuture<Void> replyFuture = CompletableFuture.runAsync(() -> {
                 try {
-                    NoteBytesEphemeral reply = collectReplyFromStream(replyIn);
-                    resultMap.put(recipientId.copy(), reply);
+                    byte[] bytes = StreamUtils.readOutputStream(replyOut);
+                    resultMap.put(recipientId.copy(), bytes);
                 } catch (Exception e) {
                     resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage("processRecipient", "Failed to read reply", e));
                 }
@@ -191,17 +192,5 @@ public class NodeBroadcaster {
         }
     }
 
-    private NoteBytesEphemeral collectReplyFromStream(PipedInputStream replyIn) throws IOException {
-        try (ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-             PipedInputStream input = replyIn) {
 
-            byte[] chunk = new byte[8192];
-            int read;
-            while ((read = input.read(chunk)) != -1) {
-                buffer.write(chunk, 0, read);
-            }
-
-            return new NoteBytesEphemeral(buffer.toByteArray());
-        }
-    }
 }

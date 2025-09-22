@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
@@ -51,15 +50,13 @@ public class HashServices {
     }
 
     public static boolean verifyBCryptPassword(NoteBytes password, NoteBytes hash) {
-        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.getChars(), hash.getBytes());
-
+        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.get(), hash.getBytes());
         return result.verified;
     }
 
    
     public static NoteBytes getBcryptHash(NoteBytes password) {
-        SecureRandom sr = new SecureRandom();
-        return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, sr, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.getChars()));
+        return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, RandomService.getSecureRandom(), LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.getChars()));
     }
 
 

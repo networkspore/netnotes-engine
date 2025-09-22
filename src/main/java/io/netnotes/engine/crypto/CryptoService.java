@@ -80,7 +80,7 @@ public class CryptoService {
     }
 
     
-    public static SecretKeySpec createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException, IOException {
+    public static SecretKeySpec createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException {
         try(NoteBytesEphemeral encoded = createPBKDF2Key(password, salt)){
             return new SecretKeySpec(encoded.get(), "AES");
         }

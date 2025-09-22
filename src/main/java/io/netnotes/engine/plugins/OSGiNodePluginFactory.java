@@ -16,12 +16,12 @@ import org.osgi.util.tracker.ServiceTracker;
 
 import io.netnotes.engine.AppData;
 import io.netnotes.engine.Node;
-import io.netnotes.engine.NoteFile;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteFile.NoteFile;
 
 public class OSGiNodePluginFactory {
     public static final NoteBytes PLUGIN_FACTORY_VERSION = new NoteBytes(1);

@@ -1,42 +1,24 @@
-package io.netnotes.engine;
+package io.netnotes.engine.noteFile;
 
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.URL;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.ManagedNoteFileInterface;
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.messaging.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.NoteJsonObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesTree;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
-
-import com.google.gson.JsonObject;
 
 import io.netnotes.engine.utils.Utils;
-import javafx.concurrent.Task;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
 
 
 
