@@ -237,7 +237,7 @@ public class FileStreamUtils {
                 OutputStream outStream = Files.newOutputStream(decryptedFile.toPath());
             ){
                 
-                byte[] iV = reader.readByteAmount(CryptoService.AES_NONCE_SIZE);
+                byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
 
                 Cipher cipher = CryptoService.getAESDecryptCipher(iV, appKey);
 
@@ -288,11 +288,11 @@ public class FileStreamUtils {
                     return null;
                 }
                 long fileSize = file.length();
-                if(fileSize < CryptoService.AES_NONCE_SIZE){
+                if(fileSize < CryptoService.AES_IV_SIZE){
                     return new byte[0];
                 }
 
-                byte[] iV = reader.readByteAmount(CryptoService.AES_NONCE_SIZE);
+                byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
 
                
                 Cipher cipher = CryptoService.getAESDecryptCipher(iV, appKey);
@@ -401,8 +401,8 @@ public class FileStreamUtils {
                 NoteBytesReader reader = new NoteBytesReader(fileInputStream);
             ) {
            
-                if (file.exists() && file.isFile() && file.length() > CryptoService.AES_NONCE_SIZE - 1) {
-                    byte[] iV = reader.readByteAmount(CryptoService.AES_NONCE_SIZE);
+                if (file.exists() && file.isFile() && file.length() > CryptoService.AES_IV_SIZE - 1) {
+                    byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
                     
                     Cipher decryptCipher = CryptoService.getAESDecryptCipher(iV, secretKey);
                     
@@ -454,7 +454,7 @@ public class FileStreamUtils {
         try (
            InputStream fileIn = Files.newInputStream(tmpFile.toPath());
         ) {
-            byte[] iV = StreamUtils.readByteAmount(CryptoService.AES_NONCE_SIZE, fileIn);
+            byte[] iV = StreamUtils.readByteAmount(CryptoService.AES_IV_SIZE, fileIn);
             
             Cipher decryptCipher = CryptoService.getAESDecryptCipher(iV, key);
             try(CipherInputStream tmpIn = new CipherInputStream(fileIn, decryptCipher) ){

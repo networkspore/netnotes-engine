@@ -10,6 +10,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+
 public class NoteBytesReader implements AutoCloseable{
     private final InputStream m_in;
     
@@ -17,7 +18,7 @@ public class NoteBytesReader implements AutoCloseable{
         m_in = is;
     }
 
-    public NoteBytes nextNoteBytes() throws EOFException, IOException{
+    public NoteBytes nextNoteBytes() throws IOException{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
@@ -30,7 +31,7 @@ public class NoteBytesReader implements AutoCloseable{
         return null;
     }
 
-    public NoteBytesEphemeral nextNoteBytesEphemeral() throws EOFException, IOException{
+    public NoteBytesEphemeral nextNoteBytesEphemeral() throws IOException{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
@@ -45,7 +46,7 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
 
-    public NoteBytesReadOnly nextNoteBytesReadOnly() throws EOFException, IOException{
+    public NoteBytesReadOnly nextNoteBytesReadOnly() throws IOException{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
@@ -59,7 +60,7 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
 
-    public NoteBytesMetaData nextMetaData() throws EOFException, IOException{
+    public NoteBytesMetaData nextMetaData() throws IOException{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];

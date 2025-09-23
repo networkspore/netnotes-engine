@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.file.Files;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -34,9 +33,14 @@ public class FactoryPathProcess {
                
                 
                 File dataDir = idDataFile.getParentFile();
-                if (path == null || path.byteLength() == 0 || dataDir == null) {
+                if (
+                    path == null || 
+                    path.byteLength() == 0 || 
+                    dataDir == null
+                ) {
                     throw new IllegalArgumentException("Required parameters cannot be null");
                 }
+
                 if(!dataDir.isDirectory()){
                     try{
                         Files.createDirectories(dataDir.toPath());
@@ -44,9 +48,14 @@ public class FactoryPathProcess {
                         throw new RuntimeException("Cannot access data directory", e);
                     }
                 }
-                List<NoteBytes> targetPath = path.getAsList();
 
-                if(idDataFile.exists() && idDataFile.isFile() && idDataFile.length() > CryptoService.AES_NONCE_SIZE){
+                NoteBytes[] targetPath = path.getAsArray();
+
+                if(
+                    idDataFile.exists() && 
+                    idDataFile.isFile() && 
+                    idDataFile.length() > CryptoService.AES_IV_SIZE
+                ){
                   
                         PipedOutputStream decryptedOutput = new PipedOutputStream();
                         PipedOutputStream parsedOutput = new PipedOutputStream();
@@ -89,7 +98,7 @@ public class FactoryPathProcess {
             }, execService);
     }
 
-    public static File createInitialFile(File idDataFile,File dataDir, List<NoteBytes> targetPath, SecretKey secretKey){
+    public static File createInitialFile(File idDataFile,File dataDir, NoteBytes[] targetPath, SecretKey secretKey){
         try{
             File newFile = DataFactory.createNewDataFile(dataDir);
             // Build the complete path structure
@@ -105,31 +114,35 @@ public class FactoryPathProcess {
        
     }
 
-    public static NoteBytesPair buildPathStructure(List<NoteBytes> targetPath, int pathIndex, File resultFile) throws Exception {
+    public static NoteBytesPair buildPathStructure(NoteBytes[] targetPath, int pathIndex, File resultFile) throws Exception {
          
-        if (pathIndex == targetPath.size()) {
+        if (pathIndex == targetPath.length) {
             return new NoteBytesPair(DataFactory.FILE_PATH, new NoteBytes(resultFile.getAbsolutePath()));
-        }else if (pathIndex >= targetPath.size()) {
+        }else if (pathIndex >= targetPath.length) {
             return null;
         }
 
-        return new NoteBytesPair(targetPath.get(pathIndex), new NoteBytesObject(new NoteBytesPair[]{
+        return new NoteBytesPair(targetPath[pathIndex], new NoteBytesObject(new NoteBytesPair[]{
             buildPathStructure(targetPath, pathIndex + 1, resultFile)
         }));
         
     }
 
-    public static CompletableFuture<File> parseIdDataFileUpdate(List<NoteBytes> targetPath, File dataDir, SecretKey secretKey,
+    public static CompletableFuture<File> parseIdDataFileUpdate(NoteBytes[] targetPath, File dataDir, SecretKey secretKey,
             PipedOutputStream decryptedInputStream,
             PipedOutputStream parsedOutputStream, ExecutorService execService) {
         return CompletableFuture
             .supplyAsync(() -> {
+
                 // Validate inputs
                 
-                try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(decryptedInputStream, StreamUtils.PIPE_BUFFER_SIZE));
-                    NoteBytesWriter writer = new NoteBytesWriter(parsedOutputStream)) {
+
+                try (
+                    NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(decryptedInputStream, StreamUtils.PIPE_BUFFER_SIZE));
+                    NoteBytesWriter writer = new NoteBytesWriter(parsedOutputStream)
+                ) {
                     
-                    NoteBytes targetPathKey = targetPath.get(0);
+                    NoteBytes targetPathKey = targetPath[0];
                     
                     boolean found = false;
                     IntCounter counter = new IntCounter();
@@ -138,13 +151,14 @@ public class FactoryPathProcess {
                         counter.add(writer.write(key));
                     }
                     while ( key != null && !(found = key.equals(targetPathKey))) {
-                        NoteBytesMetaData metaData = reader.nextMetaData();
-                        if(metaData != null){
-                            counter.add(writer.write(metaData));
-                            counter.add(StreamUtils.readWriteNextBytes(metaData.getLength(), reader, writer));
+                        //not found
+                        NoteBytesMetaData valueMetaData = reader.nextMetaData();
+                        if(valueMetaData != null){
+                            counter.add(writer.write(valueMetaData));
+                            counter.add(StreamUtils.readWriteNextBytes(valueMetaData.getLength(), reader, writer));
                         }else{
                             int location = counter.get();
-                            throw new EOFException("Illegal key found at: " + location );
+                            throw new EOFException("Unexpected end of file found at: " + location );
                         }
                     }
                     
@@ -154,15 +168,15 @@ public class FactoryPathProcess {
                     } else {
                         // Root key doesn't exist - create entire path structure
                         return createCompletePathStructure(targetPath, dataDir, reader, writer);
-                    }
+                    } 
                     
                 } catch (Exception e) {
-                    throw new RuntimeException("Failed to parse ID data file", e);
+                    throw new RuntimeException("Failed to complete parsing idDataFile", e);
                 }
             }, execService);
     }
 
-    private static File processFoundRootKey(List<NoteBytes> targetPath, File dataDir, SecretKey secretKey, 
+    private static File processFoundRootKey(NoteBytes[] targetPath, File dataDir, SecretKey secretKey, 
             NoteBytesReader reader, NoteBytesWriter writer) throws Exception {
         
         // Read metadata for the root key's value
@@ -177,7 +191,7 @@ public class FactoryPathProcess {
 
         AESBackedOutputStream abos = new AESBackedOutputStream(dataDir, secretKey, rootMetadataLength,StreamUtils.PIPE_BUFFER_SIZE, false);
 
-        IntCounter depthCounter = new IntCounter(targetPath.size() == 1 ? 0 : 1);
+        IntCounter depthCounter = new IntCounter(targetPath.length == 1 ? 0 : 1);
         NoteBytes filePathResult = divertAndParseToTempFile(abos, secretKey, targetPath, depthCounter, rootMetaData.getLength(), reader);
 
         if (filePathResult != null) {
@@ -202,7 +216,7 @@ public class FactoryPathProcess {
             NoteBytesMetaData newRootMetadata = new NoteBytesMetaData(rootMetaData.getType(), rootMetaData.getLength() + calculateInsertionSize(0, targetPath, newFile));
             writer.write(newRootMetadata);
 
-            if(targetPath.size() == 1){
+            if(targetPath.length == 1){
                 insertStructureFromDepth(writer, targetPath, 1, newFile);
                
                 try(
@@ -227,9 +241,9 @@ public class FactoryPathProcess {
 
 
 
-    private static int calculateInsertionSize(int currentDepth, List<NoteBytes> targetPath, File newFile) throws Exception {
+    private static int calculateInsertionSize(int currentDepth, NoteBytes[] targetPath, File newFile) throws Exception {
         // Base case: at the final key level, calculate the file pairs size
-        if (currentDepth == targetPath.size() - 1) {
+        if (currentDepth == targetPath.length - 1) {
             // FILE_PATH key: 1 byte + 5 bytes metadata = 6 bytes
             int filePathKeySize = DataFactory.FILE_PATH.byteLength() + NoteBytesMetaData.STANDARD_META_DATA_SIZE;
             
@@ -241,12 +255,12 @@ public class FactoryPathProcess {
         }
         
         // Beyond path - no calculation needed
-        if (currentDepth >= targetPath.size()) {
+        if (currentDepth >= targetPath.length) {
             return 0;
         }
         
         // Intermediate level: calculate size needed from this depth to the end
-        NoteBytes currentKey = targetPath.get(currentDepth);
+        NoteBytes currentKey = targetPath[currentDepth];
         
         // Key size: path key bytes + metadata
         int keySize = currentKey.byteLength() + NoteBytesMetaData.STANDARD_META_DATA_SIZE;
@@ -258,7 +272,7 @@ public class FactoryPathProcess {
         return keySize + valueSize;
     }
 
-    private static File createCompletePathStructure(List<NoteBytes> targetPath, File dataDir,
+    private static File createCompletePathStructure(NoteBytes[] targetPath, File dataDir,
             NoteBytesReader reader, NoteBytesWriter writer) throws Exception {
         
         // Create new file for this path
@@ -273,57 +287,63 @@ public class FactoryPathProcess {
     }
 
  
-    private static NoteBytes divertAndParseToTempFile(AESBackedOutputStream abaos, SecretKey secretKey, List<NoteBytes> targetPath,
-            IntCounter depthCounter, int contentLength, NoteBytesReader reader) throws Exception {
+    private static NoteBytes divertAndParseToTempFile(AESBackedOutputStream abaos, SecretKey secretKey, 
+        NoteBytes[] targetPath, IntCounter depthCounter, int contentLength, NoteBytesReader reader
+    ) throws Exception {
       
     
         try(NoteBytesWriter writer = new NoteBytesWriter(abaos)) {
-        
             // Stream the content to temp file while parsing
             IntCounter bytesCounter = new IntCounter();
             IntCounter regressionLength = new IntCounter(contentLength);
-            return parseContentWhileWritingToTemp(targetPath, depthCounter, bytesCounter, regressionLength, contentLength, reader, writer);
+            return parseContentWhileWritingToTemp(targetPath, depthCounter, bytesCounter, regressionLength, 
+                contentLength, reader, writer);
         }
         
         
     }
 
-    private static NoteBytes parseContentWhileWritingToTemp(List<NoteBytes> targetPath, IntCounter depthCounter, IntCounter bytesCounter,
-        IntCounter regressionLength, int contentLength, NoteBytesReader reader, 
+    private static NoteBytes parseContentWhileWritingToTemp(NoteBytes[] targetPath, IntCounter depthCounter, 
+        IntCounter byteCounter, IntCounter regressionLength, int contentLength, NoteBytesReader reader, 
         NoteBytesWriter tmpWriter) throws Exception 
     {
         int currentDepth = depthCounter.get();
-        int maxLevel = targetPath.size();
+        int maxLevel = targetPath.length;
 
         if(currentDepth == 0){
     
-            return searchForFilePathKey(bytesCounter,contentLength, contentLength, reader, tmpWriter);
+            return searchForFilePathKey(byteCounter,contentLength, contentLength, reader, tmpWriter);
             
-        }else if(currentDepth < maxLevel && bytesCounter.get() < contentLength && bytesCounter.get() < regressionLength.get()){
-            NoteBytes targetKey = targetPath.get(currentDepth);
+        }else if(currentDepth < maxLevel && byteCounter.get() < contentLength && 
+            byteCounter.get() < regressionLength.get()
+        ){
+            NoteBytes targetKey = targetPath[currentDepth];
 
             NoteBytes key = reader.nextNoteBytes();
             int keySize = tmpWriter.write(key);
-            bytesCounter.add(keySize);
+            byteCounter.add(keySize);
 
             if(key != null){
                 if(targetKey.equals(key)){
-                    if(currentDepth == maxLevel -1){
-                        NoteBytesMetaData metaData = reader.nextMetaData();
-                        bytesCounter.add( tmpWriter.write(metaData));
-
-                        return searchForFilePathKey(bytesCounter, metaData.getLength(), contentLength, reader, tmpWriter);
+                    depthCounter.add(1);
+                    NoteBytesMetaData metaData = reader.nextMetaData();
+                    
+                    if(metaData != null ){
+                        byteCounter.add( tmpWriter.write(metaData));
+                        if(currentDepth == maxLevel -1){
+                            return searchForFilePathKey(byteCounter, metaData.getLength(), contentLength, reader, tmpWriter);
+                        }else{
+                            regressionLength.set(byteCounter.get() + metaData.getLength());
+                            return parseContentWhileWritingToTemp(targetPath, depthCounter, byteCounter,regressionLength, contentLength, reader, tmpWriter);
+                        }
                     }else{
-                        depthCounter.add(1);
-                        NoteBytesMetaData metaData = reader.nextMetaData();
-                        bytesCounter.add(tmpWriter.write(metaData));
-                        regressionLength.set(bytesCounter.get() + metaData.getLength());
-                         return parseContentWhileWritingToTemp(targetPath, depthCounter, bytesCounter,regressionLength, contentLength, reader, tmpWriter);
+                        throw new EOFException("Unexpected end of file found at: " + targetPath[0] + " + " + byteCounter.get() + " bytes" );
                     }
+                    
                 }else{
                     NoteBytes value = reader.nextNoteBytes();
-                    bytesCounter.add(tmpWriter.write(value));
-                    return parseContentWhileWritingToTemp(targetPath, depthCounter, bytesCounter,regressionLength, contentLength, reader, tmpWriter);
+                    byteCounter.add(tmpWriter.write(value));
+                    return parseContentWhileWritingToTemp(targetPath, depthCounter, byteCounter,regressionLength, contentLength, reader, tmpWriter);
                 }
             }else{
                 return null;
@@ -369,7 +389,7 @@ public class FactoryPathProcess {
     }
    
 
-    private static void streamBackWithInsertedStructure(AESBackedOutputStream abos, List<NoteBytes> targetPath,
+    private static void streamBackWithInsertedStructure(AESBackedOutputStream abos, NoteBytes[] targetPath,
         int insertionDepth, File newFile, NoteBytesWriter writer, SecretKey secretKey, int rootMetadataLength) throws Exception {
     
         try (NoteBytesReader tmpReader = new NoteBytesReader(new AESBackedInputStream(abos, secretKey))){
@@ -379,7 +399,7 @@ public class FactoryPathProcess {
     }
 
     private static void streamBackWithSizeAdjustments(File newFile, NoteBytesReader tmpReader, NoteBytesWriter writer,
-        List<NoteBytes> targetPath, int insertionDepth, int currentDepth, int bucketLength) throws Exception 
+        NoteBytes[] targetPath, int insertionDepth, int currentDepth, int bucketLength) throws Exception 
     {
         
         IntCounter bytesProcessed = new IntCounter();
@@ -397,8 +417,8 @@ public class FactoryPathProcess {
             bytesProcessed.add(NoteBytesMetaData.STANDARD_META_DATA_SIZE);
             
             // Determine if this key is on our target path
-            boolean isOnTargetPath = (currentDepth < targetPath.size()) && 
-                                    key.equals(targetPath.get(currentDepth));
+            boolean isOnTargetPath = (currentDepth < targetPath.length) && 
+                                    key.equals(targetPath[currentDepth]);
             
             if (isOnTargetPath && currentDepth < insertionDepth && 
                 valueMetaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
@@ -440,7 +460,7 @@ public class FactoryPathProcess {
 
 
 
-    private static int insertStructureFromDepth(NoteBytesWriter writer, List<NoteBytes> targetPath, int insertionDepth, File newFile) throws Exception {
+    private static int insertStructureFromDepth(NoteBytesWriter writer, NoteBytes[] targetPath, int insertionDepth, File newFile) throws Exception {
         
         NoteBytesPair pair = buildPathStructure( targetPath, insertionDepth, newFile);
         if(pair != null){

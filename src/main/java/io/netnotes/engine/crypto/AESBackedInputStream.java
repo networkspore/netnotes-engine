@@ -28,7 +28,7 @@ public final class AESBackedInputStream extends InputStream {
         // Open file, read IV, init cipher
         InputStream fileIn = Files.newInputStream(file.toPath());
 
-        byte[] iv = StreamUtils.readByteAmount(CryptoService.AES_NONCE_SIZE, fileIn);
+        byte[] iv = StreamUtils.readByteAmount(CryptoService.AES_IV_SIZE, fileIn);
 
         Cipher decryptCipher = CryptoService.getAESDecryptCipher(iv, secretKey);
         this.m_delegate = new CipherInputStream(fileIn, decryptCipher);
@@ -59,7 +59,7 @@ public final class AESBackedInputStream extends InputStream {
             m_file = aesBackedOutputStream.getFile();
             // Open file, read IV, init cipher
             InputStream fileIn = Files.newInputStream(m_file.toPath());
-            byte[] iv = StreamUtils.readByteAmount(CryptoService.AES_NONCE_SIZE, fileIn);
+            byte[] iv = StreamUtils.readByteAmount(CryptoService.AES_IV_SIZE, fileIn);
             Cipher decryptCipher = CryptoService.getAESDecryptCipher(iv, secretKey);
             this.m_delegate = new CipherInputStream(fileIn, decryptCipher);
         }else{  

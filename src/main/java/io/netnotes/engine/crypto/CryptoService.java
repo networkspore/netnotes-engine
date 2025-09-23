@@ -1,13 +1,10 @@
 package io.netnotes.engine.crypto;
 
-import java.io.IOException;
-
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.KeySpec;
 
 import javax.crypto.Cipher;
 import javax.crypto.NoSuchPaddingException;
@@ -18,13 +15,14 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.crypto.agreement.X25519Agreement;
 import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
 import org.bouncycastle.crypto.params.HKDFParameters;
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -33,7 +31,7 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 public class CryptoService {
     public static final int CHACHA20_KEY_SIZE = 32; // 256 bits
     public static final int CHACHA20_NONCE_SIZE = 12; // 96 bits for ChaCha20-Poly1305
-    public static final int AES_NONCE_SIZE = 12;
+    public static final int AES_IV_SIZE = 12;
 
     public static final String AES_GCM_NO_PADDING ="AES/GCM/NoPadding";
     public static final String CHA_CHA_20_POLY_1305 = "ChaCha20-Poly1305";

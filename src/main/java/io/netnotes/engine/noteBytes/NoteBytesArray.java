@@ -68,31 +68,29 @@ public class NoteBytesArray extends NoteBytes{
     }
 
     public Stream<NoteBytes> getAsStream(){
-        
-         
-        byte[] bytes = get();
-        Stream.Builder<NoteBytes> noteBytesBuilder = Stream.builder();
-        int length = bytes.length;
-        int offset = 0;
-        
-        while(offset < length){
-            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-            noteBytesBuilder.accept(noteBytes);
-            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
-        }
-        return noteBytesBuilder.build();
-           
-       
+        return Arrays.stream(getAsArray());       
     }
 
     public NoteBytes[] getAsArray(){
-        return getAsStream().toArray(NoteBytes[]::new);
+        int size = size();
+        NoteBytes[] arr = new NoteBytes[size];
+        byte[] bytes = get();
+        int length = bytes.length;
+        int offset = 0;
+        int i = 0;
+        while(offset < length){
+            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
+            arr[i] = noteBytes;
+            i++;
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
+        }
+        return arr;
     }
 
     
 
     public List<NoteBytes> getAsList(){
-        return getAsStream().toList();
+        return Arrays.asList(getAsArray());        
     }
 
     public NoteBytes getAt(int index){
