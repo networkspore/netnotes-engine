@@ -21,8 +21,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.collections.NoteBytesTree;
-import io.netnotes.engine.noteBytes.collections.NoteBytesTreeAsync;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
@@ -516,8 +514,6 @@ public class NoteBytes {
         byte type = getByteDecoding().getType();
         
         switch(type) {
-            case NoteBytesMetaData.NOTE_BYTES_TREE_TYPE:
-                return getAsJsonObject();
             case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                 return getAsJsonObject();
             case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
@@ -546,8 +542,7 @@ public class NoteBytes {
         byte type = getByteDecoding().getType();
         try{
             switch(type){
-                case NoteBytesMetaData.NOTE_BYTES_TREE_TYPE:
-                    return new NoteBytesTree(get()).getAsJsonObject();
+
                 case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                     return new NoteBytesObject(get()).getAsJsonObject();
                 case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
@@ -564,8 +559,6 @@ public class NoteBytes {
         byte type = getByteDecoding().getType();
         try{
             switch(type){
-                case NoteBytesMetaData.NOTE_BYTES_TREE_TYPE:
-                    return new NoteBytesTreeAsync(get()).getAsJsonArray();
                 case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                     return new NoteBytesObject(get()).getAsJsonArray();
                 case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:

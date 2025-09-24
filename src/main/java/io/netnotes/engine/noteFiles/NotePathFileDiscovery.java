@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,13 +21,13 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateConfig;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateResult;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateConfig;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateResult;
 import io.netnotes.engine.utils.Utils;
 
-public class FileDiscovery {
+public class NotePathFileDiscovery {
 
 
     public static List<File> collectAllFilesFromDataStructure(File idDataFile, SecretKey secretKey, ExecutorService execService) throws Exception {
@@ -71,7 +71,7 @@ public class FileDiscovery {
 
                     NoteBytesMap valueMap = new NoteBytesMap(value.get());
                    
-                    NoteBytes filePath = valueMap.get(DataFactory.FILE_PATH);
+                    NoteBytes filePath = valueMap.get(NoteDataFactory.FILE_PATH);
                 
                     if (filePath != null) {
                         File file = new File(filePath.getAsString());

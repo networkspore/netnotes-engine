@@ -1,21 +1,16 @@
 package io.netnotes.engine.noteBytes.collections;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesNode;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
-public class NoteBytesTree extends NoteBytes {
+
+public class NoteBytesTree{
     
     private NoteBytesNode m_root = null;
 
@@ -26,28 +21,12 @@ public class NoteBytesTree extends NoteBytes {
     }
 
     public NoteBytesTree(byte[] bytes) {
-        super(bytes, ByteDecoding.NOTE_BYTES_TREE);
-    }
-
-
-
-    @Override
-    public void set(byte[] bytes){
-        set(bytes, ByteDecoding.NOTE_BYTES_TREE);
-    }
-
-    @Override
-    public void set(byte[] bytes, ByteDecoding byteDecoding) {
         deserialize(bytes);
-        super.set(new byte[0], byteDecoding);
     }
 
-   
     public void insert(NoteBytes data) throws InterruptedException {
-     
         m_root = insertRec(m_root, data);
         m_size++;
-        
     }
 
     private NoteBytesNode insertRec(NoteBytesNode root, NoteBytes data) {
@@ -144,88 +123,7 @@ public class NoteBytesTree extends NoteBytes {
             inOrderRec(root.getRight(), result);
         }
     }
-    @Override
-    public NoteBytesObject getAsNoteBytesObject() {
-        NoteBytesObject obj = new NoteBytesObject();
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            NoteBytesArray array = new NoteBytesArray();
-            for (NoteBytes element : elements) {
-                array.add(element);
-            }
-            obj.add("elements", array);
-        } catch (InterruptedException e) {
-            // Handle interruption
-        }
-        return obj;
-    }
 
-    @Override
-    public JsonElement getAsJsonElement() {
-        return getAsJsonObject();
-    }
-
-    @Override
-    public JsonObject getAsJsonObject() {
-        if (m_root == null) {
-            return new JsonObject();
-        }
-        
-        JsonObject jsonObject = new JsonObject();
-        JsonArray elementsArray = new JsonArray();
-        
-        // Perform in-order traversal to get elements in sorted order
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            for (NoteBytes element : elements) {
-                byte type = element.getByteDecoding().getType();
-                
-                if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-                    elementsArray.add(element.getAsJsonArray());
-                } else if (type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    elementsArray.add(element.getAsJsonObject());
-                } else {
-                    elementsArray.add(element.getAsJsonElement());
-                }
-            }
-        } catch (InterruptedException e) {
-            // Return empty object on interruption
-            return new JsonObject();
-        }
-        
-        jsonObject.add("elements", elementsArray);
-        return jsonObject;
-    }
-
-    @Override
-    public JsonArray getAsJsonArray() {
-        if (m_root == null) {
-            return new JsonArray();
-        }
-        
-        JsonArray elementsArray = new JsonArray();
-        
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            for (NoteBytes element : elements) {
-                byte type = element.getByteDecoding().getType();
-                
-                if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-                    elementsArray.add(element.getAsJsonArray());
-                } else if (type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    elementsArray.add(element.getAsJsonObject());
-                } else {
-                    elementsArray.add(element.getAsJsonElement());
-                }
-            }
-        } catch (InterruptedException e) {
-            // Return empty array on interruption
-            return new JsonArray();
-        }
-        
-        return elementsArray;
-    }
-    
 
     public void setRoot(NoteBytesNode root) {
         m_root = root;
@@ -235,12 +133,13 @@ public class NoteBytesTree extends NoteBytes {
         return m_root;
     }
 
-    @Override
-    public byte[] get() {
+  
+    public byte[] serialize() {
         if (m_root == null) {
             return new byte[0];
         }
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+        
+        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream()) {
             serializeNode(m_root, outputStream);
             return outputStream.toByteArray();
         } catch (IOException e) {
@@ -248,13 +147,8 @@ public class NoteBytesTree extends NoteBytes {
         }
     }
 
-    @Override
-    public byte[] getBytes() {
-        return get();
-    }
-    
 
-    private void serializeNode(NoteBytesNode node, ByteArrayOutputStream outputStream) throws IOException {
+    private void serializeNode(NoteBytesNode node, UnsynchronizedByteArrayOutputStream outputStream) throws IOException {
         if (node == null) {
             // Write null marker (0)
             outputStream.write(0);
@@ -331,16 +225,15 @@ public class NoteBytesTree extends NoteBytes {
         return m_size;
     }
 
-    @Override
     public boolean isEmpty() {
         return m_size == 0;
     }
 
-    @Override
+
     public void clear() {
      
         m_root = null;
         m_size = 0;
-        super.clear(); 
+   
     }
 }

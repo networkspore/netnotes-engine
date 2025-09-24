@@ -32,23 +32,27 @@ public class ByteDecoding{
     public static class NoteBytesMetaData {
         public final static int STANDARD_META_DATA_SIZE = 5;
 
-        public final static byte VIDEO_TYPE = 0x54;
-        public final static byte IMAGE_TYPE = 0x53;
-        public final static byte NOTE_BYTES_TREE_TYPE = 0x52;
-        public final static byte NOTE_BYTES_ARRAY_TYPE = 0x51;
-        public final static byte NOTE_BYTES_OBJECT_TYPE = 0x50;
-        public final static byte BIG_DECIMAL_TYPE = 0x49;
-        public final static byte BIG_INTEGER_TYPE = 0x48;
-        public final static byte SHORT_TYPE = 0x47;
-        public final static byte FLOAT_TYPE = 0x46;
-        public final static byte LONG_TYPE = 0x45;
-        public final static byte DOUBLE_TYPE = 0x44;
-        public final static byte INTEGER_TYPE = 0x43;
-        public final static byte STRING_UTF16_TYPE = 0x42;
-        public final static byte STRING_TYPE = 0x41;
-        public final static byte BOOLEAN_TYPE = 0x40;
-        public final static byte SERIALIZABLE_OBJECT_TYPE = 0x02;
+
+        
+        
         public final static byte RAW_BYTES_TYPE = 0x01;
+        public final static byte LONG_TYPE = 0x02;
+        public final static byte DOUBLE_TYPE = 0x03;
+        public final static byte INTEGER_TYPE = 0x04;
+        public final static byte STRING_UTF16_TYPE = 0x05;
+        public final static byte STRING_TYPE = 0x06;
+        public final static byte BOOLEAN_TYPE = 0x07;
+        public final static byte SHORT_TYPE = 0x08;
+        public final static byte FLOAT_TYPE = 0x09;
+
+        public final static byte NOTE_BYTES_ARRAY_TYPE = 0x10;
+        public final static byte NOTE_BYTES_OBJECT_TYPE = 0x11;
+        public final static byte BIG_DECIMAL_TYPE = 0x12;
+        public final static byte BIG_INTEGER_TYPE = 0x13;
+       
+        public final static byte SERIALIZABLE_OBJECT_TYPE = 0x20;
+        public final static byte VIDEO_TYPE = 0x21;
+        public final static byte IMAGE_TYPE = 0x22;
 
         private byte m_type;
         private int m_len;
@@ -369,10 +373,6 @@ public class ByteDecoding{
     }
 
 
-
-    public static ByteDecoding noteBytesTreeDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.NOTE_BYTES_TREE_TYPE, BIG_ENDIAN, UTF_8);
-    }
 
     public static ByteDecoding noteBytesArrayDecoding(){
         return new ByteDecoding(NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE, BIG_ENDIAN, UTF_8);

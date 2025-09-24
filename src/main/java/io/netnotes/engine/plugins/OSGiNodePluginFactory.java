@@ -21,7 +21,7 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
-import io.netnotes.engine.noteFile.NoteFile;
+import io.netnotes.engine.noteFiles.NoteFile;
 
 public class OSGiNodePluginFactory {
     public static final NoteBytes PLUGIN_FACTORY_VERSION = new NoteBytes(1);

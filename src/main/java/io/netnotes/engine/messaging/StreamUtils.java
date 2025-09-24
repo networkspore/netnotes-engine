@@ -1,7 +1,6 @@
 package io.netnotes.engine.messaging;
 
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -14,8 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
@@ -94,19 +91,6 @@ public class StreamUtils {
                     progressTracker.addBytesProcessed(length);
                 }
             }
-        }
-    }
-
-    /**
-     * Write error message to reply stream
-     */
-    public static void writeMessageToStreamAndClose(PipedOutputStream stream, NoteBytes message) throws IOException {
-        try (
-                NoteBytesEphemeral errorReply = message instanceof NoteBytesEphemeral ? (NoteBytesEphemeral) message
-                        : new NoteBytesEphemeral(message);
-                NoteBytesWriter writer = new NoteBytesWriter(stream);) {
-
-            writer.write(errorReply);
         }
     }
 

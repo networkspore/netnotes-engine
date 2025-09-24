@@ -1,10 +1,10 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import io.netnotes.engine.ManagedNoteFileInterface;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateConfig;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateResult;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateConfig;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateResult;
 
 import java.util.Iterator;
 import java.util.List;
@@ -16,7 +16,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 
-public class NoteFileRegistry extends DataFactory {
+public class NoteFileRegistry extends NoteDataFactory {
     private final Map<NoteStringArrayReadOnly, ManagedNoteFileInterface> m_registry = new ConcurrentHashMap<>();
 
     public NoteFileRegistry(SettingsData settingsData) {

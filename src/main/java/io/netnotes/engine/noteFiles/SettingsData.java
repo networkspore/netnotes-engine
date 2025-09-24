@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import java.io.File;
 import java.io.FileInputStream;

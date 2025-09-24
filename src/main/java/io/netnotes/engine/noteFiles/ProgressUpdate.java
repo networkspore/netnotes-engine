@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 public class ProgressUpdate {
         private final int completed;

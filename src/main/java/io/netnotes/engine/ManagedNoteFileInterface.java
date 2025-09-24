@@ -14,8 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteFile.NoteFile;
-import io.netnotes.engine.noteFile.NoteFileRegistry;
+import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.noteFiles.NoteFileRegistry;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File file;

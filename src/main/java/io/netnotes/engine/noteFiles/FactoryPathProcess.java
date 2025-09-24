@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import java.io.EOFException;
 import java.io.File;
@@ -11,9 +11,6 @@ import java.util.concurrent.ExecutorService;
 
 import javax.crypto.SecretKey;
 
-
-import io.netnotes.engine.crypto.AESBackedInputStream;
-import io.netnotes.engine.crypto.AESBackedOutputStream;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -27,7 +24,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class FactoryPathProcess {
     
-    public static CompletableFuture<File> processExistingDataFile(File idDataFile, NoteStringArrayReadOnly path, SecretKey secretKey, ExecutorService execService) {
+    public static CompletableFuture<File> getOrCreateIdDataFile(File idDataFile, NoteStringArrayReadOnly path, SecretKey secretKey, ExecutorService execService) {
         return CompletableFuture
             .supplyAsync(() -> {
                
@@ -51,56 +48,69 @@ public class FactoryPathProcess {
 
                 NoteBytes[] targetPath = path.getAsArray();
 
+                
+
                 if(
                     idDataFile.exists() && 
                     idDataFile.isFile() && 
                     idDataFile.length() > CryptoService.AES_IV_SIZE
                 ){
-                  
-                        PipedOutputStream decryptedOutput = new PipedOutputStream();
-                        PipedOutputStream parsedOutput = new PipedOutputStream();
-                  
-                        try {
+                    validateTargetPath(targetPath);
+                    PipedOutputStream decryptedOutput = new PipedOutputStream();
+                    PipedOutputStream parsedOutput = new PipedOutputStream();
+                
+                    try {
+                    
+                        // Chain the operations: decrypt -> parse -> encrypt -> return file
+                        CompletableFuture<NoteBytesObject> decryptFuture = 
+                            FileStreamUtils.performDecryption(idDataFile, decryptedOutput, secretKey, execService);
                         
-                            // Set up piped streams for concurrent processing
+                        CompletableFuture<File> parseFuture = 
+                            parseIdDataFileUpdate(targetPath, dataDir, secretKey, decryptedOutput, parsedOutput, execService);
+                        
+                        CompletableFuture<NoteBytesObject> saveFuture = 
+                            FileStreamUtils.saveEncryptedFileSwap(idDataFile, secretKey, parsedOutput);
+                        
+                        // Wait for all operations to complete and return the result file
+                        return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
+                            .thenCompose(v -> parseFuture) // Return the parsed file result
+                            .join(); // Block for this async operation
                         
                             
-                            // Chain the operations: decrypt -> parse -> encrypt -> return file
-                            CompletableFuture<NoteBytesObject> decryptFuture = 
-                                FileStreamUtils.performDecryption(idDataFile, decryptedOutput, secretKey, execService);
-                            
-                            CompletableFuture<File> parseFuture = 
-                                parseIdDataFileUpdate(targetPath, dataDir, secretKey, decryptedOutput, parsedOutput, execService);
-                            
-                            CompletableFuture<NoteBytesObject> saveFuture = 
-                                FileStreamUtils.saveEncryptedFileSwap(idDataFile, secretKey, parsedOutput);
-                            
-                            // Wait for all operations to complete and return the result file
-                            return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
-                                .thenCompose(v -> parseFuture) // Return the parsed file result
-                                .join(); // Block for this async operation
-                            
-                                
-                        } catch (Exception e) {
-                            throw new RuntimeException("Failed to process existing data file", e);
-                        }finally{
-                            try {
-                                if (decryptedOutput != null) decryptedOutput.close();
-                                if (parsedOutput != null) parsedOutput.close();
-                            } catch (IOException closeEx) {
-                                System.err.println("Failed to close streams: " + closeEx.getMessage());
-                            }
-                        }
-                   
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to process existing data file", e);
+                    }finally{
+                        StreamUtils.safeClose(decryptedOutput);
+                        StreamUtils.safeClose(parsedOutput);
+                    }
+                
                 }else{
                     return createInitialFile(idDataFile, dataDir, targetPath, secretKey);
                 }
             }, execService);
     }
 
+    public static void validateTargetPath(NoteBytes[] targetPath){
+        if(targetPath.length == 0){
+            throw new IllegalArgumentException("Path does not contain any valid elements");
+        }
+        int pathLength = 0;
+        
+        for(NoteBytes pathNode : targetPath){
+            if(pathNode.getByteDecoding().getType() != NoteBytesMetaData.STRING_TYPE){
+                throw new IllegalArgumentException("Path elements must be STRING_TYPE");
+            }
+            pathLength += pathNode.byteLength();
+        }
+        if(pathLength > NoteDataFactory.PATH_LENGTH_WARNING){
+            System.err.println("WARNING: Path length of: " + pathLength + " exceeds maximum of: " + NoteDataFactory.PATH_LENGTH_WARNING + " and seriously impacts all file system lookups.");
+        }
+
+    }
+
     public static File createInitialFile(File idDataFile,File dataDir, NoteBytes[] targetPath, SecretKey secretKey){
         try{
-            File newFile = DataFactory.createNewDataFile(dataDir);
+            File newFile = NoteDataFactory.createNewDataFile(dataDir);
             // Build the complete path structure
         
             NoteBytesPair rootPair = buildPathStructure( targetPath, 0, newFile);
@@ -110,15 +120,13 @@ public class FactoryPathProcess {
         }catch(Exception e){
             throw new RuntimeException("Failed to create initial data file", e);
         }
-       
-       
     }
 
     public static NoteBytesPair buildPathStructure(NoteBytes[] targetPath, int pathIndex, File resultFile) throws Exception {
          
         if (pathIndex == targetPath.length) {
-            return new NoteBytesPair(DataFactory.FILE_PATH, new NoteBytes(resultFile.getAbsolutePath()));
-        }else if (pathIndex >= targetPath.length) {
+            return new NoteBytesPair(NoteDataFactory.FILE_PATH, new NoteBytes(resultFile.getAbsolutePath()));
+        }else if (pathIndex > targetPath.length) {
             return null;
         }
 
@@ -212,7 +220,7 @@ public class FactoryPathProcess {
             StreamUtils.readWriteBytes(reader, writer);
             return new File(filePathResult.getAsString());
         } else {
-            File newFile = DataFactory.createNewDataFile(dataDir);
+            File newFile = NoteDataFactory.createNewDataFile(dataDir);
             NoteBytesMetaData newRootMetadata = new NoteBytesMetaData(rootMetaData.getType(), rootMetaData.getLength() + calculateInsertionSize(0, targetPath, newFile));
             writer.write(newRootMetadata);
 
@@ -245,7 +253,7 @@ public class FactoryPathProcess {
         // Base case: at the final key level, calculate the file pairs size
         if (currentDepth == targetPath.length - 1) {
             // FILE_PATH key: 1 byte + 5 bytes metadata = 6 bytes
-            int filePathKeySize = DataFactory.FILE_PATH.byteLength() + NoteBytesMetaData.STANDARD_META_DATA_SIZE;
+            int filePathKeySize = NoteDataFactory.FILE_PATH.byteLength() + NoteBytesMetaData.STANDARD_META_DATA_SIZE;
             
             // FILE_PATH value: path string + 5 bytes metadata
             String filePath = newFile.getAbsolutePath();
@@ -276,7 +284,7 @@ public class FactoryPathProcess {
             NoteBytesReader reader, NoteBytesWriter writer) throws Exception {
         
         // Create new file for this path
-        File newFile = DataFactory.createNewDataFile(dataDir);
+        File newFile = NoteDataFactory.createNewDataFile(dataDir);
         
         writer.write(buildPathStructure( targetPath, 0, newFile));
         
@@ -366,7 +374,7 @@ public class FactoryPathProcess {
                 int keySize = tmpWriter.write(key);
                 count += keySize;
                 byteCounter.add(keySize);
-                if(key.equals(DataFactory.FILE_PATH)){
+                if(key.equals(NoteDataFactory.FILE_PATH)){
                     NoteBytes filePath = reader.nextNoteBytes();
                     byteCounter.add(tmpWriter.write(filePath));
                     return filePath;

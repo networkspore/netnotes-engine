@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,7 +12,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -23,23 +22,23 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateConfig;
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateResult;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateConfig;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateResult;
 import io.netnotes.engine.utils.Utils;
 
-public class DataFactory {
+public class NoteDataFactory {
     public static final NoteBytes FILE_PATH = new NoteBytes(new byte[]{0x01});
+    public static final int PATH_LENGTH_WARNING = 512;
     
     private final ExecutorService m_execService;
     private final Semaphore m_dataSemaphore;
     private final ScheduledExecutorService m_schedualedExecutor;
     private final SettingsData m_settingsData;
 
-    public DataFactory(SettingsData settingsData){
+    public NoteDataFactory(SettingsData settingsData){
 
         m_execService = Executors.newVirtualThreadPerTaskExecutor();
-        ThreadFactory factory = Thread.ofVirtual().factory();
-        m_schedualedExecutor = Executors.newScheduledThreadPool(0, factory);
+        m_schedualedExecutor = Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
         m_dataSemaphore = new Semaphore(1);
         m_settingsData = settingsData;
     }
@@ -96,7 +95,7 @@ public class DataFactory {
                 }
             }, getExecService())
             .thenCompose(idDataFile -> {
-                return FactoryPathProcess.processExistingDataFile(idDataFile, path, getSecretKey(), getExecService());
+                return FactoryPathProcess.getOrCreateIdDataFile(idDataFile, path, getSecretKey(), getExecService());
                 
             })
             .whenComplete((result, throwable) -> {
@@ -191,7 +190,7 @@ public class DataFactory {
                         FileStreamUtils.performDecryption(idDataFile, decryptedOutput, oldAppKey, execService);
                     
                     CompletableFuture<List<File>> parseAndUpdateFuture = 
-                        FileDiscovery.parseDataStructureAndUpdateFilesWithStrategy(decryptedOutput, reEncryptedOutput, 
+                        NotePathFileDiscovery.parseDataStructureAndUpdateFilesWithStrategy(decryptedOutput, reEncryptedOutput, 
                                                                 oldAppKey, newAppKey, config, progressCallback, execService);
                     
                     CompletableFuture<NoteBytesObject> saveFuture = 
@@ -199,7 +198,7 @@ public class DataFactory {
                     
                     return CompletableFuture.allOf(decryptFuture, parseAndUpdateFuture, saveFuture)
                         .thenCompose(v -> parseAndUpdateFuture.thenApply(updatedFiles -> 
-                            FileDiscovery.createBulkUpdateResult(updatedFiles)))
+                            NotePathFileDiscovery.createBulkUpdateResult(updatedFiles)))
                         .join();
                         
                 } catch (Exception e) {

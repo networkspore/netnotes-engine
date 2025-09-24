@@ -1,8 +1,5 @@
 package io.netnotes.engine;
 
-import io.netnotes.engine.noteFile.NoteFileRegistry;
-import io.netnotes.engine.noteFile.SettingsData;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -10,6 +7,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteFiles.NoteFileRegistry;
+import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.utils.GitHubAPI;
 import io.netnotes.engine.utils.UpdateInformation;
 import io.netnotes.engine.utils.Utils;

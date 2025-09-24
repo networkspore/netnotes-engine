@@ -1,4 +1,4 @@
-package io.netnotes.engine.crypto;
+package io.netnotes.engine.noteFiles;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,7 +12,8 @@ import javax.crypto.SecretKey;
 
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
-import io.netnotes.engine.noteFile.FileStreamUtils;
+import io.netnotes.engine.crypto.CryptoService;
+import io.netnotes.engine.crypto.RandomService;
 
 public final class AESBackedOutputStream extends OutputStream {
 

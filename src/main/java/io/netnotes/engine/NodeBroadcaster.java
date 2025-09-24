@@ -20,6 +20,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMap;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class NodeBroadcaster {
     public static final long MAX_MESSAGE_SIZE = 50 * 1024 * 1024; // 50MB default
@@ -93,32 +94,25 @@ public class NodeBroadcaster {
                 // Serialize and write response to reply stream
                 return CompletableFuture.runAsync(() -> {
                     try{
-                        NoteBytesConcurrentMap map = resultMap; 
-                        NoteBytes noteBytes = map.getNoteBytesObject();
+                        //Serialize the results
+                        NoteBytes noteBytes = resultMap.getNoteBytesObject();
                     
-                        // Serialize the result map
-                            NoteBytesObject object = TypedMessageMap.createHeader(
-                                this.broadcasterId, 
-                                NoteMessaging.General.BROADCAST_RESULT, 
-                                noteBytes
-                                );
-                        StreamUtils.writeMessageToStreamAndClose(replyStream, object);
+                        //Create boadcast result header
+                        NoteBytesObject object = TypedMessageMap.createHeader(
+                            this.broadcasterId, 
+                            NoteMessaging.General.BROADCAST_RESULT, 
+                            noteBytes
+                        );
+
+                        try(
+                            NoteBytesWriter writer = new NoteBytesWriter(replyStream);
+                        ){
+                            writer.write(object);
+                        }catch(IOException e){
+                            throw new RuntimeException("Writing replies to reply stream failed", e);
+                        }
                         
                     } catch (Exception e) {
-                        // If there's an error, try to write error response
-                        try {
-                                NoteBytesObject object = TypedMessageMap.createHeader(
-                                this.broadcasterId, 
-                                NoteMessaging.General.ERROR, 
-                                TaskMessages.createErrorMessage(
-                                    "Stream reply", 
-                                    "Failed to serialize broadcast results", 
-                                    e));
-                            StreamUtils.writeMessageToStreamAndClose(replyStream, object);
-                        } catch (IOException ioEx) {
-                            // Log or handle the fact that we couldn't even write the error
-                            throw new RuntimeException("Failed to write error response", ioEx);
-                        }
                         throw new RuntimeException("Failed to process broadcast response", e);
                     }
                 }, exec);

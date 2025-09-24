@@ -1,10 +1,10 @@
-package io.netnotes.engine.noteFile;
+package io.netnotes.engine.noteFiles;
 
 import java.io.File;
 import java.util.List;
 
-import io.netnotes.engine.noteFile.FileStreamUtils.BulkUpdateConfig;
-import io.netnotes.engine.noteFile.FileStreamUtils.UpdateStrategy;
+import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateConfig;
+import io.netnotes.engine.noteFiles.FileStreamUtils.UpdateStrategy;
 
 public class DiskSpaceValidation {
         private boolean m_isValid;
