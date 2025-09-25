@@ -8,6 +8,7 @@ import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesPair {
     private NoteBytes m_key;
@@ -70,13 +71,6 @@ public class NoteBytesPair {
         return m_value;
     }
 
-    public void setKey(NoteBytes key){
-        m_key = key;
-    }
-    public void setValue(NoteBytes value){
-        m_value = value;
-    }
-
     public NoteBytesReadOnly getValueAsReadOnly(){
         return getValueAsReadOnly();
     }
@@ -102,7 +96,11 @@ public class NoteBytesPair {
         return new NoteBytesPair(key, value);
     }
 
-
+    public int byteLength(){
+        return getKey().byteLength() + 
+            getValue().byteLength() + 
+            (NoteBytesMetaData.STANDARD_META_DATA_SIZE * 2);
+    }
 
 
     public NoteBytesObject getAsNoteBytesObject(){

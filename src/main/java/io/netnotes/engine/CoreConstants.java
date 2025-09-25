@@ -5,7 +5,6 @@ import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 
 public class CoreConstants {
-
     public final static File LOG_FILE = new File("netnotes-log.txt");
     public final static String ASSETS_DIRECTORY = "/assets";
 

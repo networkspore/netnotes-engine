@@ -1,22 +1,21 @@
 package io.netnotes.engine.noteFiles;
 
 import io.netnotes.engine.ManagedNoteFileInterface;
+import io.netnotes.engine.messaging.StreamUtils;
+import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateConfig;
-import io.netnotes.engine.noteFiles.FileStreamUtils.BulkUpdateResult;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 
-public class NoteFileRegistry extends NoteDataFactory {
+public class NoteFileRegistry extends NotePathFactory {
     private final Map<NoteStringArrayReadOnly, ManagedNoteFileInterface> m_registry = new ConcurrentHashMap<>();
 
     public NoteFileRegistry(SettingsData settingsData) {
@@ -24,10 +23,10 @@ public class NoteFileRegistry extends NoteDataFactory {
     }
     
     public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path) {
-        return getIdDataFile(path)
-            .thenApply(file -> {
+        return getNoteFilePath(path)
+            .thenApply(noteFilePath -> {
                 ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path, 
-                    k -> new ManagedNoteFileInterface(file, this, path));
+                    k -> new ManagedNoteFileInterface(noteFilePath, this, path));
                 return new NoteFile(path, noteFileInterface);
             });
     }
@@ -84,23 +83,25 @@ public class NoteFileRegistry extends NoteDataFactory {
     }
 
     @Override
-    public CompletableFuture<BulkUpdateResult> updateAllFileEncryptionWithProgress(
-            NoteBytesEphemeral oldPassword,
-            NoteBytesEphemeral newPassword,
-            BulkUpdateConfig config,
-            Consumer<ProgressUpdate> progressCallback,
-            ExecutorService execService
+    public CompletableFuture<Void> updateFilePathLedgerEncryption(
+        AsyncNoteBytesWriter progressWriter,
+        NoteBytesEphemeral oldPassword,
+        NoteBytesEphemeral newPassword,
+        int batchSize
     ) {
-        return prepareAllForKeyUpdate()
-            .thenCompose(v -> 
-                super.updateAllFileEncryptionWithProgress(
-                    oldPassword, newPassword, config, progressCallback, execService
-                )
-            )
-            .whenComplete((result, throwable) -> {
-                // always run, success or failure
-                completeKeyUpdateForAll();
-            });
+  
+            ProgressMessage.writeAsync("noteFileRegistry.updateFilePathLedgerEncryption",0,-1, 
+                "Preparing for key update", progressWriter);
+            return prepareAllForKeyUpdate()
+                .thenCompose(v -> super.updateFilePathLedgerEncryption( progressWriter,
+                    oldPassword, newPassword, batchSize))
+                .whenComplete((result, throwable) -> {
+                    ProgressMessage.writeAsync("noteFileRegistry.updateFilePathLedgerEncryption", 
+                        0, -1, "Completing key update", progressWriter);
+                    completeKeyUpdateForAll();
+                    StreamUtils.safeClose(progressWriter);
+                });
+        
     }
         
         

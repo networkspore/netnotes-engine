@@ -40,6 +40,7 @@ public class NoteMessaging {
         public static final String INCOMPLETE = "Incomplete";
         public static final String BROADCAST_RESULT = "Broadcast"; 
         public static final String BROADCAST = "Broadcast Result";
+        public static final String STATUS = "Status";
     }
 
     public static class Headings {
@@ -48,6 +49,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly UUID_256 = new NoteBytesReadOnly("uuid_256");
         public static final NoteBytesReadOnly TIME_STAMP = new NoteBytesReadOnly("timeStamp");
     }
+
 
     /* =========================
      * Status lifecycle constants
@@ -75,7 +77,6 @@ public class NoteMessaging {
      * ========================= */
     public static class Event {
         public static final String MSG_SEND_NOTE = "Event_Send_note";
-        public static final String STATUS = "Event_Status";
 
         public static final String LIST_CHANGED = "Event_List_changed";
         public static final String LIST_CHECKED = "Event_List_checked";

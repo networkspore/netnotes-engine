@@ -13,8 +13,8 @@ import java.util.concurrent.Executor;
 import io.netnotes.engine.messaging.TypedMessageMap;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.messaging.TaskMessages;
 import io.netnotes.engine.messaging.NoteMessaging.General;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -144,7 +144,7 @@ public class NodeBroadcaster {
         Node targetNode = nodeRegistry.get(recipientId);
 
         if (targetNode == null) {
-            resultMap.put(recipientId.copy(), TaskMessages.getResultMessage(General.ERROR, "Node not found"));
+            resultMap.put(recipientId.copy(), TaskMessages.getTaskMessage("processRecipient", General.ERROR, "Node not found"));
             return CompletableFuture.completedFuture(null);
         }
 

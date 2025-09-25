@@ -35,10 +35,19 @@ public class NoteBytesReadOnly extends NoteBytes {
         System.arraycopy(bytes, offset + 4, dst, 0, size);
         return new NoteBytesReadOnly(dst, ByteDecoding.of(type));
     }
+
+    @Override 
+    public byte[] get(){
+        byte[] bytes = super.get();
+        byte[] newBytes = new byte[bytes.length];
+        System.arraycopy(bytes, 0, newBytes, 0, bytes.length);
+        return newBytes;
+    }
+
     
     @Override
     public NoteBytesReadOnly copy(){
-        return new NoteBytesReadOnly(Arrays.copyOf(get(), byteLength()), getByteDecoding());
+        return new NoteBytesReadOnly(get(), getByteDecoding());
     }
 
     @Override
@@ -61,6 +70,7 @@ public class NoteBytesReadOnly extends NoteBytes {
 
     }
 
+    
  
     @Override
     public void ruin(){

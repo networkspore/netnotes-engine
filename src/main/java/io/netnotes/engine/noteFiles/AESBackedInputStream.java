@@ -1,6 +1,5 @@
 package io.netnotes.engine.noteFiles;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,6 +9,7 @@ import javax.crypto.Cipher;
 import javax.crypto.CipherInputStream;
 import javax.crypto.SecretKey;
 
+import org.apache.commons.io.input.UnsynchronizedByteArrayInputStream;
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.crypto.CryptoService;
@@ -48,7 +48,7 @@ public final class AESBackedInputStream extends InputStream {
     ){
         m_file = null;
         this.m_fileBacked = false;
-        this.m_delegate = new ByteArrayInputStream(rawBytes);
+        this.m_delegate = new UnsynchronizedByteArrayInputStream(rawBytes);
     }
 
     public AESBackedInputStream(
@@ -110,12 +110,12 @@ public final class AESBackedInputStream extends InputStream {
     }
 
     @Override
-    public synchronized void mark(int readlimit) {
+    public void mark(int readlimit) {
         m_delegate.mark(readlimit);
     }
 
     @Override
-    public synchronized void reset() throws IOException {
+    public void reset() throws IOException {
         m_delegate.reset();
     }
 

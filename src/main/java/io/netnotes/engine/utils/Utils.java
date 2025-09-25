@@ -25,8 +25,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import java.util.zip.ZipFile;
@@ -41,6 +43,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -81,7 +84,10 @@ import io.netnotes.engine.CoreConstants;
 import io.netnotes.engine.crypto.HashData;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -101,8 +107,9 @@ public class Utils {
     public static final int PRINTABLE_CHAR_RANGE_START = 32;
     public static final int PRINTABLE_CHAR_RANGE_END = 127;
     
+  
 
-
+ 
 
     public static byte[] getTimeStampBytes(){
         long timeStamp = System.currentTimeMillis();
@@ -810,6 +817,25 @@ public class Utils {
     }
 
     
+
+    public static CompletableFuture<Void> logAsync(Semaphore semaphore, File logFile, NoteBytesObject taskMessageObject){
+        return  CompletableFuture.runAsync(() -> {
+            try {
+                semaphore.acquire();
+                try(
+                    NoteBytesWriter writer = new NoteBytesWriter(Files.newOutputStream(logFile.toPath(), StandardOpenOption.CREATE, StandardOpenOption.APPEND));
+                ){
+                    writer.write(taskMessageObject);
+                } catch (IOException e) {
+                    throw new RuntimeException(NoteMessaging.Error.IO, e);
+                }finally{
+                   semaphore.release();
+                }
+            } catch (InterruptedException e) {
+                throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
+            }
+        });
+    }
  
     public static Future<?> delayObject(Object object, long delayMillis, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded) {
 

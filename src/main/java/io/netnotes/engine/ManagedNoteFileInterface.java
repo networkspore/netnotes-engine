@@ -19,15 +19,15 @@ import io.netnotes.engine.noteFiles.NoteFileRegistry;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File file;
-    private final Semaphore semaphore = new Semaphore(1);
+    private final Semaphore semaphore = new Semaphore(1, true);
     private final AtomicBoolean locked = new AtomicBoolean(false);
 
     private final Set<NoteBytes> activeReferences = ConcurrentHashMap.newKeySet();
     private final NoteFileRegistry registry;
     private final NoteStringArrayReadOnly registryKey;
     
-   public ManagedNoteFileInterface(File file, NoteFileRegistry registry, NoteStringArrayReadOnly registryKey) {
-        this.file = file;
+   public ManagedNoteFileInterface(NoteBytes noteFilePath, NoteFileRegistry registry, NoteStringArrayReadOnly registryKey) {
+        this.file = new File(noteFilePath.getAsString());
         this.registry = registry;
         this.registryKey = registryKey;   
     }

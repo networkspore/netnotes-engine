@@ -9,10 +9,11 @@ import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
@@ -104,6 +105,7 @@ public class StreamUtils {
             }
         }
     }
+
 
     public static CompletableFuture<Void> readMessageHeaderExample(
             NoteBytesReadOnly identityPrivateKey,
@@ -206,7 +208,23 @@ public class StreamUtils {
         }
     }
 
-
+    public static CompletableFuture<Void> writeToStreamAsync(NoteBytesWriter writer, Semaphore semaphore, NoteBytesObject taskMessage){
+        return CompletableFuture.runAsync(()->{
+            try {
+                semaphore.acquire();
+                try{
+                    writer.write(taskMessage);
+                }catch(IOException e){
+                     throw new RuntimeException(NoteMessaging.Error.IO, e);
+                }finally{
+                    semaphore.release();
+                }
+            } catch (InterruptedException e) {
+                throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
+            }
+            
+        });
+    }
 
     
 }

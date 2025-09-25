@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 import io.netnotes.engine.messaging.NoteMessaging.General;
-import io.netnotes.engine.messaging.TaskMessages;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteSerializable;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 
@@ -38,7 +38,7 @@ public class FileSwapUtils {
             
             
             // Success case
-            NoteBytesObject result = TaskMessages.getResultMessage(
+            NoteBytesObject result = TaskMessages.getTaskMessage(originalFile.getAbsolutePath(),
                 General.SUCCESS, "File length:" + bytesWritten);
             result.add("completionStage", 2);
             return result;
@@ -57,8 +57,7 @@ public class FileSwapUtils {
         switch (failedStep) {
             case 0:
                 // Failed to backup original file
-                errorResult = TaskMessages.createErrorMessage(
-                    "backupFile:" + originalFile.getAbsolutePath() + "->" + backupFile.getAbsolutePath(),
+                errorResult = TaskMessages.createErrorMessage( originalFile.getAbsolutePath(),
                     "Failed to backup original file", originalException);
                 break;
                 
@@ -77,7 +76,7 @@ public class FileSwapUtils {
             default:
                 // Unexpected failure
                 errorResult = TaskMessages.createErrorMessage(
-                    "unexpectedFailure", "Unexpected failure during file swap", originalException);
+                    originalFile.getAbsolutePath(), "Unexpected failure during file swap", originalException);
                 break;
         }
         

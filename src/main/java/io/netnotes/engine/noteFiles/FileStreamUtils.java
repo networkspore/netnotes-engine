@@ -11,9 +11,6 @@ import java.io.PipedOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -28,111 +25,21 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.messaging.TaskMessages;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class FileStreamUtils {
-
+ 
     private static final int BUFFER_SIZE = 64 * 1024;
 
     public static String getNewUUIDFilePath(File dataDir){
         return dataDir.getAbsolutePath() + "/" + NoteUUID.createSafeUUID128();
     }
 
-    public static class BulkUpdateResult {
-        private final int successCount;
-        private final int failureCount;
-        private final List<String> failedFiles;
-        
-        public BulkUpdateResult(int successCount, int failureCount, List<String> failedFiles) {
-            this.successCount = successCount;
-            this.failureCount = failureCount;
-            this.failedFiles = new ArrayList<>(failedFiles);
-        }
-        
-        public int getSuccessCount() {
-            return successCount;
-        }
-        
-        public int getFailureCount() {
-            return failureCount;
-        }
-        
-        public List<String> getFailedFiles() {
-            return Collections.unmodifiableList(failedFiles);
-        }
-        
-        public int getTotalFiles() {
-            return successCount + failureCount;
-        }
-        
-        public boolean isAllSuccessful() {
-            return failureCount == 0;
-        }
-        
-        @Override
-        public String toString() {
-            return String.format("BulkUpdateResult{total=%d, success=%d, failed=%d}", 
-                            getTotalFiles(), successCount, failureCount);
-        }
-    }
-
-    public enum UpdateStrategy {
-        SEQUENTIAL("Process files one at a time - safest for disk space"),
-        BATCHED("Process files in small batches - balanced approach"),
-        PARALLEL("Process all files simultaneously - fastest but uses most disk space");
-        
-        private final String description;
-        
-        UpdateStrategy(String description) {
-            this.description = description;
-        }
-        
-        public String getDescription() {
-            return description;
-        }
-        
-        @Override
-        public String toString() {
-            return name() + ": " + description;
-        }
-    }
+   
 
 
-    public static class BulkUpdateConfig {
-        private final UpdateStrategy strategy;
-        private final int batchSize;
-        private final double diskSpaceBuffer; // Percentage of free space to keep as buffer
-        
-        public BulkUpdateConfig(UpdateStrategy strategy, int batchSize, double diskSpaceBuffer) {
-            this.strategy = strategy;
-            this.batchSize = Math.max(1, batchSize);
-            this.diskSpaceBuffer = Math.max(0.1, Math.min(0.9, diskSpaceBuffer)); // 10-90%
-        }
-        
-        public static BulkUpdateConfig conservative() {
-            return new BulkUpdateConfig(UpdateStrategy.SEQUENTIAL, 1, 0.5); // Keep 50% free space
-        }
-        
-        public static BulkUpdateConfig balanced() {
-            return new BulkUpdateConfig(UpdateStrategy.BATCHED, 5, 0.3); // Keep 30% free space
-        }
-        
-        public static BulkUpdateConfig aggressive() {
-            return new BulkUpdateConfig(UpdateStrategy.PARALLEL, Integer.MAX_VALUE, 0.1); // Keep 10% free space
-        }
-        
-        public UpdateStrategy getStrategy() { return strategy; }
-        public int getBatchSize() { return batchSize; }
-        public double getDiskSpaceBuffer() { return diskSpaceBuffer; }
-        
-        @Override
-        public String toString() {
-            return String.format("BulkUpdateConfig{strategy=%s, batchSize=%d, diskSpaceBuffer=%.1f%%}", 
-                            strategy, batchSize, diskSpaceBuffer * 100);
-        }
-    }
 
     
 
@@ -339,7 +246,7 @@ public class FileStreamUtils {
                         bytesWritten += length;
                     }
 
-                    return TaskMessages.createSuccessResult("File length:" + bytesWritten);
+                    return TaskMessages.createSuccessResult(file.getAbsolutePath(), "File length:" + bytesWritten);
                 }
             }catch (Exception e) {
                 throw new RuntimeException(e);
@@ -415,11 +322,11 @@ public class FileStreamUtils {
                             pipedOutput.write(readBuffer, 0, length);
                         }
                     
-                        return TaskMessages.createSuccessResult("Data length:" + dataLength);
+                        return TaskMessages.createSuccessResult(file.getAbsolutePath(), "Data length:" + dataLength);
                     }
                 }
                 
-                return TaskMessages.createSuccessResult("File length: 0");
+                return TaskMessages.createSuccessResult(file.getAbsolutePath(), "File length: 0");
                 
             } catch (Exception e) {
                 throw new RuntimeException(e);
