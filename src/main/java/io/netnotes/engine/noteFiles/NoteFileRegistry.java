@@ -1,9 +1,11 @@
 package io.netnotes.engine.noteFiles;
 
 import io.netnotes.engine.ManagedNoteFileInterface;
+import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 
@@ -83,7 +85,7 @@ public class NoteFileRegistry extends NotePathFactory {
     }
 
     @Override
-    public CompletableFuture<Void> updateFilePathLedgerEncryption(
+    public CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,
@@ -96,8 +98,8 @@ public class NoteFileRegistry extends NotePathFactory {
                 .thenCompose(v -> super.updateFilePathLedgerEncryption( progressWriter,
                     oldPassword, newPassword, batchSize))
                 .whenComplete((result, throwable) -> {
-                    ProgressMessage.writeAsync("noteFileRegistry.updateFilePathLedgerEncryption", 
-                        0, -1, "Completing key update", progressWriter);
+                    progressWriter.writeAsync(ProgressMessage
+                        .getProgressMessage(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks"));
                     completeKeyUpdateForAll();
                     StreamUtils.safeClose(progressWriter);
                 });

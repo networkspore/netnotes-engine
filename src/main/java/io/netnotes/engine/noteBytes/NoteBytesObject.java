@@ -162,9 +162,27 @@ public class NoteBytesObject extends NoteBytes{
 
         byte[] bytes = getBytes();
         int length = bytes.length;
-        byte[] newBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
+        byte[] newBytes = Arrays.copyOf(bytes, length + pair.byteLength());
         int offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
         NoteBytes.writeNote(pair.getValue(), newBytes, offset);
+        set(newBytes);
+
+    }
+
+     public void add(NoteBytesPair[] pairs) {
+        int pairsLength = 0;
+        for(NoteBytesPair pair: pairs){
+            pairsLength += pair.byteLength();
+        }
+        byte[] bytes = getBytes();
+        int length = bytes.length;
+
+        byte[] newBytes = Arrays.copyOf(bytes, length + pairsLength);
+        int offset = length;
+        for(NoteBytesPair pair : pairs){
+            offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
+            offset = NoteBytes.writeNote(pair.getValue(), newBytes, offset);
+        }
         set(newBytes);
 
     }

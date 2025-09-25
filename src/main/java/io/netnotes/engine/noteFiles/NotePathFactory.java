@@ -16,12 +16,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.task.ProgressMessage;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.utils.Utils;
@@ -112,7 +115,7 @@ public class NotePathFactory {
     }
 
 
-     protected CompletableFuture<Void> updateFilePathLedgerEncryption(
+     protected CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,
@@ -125,20 +128,16 @@ public class NotePathFactory {
 
                 try {
                     progressWriter.writeAsync(ProgressMessage
-                        .getProgressMessage(
-                            "noteFileRegistry.updateFilePathLedgerEncryption", 
-                            0, 
-                            -1, 
-                            "Preparing for key update"
-                        )
-                    );
+                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Verifying password"));
+                    
                     SettingsData.verifyPassword(oldPassword, getSettingsData().getAppKey());
-                 //   progressCallback.accept(new ProgressUpdate(0, -1, "Aquiring ledger"));
+                    progressWriter.writeAsync(ProgressMessage
+                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Aquiring file path ledger"));
                     getDataSemaphore().acquire();
                     lockAcquired.set(true);
-
-                 //   progressCallback.accept(new ProgressUpdate(0, -1, "Updating password"));
                     getSettingsData().updatePassword(oldPassword, newPassword);
+                    progressWriter.writeAsync(ProgressMessage
+                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Created new key"));
                     return getFilePathLedger();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -150,18 +149,22 @@ public class NotePathFactory {
                 } 
             }, getExecService())
             .thenCompose(filePathLedger -> {
-             //   progressCallback.accept(new ProgressUpdate(0, filePathLedger.length(), "Initializing: Encryption process"));
                 return FilePathEncryptionUpdate.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
-                
             })
             .whenComplete((result, throwable) -> {
-                // Always release semaphore
                 if (lockAcquired.getAndSet(false)) {
                     getDataSemaphore().release();
                 }
-                
                 if (throwable != null) {
-                    Utils.writeLogMsg("AppData.getIdDataFileAsync", throwable);
+                    Utils.writeLogMsg("NoteFileFactory.updateFilePathLedgerEncryption", throwable);
+                    progressWriter.writeAsync(ProgressMessage
+                    .getProgressMessage(NoteMessaging.Status.STOPPING, 0, -1, NoteMessaging.General.ERROR,
+                    new NoteBytesPair[]{
+                        new NoteBytesPair("errorMsg", TaskMessages.createErrorMessage(
+                            NoteMessaging.Status.STOPPING, 
+                            "termination error", throwable)) 
+                    }            
+                ));
                 }
             });
     }

@@ -90,11 +90,16 @@ public class NoteBytesPair {
 
     public static NoteBytesPair read(byte[] bytes, int offset){
         NoteBytes key = NoteBytes.readNote(bytes, offset);
-        offset += (5 + key.byteLength()); // 1 byte type + 4 bytes length
-        
+        offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + key.byteLength());
         NoteBytes value = NoteBytes.readNote(bytes, offset);
         return new NoteBytesPair(key, value);
     }
+
+    public static int write(NoteBytesPair pair, byte[] dst, int dstOffset){
+        dstOffset = NoteBytes.writeNote(pair.getKey(), dst, dstOffset);
+        return NoteBytes.writeNote(pair.getValue(), dst, dstOffset);
+    }
+
 
     public int byteLength(){
         return getKey().byteLength() + 

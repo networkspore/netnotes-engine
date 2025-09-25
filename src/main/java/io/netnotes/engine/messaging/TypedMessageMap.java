@@ -2,7 +2,6 @@ package io.netnotes.engine.messaging;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.util.HashMap;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;

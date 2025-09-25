@@ -79,7 +79,7 @@ public class TaskMessages {
         return result;
     }
 
-    public static NoteBytesObject createErrorMessage(String scope, String message, Exception e)  {
+    public static NoteBytesObject createErrorMessage(String scope, String message, Throwable e)  {
         NoteBytesObject result = getTaskMessage(scope, General.ERROR, message);
         try{
             result.add(EXCEPTION_KEY, new NoteSerializable(e));
@@ -88,6 +88,7 @@ public class TaskMessages {
         }
         return result;
     }
+
 
    
     public static CompletableFuture<Integer> writeErrorAsync(String scope, String message, Exception e, AsyncNoteBytesWriter asyncWriter){

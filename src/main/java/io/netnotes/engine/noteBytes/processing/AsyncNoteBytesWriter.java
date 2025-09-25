@@ -19,6 +19,7 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
     private final NoteBytesWriter delegate;
     private final Semaphore semaphore = new Semaphore(1, true);
     private final Executor executor;
+    private boolean m_wasClosed = false;
 
     public AsyncNoteBytesWriter(OutputStream outputStream, Executor executor) {
         this.delegate = new NoteBytesWriter(outputStream);
@@ -50,19 +51,21 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
 
     private <R> CompletableFuture<R> supplyAsync(IOFunction<NoteBytesWriter, R> action) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                semaphore.acquire();
+
                 try {
-                    return action.apply(delegate);
-                } finally {
-                    semaphore.release();
+                    semaphore.acquire();
+                    try {
+                        return action.apply(delegate);
+                    } finally {
+                        semaphore.release();
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(NoteMessaging.Error.IO, e);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(NoteMessaging.Error.IO, e);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-            }
+
         }, executor);
     }
 
@@ -104,17 +107,23 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
         return runAsync(NoteBytesWriter::flush);
     }
 
+    public boolean wasClosed(){
+        return m_wasClosed;
+    }
+
     @Override
     public void close() throws IOException {
+        m_wasClosed = true;
         delegate.close();
     }
 
-    // Functional interface for methods that throw IOException
+
     @FunctionalInterface
     private interface IOConsumer<T> {
         void accept(T t) throws IOException;
     }
 
+    @FunctionalInterface
     private interface IOFunction<T, R> {
         R apply(T t) throws IOException;
     }

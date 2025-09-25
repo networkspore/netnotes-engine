@@ -8,7 +8,6 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class ProgressMessage {
     public static final String PROGRESS_MESSAGE_TYPE = "Progress";
@@ -18,8 +17,27 @@ public class ProgressMessage {
 
     public static NoteBytesObject getProgressMessage(String scope, long total, long completed, String message){
         NoteBytesObject messageObject = TaskMessages.getTaskMessage(scope, PROGRESS_MESSAGE_TYPE, message);
-        messageObject.add(TOTAL_KEY, total);
-        messageObject.add(COMPLETED_KEY, completed);
+        messageObject.add(new NoteBytesPair[]{
+            new NoteBytesPair(TOTAL_KEY, total),
+            new NoteBytesPair(COMPLETED_KEY, completed)
+        });
+        return messageObject;
+    }
+         
+
+    public static NoteBytesObject getProgressMessage(String scope, long total, long completed, String message, 
+        NoteBytesPair[] pairs
+    ){
+        NoteBytesObject messageObject = TaskMessages.getTaskMessage(scope, PROGRESS_MESSAGE_TYPE, message);
+        int pairsLength = pairs != null ? pairs.length : 0;
+        NoteBytesPair[] newPairs = new NoteBytesPair[pairsLength + 2];
+        newPairs[0] = new NoteBytesPair(TOTAL_KEY, total);
+        newPairs[1] = new NoteBytesPair(COMPLETED_KEY, completed);
+
+        for(int i = 0 ; i < pairsLength ; i++){
+            newPairs[i + 2]  = pairs[i];
+        }
+        
         return messageObject;
     }
 
