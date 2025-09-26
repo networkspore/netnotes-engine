@@ -91,7 +91,7 @@ public class TaskMessages {
 
 
    
-    public static CompletableFuture<Integer> writeErrorAsync(String scope, String message, Exception e, AsyncNoteBytesWriter asyncWriter){
+    public static CompletableFuture<Integer> writeErrorAsync(String scope, String message, Throwable e, AsyncNoteBytesWriter asyncWriter){
 
         return asyncWriter.writeAsync(createErrorMessage(scope, message, e));
     }

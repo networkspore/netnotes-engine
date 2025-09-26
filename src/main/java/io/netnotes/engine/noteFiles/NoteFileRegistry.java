@@ -41,6 +41,7 @@ public class NoteFileRegistry extends NotePathFactory {
     
     // For key updates - acquire locks on all registered interfaces
     public CompletableFuture<Void> prepareAllForKeyUpdate() {
+
         List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
             .map(ManagedNoteFileInterface::prepareForKeyUpdate)
             .collect(Collectors.toList());
@@ -91,18 +92,18 @@ public class NoteFileRegistry extends NotePathFactory {
         NoteBytesEphemeral newPassword,
         int batchSize
     ) {
-  
-            ProgressMessage.writeAsync("noteFileRegistry.updateFilePathLedgerEncryption",0,-1, 
-                "Preparing for key update", progressWriter);
-            return prepareAllForKeyUpdate()
-                .thenCompose(v -> super.updateFilePathLedgerEncryption( progressWriter,
-                    oldPassword, newPassword, batchSize))
-                .whenComplete((result, throwable) -> {
-                    progressWriter.writeAsync(ProgressMessage
-                        .getProgressMessage(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks"));
-                    completeKeyUpdateForAll();
-                    StreamUtils.safeClose(progressWriter);
-                });
+
+        ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 0, 4, "Aquiring file locks", 
+            progressWriter);
+        
+        return prepareAllForKeyUpdate()
+            .thenCompose(v ->super.updateFilePathLedgerEncryption( progressWriter,oldPassword, newPassword, batchSize))
+            .whenComplete((result, throwable) -> {
+                ProgressMessage.writeAsync(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks", 
+                    progressWriter);
+                completeKeyUpdateForAll();
+                StreamUtils.safeClose(progressWriter);
+            });
         
     }
         

@@ -1,8 +1,10 @@
 package io.netnotes.engine.noteFiles;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -19,7 +21,6 @@ import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.LongCounter;
@@ -56,23 +57,18 @@ public class FilePathEncryptionUpdate {
                 PipedOutputStream parsedOutput = new PipedOutputStream();
             
                 try {
-                    long ledgerLength = pathLedger.length();
-
-                    // Chain the operations: decrypt -> parse -> encrypt -> return file
+   
                     CompletableFuture<NoteBytesObject> decryptFuture = 
                         FileStreamUtils.performDecryption(pathLedger, decryptedOutput, oldSecretKey, execService);
                     
-                    progressWriter.writeAsync(ProgressMessage.getProgressMessage("reCryptFiles",12, ledgerLength, "Decryption started"));
-                    
-                    CompletableFuture<Void> parseFuture = 
-                        parseStreamUpdateEncryption(batchSize, ledgerLength, oldSecretKey, newSecretKey, decryptedOutput, parsedOutput, progressWriter, execService);
+                    CompletableFuture<Void> parseFuture = parseStreamUpdateEncryption(batchSize, pathLedger.length(), 
+                        oldSecretKey, newSecretKey, decryptedOutput, parsedOutput, progressWriter, execService);
                     
                     CompletableFuture<NoteBytesObject> saveFuture = 
                         FileStreamUtils.saveEncryptedFileSwap(pathLedger, newSecretKey, parsedOutput);
                     
-                    // Wait for all operations to complete and return the result file
                     return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
-                        .thenCompose(v -> saveFuture) // Return the encrypted file info
+                        .thenCompose(v -> saveFuture) // Return the file ledger encryption result
                         .join(); // Block for this async operation
                     
                         
@@ -100,13 +96,10 @@ public class FilePathEncryptionUpdate {
                     NoteBytesWriter writer = new NoteBytesWriter(parsedOutput)
                 ) {
 
-                    LongCounter byteCounter = new LongCounter(12);
+                    ProgressMessage.writeAsync(NoteMessaging.General.INFO,
+                        12, fileSize, "Finding file paths", progressWriter);
                     
-                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTED,
-                        12, fileSize, "Beginning file re-encryption", progressWriter);
-                    
-                    recursivelyParseQueueEncryption(futures, fileUpdateSemaphore, byteCounter, fileSize, 
-                        fileSize + byteCounter.get(), fileSize + byteCounter.get(), oldKey, newKey, reader, writer, 
+                    rootLevelParse(futures, fileSize, fileUpdateSemaphore, oldKey, newKey, reader, writer, 
                         progressWriter, execService);
                     
                 } catch (Exception e) {
@@ -129,38 +122,78 @@ public class FilePathEncryptionUpdate {
 
     }
 
-
-    public static void recursivelyParseQueueEncryption( List<CompletableFuture<Void>> futures, Semaphore fileUpdateSemaphore, LongCounter byteCounter, long fileSize,
-        long rootSize, long levelsize, SecretKey oldKey, SecretKey newKey, NoteBytesReader reader, NoteBytesWriter writer, 
+    public static void rootLevelParse( List<CompletableFuture<Void>> futures, long fileSize, Semaphore fileUpdateSemaphore, 
+        SecretKey oldKey, SecretKey newKey, NoteBytesReader reader, NoteBytesWriter writer, 
         AsyncNoteBytesWriter progressWriter, ExecutorService execService
     ) throws Exception {
-       
-        while(byteCounter.get() < rootSize && byteCounter.get() < levelsize){
-            
-            NoteBytes rootKey = reader.nextNoteBytes();
-            if(rootKey == null){
-                return;
-            }
+
+        LongCounter byteCounter = new LongCounter(0);
+        
+        NoteBytes rootKey = reader.nextNoteBytes();
+
+        while(rootKey != null){
             byteCounter.add(writer.write(rootKey));
             if(rootKey.equals(NotePathFactory.FILE_PATH)){
                 NoteBytes filePath = reader.nextNoteBytes();
                 byteCounter.add(writer.write(filePath));
                 futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 
                     progressWriter, execService));
-            }else{
+            }else if(rootKey.getByteDecoding().getType() == NoteBytesMetaData.STRING_TYPE){
                 NoteBytesMetaData metaData = reader.nextMetaData();
-                if(rootKey.getByteDecoding().getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                if(metaData != null && metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     byteCounter.add(writer.write(metaData));
-                    recursivelyParseQueueEncryption(futures, fileUpdateSemaphore, byteCounter, fileSize, byteCounter.get() + metaData.getLength(), 
+                    if(!recursivelyParseQueueEncryption(futures, fileUpdateSemaphore, byteCounter, fileSize, 
                         byteCounter.get() + metaData.getLength(), oldKey, newKey, reader, writer, progressWriter,
+                        execService)
+                    ){
+                        return;
+                    }
+                }else{
+                     throw new IllegalStateException("Invalid value data detected: " + metaData == null ? 
+                        "metadata null" : "type: " + (int) metaData.getType());
+                }
+            }else{
+                throw new IllegalStateException("Invalid key type: " + (int) rootKey.getByteDecoding().getType());
+            }
+
+            rootKey = reader.nextNoteBytes();
+        }
+    }
+
+    public static boolean recursivelyParseQueueEncryption( List<CompletableFuture<Void>> futures, 
+        Semaphore fileUpdateSemaphore, LongCounter byteCounter, long fileSize, long bucketEnd, SecretKey oldKey, 
+        SecretKey newKey, NoteBytesReader reader, NoteBytesWriter writer, AsyncNoteBytesWriter progressWriter, 
+        ExecutorService execService
+    ) throws Exception {
+       
+        while(byteCounter.get() < bucketEnd){
+            
+            NoteBytes foundKey = reader.nextNoteBytes();
+            if(foundKey == null){
+                return false;
+            }
+            byteCounter.add(writer.write(foundKey));
+            if(foundKey.equals(NotePathFactory.FILE_PATH)){
+                NoteBytes filePath = reader.nextNoteBytes();
+                byteCounter.add(writer.write(filePath));
+                futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 
+                    progressWriter, execService));
+            }else if (foundKey.getByteDecoding().getType() == NoteBytesMetaData.STRING_TYPE){
+                NoteBytesMetaData metaData = reader.nextMetaData();
+                if(metaData != null && metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                    byteCounter.add(writer.write(metaData));
+                    recursivelyParseQueueEncryption(futures, fileUpdateSemaphore, byteCounter, fileSize,
+                        byteCounter.get() + metaData.getLength(), oldKey, newKey, reader, writer, progressWriter, 
                         execService);
                 }else{
-                    byteCounter.add(writer.write(metaData));
-                    StreamUtils.readWriteNextBytes(metaData.getLength(), reader, writer);
+                    throw new IllegalStateException("Invalid value data detected: " + metaData == null ? 
+                        "metadata null" : "type: " + (int) metaData.getType());
                 }
+            }else{
+                throw new IllegalStateException("Invalid key type: " + (int) foundKey.getByteDecoding().getType());
             }
-            
         }
+        return true;
     }
 
     private static CompletableFuture<Void> queueEncryptionUpdate(Semaphore fileUpdateSemaphore, LongCounter byteCounter, 
@@ -172,25 +205,33 @@ public class FilePathEncryptionUpdate {
             File file = new File(filePathString);
             if(file.exists() && file.isFile() && file.length() > 12){
                 try{
+                    File tmpFile = new File(file.getAbsolutePath() + ".tmp");
                     fileUpdateSemaphore.acquire();
                     try{
-                        File tmpFile = new File(file.getAbsolutePath() + ".tmp");
                         ProgressMessage.writeAsync(NoteMessaging.General.INFO,
                             byteCounter.get(), fileSize, file.getAbsolutePath(), progressWriter);
                         
-                        FileStreamUtils.updateFileEncryption(oldKey, newKey, file, tmpFile);
-   
+                        FileStreamUtils.updateFileEncryption(oldKey, newKey, file, tmpFile, progressWriter);
+
                     }catch(Exception e){
-                        TaskMessages.writeErrorAsync(file.getAbsolutePath(), e.getMessage(), e, progressWriter);
+                        TaskMessages.writeErrorAsync(NoteMessaging.Error.IO, file.getAbsolutePath() , e, progressWriter);
                     }finally{
+                        try{
+                            Files.deleteIfExists(tmpFile.toPath());
+                        }catch(IOException e){
+                            TaskMessages.writeErrorAsync("Delete_Error", tmpFile.getAbsolutePath() , e, progressWriter);
+                            System.err.println("Failed to delete temp file:" + tmpFile.getAbsolutePath());
+                        }
                         fileUpdateSemaphore.release();
                     }
                     return;
                 }catch(InterruptedException e){
-                    TaskMessages.writeErrorAsync(file.getAbsolutePath(), e.getMessage(), e, progressWriter);
                     return;    
                 }
               
+            }else{
+                ProgressMessage.writeAsync(NoteMessaging.General.INFO,
+                    byteCounter.get(), fileSize, file.getAbsolutePath(), progressWriter);
             }
         }, execService);
 

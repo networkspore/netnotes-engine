@@ -127,17 +127,19 @@ public class NotePathFactory {
             .supplyAsync(() -> {
 
                 try {
-                    progressWriter.writeAsync(ProgressMessage
-                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Verifying password"));
-                    
+                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 1, 4, 
+                        "Verifying password", progressWriter);
                     SettingsData.verifyPassword(oldPassword, getSettingsData().getAppKey());
-                    progressWriter.writeAsync(ProgressMessage
-                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Aquiring file path ledger"));
+                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 2, 4, 
+                        "Aquiring file path ledger",progressWriter);
+
                     getDataSemaphore().acquire();
                     lockAcquired.set(true);
                     getSettingsData().updatePassword(oldPassword, newPassword);
-                    progressWriter.writeAsync(ProgressMessage
-                        .getProgressMessage(NoteMessaging.Status.STARTING, 0, -1, "Created new key"));
+
+                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 3, 4, 
+                        "Created new key",progressWriter);
+
                     return getFilePathLedger();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -149,6 +151,8 @@ public class NotePathFactory {
                 } 
             }, getExecService())
             .thenCompose(filePathLedger -> {
+                ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 4, 4, 
+                        "Opening file path ledger",progressWriter);
                 return FilePathEncryptionUpdate.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
             })
             .whenComplete((result, throwable) -> {
@@ -156,15 +160,7 @@ public class NotePathFactory {
                     getDataSemaphore().release();
                 }
                 if (throwable != null) {
-                    Utils.writeLogMsg("NoteFileFactory.updateFilePathLedgerEncryption", throwable);
-                    progressWriter.writeAsync(ProgressMessage
-                    .getProgressMessage(NoteMessaging.Status.STOPPING, 0, -1, NoteMessaging.General.ERROR,
-                    new NoteBytesPair[]{
-                        new NoteBytesPair("errorMsg", TaskMessages.createErrorMessage(
-                            NoteMessaging.Status.STOPPING, 
-                            "termination error", throwable)) 
-                    }            
-                ));
+                    TaskMessages.writeErrorAsync(NoteMessaging.Status.STOPPING, throwable.getMessage(), throwable, progressWriter);
                 }
             });
     }

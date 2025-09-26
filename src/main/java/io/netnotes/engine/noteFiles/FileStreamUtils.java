@@ -24,28 +24,22 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
+import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
+import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class FileStreamUtils {
  
-    private static final int BUFFER_SIZE = 64 * 1024;
+    
 
     public static String getNewUUIDFilePath(File dataDir){
         return dataDir.getAbsolutePath() + "/" + NoteUUID.createSafeUUID128();
     }
 
-   
-
-
-
-    
-
-
-    // Disk space validation result
-    
 
 
 
@@ -54,7 +48,7 @@ public class FileStreamUtils {
             OutputStream fileOutputStream = Files.newOutputStream(file.toPath());
             ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes);
         ){
-            byte[] buffer = new byte[BUFFER_SIZE];
+            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE > bytes.length ? bytes.length : StreamUtils.BUFFER_SIZE];
             int length = 0;
             
             while((length = inputStream.read(buffer)) != 1){
@@ -80,7 +74,7 @@ public class FileStreamUtils {
                 CipherOutputStream outputStream = new CipherOutputStream(fileOutputStream, encryptCipher);
                 ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes);
             ){
-                byte[] buffer = new byte[BUFFER_SIZE];
+                byte[] buffer = new byte[StreamUtils.BUFFER_SIZE > bytes.length ? bytes.length : StreamUtils.BUFFER_SIZE];
                 int length = 0;
                 while((length = inputStream.read(buffer)) != 1){
                     outputStream.write(buffer, 0, length);
@@ -90,44 +84,71 @@ public class FileStreamUtils {
     
     }
 
-
-
-
     public static boolean updateFileEncryption(SecretKey oldAppKey, SecretKey newAppKey, File file, File tmpFile) throws Exception {
+        return updateFileEncryption(oldAppKey, newAppKey, file, tmpFile, null);
+    }
+
+    public static boolean updateFileEncryption(SecretKey oldAppKey, SecretKey newAppKey, File file, File tmpFile, 
+        AsyncNoteBytesWriter progressWriter
+    ) throws Exception {
         if(file != null && file.isFile()){
             
             Path filePath = file.toPath();
             Path tmpPath = tmpFile.toPath();
-
+            if(progressWriter != null){
+                progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
+                    0, -1, NoteMessaging.Status.STARTED, new NoteBytesPair[]{
+                        new NoteBytesPair("file", file.getAbsolutePath()),
+                        new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
+                    }
+                ));
+            }
             try(
                 InputStream fileInputStream = Files.newInputStream(filePath);
                 OutputStream fileOutputStream = Files.newOutputStream(tmpPath);
                 NoteBytesReader initialReader = new NoteBytesReader(fileInputStream);
             ){
                 
-                byte[] oldIV = initialReader.readByteAmount(12);
+                byte[] oldIV = initialReader.readByteAmount(CryptoService.AES_IV_SIZE);
                 byte[] outIV = RandomService.getIV();
 
                 Cipher decryptCipher = CryptoService.getAESDecryptCipher(oldIV, newAppKey);
                 Cipher encryptCipher = CryptoService.getAESEncryptCipher(outIV, newAppKey);
 
                 fileOutputStream.write(outIV);
-
+                long fileSize = file.length();
+                
                 try(
                     CipherInputStream inputStream = new CipherInputStream(fileInputStream, decryptCipher);
                     CipherOutputStream outputStream = new CipherOutputStream(fileOutputStream, encryptCipher);
                 ){
-                    byte[] buffer = new byte[BUFFER_SIZE];
+                    byte[] buffer = new byte[StreamUtils.BUFFER_SIZE >  (fileSize -12)? (int) (fileSize-12) : StreamUtils.BUFFER_SIZE];
                     int length = 0;
+                    long total = 12;
                     while((length = inputStream.read(buffer)) != 1){
                         outputStream.write(buffer, 0, length);
+                        total += length;
+                        if(progressWriter != null){
+                        progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
+                            total, fileSize, NoteMessaging.Status.UPDATED, new NoteBytesPair[]{
+                                new NoteBytesPair("file", file.getAbsolutePath()),
+                                new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
+                            }
+                        ));
+                    }
                     }
                 }
             }
         
-
             Files.move(tmpPath, filePath, StandardCopyOption.REPLACE_EXISTING);
-
+            if(progressWriter != null){
+                progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
+                    0, -1, NoteMessaging.General.SUCCESS, new NoteBytesPair[]{
+                        new NoteBytesPair("file", file.getAbsolutePath()),
+                        new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
+                    }
+                ));
+            }
             return true;
         }
         return false;
