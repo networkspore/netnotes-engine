@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
 
@@ -33,6 +34,55 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         }
 
         return String.join(delim, str);
+    }
+
+    @Override
+    public NoteString[] getAsArray(){
+        int size = size();
+        NoteString[] arr = new NoteString[size];
+        byte[] bytes = get();
+        int length = bytes.length;
+        int offset = 0;
+        int i = 0;
+        while(offset < length){
+            NoteString noteBytes = readNoteString(bytes, offset);
+            arr[i] = noteBytes;
+            i++;
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
+        }
+        return arr;
+    }
+
+    public static NoteString readNoteString(byte[] src, int srcOffset){
+        final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
+        final byte stringType = NoteBytesMetaData.STRING_TYPE;
+
+        if (src.length < srcOffset + metaDataSize) {
+            throw new IndexOutOfBoundsException("insufficient source length for metadata");
+        }
+
+        // 1. Read type
+        byte type = src[srcOffset];
+
+        if(type != stringType){
+            throw new IllegalArgumentException("String type required");
+        }
+
+        // 2. Read length (4 bytes big-endian)
+        int length = ((src[srcOffset + 1] & 0xFF) << 24) |
+                    ((src[srcOffset + 2] & 0xFF) << 16) |
+                    ((src[srcOffset + 3] & 0xFF) << 8)  |
+                    (src[srcOffset + 4] & 0xFF);
+
+        if (src.length < srcOffset + metaDataSize + length) {
+            throw new IndexOutOfBoundsException("insufficient source length for data");
+        }
+
+        // 3. Copy payload
+        byte[] data = new byte[length];
+        System.arraycopy(src, srcOffset + metaDataSize, data, 0, length);
+
+        return new NoteString(data);
     }
 
 

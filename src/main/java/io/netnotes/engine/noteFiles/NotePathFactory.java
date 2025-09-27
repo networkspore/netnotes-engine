@@ -3,7 +3,7 @@ package io.netnotes.engine.noteFiles;
 import java.io.File;
 import java.io.IOException;
 import java.io.PipedOutputStream;
-
+import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 
@@ -22,9 +22,9 @@ import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.utils.Utils;
@@ -38,6 +38,7 @@ public class NotePathFactory {
     private final Semaphore m_dataSemaphore;
     private final ScheduledExecutorService m_schedualedExecutor;
     private final SettingsData m_settingsData;
+    private final AtomicBoolean m_locked = new AtomicBoolean(false);
 
     public NotePathFactory(SettingsData settingsData){
 
@@ -53,17 +54,40 @@ public class NotePathFactory {
 
 
 
-    public Semaphore getDataSemaphore(){
+    protected Semaphore getDataSemaphore(){
         return m_dataSemaphore;
     }
 
 
+    protected CompletableFuture<File> acquireLock() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                m_dataSemaphore.acquire();
+                m_locked.set(true);
+                return getFilePathLedger();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }, getExecService());
+    }
+
+    protected boolean isLocked() {
+        return m_locked.get();
+    }
+
+    protected void releaseLock() {
+        if (m_locked.getAndSet(false)) {
+            m_dataSemaphore.release();
+        
+        }
+    }
 
     public ExecutorService getExecService(){
         return m_execService;
     }
 
-
+    
 
 
     public static File createNewDataFile(File dataDir) {     
@@ -74,17 +98,109 @@ public class NotePathFactory {
     }
     
 
-    public File getFilePathLedger() throws IOException{
+    public File getFilePathLedger() {
         File dataDir = m_settingsData.getDataDir();
 
         File idDataFile = new File(dataDir.getAbsolutePath() + "/data.dat");
         return idDataFile;
     }
 
+    private SettingsData getSettingsData(){
+        return m_settingsData;
+    }
 
-    protected CompletableFuture<NoteBytes> getNoteFilePath(NoteStringArrayReadOnly path) {
-        AtomicBoolean lockAcquired = new AtomicBoolean(false);
+    private SecretKey getSecretKey(){
+        return getSettingsData().getSecretKey();
+    }
+
+   public CompletableFuture<NoteBytesObject> performDecryption(
+        File file, 
+        PipedOutputStream pipedOutput
+    ){
+        return FileStreamUtils.performDecryption(file, pipedOutput, getSecretKey(), getExecService());
+    }
+  
+    public CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(
+        File file,
+        PipedOutputStream pipedOutputStream
+    ) {
+        if(file.exists() && file.isFile()){
+            return FileStreamUtils.saveEncryptedFileSwap(file, getSecretKey(), pipedOutputStream);
+        }else{
+            return FileStreamUtils.saveEncryptedFile(file, getSecretKey(), pipedOutputStream);
+        }
+    }
+
+
+    protected CompletableFuture<NoteBytes> getNoteFilePath(File filePathLedger, NoteStringArrayReadOnly path) {
+        File dataDir = m_settingsData.getDataDir();
+        return CompletableFuture.supplyAsync(()->{
+            if(!m_locked.get()){
+                throw new IllegalStateException("Lock required");
+            }
+            if (
+                path == null || 
+                path.byteLength() == 0 || 
+                dataDir == null
+            ) {
+                throw new IllegalArgumentException("Required parameters cannot be null");
+            }
+            if(!dataDir.isDirectory()){
+                try{
+                    Files.createDirectories(dataDir.toPath());
+                }catch(IOException e){
+                    throw new RuntimeException("Cannot access data directory", e);
+                }
+            }
+
+            if(path.byteLength() > NotePathFactory.PATH_LENGTH_WARNING){
+                System.err.println("WARNING: Path length of: " + path.byteLength());
+            }
+
+            NoteString[] targetPath = path.getAsArray();
+            if(targetPath.length == 0){
+                throw new IllegalArgumentException("Path does not contain any valid elements");
+            }
+
+            return targetPath;
+        }, getExecService()).thenCompose(targetPath->FactoryPathProcess.getOrCreateIdDataFile(filePathLedger, dataDir, 
+            targetPath, path, getSecretKey(), getExecService()));
+    }
+
+
+     protected CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
+        File filePathLedger,
+        AsyncNoteBytesWriter progressWriter,
+        NoteBytesEphemeral oldPassword,
+        NoteBytesEphemeral newPassword,
+        int batchSize
+     ) {
+      
         
+        return CompletableFuture
+            .runAsync(() -> {
+                if(!m_locked.get()){
+                    throw new IllegalStateException("Lock required");
+                }
+                try {
+                    getSettingsData().updatePassword(oldPassword, newPassword);
+                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 3, 4, 
+                        "Created new key",progressWriter);
+                 } catch (IOException | VerifyError | InvalidKeySpecException | NoSuchAlgorithmException e) {
+                     throw new RuntimeException("Failed to update password", e);
+                } 
+            }, getExecService())
+            .thenCompose(v -> {
+                ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 4, 4, 
+                        "Opening file path ledger",progressWriter);
+                return FilePathEncryptionUpdate.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
+            });
+    }
+
+    
+    protected CompletableFuture<Void> deleteNoteFilePath(File filePathLedger, NoteStringArrayReadOnly path, boolean recursive){
+
+        /*
         return CompletableFuture
             .supplyAsync(() -> {
                 try {
@@ -111,86 +227,7 @@ public class NotePathFactory {
                 if (throwable != null) {
                     Utils.writeLogMsg("AppData.getIdDataFileAsync", throwable);
                 }
-            });
+            });*/
+            return null;
     }
-
-
-     protected CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
-        AsyncNoteBytesWriter progressWriter,
-        NoteBytesEphemeral oldPassword,
-        NoteBytesEphemeral newPassword,
-        int batchSize
-     ) {
-        AtomicBoolean lockAcquired = new AtomicBoolean(false);
-        
-        return CompletableFuture
-            .supplyAsync(() -> {
-
-                try {
-                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 1, 4, 
-                        "Verifying password", progressWriter);
-                    SettingsData.verifyPassword(oldPassword, getSettingsData().getAppKey());
-                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 2, 4, 
-                        "Aquiring file path ledger",progressWriter);
-
-                    getDataSemaphore().acquire();
-                    lockAcquired.set(true);
-                    getSettingsData().updatePassword(oldPassword, newPassword);
-
-                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 3, 4, 
-                        "Created new key",progressWriter);
-
-                    return getFilePathLedger();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Thread interrupted", e);
-                } catch (IOException e) {
-                    throw new RuntimeException("Failed to get file path ledger", e);
-                } catch (VerifyError | InvalidKeySpecException | NoSuchAlgorithmException e) {
-                     throw new RuntimeException("Failed to update password", e);
-                } 
-            }, getExecService())
-            .thenCompose(filePathLedger -> {
-                ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 4, 4, 
-                        "Opening file path ledger",progressWriter);
-                return FilePathEncryptionUpdate.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
-            })
-            .whenComplete((result, throwable) -> {
-                if (lockAcquired.getAndSet(false)) {
-                    getDataSemaphore().release();
-                }
-                if (throwable != null) {
-                    TaskMessages.writeErrorAsync(NoteMessaging.Status.STOPPING, throwable.getMessage(), throwable, progressWriter);
-                }
-            });
-    }
-
-    private SettingsData getSettingsData(){
-        return m_settingsData;
-    }
-
-    private SecretKey getSecretKey(){
-        return getSettingsData().getSecretKey();
-    }
-
-
-
-   public CompletableFuture<NoteBytesObject> performDecryption(
-        File file, 
-        PipedOutputStream pipedOutput
-    ){
-        return FileStreamUtils.performDecryption(file, pipedOutput, getSecretKey(), getExecService());
-    }
-  
-    public CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(
-        File file,
-        PipedOutputStream pipedOutputStream
-    ) {
-        if(file.exists() && file.isFile()){
-            return FileStreamUtils.saveEncryptedFileSwap(file, getSecretKey(), pipedOutputStream);
-        }else{
-            return FileStreamUtils.saveEncryptedFile(file, getSecretKey(), pipedOutputStream);
-        }
-    }
-
 }

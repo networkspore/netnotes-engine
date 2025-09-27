@@ -36,6 +36,9 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
             try {
                 semaphore.acquire();
                 try {
+                    if (m_wasClosed) {
+                        throw new IllegalStateException("Writer has been closed");
+                    }
                     action.accept(delegate);
                 } finally {
                     semaphore.release();
@@ -55,6 +58,9 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
                 try {
                     semaphore.acquire();
                     try {
+                        if (m_wasClosed) {
+                            throw new IllegalStateException("Writer has been closed");
+                        }
                         return action.apply(delegate);
                     } finally {
                         semaphore.release();
@@ -111,10 +117,31 @@ public class AsyncNoteBytesWriter implements AutoCloseable {
         return m_wasClosed;
     }
 
+
+
     @Override
     public void close() throws IOException {
-        m_wasClosed = true;
-        delegate.close();
+        boolean acquired = false;
+        try {
+            semaphore.acquire();
+            acquired = true;
+            if (!m_wasClosed) {
+                m_wasClosed = true;
+                delegate.close();
+            }
+        } catch (InterruptedException e) {
+            // Force close even if interrupted
+            if (!m_wasClosed) {
+                m_wasClosed = true;
+                delegate.close(); // Force close without semaphore protection
+            }
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while closing", e);
+        } finally {
+            if (acquired) {
+                semaphore.release();
+            }
+        }
     }
 
 

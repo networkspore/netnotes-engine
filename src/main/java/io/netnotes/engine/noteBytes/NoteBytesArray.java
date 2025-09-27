@@ -122,6 +122,21 @@ public class NoteBytesArray extends NoteBytes{
         return indexOf(noteBytes) != -1;
     }
 
+    public boolean arrayStartsWith(NoteBytes noteBytes){        
+        byte[] src = get();
+        byte[] dst = noteBytes.get();
+        int srcLength = src.length;
+        int dstLength = dst.length;
+
+        if(srcLength > dstLength){
+            return false;
+        }
+        if(srcLength == dstLength){
+            return noteBytes.equals(this);
+        }
+        
+        return Arrays.equals(src, 0, srcLength, dst, 0, dstLength);
+    }
     
     public int indexOf(NoteBytes noteBytes){
         byte[] bytes = get();

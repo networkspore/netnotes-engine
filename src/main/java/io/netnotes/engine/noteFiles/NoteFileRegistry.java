@@ -1,6 +1,5 @@
 package io.netnotes.engine.noteFiles;
 
-import io.netnotes.engine.ManagedNoteFileInterface;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -9,6 +8,8 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -25,11 +26,20 @@ public class NoteFileRegistry extends NotePathFactory {
     }
     
     public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path) {
-        return getNoteFilePath(path)
+
+        ManagedNoteFileInterface existing = m_registry.get(path);
+        if (existing != null) {
+            return CompletableFuture.completedFuture(new NoteFile(path, existing));
+        }
+
+        return acquireLock()
+            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger,path))
             .thenApply(noteFilePath -> {
-                ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path, 
-                    k -> new ManagedNoteFileInterface(noteFilePath, this, path));
+                ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path,
+                    k -> new ManagedNoteFileInterface(noteFilePath, this, k));
                 return new NoteFile(path, noteFileInterface);
+            }).whenComplete((result, failure)->{
+                releaseLock();
             });
     }
     
@@ -40,17 +50,21 @@ public class NoteFileRegistry extends NotePathFactory {
     }
     
     // For key updates - acquire locks on all registered interfaces
-    public CompletableFuture<Void> prepareAllForKeyUpdate() {
-
-        List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
-            .map(ManagedNoteFileInterface::prepareForKeyUpdate)
-            .collect(Collectors.toList());
-            
-        return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]));
+    public CompletableFuture<File> prepareAllForKeyUpdate() {
+        return acquireLock()
+            .thenCompose(filePathLedger -> {
+                List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
+                    .map(ManagedNoteFileInterface::prepareForKeyUpdate)
+                    .collect(Collectors.toList());
+                
+                return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]))
+                    .thenApply(v -> filePathLedger);
+            });
     }
     
     public void completeKeyUpdateForAll() {
         m_registry.values().forEach(ManagedNoteFileInterface::completeKeyUpdate);
+        releaseLock();
     }
     
     // Manual cleanup method to remove unused interfaces (for maintenance)
@@ -85,26 +99,65 @@ public class NoteFileRegistry extends NotePathFactory {
             ));
     }
 
-    @Override
+ 
     public CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,
         int batchSize
     ) {
-
         ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 0, 4, "Aquiring file locks", 
             progressWriter);
-        
+
         return prepareAllForKeyUpdate()
-            .thenCompose(v ->super.updateFilePathLedgerEncryption( progressWriter,oldPassword, newPassword, batchSize))
-            .whenComplete((result, throwable) -> {
-                ProgressMessage.writeAsync(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks", 
-                    progressWriter);
-                completeKeyUpdateForAll();
-                StreamUtils.safeClose(progressWriter);
+            .thenCompose(filePathLedger->
+                super.updateFilePathLedgerEncryption(filePathLedger, progressWriter, 
+                    oldPassword, newPassword, batchSize)).whenComplete((result, throwable) -> {
+                        ProgressMessage.writeAsync(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks", 
+                            progressWriter);
+                        completeKeyUpdateForAll();
+                        StreamUtils.safeClose(progressWriter);
+                });
+    }
+
+
+
+    public CompletableFuture<Void> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive) {
+
+        return acquireLock().thenCompose((filePathLedger)->{
+                if(recursive){
+                    List<CompletableFuture<Void>> list = new ArrayList<>();
+                    List<NoteStringArrayReadOnly> toRemove = new ArrayList<>();
+                    for(Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry : m_registry.entrySet()) {
+                        if(entry.getKey().arrayStartsWith(path)){
+                            list.add(entry.getValue().perpareForDeletion());
+                            toRemove.add(entry.getKey());
+                        }
+                    }
+                    return CompletableFuture.allOf(list.toArray(new CompletableFuture[0])).thenCompose(v->{
+                        toRemove.forEach(key->{
+                            ManagedNoteFileInterface managedInterface = m_registry.remove(key);
+                            managedInterface.releaseLock();
+                        });
+                        return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                    });
+                }else{
+                    ManagedNoteFileInterface managedInterface = m_registry.get(path);
+                    if(managedInterface != null){
+                        return managedInterface.perpareForDeletion().thenCompose(v->{
+                            m_registry.remove(path, managedInterface);
+                            managedInterface.releaseLock();
+                            return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                        });
+                    }else{
+                        return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                    }
+                }
+            }).whenComplete((v, ex)->{
+                releaseLock();
             });
-        
+      
+
     }
         
         

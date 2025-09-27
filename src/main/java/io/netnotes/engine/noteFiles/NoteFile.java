@@ -1,22 +1,18 @@
 package io.netnotes.engine.noteFiles;
 
-import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.PipedOutputStream;
 import java.net.URL;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-import io.netnotes.engine.ManagedNoteFileInterface;
 import io.netnotes.engine.messaging.StreamUtils;
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 import io.netnotes.engine.utils.Utils;
 
@@ -42,20 +38,24 @@ public class NoteFile implements AutoCloseable  {
 
     private final NoteStringArrayReadOnly m_path;
     private final NoteFileInterface m_noteFileInterface;
-    private final NoteBytes noteUUID;
-    private boolean closed = false;
+    private final NoteBytesReadOnly noteUUID;
+    private AtomicBoolean closed = new AtomicBoolean(false);
     
-    public NoteFile(NoteStringArrayReadOnly path, ManagedNoteFileInterface noteFileInterface) { // Change to ManagedNoteFileInterface
+    public NoteFile(NoteStringArrayReadOnly path, ManagedNoteFileInterface noteFileInterface) throws IllegalStateException {
         this.m_path = path;
         this.m_noteFileInterface = noteFileInterface;
         this.noteUUID = NoteUUID.createLocalUUID128ReadOnly();
         
         // ADD: Register this NoteFile with the interface
-        noteFileInterface.addReference(noteUUID);
+        noteFileInterface.addReference(this);
+    }
+
+    public NoteBytesReadOnly getId(){
+        return noteUUID;
     }
 
     private void checkNotClosed() {
-        if (closed) {
+        if (closed.get()) {
             throw new IllegalStateException("NoteFile has been closed");
         }
     }
@@ -65,16 +65,18 @@ public class NoteFile implements AutoCloseable  {
 
     @Override
     public void close() {
-        if (!closed) {
-            closed = true;
+        if (!closed.getAndSet(true)) {
             // Remove reference from the interface
             m_noteFileInterface.removeReference(noteUUID);
         }
     }
 
-
+    public void forceClose(){
+        closed.set(true);
+    }
 
     public CompletableFuture<NoteBytesObject> readOnly(PipedOutputStream readOutput) {
+        checkNotClosed();
         return m_noteFileInterface.acquireLock()
             .thenCompose(v -> {
                 PipedOutputStream decryptedOutput = new PipedOutputStream();
@@ -114,7 +116,7 @@ public class NoteFile implements AutoCloseable  {
     
     // Functional approach inspired by Files.newOutputStream - no session objects created
     public <T> CompletableFuture<T> withExclusiveAccess(Function<NoteFileInterface, CompletableFuture<T>> operation) {
-   
+        checkNotClosed();
         return m_noteFileInterface.acquireLock()
             .thenCompose(v -> operation.apply(m_noteFileInterface))
             .whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
@@ -124,14 +126,15 @@ public class NoteFile implements AutoCloseable  {
     public CompletableFuture<NoteBytesObject> readWriteLock(
             PipedOutputStream inParseStream, 
             PipedOutputStream modifiedInParseStream) {
+     
         return withExclusiveAccess(fileInterface -> 
             fileInterface.readWriteFile(inParseStream, modifiedInParseStream));
     }
     
-    public static CompletableFuture<NoteBytesObject> readWriteNoteFile(
-            NoteFile noteFile,
-            PipedOutputStream outStream, 
-            PipedOutputStream modifiedStream) {
+    public static CompletableFuture<NoteBytesObject> readWriteNoteFile(NoteFile noteFile, PipedOutputStream outStream, 
+        PipedOutputStream modifiedStream
+    ) {
+
         return noteFile.readWriteNoLock(outStream, modifiedStream);
     }
     
@@ -194,8 +197,8 @@ public class NoteFile implements AutoCloseable  {
     
     // Getters
 
-    public NoteBytes getNoteUUID() { return noteUUID; }
-    public boolean isClosed() { return closed; }
+
+    public boolean isClosed() { return closed.get(); }
 
     public NoteStringArrayReadOnly getPath() { return m_path; }
 
@@ -216,33 +219,6 @@ public class NoteFile implements AutoCloseable  {
     }
 
 
-
-
-
-    // helper: read exactly length bytes from reader, write them to writer (in chunks), return the collected bytes
-    public static byte[] readAndForwardBytes(int length, NoteBytesReader reader, NoteBytesWriter writer, byte[] buffer) throws IOException {
-        if (length <= 0) return new byte[0];
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(Math.min(length, StreamUtils.BUFFER_SIZE));
-        int remaining = length;
-        while (remaining > 0) {
-            int toRead = Math.min(buffer.length, remaining);
-            int r = reader.read(buffer, 0, toRead);
-            if (r == -1) throw new EOFException("Unexpected EOF while reading value");
-            int actually = Math.min(r, remaining);
-            baos.write(buffer, 0, actually);
-            // forward the exact bytes read to the writer
-            if (actually == buffer.length) {
-                writer.write(buffer);
-            } else {
-                byte[] chunk = new byte[actually];
-                System.arraycopy(buffer, 0, chunk, 0, actually);
-                writer.write(chunk);
-            }
-            remaining -= actually;
-            // if r > actually (shouldn't happen) remaining logic handles it
-         }
-         return baos.toByteArray();
-     }
  /*
 
     public Future<?> getFileNoteBytesObject(EventHandler<WorkerStateEvent> onSucceeded,EventHandler<WorkerStateEvent> onRead,EventHandler<WorkerStateEvent> onWritten, EventHandler<WorkerStateEvent> onFailed){
@@ -323,8 +299,8 @@ public class NoteFile implements AutoCloseable  {
         ExecutorService getExecService();
         boolean isFile();
         long fileSize();
-        void addReference(NoteBytes noteFileUUID);
-        void removeReference(NoteBytes noteFileUUID);
+        void addReference(NoteFile noteFile);
+        void removeReference(NoteBytesReadOnly noteUUID);
         int getReferenceCount();
         CompletableFuture<NoteBytesObject> decryptFile(PipedOutputStream pipedOutput) ;
         CompletableFuture<NoteBytesObject> encryptFile( PipedOutputStream pipedOutputStream);
@@ -332,6 +308,8 @@ public class NoteFile implements AutoCloseable  {
         CompletableFuture<Void> acquireLock();
         void releaseLock();
         boolean isLocked();
+        boolean isClosed();
+        CompletableFuture<Void> perpareForDeletion();
         CompletableFuture<Void> prepareForKeyUpdate();
         void completeKeyUpdate();
     }

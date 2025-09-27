@@ -2,10 +2,8 @@ package io.netnotes.engine.noteFiles;
 
 import java.io.EOFException;
 import java.io.File;
-import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -17,6 +15,7 @@ import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
@@ -26,7 +25,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class FactoryPathProcess {
     
-    public static NoteBytes createInitialFile(File idDataFile, File dataDir, NoteBytes[] targetPath, SecretKey secretKey){
+    public static NoteBytes createInitialFile(File idDataFile, File dataDir, NoteString[] targetPath, SecretKey secretKey){
         try{
             NoteBytes noteFilePath = getNewFilePath(dataDir);
             // Build the complete path structure
@@ -44,7 +43,7 @@ public class FactoryPathProcess {
         return new NoteBytesReadOnly(newFile.getAbsolutePath());
     }
 
-    public static NoteBytesPair buildPathStructure(NoteBytes[] targetPath, int pathIndex, 
+    public static NoteBytesPair buildPathStructure(NoteString[] targetPath, int pathIndex, 
         NoteBytes resultFileAbsolutePath
     ) {
         if (pathIndex == targetPath.length) {
@@ -58,7 +57,7 @@ public class FactoryPathProcess {
         
     }
 
-    private static NoteBytes createNewRootPath(NoteBytes[] targetPath, File dataDir, 
+    private static NoteBytes createNewRootPath(NoteString[] targetPath, File dataDir, 
         NoteBytesWriter writer) throws Exception 
     {
         NoteBytes resultPath = getNewFilePath(dataDir);
@@ -67,38 +66,12 @@ public class FactoryPathProcess {
     }
 
     
-    public static CompletableFuture<NoteBytes> getOrCreateIdDataFile(File pathLedger, NoteStringArrayReadOnly path, SecretKey secretKey, ExecutorService execService) {
+    public static CompletableFuture<NoteBytes> getOrCreateIdDataFile(File pathLedger, File dataDir, NoteString[] targetPath, 
+        NoteStringArrayReadOnly path, SecretKey secretKey, ExecutorService execService
+    ) {
         return CompletableFuture
             .supplyAsync(() -> {
-               
-                File dataDir = pathLedger.getParentFile();
-                if (
-                    path == null || 
-                    path.byteLength() == 0 || 
-                    dataDir == null
-                ) {
-                    throw new IllegalArgumentException("Required parameters cannot be null");
-                }
-
-                if(!dataDir.isDirectory()){
-                    try{
-                        Files.createDirectories(dataDir.toPath());
-                    }catch(IOException e){
-                        throw new RuntimeException("Cannot access data directory", e);
-                    }
-                }
-
-                if(path.byteLength() > NotePathFactory.PATH_LENGTH_WARNING){
-                    
-                    System.err.println("WARNING: Path length of: " + path.byteLength());
-
-                }
-
-                NoteBytes[] targetPath = path.getAsArray();
-                if(targetPath.length == 0){
-                    throw new IllegalArgumentException("Path does not contain any valid elements");
-                }
-
+            
                 if(
                     pathLedger.exists() && 
                     pathLedger.isFile() && 
@@ -141,7 +114,7 @@ public class FactoryPathProcess {
 
  
 
-    public static CompletableFuture<NoteBytes> parseStreamToOutputGetOrAddPath(NoteBytes[] targetPath, File dataDir, SecretKey secretKey,
+    public static CompletableFuture<NoteBytes> parseStreamToOutputGetOrAddPath(NoteString[] targetPath, File dataDir, SecretKey secretKey,
             PipedOutputStream decryptedInputStream,
             PipedOutputStream parsedOutputStream, ExecutorService execService) {
         return CompletableFuture
@@ -153,7 +126,7 @@ public class FactoryPathProcess {
                     NoteBytesWriter writer = new NoteBytesWriter(parsedOutputStream)
                 ) {
                     
-                    NoteBytes targetPathKey = targetPath[0];
+                    NoteString targetPathKey = targetPath[0];
                 
                     boolean foundRootKey = false;
                     IntCounter byteCounter = new IntCounter();
@@ -184,7 +157,7 @@ public class FactoryPathProcess {
             }, execService);
     }
 
-    private static NoteBytes processFoundRootKey(NoteBytes[] targetPath, File dataDir, SecretKey secretKey, 
+    private static NoteBytes processFoundRootKey(NoteString[] targetPath, File dataDir, SecretKey secretKey, 
             NoteBytesReader reader, NoteBytesWriter writer) throws Exception {
         
         // Read metadata for the root key's value
@@ -239,7 +212,7 @@ public class FactoryPathProcess {
 
 
     private static NoteBytes divertAndParseToTempFile(AESBackedOutputStream abaos, SecretKey secretKey, 
-        NoteBytes[] targetPath, IntCounter depthCounter, int contentLength, NoteBytesReader reader
+        NoteString[] targetPath, IntCounter depthCounter, int contentLength, NoteBytesReader reader
     ) throws Exception {
       
     
@@ -254,7 +227,7 @@ public class FactoryPathProcess {
         
     }
 
-    private static NoteBytes parseContentWhileWritingToTemp(NoteBytes[] targetPath, IntCounter depthCounter, 
+    private static NoteBytes parseContentWhileWritingToTemp(NoteString[] targetPath, IntCounter depthCounter, 
         IntCounter byteCounter, IntCounter regressionLength, int contentLength, NoteBytesReader reader, 
         NoteBytesWriter tmpWriter) throws Exception 
     {
@@ -343,7 +316,7 @@ public class FactoryPathProcess {
 
 
     private static boolean streamBackWithSizeAdjustments(NoteBytesPair insertionPair, NoteBytesReader tmpReader, 
-        IntCounter bytesProcessed, NoteBytesWriter writer, NoteBytes[] targetPath, int currentDepth, 
+        IntCounter bytesProcessed, NoteBytesWriter writer, NoteString[] targetPath, int currentDepth, 
         int insertionDepth, int insertionSizeIncrease
     ) throws Exception {
 

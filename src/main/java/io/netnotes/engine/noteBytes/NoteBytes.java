@@ -340,11 +340,19 @@ public class NoteBytes {
         // 1. Read type
         byte type = src[srcOffset];
 
-        // 2. Read length (4 bytes big-endian)
-        int length = ((src[srcOffset + 1] & 0xFF) << 24) |
-                    ((src[srcOffset + 2] & 0xFF) << 16) |
-                    ((src[srcOffset + 3] & 0xFF) << 8)  |
-                    (src[srcOffset + 4] & 0xFF);
+        ByteDecoding decoding = ByteDecoding.of(type);
+
+        // 2. Read length (4 bytes little-endian or big-endian)
+        int length = decoding.isLittleEndian() ? 
+            (src[srcOffset + 1] & 0xFF) |
+            ((src[srcOffset + 2] & 0xFF) << 8) |
+            ((src[srcOffset + 3] & 0xFF) << 16) |
+            ((src[srcOffset + 4] & 0xFF) << 24) 
+            : 
+            ((src[srcOffset + 1] & 0xFF) << 24) |
+            ((src[srcOffset + 2] & 0xFF) << 16) |
+            ((src[srcOffset + 3] & 0xFF) << 8)  |
+            (src[srcOffset + 4] & 0xFF);
 
         if (src.length < srcOffset + metaDataSize + length) {
             throw new IndexOutOfBoundsException("insufficient source length for data");
@@ -355,7 +363,7 @@ public class NoteBytes {
         System.arraycopy(src, srcOffset + metaDataSize, data, 0, length);
 
         // 4. Construct NoteBytes
-        ByteDecoding decoding = ByteDecoding.of(type);
+        
         return new NoteBytes(data, decoding);
     }
 
