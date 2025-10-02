@@ -6,7 +6,6 @@ import java.util.concurrent.CompletableFuture;
 import javax.naming.NameNotFoundException;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public class NodeController {
@@ -49,7 +48,6 @@ public class NodeController {
         private final NoteBytesReadOnly nodeId;
 
 
-
         public StreamingNodeControllerInterface(NoteBytesReadOnly nodeId) {
             this.nodeId = nodeId;
         }
@@ -63,16 +61,18 @@ public class NodeController {
    
         // Send message to specific node
         @Override
-        public CompletableFuture<Void> sendMessage(NoteBytesReadOnly toId, PipedOutputStream messageStream, PipedOutputStream replyStream) {
+        public CompletableFuture<Void> sendMessage(NoteBytesReadOnly toId, PipedOutputStream messageStream, 
+            PipedOutputStream replyStream
+        ) {
             return routeToNode(this.nodeId, toId, messageStream, replyStream);
         }
         
-      
+
 
         @Override
-        public CompletableFuture<Void> sendMessage(NoteBytesArrayReadOnly toIds, 
-        PipedOutputStream messageStream, 
-        PipedOutputStream replyStream) {
+        public CompletableFuture<Void> sendMessage(NoteBytesReadOnly[] toIds, PipedOutputStream messageStream, 
+            PipedOutputStream replyStream
+        ) {
             
             return m_nodeBroadcaster.sendMessage(nodeId, toIds, messageStream, replyStream);
         }

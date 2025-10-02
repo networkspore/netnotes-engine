@@ -10,6 +10,13 @@ public class IntCounter {
         m_count = initialValue;
     }
 
+    public void increment(){
+        this.m_count++;
+    }
+    public void decrement(){
+        this.m_count--;
+    }
+
     public void add(int count) { 
         this.m_count += count; 
     }

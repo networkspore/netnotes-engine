@@ -10,12 +10,11 @@ import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import org.bouncycastle.crypto.params.X25519PrivateKeyParameters;
+
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
@@ -108,47 +107,7 @@ public class StreamUtils {
     }
 
 
-    public static CompletableFuture<Void> readMessageHeaderExample(
-            NoteBytesReadOnly identityPrivateKey,
-            PipedOutputStream encryptedInputStream,
-            PipedOutputStream decryptedOutputStream,
-            ExecutorService execService) throws IOException {
-
-        PipedInputStream inputStream = new PipedInputStream(encryptedInputStream, StreamUtils.PIPE_BUFFER_SIZE);
-
-        CompletableFuture<MessageHeader> headerFuture = CompletableFuture.supplyAsync(() -> {
-            try {
-                NoteBytesReader reader = new NoteBytesReader(inputStream);
-                return MessageHeader.readHeader(reader);
-            } catch (Exception e) {
-                throw new CompletionException(e);
-            }
-        }, execService);
-
-        return headerFuture.thenCompose(header -> {
-            if (header instanceof SecureMessageV1) {
-                return SecureMessageV1.decryptStreamToStream(
-                        (SecureMessageV1) header,
-                        identityPrivateKey,
-                        inputStream,
-                        decryptedOutputStream,
-                        null,
-                        execService);
-            } else {
-                // unsupported header → fail fast
-                CompletableFuture<Void> failed = new CompletableFuture<>();
-                failed.completeExceptionally(
-                        new IllegalArgumentException("No compatible header found: " + header));
-                return failed;
-            }
-        }).whenComplete((result, error) -> {
-            // cleanup
-
-            StreamUtils.safeClose(encryptedInputStream);
-            StreamUtils.safeClose(decryptedOutputStream);
-
-        });
-    }
+  
 
     public static byte[] readOutputStream(PipedOutputStream outStream) throws IOException {
         try (ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -209,24 +168,5 @@ public class StreamUtils {
         }
     }
 
-    public static CompletableFuture<Void> writeToStreamAsync(NoteBytesWriter writer, Semaphore semaphore, NoteBytesObject taskMessage){
-        return CompletableFuture.runAsync(()->{
-            try {
-                semaphore.acquire();
-                try{
-                    writer.write(taskMessage);
-                }catch(IOException e){
-                     throw new RuntimeException(NoteMessaging.Error.IO, e);
-                }finally{
-                    semaphore.release();
-                }
-            } catch (InterruptedException e) {
-                throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-            }
-            
-        });
-    }
-
-
-    
+   
 }

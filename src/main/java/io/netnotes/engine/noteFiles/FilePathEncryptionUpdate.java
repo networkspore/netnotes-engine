@@ -133,7 +133,7 @@ public class FilePathEncryptionUpdate {
 
         while(rootKey != null){
             byteCounter.add(writer.write(rootKey));
-            if(rootKey.equals(NotePathFactory.FILE_PATH)){
+            if(rootKey.equals(NotePath.FILE_PATH)){
                 NoteBytes filePath = reader.nextNoteBytes();
                 byteCounter.add(writer.write(filePath));
                 futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 
@@ -173,7 +173,7 @@ public class FilePathEncryptionUpdate {
                 return false;
             }
             byteCounter.add(writer.write(foundKey));
-            if(foundKey.equals(NotePathFactory.FILE_PATH)){
+            if(foundKey.equals(NotePath.FILE_PATH)){
                 NoteBytes filePath = reader.nextNoteBytes();
                 byteCounter.add(writer.write(filePath));
                 futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 

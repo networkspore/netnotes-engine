@@ -25,8 +25,7 @@ public final class AESBackedOutputStream extends OutputStream {
             File dataDir,
             SecretKey secretKey,
             int contentLength,
-            int thresholdBytes,
-            boolean syncronized
+            int thresholdBytes
     ) throws Exception {
         if (contentLength <= thresholdBytes) {
             this.delegate = new UnsynchronizedByteArrayOutputStream(contentLength);

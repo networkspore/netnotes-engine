@@ -33,7 +33,7 @@ public class NoteFileRegistry extends NotePathFactory {
         }
 
         return acquireLock()
-            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger,path))
+            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger, path))
             .thenApply(noteFilePath -> {
                 ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path,
                     k -> new ManagedNoteFileInterface(noteFilePath, this, k));
@@ -122,40 +122,41 @@ public class NoteFileRegistry extends NotePathFactory {
 
 
 
-    public CompletableFuture<Void> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive) {
-
+    public CompletableFuture<NoteBytesObject> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive) {
         return acquireLock().thenCompose((filePathLedger)->{
-                if(recursive){
-                    List<CompletableFuture<Void>> list = new ArrayList<>();
-                    List<NoteStringArrayReadOnly> toRemove = new ArrayList<>();
-                    for(Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry : m_registry.entrySet()) {
-                        if(entry.getKey().arrayStartsWith(path)){
-                            list.add(entry.getValue().perpareForDeletion());
-                            toRemove.add(entry.getKey());
-                        }
+            if(recursive){
+                List<CompletableFuture<Void>> list = new ArrayList<>();
+                List<NoteStringArrayReadOnly> toRemove = new ArrayList<>();
+                for(Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry : m_registry.entrySet()) {
+                    if(entry.getKey().arrayStartsWith(path)){
+                        list.add(entry.getValue().perpareForDeletion());
+                        toRemove.add(entry.getKey());
                     }
-                    return CompletableFuture.allOf(list.toArray(new CompletableFuture[0])).thenCompose(v->{
-                        toRemove.forEach(key->{
-                            ManagedNoteFileInterface managedInterface = m_registry.remove(key);
+                }
+                return CompletableFuture.allOf(list.toArray(new CompletableFuture[0])).thenCompose(v->{
+                    toRemove.forEach(key->{
+                        ManagedNoteFileInterface managedInterface = m_registry.remove(key);
+                        if(managedInterface != null){
                             managedInterface.releaseLock();
-                        });
+                        }
+                    });
+                    return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                });
+            }else{
+                ManagedNoteFileInterface managedInterface = m_registry.get(path);
+                if(managedInterface != null){
+                    return managedInterface.perpareForDeletion().thenCompose(v->{
+                        m_registry.remove(path, managedInterface);
+                        managedInterface.releaseLock();
                         return super.deleteNoteFilePath(filePathLedger, path, recursive);
                     });
                 }else{
-                    ManagedNoteFileInterface managedInterface = m_registry.get(path);
-                    if(managedInterface != null){
-                        return managedInterface.perpareForDeletion().thenCompose(v->{
-                            m_registry.remove(path, managedInterface);
-                            managedInterface.releaseLock();
-                            return super.deleteNoteFilePath(filePathLedger, path, recursive);
-                        });
-                    }else{
-                        return super.deleteNoteFilePath(filePathLedger, path, recursive);
-                    }
+                    return super.deleteNoteFilePath(filePathLedger, path, recursive);
                 }
-            }).whenComplete((v, ex)->{
-                releaseLock();
-            });
+            }
+        }).whenComplete((v, ex)->{
+            releaseLock();
+        });
       
 
     }

@@ -14,7 +14,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
@@ -34,35 +33,26 @@ public class NoteBytesObject extends NoteBytes{
         this(noteBytePairsToByteArray(pairs));
     }
 
-
-    public static byte[] noteBytePairsToByteArray(NoteBytesPair[] pairs) {
-        byte[] bytes = new byte[0];
-        int offset = 0;
-        for(NoteBytesPair pair : pairs) {
-            int length = bytes.length;
-            byte[] dstBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
-            offset = NoteBytes.writeNote(pair.getKey(), dstBytes, offset);
-            offset = NoteBytes.writeNote(pair.getValue(), dstBytes, offset);
-            bytes = dstBytes;
-        }
-        return bytes;
+    public NoteBytesObject(NoteBytesPair pair){
+        this(pair.get());
     }
 
-     public static byte[] noteBytePairsToByteArray(NoteBytesPairEphemeral[] pairs) {
-        byte[] bytes = new byte[0];
+
+
+    public static byte[] noteBytePairsToByteArray(NoteBytesPair[] pairs) {
+        int byteLength = 0;
+        for(NoteBytesPair pair : pairs){
+            byteLength += pair.byteLength();
+        }
+        byte[] bytes = new byte[byteLength];
         int offset = 0;
-        for(NoteBytesPairEphemeral pair : pairs) {
-            int length = bytes.length;
-            byte[] dstBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
-            offset = NoteBytes.writeNote(pair.getKey(), dstBytes, offset);
-            offset = NoteBytes.writeNote(pair.getValue(), dstBytes, offset);
-            bytes = dstBytes;
+        for(NoteBytesPair pair : pairs) {
+            offset = NoteBytesPair.write(pair, bytes, offset);
         }
         return bytes;
     }
 
     public Stream<NoteBytesPair> getAsStream() {
-    
         byte[] bytes = get();
         Stream.Builder<NoteBytesPair> noteBytesBuilder = Stream.builder();
         int length = bytes.length;

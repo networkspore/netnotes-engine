@@ -15,7 +15,6 @@ import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.NoteMessaging.General;
 import io.netnotes.engine.messaging.task.TaskMessages;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -41,7 +40,7 @@ public class NodeBroadcaster {
     }
 
     public CompletableFuture<Void> sendMessage(NoteBytesReadOnly nodeId, 
-        NoteBytesArrayReadOnly toIds, 
+        NoteBytesReadOnly[] toIds, 
         PipedOutputStream messageStream, 
         PipedOutputStream replyStream
     ) {
@@ -49,7 +48,7 @@ public class NodeBroadcaster {
         return CompletableFuture
             .supplyAsync(() -> {
                 // Early validation - check recipient count first (cheapest check)
-                int recipientCount = toIds.getAsReadOnlyArray().length;
+                int recipientCount = toIds.length;
                 if (recipientCount > MAX_RECIPIENTS) {
                     throw new RuntimeException("Too many recipients: " + recipientCount + " (max: " + MAX_RECIPIENTS + ")");
                 }
@@ -119,12 +118,11 @@ public class NodeBroadcaster {
             });
     }
 
-    private CompletableFuture<NoteBytesConcurrentMap> broadcastMessage(
-            NoteBytesReadOnly fromId,
-            NoteBytesArrayReadOnly toIds,
-            byte[] messageBytes) {
+    private CompletableFuture<NoteBytesConcurrentMap> broadcastMessage(NoteBytesReadOnly fromId, 
+        NoteBytesReadOnly[] recipients, byte[] messageBytes
+    ) {
 
-        NoteBytesReadOnly[] recipients = toIds.getAsReadOnlyArray();
+   
         NoteBytesConcurrentMap resultMap = new NoteBytesConcurrentMap();
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();

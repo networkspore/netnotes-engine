@@ -14,6 +14,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 
 public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
@@ -53,6 +54,12 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
     
+    public NoteBytesEphemeral(NoteBytesPairEphemeral[] pairs){
+        this(noteBytePairsEphemeralToByteArray(pairs), ByteDecoding.NOTE_BYTES_OBJECT);
+    }
+    public NoteBytesEphemeral(NoteBytesPairEphemeral pair){
+        this(noteBytePairsEphemeralToByteArray(new NoteBytesPairEphemeral[]{pair}), ByteDecoding.NOTE_BYTES_OBJECT);
+    }
 
     public NoteBytesEphemeral( byte[] value, ByteDecoding byteDecoding){
         super(value , byteDecoding);
@@ -96,6 +103,19 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
         cleanable.clean(); // Trigger cleanup action manually
     }
 
+    public static byte[] noteBytePairsEphemeralToByteArray(NoteBytesPairEphemeral[] pairs) {
+        int byteLength = 0;
+        for(NoteBytesPairEphemeral pair : pairs){
+            byteLength += pair.byteLength();
+        }
+        byte[] bytes = new byte[byteLength];
+        int offset = 0;
+        for(NoteBytesPairEphemeral pair : pairs) {
+            offset = NoteBytes.writeNote(pair.getKey(), bytes, offset);
+            offset = NoteBytes.writeNote(pair.getValue(), bytes, offset);
+        }
+        return bytes;
+    }
     
     /**
     * Create an ephemeral copy of existing NoteBytes for temporary use

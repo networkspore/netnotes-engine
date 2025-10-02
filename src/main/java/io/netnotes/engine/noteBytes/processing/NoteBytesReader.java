@@ -113,19 +113,22 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
 
-    public int skipData(int length) throws EOFException, IOException{
+    public int skipData(int size) throws EOFException, IOException{
         
         int count = 0;
 
-        byte[] buffer = new byte[ StreamUtils.BUFFER_SIZE];
-        while(count < length){
-            int read = m_in.read(buffer, 0, Math.min(buffer.length, length - count));
-            if(read == -1){
-                throw new EOFException();
-            }
-            count += read;
+        int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
+        byte[] buffer = new byte[bufferSize];
+        int length = 0;
+        int remaining = size;
+        while(remaining > 0 && ((length = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
+            remaining -= length;
+            count += length;
         }
-                    
+        if(remaining > 0){
+            throw new IOException("Reached pre-mature end of stream expected: " + size);
+        }
+    
         return count;
     }
 

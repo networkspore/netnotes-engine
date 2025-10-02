@@ -2,11 +2,8 @@ package io.netnotes.engine;
 
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 
 
 public interface NodeControllerInterface {
@@ -17,7 +14,7 @@ public interface NodeControllerInterface {
     // Direct messaging
 
     CompletableFuture<Void> sendMessage(NoteBytesReadOnly toId, PipedOutputStream messageStream, PipedOutputStream replyStream);
-    CompletableFuture<Void> sendMessage(NoteBytesArrayReadOnly toId, PipedOutputStream messageStream, PipedOutputStream replyStream);
+    CompletableFuture<Void> sendMessage(NoteBytesReadOnly[] recipients, PipedOutputStream messageStream, PipedOutputStream replyStream);
     
     // Lifecycle
     CompletableFuture<Void> unregisterNode();

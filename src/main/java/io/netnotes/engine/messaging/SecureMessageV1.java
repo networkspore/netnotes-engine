@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import javax.crypto.Cipher;
+import javax.crypto.CipherInputStream;
 import javax.crypto.CipherOutputStream;
 
 import org.bouncycastle.crypto.agreement.X25519Agreement;
@@ -52,14 +53,14 @@ public class SecureMessageV1 extends MessageHeader {
     public static final NoteBytesReadOnly SALT_KEY = new NoteBytesReadOnly(new byte[]{0x20});
 
 
-    private NoteBytesReadOnly m_senderPublicKey = null;
-    private NoteBytesReadOnly m_signature = null;
-    private NoteBytesReadOnly m_dataLength = null;
-    private NoteBytesReadOnly m_securityLevel = null;
-    private NoteBytesReadOnly m_ephemeralPublicKey = null;
-    private NoteBytesReadOnly m_nonce = null;
-    private NoteBytesReadOnly m_salt = null;
-    private NoteBytesReadOnly m_algorithm = null;
+    private NoteBytes m_senderPublicKey = null;
+    private NoteBytes m_signature = null;
+    private NoteBytes m_dataLength = null;
+    private NoteBytes m_securityLevel = null;
+    private NoteBytes m_ephemeralPublicKey = null;
+    private NoteBytes m_nonce = null;
+    private NoteBytes m_salt = null;
+    private NoteBytes m_algorithm = null;
 
     public SecureMessageV1(NoteBytesReader reader) throws EOFException, IOException{
         super(HEADER_KEY);
@@ -97,21 +98,22 @@ public class SecureMessageV1 extends MessageHeader {
 
         NoteBytes signatureKey = reader.nextNoteBytes();
 
-        if(signatureKey.equals(signatureKey))
-        
+        if(signatureKey == null){
+            throw new EOFException("Signature key missing before end of stream");
+        }
         if(!signatureKey.equals(SIGNATURE_KEY)){
-            throw new IOException("Signature key invalid for SecurityHeaderV1");
+            throw new IllegalArgumentException("Signature key invalid for SecurityHeaderV1");
         }
 
         NoteBytes signature = reader.nextNoteBytes();
         if(signature == null){
-            throw new IOException("Signature key invalid for SecurityHeaderV1");
+            throw new EOFException("Signature value missing before end of stream");
         }
 
         return signature;
     }
 
-    public NoteBytesReadOnly getData(NoteBytesReadOnly key){
+    public NoteBytes getData(NoteBytesReadOnly key){
         if(key.equals(SENDER_ID_KEY)){
             return getSenderId();
         }else if(key.equals(TIME_STAMP_KEY)){
@@ -163,67 +165,67 @@ public class SecureMessageV1 extends MessageHeader {
     }
 
 
-    public NoteBytesReadOnly getSenderPublicKey() {
+    public NoteBytes getSenderPublicKey() {
         return m_senderPublicKey;
     }
 
-    public void setSenderPublicKey(NoteBytesReadOnly senderPublicKey) {
+    public void setSenderPublicKey(NoteBytes senderPublicKey) {
         this.m_senderPublicKey = senderPublicKey;
     }
 
-    public NoteBytesReadOnly getSignature() {
+    public NoteBytes getSignature() {
         return m_signature;
     }
 
-    public void setSignature(NoteBytesReadOnly signature) {
+    public void setSignature(NoteBytes signature) {
         this.m_signature = signature;
     }
 
-    public NoteBytesReadOnly getDataLength() {
+    public NoteBytes getDataLength() {
         return m_dataLength;
     }
 
-    public void setDataLength(NoteBytesReadOnly dataLength) {
+    public void setDataLength(NoteBytes dataLength) {
         this.m_dataLength = dataLength;
     }
 
-    public NoteBytesReadOnly getSecurityLevel() {
+    public NoteBytes getSecurityLevel() {
         return m_securityLevel;
     }
 
-    public void setSecurityLevel(NoteBytesReadOnly securityLevel) {
+    public void setSecurityLevel(NoteBytes securityLevel) {
         this.m_securityLevel = securityLevel;
     }
 
-    public NoteBytesReadOnly getEphemeralPublicKey() {
+    public NoteBytes getEphemeralPublicKey() {
         return m_ephemeralPublicKey;
     }
 
-    public void setEphemeralPublicKey(NoteBytesReadOnly ephemeralPublicKey) {
+    public void setEphemeralPublicKey(NoteBytes ephemeralPublicKey) {
         this.m_ephemeralPublicKey = ephemeralPublicKey;
     }
 
-    public NoteBytesReadOnly getNonce() {
+    public NoteBytes getNonce() {
         return m_nonce;
     }
 
-    public void setNonce(NoteBytesReadOnly nonce) {
+    public void setNonce(NoteBytes nonce) {
         this.m_nonce = nonce;
     }
 
-    public NoteBytesReadOnly getSalt() {
+    public NoteBytes getSalt() {
         return m_salt;
     }
 
-    public void setSalt(NoteBytesReadOnly salt) {
+    public void setSalt(NoteBytes salt) {
         this.m_salt = salt;
     }
 
-    public NoteBytesReadOnly getAlgorithm() {
+    public NoteBytes getAlgorithm() {
         return m_algorithm;
     }
 
-    public void setAlgorithm(NoteBytesReadOnly algorithm) {
+    public void setAlgorithm(NoteBytes algorithm) {
         this.m_algorithm = algorithm;
     }
 
@@ -256,7 +258,7 @@ public class SecureMessageV1 extends MessageHeader {
             NoteBytesPairEphemeral algo = new NoteBytesPairEphemeral(ALGORITHM_KEY, algorithm);
         ){
             return new NoteBytesPairEphemeral(HEADER_KEY, 
-                new NoteBytesEphemeral(NoteBytesObject.noteBytePairsToByteArray(new NoteBytesPairEphemeral[]{
+                new NoteBytesEphemeral(new NoteBytesPairEphemeral[]{
                     senderIdKey,
                     securityLevel,
                     timeStamp,
@@ -264,7 +266,7 @@ public class SecureMessageV1 extends MessageHeader {
                     ephPk,
                     nonceKey,
                     algo
-                }))
+                })
             );
         }
     }
@@ -282,7 +284,7 @@ public class SecureMessageV1 extends MessageHeader {
             NoteBytesPairEphemeral saltPair = new NoteBytesPairEphemeral(SALT_KEY, salt);
         ){
             return new NoteBytesPairEphemeral(HEADER_KEY, 
-                new NoteBytesEphemeral(NoteBytesObject.noteBytePairsToByteArray(new NoteBytesPairEphemeral[]{
+                new NoteBytesEphemeral(new NoteBytesPairEphemeral[]{
                     senderIdPair,
                     securityLevelPair,
                     timeStampPair,
@@ -291,7 +293,7 @@ public class SecureMessageV1 extends MessageHeader {
                     noncePair,
                     algorithmPair,
                     saltPair,
-                }))
+                })
             );
         }
     }
@@ -310,7 +312,7 @@ public class SecureMessageV1 extends MessageHeader {
         return CompletableFuture.runAsync(() -> {
 
             NoteBytesPair header = getSecuritySignedHeader(senderId, senderPublicKey, dataLength);
-
+           
             try(
                 PipedInputStream inputStream = new PipedInputStream(startStream, StreamUtils.PIPE_BUFFER_SIZE);
                 NoteBytesWriter writer = new NoteBytesWriter(outputEncryptedStream);
@@ -335,6 +337,8 @@ public class SecureMessageV1 extends MessageHeader {
                 if(totalBytes != dataLength){
                     throw new IllegalStateException("Message data length does not match header");
                 }
+
+                //generateSignature and writer footer
                 writer.write(getSecuritySignedFooter(signer.generateSignature()));
             }catch(Exception e){
                 throw new RuntimeException("Signed stream failed", e);
@@ -387,15 +391,173 @@ public class SecureMessageV1 extends MessageHeader {
     }
 
 
+                
+    public static void processSignedDecryption(
+        SecureMessageV1 header,
+        PipedOutputStream streamToProcess,
+        OutputStream output,
+        StreamProgressTracker progressTracker
+    ) throws IOException, InterruptedException, SecurityException, IllegalStateException {
 
+        try( PipedInputStream input = new PipedInputStream(streamToProcess, StreamUtils.PIPE_BUFFER_SIZE)){
+            // Extract signature metadata
+            NoteBytes senderPublicKeyReadOnly = header.getSenderPublicKey();
 
-    public static CompletableFuture<Void> decryptStreamToStream(
-            SecureMessageV1 header,
-            NoteBytesReadOnly privateKey,
-            InputStream encryptedInputStream,
-            OutputStream decryptedOutputStream,
+            NoteBytes lengthReadOnly = header.getDataLength();
+            
+            if (senderPublicKeyReadOnly == null || lengthReadOnly == null) {
+                throw new SecurityException("Missing signature metadata");
+            }
+            byte type = lengthReadOnly.getByteDecoding().getType();
+            
+            byte[] senderPublicKeyBytes = senderPublicKeyReadOnly.get();
+        
+            long dataLength = type == NoteBytesMetaData.INTEGER_TYPE ? (long) lengthReadOnly.getAsInt() : lengthReadOnly.getAsLong();
+            
+            if (progressTracker != null) {
+                progressTracker.setTotalBytes(dataLength);
+            }
+            
+            // Stream verification
+            Ed25519PublicKeyParameters publicKey = new Ed25519PublicKeyParameters(senderPublicKeyBytes, 0);
+            Ed25519Signer verifier = new Ed25519Signer();
+            verifier.init(false, publicKey);
+            
+            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+            long totalRead = 0;
+
+            while (totalRead < dataLength) {
+                if (progressTracker != null && progressTracker.isCancelled()) {
+                    throw new InterruptedException("Operation cancelled");
+                }
+                
+                int toRead = (int) Math.min(StreamUtils.BUFFER_SIZE, dataLength - totalRead);
+                int bytesRead = input.read(buffer, 0, toRead);
+                if (bytesRead == -1) {
+                    throw new IOException("Unexpected end of stream");
+                }
+                
+                verifier.update(buffer, 0, bytesRead);
+                output.write(buffer, 0, bytesRead);
+                totalRead += bytesRead;
+                
+                if (progressTracker != null) {
+                    progressTracker.addBytesProcessed(bytesRead);
+                }
+            }
+
+            NoteBytesReader reader = new NoteBytesReader(input);
+
+            try(NoteBytesEphemeral signature = new NoteBytesEphemeral(readSignature(reader))){
+                if(!verifier.verifySignature(signature.get())){
+                    throw new SecurityException("Signature verification failed");
+                }
+            }catch(EOFException e){
+                throw new SecurityException("Message reached end of stream before signature could be read", e);
+            }catch(IOException e){
+                throw new SecurityException("Failed to read signature after message data", e);
+            }
+            
+            
+        }finally{
+            StreamUtils.safeClose(output);
+        }
+    }
+    
+    public static void processSealedDecryption(
+        SecureMessageV1 header,
+        InputStream input,
+        OutputStream output,
+        X25519PrivateKeyParameters privateKey,
+        StreamProgressTracker progressTracker
+    )  {
+
+        // Extract encryption metadata
+        NoteBytes ephemeralReadOnly = header.getEphemeralPublicKey();
+        NoteBytes nonce = header.getNonce();
+
+        if (ephemeralReadOnly == null || nonce == null) {
+            throw new SecurityException("Missing encryption metadata");
+        }
+
+        byte[] ephemeralPublicKeyBytes = ephemeralReadOnly.getBytes();
+  
+        // Recreate ephemeral public key
+        X25519PublicKeyParameters ephemeralPublicKey =
+                new X25519PublicKeyParameters(ephemeralPublicKeyBytes, 0);
+
+        // Derive shared secret using X25519 key agreement
+        X25519Agreement agreement = new X25519Agreement();
+        agreement.init(privateKey);
+        byte[] sharedSecret = new byte[32];
+        agreement.calculateAgreement(ephemeralPublicKey, sharedSecret, 0);
+    
+        // Perform streaming decryption
+        try(
+            NoteBytesEphemeral ephemeralSecret = new NoteBytesEphemeral(sharedSecret);
+            NoteBytesEphemeral ephemeralDecryptionKey = new NoteBytesEphemeral( CryptoService.deriveHKDFKey(
+                sharedSecret,
+                CryptoService.CHA_CHA_20_POLY_1305_ALGORITHM,
+                CryptoService.CHACHA20_KEY_SIZE
+            ));
+            CipherInputStream cipherInput = new CipherInputStream(input, 
+                CryptoService.getChaCha20Poly1305Cipher(ephemeralDecryptionKey, nonce, Cipher.DECRYPT_MODE))
+        ) {
+
+            StreamUtils.streamCopy(cipherInput, output, progressTracker);
+            
+        } catch(Exception e){
+            throw new RuntimeException("Decryption failed", e);
+        }
+    }
+    
+
+     /*
+      public static CompletableFuture<Void> readMessageHeaderExample(
+            X25519PrivateKeyParameters identityPrivateKey,
+            PipedOutputStream encryptedInputStream,
+            PipedOutputStream decryptedOutputStream,
             StreamProgressTracker progressTracker,
-            ExecutorService execService
+            ExecutorService execService) throws IOException {
+
+        PipedInputStream inputStream = new PipedInputStream(encryptedInputStream, StreamUtils.PIPE_BUFFER_SIZE);
+
+        CompletableFuture<MessageHeader> headerFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                NoteBytesReader reader = new NoteBytesReader(inputStream);
+                return MessageHeader.readHeader(reader);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }, execService);
+
+        return headerFuture.thenCompose(header -> {
+            if (header instanceof SecureMessageV1) {
+                return decryptStreamToStream(
+                        (SecureMessageV1) header,
+                        identityPrivateKey,
+                        inputStream,
+                        decryptedOutputStream,
+                        progressTracker,
+                        execService);
+            } else {
+                // unsupported header → fail fast
+                CompletableFuture<Void> failed = new CompletableFuture<>();
+                failed.completeExceptionally(
+                        new IllegalArgumentException("No compatible header found: " + header));
+                return failed;
+            }
+        }).whenComplete((result, error) -> {
+            // cleanup
+
+            StreamUtils.safeClose(encryptedInputStream);
+            StreamUtils.safeClose(decryptedOutputStream);
+
+        });
+    }
+    public static CompletableFuture<Void> decryptStreamToStream(SecureMessageV1 header, 
+        X25519PrivateKeyParameters privateKey, InputStream encryptedInputStream, OutputStream decryptedOutputStream,
+        StreamProgressTracker progressTracker, ExecutorService execService
     ) {
         
         return CompletableFuture.runAsync(() -> {
@@ -403,7 +565,7 @@ public class SecureMessageV1 extends MessageHeader {
             try {
                 if(header.getHeaderType().equals(SecureMessageV1.HEADER_KEY)){
                     SecureMessageV1 securityHeaderV1 = (SecureMessageV1) header;
-                    NoteBytesReadOnly securityLevel = securityHeaderV1.getSecurityLevel();
+                    NoteBytes securityLevel = securityHeaderV1.getSecurityLevel();
 
                     if (securityLevel.equals(SecurityLevel.SECURITY_SIGNED)) {
                         processSignedDecryption(header,encryptedInputStream,decryptedOutputStream,progressTracker);
@@ -424,105 +586,6 @@ public class SecureMessageV1 extends MessageHeader {
             } 
         });  
     
-    }
-
-                
-    public static void processSignedDecryption(
-        SecureMessageV1 header,
-        InputStream input,
-        OutputStream output,
-        StreamProgressTracker progressTracker
-    ) throws Exception {
-
-        // Extract signature metadata
-        NoteBytesReadOnly senderPublicKeyReadOnly = header.getSenderPublicKey();
-        NoteBytesReadOnly signatureReadOnly = header.getSignature();
-        NoteBytesReadOnly lengthReadOnly = header.getDataLength();
-        
-        if (senderPublicKeyReadOnly == null || signatureReadOnly == null || lengthReadOnly == null) {
-            throw new SecurityException("Missing signature metadata");
-        }
-        byte type = lengthReadOnly.getByteDecoding().getType();
-        
-        byte[] senderPublicKeyBytes = senderPublicKeyReadOnly.get();
-        byte[] signatureBytes = signatureReadOnly.get();
-        long dataLength = type == NoteBytesMetaData.INTEGER_TYPE ? (long) lengthReadOnly.getAsInt() : lengthReadOnly.getAsLong();
-        
-        if (progressTracker != null) {
-            progressTracker.setTotalBytes(dataLength);
-        }
-        
-        // Stream verification
-        Ed25519PublicKeyParameters publicKey = new Ed25519PublicKeyParameters(senderPublicKeyBytes, 0);
-        Ed25519Signer verifier = new Ed25519Signer();
-        verifier.init(false, publicKey);
-        
-        byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
-        long totalRead = 0;
-        
-        while (totalRead < dataLength) {
-            if (progressTracker != null && progressTracker.isCancelled()) {
-                throw new InterruptedException("Operation cancelled");
-            }
-            
-            int toRead = (int) Math.min(StreamUtils.BUFFER_SIZE, dataLength - totalRead);
-            int bytesRead = input.read(buffer, 0, toRead);
-            if (bytesRead == -1) {
-                throw new IOException("Unexpected end of stream");
-            }
-            
-            verifier.update(buffer, 0, bytesRead);
-            output.write(buffer, 0, bytesRead);
-            totalRead += bytesRead;
-            
-            if (progressTracker != null) {
-                progressTracker.addBytesProcessed(bytesRead);
-            }
-        }
-        
-        if (!verifier.verifySignature(signatureBytes)) {
-            throw new SecurityException("Signature verification failed");
-        }
-
-    }
-    
-    public static void processSealedDecryption(
-        SecureMessageV1 header,
-        InputStream input,
-        OutputStream output,
-        NoteBytesReadOnly identityPrivateKey,
-        StreamProgressTracker progressTracker
-    ) throws Exception {
-
-        // Extract encryption metadata
-        NoteBytesReadOnly ephemeralReadOnly = header.getEphemeralPublicKey();
-        NoteBytesReadOnly nonceReadOnly = header.getNonce();
-        
-        if (ephemeralReadOnly == null || nonceReadOnly == null) {
-            throw new SecurityException("Missing encryption metadata");
-        }
-        
-        byte[] ephemeralPublicKeyBytes = ephemeralReadOnly.getBytes();
-        byte[] nonce = nonceReadOnly.getBytes();
-        byte[] pkBytes = identityPrivateKey.getBytes();
-        // Recreate shared secret
-        X25519PrivateKeyParameters privateKey = new X25519PrivateKeyParameters(pkBytes, 0);
-        X25519PublicKeyParameters ephemeralPublicKey = new X25519PublicKeyParameters(ephemeralPublicKeyBytes, 0);
-        
-        X25519Agreement agreement = new X25519Agreement();
-        agreement.init(privateKey);
-        byte[] sharedSecret = new byte[32];
-        agreement.calculateAgreement(ephemeralPublicKey, sharedSecret, 0);
-        
-        // Derive decryption key
-        byte[] decryptionKey = CryptoService.deriveHKDFKey(sharedSecret, CryptoService.CHA_CHA_20_POLY_1305_ALGORITHM, CryptoService.CHACHA20_KEY_SIZE);
-        
-        // Direct decryption
-      //  CryptoStreamUtils.streamDecrypt(input, output, decryptionKey, nonce, progressTracker);
-        
-
-    }
-    
-
+    }*/
     
 }

@@ -38,6 +38,7 @@ public class NoteBytesPair {
     public NoteBytesPair(NoteBytes key, Object value){
         this(key, NoteBytes.of(value));    
     }
+  
 
     public NoteBytesPair(NoteBytes key, NoteBytes value){
         m_key = key;
@@ -100,6 +101,11 @@ public class NoteBytesPair {
         return NoteBytes.writeNote(pair.getValue(), dst, dstOffset);
     }
 
+    public byte[] get(){
+        byte[] bytes = new byte[byteLength()];
+        NoteBytesPair.write(this, bytes, 0);
+        return bytes;
+    }
 
     public int byteLength(){
         return getKey().byteLength() + 

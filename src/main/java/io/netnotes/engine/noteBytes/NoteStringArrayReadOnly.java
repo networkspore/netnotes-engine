@@ -37,15 +37,15 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     }
 
     @Override
-    public NoteString[] getAsArray(){
+    public NoteBytesReadOnly[] getAsArray(){
         int size = size();
-        NoteString[] arr = new NoteString[size];
+        NoteBytesReadOnly[] arr = new NoteBytesReadOnly[size];
         byte[] bytes = get();
         int length = bytes.length;
         int offset = 0;
         int i = 0;
         while(offset < length){
-            NoteString noteBytes = readNoteString(bytes, offset);
+            NoteBytesReadOnly noteBytes = readNoteString(bytes, offset);
             arr[i] = noteBytes;
             i++;
             offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
@@ -53,7 +53,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return arr;
     }
 
-    public static NoteString readNoteString(byte[] src, int srcOffset){
+    public static NoteBytesReadOnly readNoteString(byte[] src, int srcOffset){
         final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
         final byte stringType = NoteBytesMetaData.STRING_TYPE;
 
@@ -82,7 +82,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         byte[] data = new byte[length];
         System.arraycopy(src, srcOffset + metaDataSize, data, 0, length);
 
-        return new NoteString(data);
+        return new NoteBytesReadOnly(data, ByteDecoding.STRING_UTF8);
     }
 
 

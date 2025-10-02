@@ -2,6 +2,7 @@ package io.netnotes.engine.noteBytes.collections;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesPairEphemeral implements AutoCloseable {
     private NoteBytes m_key;
@@ -29,7 +30,11 @@ public class NoteBytesPairEphemeral implements AutoCloseable {
         return new NoteBytesPairEphemeral(key, value);
     }
 
-
+    public int byteLength(){
+        return getKey().byteLength() + 
+            getValue().byteLength() + 
+            (NoteBytesMetaData.STANDARD_META_DATA_SIZE * 2);
+    }
 
     public void close(){
         m_key.clear();

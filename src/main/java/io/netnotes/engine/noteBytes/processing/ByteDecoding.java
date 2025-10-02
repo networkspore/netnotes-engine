@@ -86,6 +86,22 @@ public class ByteDecoding{
         public void setType(byte type) {
             this.m_type = type;
         }
+
+        public static int write(ByteDecoding byteDecoding, int len, byte[] dst, int offset){
+            dst[offset] = byteDecoding.getType();
+            if(byteDecoding.isLittleEndian()){
+                dst[offset + 1] = (byte) (len);
+                dst[offset + 2] = (byte) (len >>> 8);
+                dst[offset + 3] = (byte) (len >>> 16);
+                dst[offset + 4] = (byte) (len >>> 24);
+            }else{
+                dst[offset + 1] = (byte) (len >>> 24);
+                dst[offset + 2] = (byte) (len >>> 16);
+                dst[offset + 3] = (byte) (len >>> 8);
+                dst[offset + 4] = (byte) (len);
+            }
+            return offset + STANDARD_META_DATA_SIZE;
+        }
     }
 
     

@@ -28,6 +28,10 @@ import io.netnotes.engine.utils.Version;
 
 public class SettingsData {
 
+    public static class InvalidPasswordException extends RuntimeException {
+        public InvalidPasswordException(String msg) { super(msg); }
+    }
+
     private static final String SETTINGS_FILE_NAME = "settings.dat";
     public static final File HOME_DIRECTORY = new File(System.getProperty("user.home"));
     public static final File DESKTOP_DIRECTORY = new File(HOME_DIRECTORY + "/Desktop");
@@ -92,8 +96,8 @@ public class SettingsData {
         return m_oldKey;
     }
 
-    public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws VerifyError, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
-   
+    public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws InvalidPasswordException, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
+        verifyPassword(oldPassword, m_bcryptKey);
         NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
         NoteBytes salt = new NoteRandom(m_saltLength);
         SecretKey secretKey = CryptoService.createKey(newPassword, salt);
@@ -141,15 +145,15 @@ public class SettingsData {
     }
 
 
-    public NoteBytes getAppKey() {
+    public NoteBytes getBCryptKey() {
         return m_bcryptKey;
     }
 
-    public byte[] getAppKeyBytes() {
+    public byte[] getBCryptKeyBytes() {
         return m_bcryptKey.getBytes();
     }
 
-    public void setAppKey(NoteBytes hash) throws IOException {
+    public void setBCryptKey(NoteBytes hash) throws IOException {
         m_bcryptKey = hash;
     }
 
@@ -160,10 +164,10 @@ public class SettingsData {
         
     }
 
-    public static void verifyPassword(NoteBytesEphemeral password, NoteBytes bcrypt) throws VerifyError{
+    public static void verifyPassword(NoteBytesEphemeral password, NoteBytes bcrypt) throws InvalidPasswordException{
         
         if(!HashServices.verifyBCryptPassword(password, bcrypt)){
-            throw new VerifyError("Password not verified");
+            throw new InvalidPasswordException("Password not verified");
         }
     }
 
@@ -198,7 +202,7 @@ public class SettingsData {
         return settingsData;
     }
 
-    public static SettingsData readSettings(NoteBytesEphemeral password)throws VerifyError,FileNotFoundException, IOException{
+    public static SettingsData readSettings(NoteBytesEphemeral password)throws InvalidPasswordException, FileNotFoundException, IOException{
         File settingsFile = getSettingsFile();
      
 

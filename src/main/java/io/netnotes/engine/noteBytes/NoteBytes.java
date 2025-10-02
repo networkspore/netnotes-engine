@@ -21,6 +21,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
@@ -305,15 +306,12 @@ public class NoteBytes {
         final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
         byte[] src = noteBytes.get(); 
         int srcLength = src.length;
+        ByteDecoding byteDecoding = noteBytes.getByteDecoding();
 
         if(dstLength >= dstOffset + metaDataSize + srcLength){
-            dst[dstOffset] = noteBytes.getByteDecoding().getType();
-            dst[dstOffset + 1] = (byte) (srcLength >>> 24);
-            dst[dstOffset + 2] = (byte) (srcLength >>> 16);
-            dst[dstOffset + 3] = (byte) (srcLength >>> 8);
-            dst[dstOffset + 4] = (byte) (srcLength);
-            System.arraycopy(src, 0, dst, dstOffset + metaDataSize, srcLength);
-            return dstOffset + metaDataSize + srcLength;
+            dstOffset = NoteBytesMetaData.write(byteDecoding, srcLength, dst, dstOffset);
+            System.arraycopy(src, 0, dst, dstOffset, srcLength);
+            return dstOffset + srcLength;
         }else{
             throw new IndexOutOfBoundsException("insufficient destination length");
         }
@@ -699,6 +697,8 @@ public class NoteBytes {
             return new NoteBytes((char[]) obj);
         } else if (obj instanceof JsonObject) {
             return new NoteJsonObject((JsonObject) obj);
+        } else if (obj instanceof NoteBytesPairEphemeral) {
+            return new NoteBytesEphemeral(new NoteBytesPairEphemeral[]{(NoteBytesPairEphemeral) obj});
         } else if (obj instanceof NoteBytesPair) {
             return new NoteBytesObject(new NoteBytesPair[]{(NoteBytesPair) obj});
         } else if (obj instanceof NoteBytesPair[]) {
