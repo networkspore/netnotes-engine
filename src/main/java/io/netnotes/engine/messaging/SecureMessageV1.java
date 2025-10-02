@@ -394,74 +394,69 @@ public class SecureMessageV1 extends MessageHeader {
                 
     public static void processSignedDecryption(
         SecureMessageV1 header,
-        PipedOutputStream streamToProcess,
+        InputStream input,
         OutputStream output,
         StreamProgressTracker progressTracker
     ) throws IOException, InterruptedException, SecurityException, IllegalStateException {
 
-        try( PipedInputStream input = new PipedInputStream(streamToProcess, StreamUtils.PIPE_BUFFER_SIZE)){
-            // Extract signature metadata
-            NoteBytes senderPublicKeyReadOnly = header.getSenderPublicKey();
+        // Extract signature metadata
+        NoteBytes senderPublicKeyReadOnly = header.getSenderPublicKey();
 
-            NoteBytes lengthReadOnly = header.getDataLength();
-            
-            if (senderPublicKeyReadOnly == null || lengthReadOnly == null) {
-                throw new SecurityException("Missing signature metadata");
-            }
-            byte type = lengthReadOnly.getByteDecoding().getType();
-            
-            byte[] senderPublicKeyBytes = senderPublicKeyReadOnly.get();
+        NoteBytes lengthReadOnly = header.getDataLength();
         
-            long dataLength = type == NoteBytesMetaData.INTEGER_TYPE ? (long) lengthReadOnly.getAsInt() : lengthReadOnly.getAsLong();
+        if (senderPublicKeyReadOnly == null || lengthReadOnly == null) {
+            throw new SecurityException("Missing signature metadata");
+        }
+        byte type = lengthReadOnly.getByteDecoding().getType();
+        
+        byte[] senderPublicKeyBytes = senderPublicKeyReadOnly.get();
+    
+        long dataLength = type == NoteBytesMetaData.INTEGER_TYPE ? (long) lengthReadOnly.getAsInt() : lengthReadOnly.getAsLong();
+        
+        if (progressTracker != null) {
+            progressTracker.setTotalBytes(dataLength);
+        }
+        
+        // Stream verification
+        Ed25519PublicKeyParameters publicKey = new Ed25519PublicKeyParameters(senderPublicKeyBytes, 0);
+        Ed25519Signer verifier = new Ed25519Signer();
+        verifier.init(false, publicKey);
+        
+        byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+        long totalRead = 0;
+
+        while (totalRead < dataLength) {
+            if (progressTracker != null && progressTracker.isCancelled()) {
+                throw new InterruptedException("Operation cancelled");
+            }
+            
+            int toRead = (int) Math.min(StreamUtils.BUFFER_SIZE, dataLength - totalRead);
+            int bytesRead = input.read(buffer, 0, toRead);
+            if (bytesRead == -1) {
+                throw new IOException("Unexpected end of stream");
+            }
+            
+            verifier.update(buffer, 0, bytesRead);
+            output.write(buffer, 0, bytesRead);
+            totalRead += bytesRead;
             
             if (progressTracker != null) {
-                progressTracker.setTotalBytes(dataLength);
+                progressTracker.addBytesProcessed(bytesRead);
             }
-            
-            // Stream verification
-            Ed25519PublicKeyParameters publicKey = new Ed25519PublicKeyParameters(senderPublicKeyBytes, 0);
-            Ed25519Signer verifier = new Ed25519Signer();
-            verifier.init(false, publicKey);
-            
-            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
-            long totalRead = 0;
-
-            while (totalRead < dataLength) {
-                if (progressTracker != null && progressTracker.isCancelled()) {
-                    throw new InterruptedException("Operation cancelled");
-                }
-                
-                int toRead = (int) Math.min(StreamUtils.BUFFER_SIZE, dataLength - totalRead);
-                int bytesRead = input.read(buffer, 0, toRead);
-                if (bytesRead == -1) {
-                    throw new IOException("Unexpected end of stream");
-                }
-                
-                verifier.update(buffer, 0, bytesRead);
-                output.write(buffer, 0, bytesRead);
-                totalRead += bytesRead;
-                
-                if (progressTracker != null) {
-                    progressTracker.addBytesProcessed(bytesRead);
-                }
-            }
-
-            NoteBytesReader reader = new NoteBytesReader(input);
-
-            try(NoteBytesEphemeral signature = new NoteBytesEphemeral(readSignature(reader))){
-                if(!verifier.verifySignature(signature.get())){
-                    throw new SecurityException("Signature verification failed");
-                }
-            }catch(EOFException e){
-                throw new SecurityException("Message reached end of stream before signature could be read", e);
-            }catch(IOException e){
-                throw new SecurityException("Failed to read signature after message data", e);
-            }
-            
-            
-        }finally{
-            StreamUtils.safeClose(output);
         }
+
+        NoteBytesReader reader = new NoteBytesReader(input);
+
+        try(NoteBytesEphemeral signature = new NoteBytesEphemeral(readSignature(reader))){
+            if(!verifier.verifySignature(signature.get())){
+                throw new SecurityException("Signature verification failed");
+            }
+        }catch(EOFException e){
+            throw new SecurityException("Message reached end of stream before signature could be read", e);
+        }catch(IOException e){
+            throw new SecurityException("Failed to read signature after message data", e);
+        }
+        output.flush();
     }
     
     public static void processSealedDecryption(
@@ -471,20 +466,19 @@ public class SecureMessageV1 extends MessageHeader {
         X25519PrivateKeyParameters privateKey,
         StreamProgressTracker progressTracker
     )  {
-
+        //Uknown total size
+        progressTracker.setTotalBytes(-1);
         // Extract encryption metadata
-        NoteBytes ephemeralReadOnly = header.getEphemeralPublicKey();
+        NoteBytes headerEphemeralKey = header.getEphemeralPublicKey();
         NoteBytes nonce = header.getNonce();
 
-        if (ephemeralReadOnly == null || nonce == null) {
+        if (headerEphemeralKey == null || nonce == null) {
             throw new SecurityException("Missing encryption metadata");
         }
-
-        byte[] ephemeralPublicKeyBytes = ephemeralReadOnly.getBytes();
   
         // Recreate ephemeral public key
         X25519PublicKeyParameters ephemeralPublicKey =
-                new X25519PublicKeyParameters(ephemeralPublicKeyBytes, 0);
+                new X25519PublicKeyParameters(headerEphemeralKey.getBytes(), 0);
 
         // Derive shared secret using X25519 key agreement
         X25519Agreement agreement = new X25519Agreement();
@@ -494,6 +488,7 @@ public class SecureMessageV1 extends MessageHeader {
     
         // Perform streaming decryption
         try(
+            NoteBytesEphemeral receivedPk = new NoteBytesEphemeral(headerEphemeralKey);
             NoteBytesEphemeral ephemeralSecret = new NoteBytesEphemeral(sharedSecret);
             NoteBytesEphemeral ephemeralDecryptionKey = new NoteBytesEphemeral( CryptoService.deriveHKDFKey(
                 sharedSecret,
@@ -501,9 +496,10 @@ public class SecureMessageV1 extends MessageHeader {
                 CryptoService.CHACHA20_KEY_SIZE
             ));
             CipherInputStream cipherInput = new CipherInputStream(input, 
-                CryptoService.getChaCha20Poly1305Cipher(ephemeralDecryptionKey, nonce, Cipher.DECRYPT_MODE))
+                CryptoService.getChaCha20Poly1305Cipher(ephemeralDecryptionKey, nonce, Cipher.DECRYPT_MODE)
+            );
         ) {
-
+            
             StreamUtils.streamCopy(cipherInput, output, progressTracker);
             
         } catch(Exception e){
