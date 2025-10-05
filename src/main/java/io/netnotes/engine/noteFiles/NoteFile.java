@@ -36,13 +36,13 @@ builder.execute(fileInterface -> {
 
 public class NoteFile implements AutoCloseable  {
 
-    private final NoteStringArrayReadOnly m_path;
+    private final NoteStringArrayReadOnly m_notePath;
     private final NoteFileInterface m_noteFileInterface;
     private final NoteBytesReadOnly noteUUID;
     private AtomicBoolean closed = new AtomicBoolean(false);
     
-    public NoteFile(NoteStringArrayReadOnly path, ManagedNoteFileInterface noteFileInterface) throws IllegalStateException {
-        this.m_path = path;
+    public NoteFile(NoteStringArrayReadOnly notePath, ManagedNoteFileInterface noteFileInterface) throws IllegalStateException {
+        this.m_notePath = notePath;
         this.m_noteFileInterface = noteFileInterface;
         this.noteUUID = NoteUUID.createLocalUUID128ReadOnly();
         
@@ -88,13 +88,9 @@ public class NoteFile implements AutoCloseable  {
 
                     return m_noteFileInterface.encryptFile(encryptOutput);
                 }catch(IOException e){
-                    throw new RuntimeException("Duplication failed", e);
+                    throw new RuntimeException("readOnly: Duplication failed", e);
                 }finally{
-                    try{
-                        encryptOutput.close();
-                    }catch(IOException e){
-
-                    }
+                    StreamUtils.safeClose(readOutput);
                 }
             }).whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
     }
@@ -200,7 +196,7 @@ public class NoteFile implements AutoCloseable  {
 
     public boolean isClosed() { return closed.get(); }
 
-    public NoteStringArrayReadOnly getPath() { return m_path; }
+    public NoteStringArrayReadOnly getPath() { return m_notePath; }
 
     public boolean isLocked(){
         return m_noteFileInterface.isLocked();

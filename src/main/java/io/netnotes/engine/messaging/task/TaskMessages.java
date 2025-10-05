@@ -20,14 +20,15 @@ public class TaskMessages {
     public final static NoteBytesReadOnly EXCEPTION_KEY = new NoteBytesReadOnly("exception");
     public final static NoteBytesReadOnly SCOPE_KEY = new NoteBytesReadOnly("scope");
     public final static NoteBytesReadOnly RESULT_KEY = new NoteBytesReadOnly("result");
-    public final static NoteBytesReadOnly TIMESTAM_KEY = new NoteBytesReadOnly("timeStamp");
+    public final static NoteBytesReadOnly TIMESTAMP_KEY = new NoteBytesReadOnly("timeStamp");
+    public final static NoteBytesReadOnly STATUS_KEY = new NoteBytesReadOnly("status");
 
     public static NoteBytesObject getTaskMessage(String scope, String type, String message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(new NoteBytes(SCOPE_KEY), new NoteBytes(scope)),
             new NoteBytesPair(new NoteBytes(TYPE_KEY), new NoteBytes(type)),
             new NoteBytesPair(new NoteBytes(MESSAGE_KEY), message),
-            new NoteBytesPair(new NoteBytes(TIMESTAM_KEY), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(TIMESTAMP_KEY), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
@@ -37,7 +38,7 @@ public class TaskMessages {
             new NoteBytesPair(new NoteBytes(SCOPE_KEY), new NoteBytes(scope)),
             new NoteBytesPair(new NoteBytes(TYPE_KEY), new NoteBytes(type)),
             new NoteBytesPair(new NoteBytes(MESSAGE_KEY), message),
-            new NoteBytesPair(new NoteBytes(TIMESTAM_KEY), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(TIMESTAMP_KEY), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
@@ -71,20 +72,24 @@ public class TaskMessages {
 
     public static NoteBytesObject createErrorMessage(String scope, String message, WorkerStateEvent failedEvent)  {
         NoteBytesObject result = getTaskMessage(scope, General.ERROR, message);
-        try{
-            result.add("exception", new NoteSerializable(Utils.getCreateException(failedEvent)));
-        }catch(IOException ex){
-   
+        if(failedEvent != null){
+            try{
+                result.add(EXCEPTION_KEY, new NoteSerializable(Utils.getCreateException(failedEvent)));
+            }catch(IOException ex){
+    
+            }
         }
         return result;
     }
 
     public static NoteBytesObject createErrorMessage(String scope, String message, Throwable e)  {
         NoteBytesObject result = getTaskMessage(scope, General.ERROR, message);
-        try{
-            result.add(EXCEPTION_KEY, new NoteSerializable(e));
-        }catch(IOException ex){
+        if(e != null){
+            try{
+                result.add(EXCEPTION_KEY, new NoteSerializable(e));
+            }catch(IOException ex){
 
+            }
         }
         return result;
     }

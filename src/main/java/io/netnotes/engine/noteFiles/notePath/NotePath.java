@@ -1,21 +1,28 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.noteFiles.notePath;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
+import io.netnotes.engine.messaging.task.ProgressMessage;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.IntCounter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
 
 public class NotePath{
 
@@ -34,34 +41,68 @@ public class NotePath{
     private IntCounter currentLevel = new IntCounter();
     private int[] pathSize;
     private final File pathLedger;
+    private final AsyncNoteBytesWriter progressWriter;
+    private ArrayList<CompletableFuture<Void>> asyncFileDeletions = null;
     
     
-    
-    public NotePath( File pathLedger, NoteBytesReadOnly[] targetPath, boolean recursive){
+    public NotePath( File pathLedger, NoteBytesReadOnly[] targetPath, boolean recursive, AsyncNoteBytesWriter progressWriter){
         this.pathLedger = pathLedger;
         this.targetPath = targetPath;
         this.size = targetPath.length;
         this.recursive = recursive;
         pathSize = new int[targetPath.length];
+        this.progressWriter = progressWriter;
     }
 
-    public NotePath(File pathLedger, NoteStringArrayReadOnly path, boolean recursive){
-        this(pathLedger, path.getAsArray(), recursive);
+    public NotePath(File pathLedger, NoteStringArrayReadOnly path, boolean recursive, AsyncNoteBytesWriter progressWriter){
+        this(pathLedger, path.getAsArray(), recursive, progressWriter);
+    }
+
+    public NotePath(File pathLedger, NoteStringArrayReadOnly path, AsyncNoteBytesWriter progressWriter){
+        this(pathLedger, path.getAsArray(), progressWriter);
     }
 
     public NotePath(File pathLedger, NoteStringArrayReadOnly path){
         this(pathLedger, path.getAsArray());
     }
 
+    public NotePath( File pathLedger, NoteBytesReadOnly[] targetPath, AsyncNoteBytesWriter progressWriter){
+        this(pathLedger, targetPath, false, progressWriter);
+    }
+
     public NotePath( File pathLedger, NoteBytesReadOnly[] targetPath){
-        this(pathLedger, targetPath, false);
+        this(pathLedger, targetPath, false, null);
     }
     public void addMetaData(NoteBytesMetaData metaData){
 
         if(currentLevel.get() < pathSize.length){
             pathSize[currentLevel.get()] = metaData.getLength();
         }
-        currentLevel.add(1);
+        currentLevel.increment();
+    }
+
+    public int getCurrentPathSize(){
+        int level = currentLevel.get();
+        if(level < pathSize.length){
+            return pathSize[level];
+        } else {
+            return 0;
+        }
+    }
+
+    public ArrayList<CompletableFuture<Void>> getCompletableList(){
+        if( asyncFileDeletions == null){
+            asyncFileDeletions = new ArrayList<>();
+        }
+        return asyncFileDeletions;
+    }
+
+    public boolean isProgressWriter(){
+        return progressWriter != null;
+    }
+
+    public AsyncNoteBytesWriter getProgressWriter(){
+        return progressWriter;
     }
 
     public void setTargetFilePath(NoteBytes filePath){
@@ -117,6 +158,10 @@ public class NotePath{
     
     public int getPathSize(int level){
         return pathSize[level];
+    }
+
+    public int getRootPathSize(){
+        return pathSize[0];
     }
 
     public void setPathSize(int[] pathSize) {
@@ -180,9 +225,9 @@ public class NotePath{
         ));
     }
 
-    public NoteBytesObject createCurrentFilePathObject(){
-        return new NoteBytesObject(createFilePath(currentLevel.get(), targetFilePath));
-    }
+    
+
+
 
     public NoteBytes createNewRootPath(NoteBytesWriter writer) throws Exception {
         NoteBytes resultPath = generateNewDataFilePath(getDataDir());
@@ -214,4 +259,47 @@ public class NotePath{
             }
         }
     }
+
+    public void deleteFilePathValue(NoteBytes filePathValue, ArrayList<CompletableFuture<Void>> completableList){
+        completableList.add(CompletableFuture.runAsync(()->{
+            String filePath = filePathValue.getAsString();
+
+            progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath,new NoteBytesPair[]{new NoteBytesPair(
+                TaskMessages.STATUS_KEY, NoteMessaging.Status.STARTED) });
+           
+            try{
+                
+                Files.deleteIfExists(new File(filePath).toPath());
+               
+                progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath, new NoteBytesPair[]{
+                    new NoteBytesPair(TaskMessages.STATUS_KEY, NoteMessaging.General.SUCCESS)});
+
+            }catch(IOException e){
+
+                progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath,  new NoteBytesPair[]{
+                    new NoteBytesPair(TaskMessages.STATUS_KEY, NoteMessaging.General.ERROR),
+                    new NoteBytesPair(TaskMessages.EXCEPTION_KEY, e)});
+    
+                throw new RuntimeException(filePath, e);
+            }
+        }));
+    }
+
+    public CompletableFuture<Integer> progressMsg(String scope, long total, long completed, String message){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, progressWriter) : 
+            CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
+    }
+
+    public CompletableFuture<Integer> progressMsg(String scope, long total, long completed, String message, 
+        NoteBytesPair[] pairs){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, pairs, progressWriter) : 
+            CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
+    }
+
+     public CompletableFuture<Integer> errorMsg(String scope, String message, Throwable e){
+        return progressWriter != null ? progressWriter.writeAsync(TaskMessages.createErrorMessage(scope, message, e)): 
+            CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
+    }
+
+    
 }

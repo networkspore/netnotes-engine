@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.noteFiles.notePath;
 
 import java.io.EOFException;
 import java.io.File;
@@ -17,56 +17,48 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteFiles.AESBackedInputStream;
+import io.netnotes.engine.noteFiles.AESBackedOutputStream;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.noteBytes.processing.IntCounter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
-public class FactoryFilePathGet {
+public class NotePathGet {
     
     
     public static CompletableFuture<NoteBytes> getOrCreateNoteFilePath(NotePath notePath, 
         SecretKey secretKey, ExecutorService execService
     ) {
-        return CompletableFuture
-            .supplyAsync(() -> {
-                File pathLedger = notePath.getPathLedger();
-                if(
-                    pathLedger.exists() && 
-                    pathLedger.isFile() && 
-                    pathLedger.length() > CryptoService.AES_IV_SIZE
-                ){
-                    PipedOutputStream decryptedOutput = new PipedOutputStream();
-                    PipedOutputStream parsedOutput = new PipedOutputStream();
-                
-                    try {
-                    
-                        // Chain the operations: decrypt -> parse -> encrypt -> return file
-                        CompletableFuture<NoteBytesObject> decryptFuture = 
-                            FileStreamUtils.performDecryption(pathLedger, decryptedOutput, secretKey, execService);
-                        
-                        CompletableFuture<NoteBytes> parseFuture = 
-                            parseStreamToOutputGetOrAddPath(notePath, secretKey, decryptedOutput, parsedOutput, execService);
-                        
-                        CompletableFuture<NoteBytesObject> saveFuture = 
-                            FileStreamUtils.saveEncryptedFileSwap(pathLedger, secretKey, parsedOutput);
-                        
-                        // Wait for all operations to complete and return the result file
-                        return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
-                            .thenCompose(v -> parseFuture) // Return the parsed file result
-                            .join(); // Block for this async operation
-                        
-                            
-                    } catch (Exception e) {
-                        throw new RuntimeException("Failed to process existing data file", e);
-                    }finally{
-                        StreamUtils.safeClose(decryptedOutput);
-                        StreamUtils.safeClose(parsedOutput);
-                    }
-                
-                }else{
-                    return notePath.createNotePathLedger(secretKey);
-                }
-            }, execService);
+        File pathLedger = notePath.getPathLedger();
+        if(
+            pathLedger.exists() && 
+            pathLedger.isFile() && 
+            pathLedger.length() > CryptoService.AES_IV_SIZE
+        ){
+            PipedOutputStream decryptedOutput = new PipedOutputStream();
+            PipedOutputStream parsedOutput = new PipedOutputStream();
+        
+            // Chain the operations: decrypt -> parse -> encrypt -> return file
+            CompletableFuture<NoteBytesObject> decryptFuture = 
+                FileStreamUtils.performDecryption(pathLedger, decryptedOutput, secretKey, execService);
+            
+            CompletableFuture<NoteBytes> parseFuture = 
+                parseStreamToOutputGetOrAddPath(notePath, secretKey, decryptedOutput, parsedOutput, execService);
+            
+            CompletableFuture<NoteBytesObject> saveFuture = 
+                FileStreamUtils.saveEncryptedFileSwap(pathLedger, secretKey, parsedOutput, execService);
+            
+            // Wait for all operations to complete and return the result file
+            return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
+                .thenCompose(v -> parseFuture)
+                .whenComplete((v, ex)->{
+                    StreamUtils.safeClose(decryptedOutput);
+                    StreamUtils.safeClose(parsedOutput);
+                });
+        }else{
+            return CompletableFuture.supplyAsync(()->notePath.createNotePathLedger(secretKey));
+        }
     }
 
  

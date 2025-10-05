@@ -3,7 +3,8 @@ package io.netnotes.engine.noteBytes;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.math.BigInteger; 
+import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -68,7 +69,23 @@ public class NoteBytesObject extends NoteBytes{
     }
 
     public NoteBytesPair[] getAsArray(){
-        return getAsStream().toArray(NoteBytesPair[]::new);
+        return getAsList().toArray(new NoteBytesPair[0]);
+    }
+
+    public ArrayList<NoteBytesPair> getAsList(){
+        ArrayList<NoteBytesPair> pairs = new ArrayList<>();
+        byte[] bytes = get();
+      
+        int length = bytes.length;
+        int offset = 0;
+    
+        while(offset < length) {
+            NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
+            pairs.add(pair);
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE *2) + pair.getKey().byteLength() + pair.getValue().byteLength(); // 2 bytes type + 8 bytes length
+        }
+
+        return pairs;
     }
 
 

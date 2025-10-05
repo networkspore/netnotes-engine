@@ -7,8 +7,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteFiles.NoteFileRegistry;
 import io.netnotes.engine.noteFiles.SettingsData;
+import io.netnotes.engine.noteFiles.notePath.NoteFileRegistry;
 import io.netnotes.engine.utils.GitHubAPI;
 import io.netnotes.engine.utils.UpdateInformation;
 import io.netnotes.engine.utils.Utils;
@@ -20,7 +20,7 @@ import javafx.beans.property.SimpleObjectProperty;
 public class AppData {
 
     private final NoteFileRegistry m_noteFileRegistry;
-    private final Map<NoteBytesReadOnly, Node> m_nodeRegistry = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, INode> m_nodeRegistry = new ConcurrentHashMap<>();
 
     private final SettingsData m_settingsData;
 
@@ -38,18 +38,13 @@ public class AppData {
         return m_noteFileRegistry.getScheduledExecutor();
     }
 
-    public Map<NoteBytesReadOnly, Node> nodeRegistry(){
+    public Map<NoteBytesReadOnly, INode> nodeRegistry(){
         return m_nodeRegistry;
     }
 
     public NoteFileRegistry getNoteFileRegistry(){
         return m_noteFileRegistry;
     }
-
-
-
-
-  
 
     public Future<?> checkForUpdates(String gitHubUser, String githubProject, SimpleObjectProperty<UpdateInformation> updateInformation){
         GitHubAPI gitHubAPI = new GitHubAPI(gitHubUser, githubProject);

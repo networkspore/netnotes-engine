@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.noteFiles.notePath;
 
 import java.io.File;
 import java.io.IOException;
@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -24,6 +24,8 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
+import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.noteFiles.SettingsData.InvalidPasswordException;
 
 public class NotePathFactory {
@@ -120,9 +122,9 @@ public class NotePathFactory {
         PipedOutputStream pipedOutputStream
     ) {
         if(file.exists() && file.isFile()){
-            return FileStreamUtils.saveEncryptedFileSwap(file, getSecretKey(), pipedOutputStream);
+            return FileStreamUtils.saveEncryptedFileSwap(file, getSecretKey(), pipedOutputStream, getExecService());
         }else{
-            return FileStreamUtils.saveEncryptedFile(file, getSecretKey(), pipedOutputStream);
+            return FileStreamUtils.saveEncryptedFile(file, getSecretKey(), pipedOutputStream, getExecService());
         }
     }
 
@@ -144,7 +146,7 @@ public class NotePathFactory {
             notePath.checkDataDir();
 
             return notePath;
-        }, getExecService()).thenCompose(notePath-> FactoryFilePathGet.getOrCreateNoteFilePath(notePath, 
+        }, getExecService()).thenCompose(notePath-> NotePathGet.getOrCreateNoteFilePath(notePath, 
             getSecretKey(), getExecService()));
     }
 
@@ -172,7 +174,7 @@ public class NotePathFactory {
             .thenCompose(v -> {
                 ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 4, 4, 
                         "Opening file path ledger",progressWriter);
-                return FilePathEncryptionUpdate.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
+                return NotePathReEncryption.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
             });
     }
 
@@ -182,39 +184,35 @@ public class NotePathFactory {
         });
     }
     
-    protected CompletableFuture<NoteBytesObject> deleteNoteFilePath(File filePathLedger, NoteStringArrayReadOnly path, boolean recursive){
-       
-        return CompletableFuture.supplyAsync(() -> {
-            if(!m_locked.get()){
-                throw new IllegalStateException("Lock required");
-            }
-               
-            if (
-                filePathLedger == null ||
-                path == null || 
-                path.byteLength() == 0
-            ) {
-                throw new IllegalArgumentException("Required parameters cannot be null");
-            }
+    protected CompletableFuture<NotePath> deleteNoteFilePath(NotePath notePath){
 
-            NotePath notePath = new NotePath(filePathLedger, path, recursive);
-            notePath.checkDataDir();
+        notePath.progressMsg(NoteMessaging.Status.STARTING,3, 4, "Initializing pipeline");
+        
+        File ledger = notePath.getPathLedger();
+        SecretKey secretKey = getSecretKey();
+        ExecutorService execService = getExecService();
+        PipedOutputStream decryptedOutput = new PipedOutputStream();
+        PipedOutputStream parsedOutput = new PipedOutputStream();
 
-            if(
-                !filePathLedger.exists() || 
-                !filePathLedger.isFile() || 
-                filePathLedger.length() <= CryptoService.AES_IV_SIZE
-            ){
-                throw new RuntimeException("File path ledger is unavailable or contains no information");
-            }
-            
-            if(notePath.getSize() == 0){
-                throw new IllegalArgumentException("Path does not contain any valid elements");
-            }
+        CompletableFuture<NoteBytesObject> decryptFuture = 
+            FileStreamUtils.performDecryption(ledger, decryptedOutput, secretKey, execService);
+        
+        CompletableFuture<Void> parseFuture = 
+            NotePathDelete.parseStreamForRoot(notePath, secretKey, decryptedOutput, parsedOutput, execService);
+        
+        CompletableFuture<NoteBytesObject> saveFuture = 
+            FileStreamUtils.saveEncryptedFileSwap(ledger, secretKey, parsedOutput, execService);
+        
+        return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
+            .whenComplete((v, ex) -> {
+                StreamUtils.safeClose(decryptedOutput);
+                StreamUtils.safeClose(parsedOutput);
 
-            return notePath;
-
-        }, getExecService())
-            .thenCompose(notePath-> FactoryFilePathDelete.deleteNoteFilePath(notePath,getSecretKey(), getExecService()));
+            }).thenCompose(v-> 
+                CompletableFuture.allOf(notePath.getCompletableList().toArray(new CompletableFuture[0]))
+            .thenCompose(nv->
+                CompletableFuture.completedFuture(notePath)
+            ));
+    
     }
 }

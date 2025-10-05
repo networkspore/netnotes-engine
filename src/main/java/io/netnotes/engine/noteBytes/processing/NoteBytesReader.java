@@ -24,7 +24,7 @@ public class NoteBytesReader implements AutoCloseable{
             byte[] fourBytes = new byte[4];
             m_in.read(fourBytes);
             int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
-            byte[] data = readByteAmount(len);
+            byte[] data = readNextBytes(len);
      
             return NoteBytes.of(data, (byte)type);
         }
@@ -38,7 +38,7 @@ public class NoteBytesReader implements AutoCloseable{
             m_in.read(fourBytes);
             ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
             int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
-            byte[] data = readByteAmount(len);
+            byte[] data = readNextBytes(len);
      
             return new NoteBytesEphemeral(data, byteDecoding);
         }
@@ -53,7 +53,7 @@ public class NoteBytesReader implements AutoCloseable{
             m_in.read(fourBytes);
             ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
             int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
-            byte[] data = readByteAmount(len);
+            byte[] data = readNextBytes(len);
             return new NoteBytesReadOnly(data, byteDecoding);
         }
         return null;
@@ -71,7 +71,7 @@ public class NoteBytesReader implements AutoCloseable{
         return null;
     }
 
-    public byte[] readByteAmount(int size) throws IOException{
+    public byte[] readNextBytes(int size) throws IOException{
         try(ByteArrayOutputStream byteOutput = new ByteArrayOutputStream(size)){
             int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
             byte[] buffer = new byte[bufferSize];

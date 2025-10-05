@@ -41,13 +41,14 @@ public class NoteMessaging {
         public static final String BROADCAST_RESULT = "Broadcast"; 
         public static final String BROADCAST = "Broadcast Result";
         public static final String STATUS = "Status";
+        public static final String PROCESSING = "Processing";
     }
 
     public static class Headings {
-
         public static final NoteBytesReadOnly UUID_128 = new NoteBytesReadOnly("uuid_128");
         public static final NoteBytesReadOnly UUID_256 = new NoteBytesReadOnly("uuid_256");
         public static final NoteBytesReadOnly TIME_STAMP = new NoteBytesReadOnly("timeStamp");
+        public static final NoteBytesReadOnly VERSION_KEY = new NoteBytesReadOnly("version");
     }
 
 
@@ -97,6 +98,9 @@ public class NoteMessaging {
         public static final String IO = "Error_IO failed";
         public static final String CANCELED = "Error_Canceled";
         public static final String CLOSING = "Error_Closing";
+
+        //IO
+        public static final String IO_DELETION = "Disk error: onDelete";
 
         // Availability / lifecycle
         public static final String NOT_STARTED = "Error_Not started";

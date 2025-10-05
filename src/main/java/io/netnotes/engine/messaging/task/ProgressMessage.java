@@ -89,4 +89,10 @@ public class ProgressMessage {
 
         return asyncWriter.writeAsync(getProgressMessage(scope, total, completed, message));
     }
+
+    public static CompletableFuture<Integer> writeAsync(String scope, long total, long completed, String message, 
+        NoteBytesPair[] pairs, AsyncNoteBytesWriter asyncWriter){
+
+        return asyncWriter.writeAsync(getProgressMessage(scope, total, completed, message, pairs));
+    }
 }

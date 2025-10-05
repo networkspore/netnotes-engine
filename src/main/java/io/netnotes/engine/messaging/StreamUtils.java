@@ -90,15 +90,18 @@ public class StreamUtils {
         }
     }
 
-    public static void safeClose(AutoCloseable resource) {
+    public static boolean safeClose(AutoCloseable resource) {
         if (resource != null) {
             try {
                 resource.close();
+                return true;
             } catch (Exception e) {
                 // Log but don't throw - we're cleaning up
                 System.err.println("Warning: Error closing resource: " + e.getMessage());
+                return false;
             }
         }
+        return false;
     }
 
 

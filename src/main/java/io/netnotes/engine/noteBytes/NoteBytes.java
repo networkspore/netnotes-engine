@@ -498,7 +498,8 @@ public class NoteBytes {
     public int byteLength(){
         return get().length;
     }
-    
+
+
     public NoteBytesObject getAsNoteBytesObject(){
         return new NoteBytesObject(getBytes());
     }

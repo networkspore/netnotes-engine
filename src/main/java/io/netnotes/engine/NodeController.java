@@ -30,7 +30,7 @@ public class NodeController {
     private CompletableFuture<Void> routeToNode(NoteBytes fromId, NoteBytes toId, 
                                                           PipedOutputStream messageStream, 
                                                           PipedOutputStream replyStream) {
-        Node targetNode = appData.nodeRegistry().get(toId);
+        INode targetNode = appData.nodeRegistry().get(toId);
         if (targetNode == null) {
             return CompletableFuture.failedFuture(new NameNotFoundException("Node not found: " + toId));
         }

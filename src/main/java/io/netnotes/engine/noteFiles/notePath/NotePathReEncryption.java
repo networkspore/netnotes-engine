@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.noteFiles.notePath;
 
 import java.io.File;
 import java.io.IOException;
@@ -22,72 +22,60 @@ import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.LongCounter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
-public class FilePathEncryptionUpdate {
+public class NotePathReEncryption {
 
-    public static CompletableFuture<NoteBytesObject> updatePathLedgerEncryption(
-        File pathLedger,
-        SecretKey oldSecretKey, SecretKey newSecretKey, int batchSize,
-        AsyncNoteBytesWriter progressWriter, ExecutorService execService) {
+    public static CompletableFuture<NoteBytesObject> updatePathLedgerEncryption(File pathLedger, SecretKey oldSecretKey,
+        SecretKey newSecretKey, int batchSize, AsyncNoteBytesWriter progressWriter, ExecutorService execService
+    ) {
     
-        return CompletableFuture
-            .supplyAsync(() -> {
-                
-                if(
-                    !pathLedger.exists() || 
-                    !pathLedger.isFile() || 
-                    pathLedger.length() < CryptoService.AES_IV_SIZE
-                ){
-                    throw new RuntimeException("Path ledger file is not valid");
-                }
-                
-                if(oldSecretKey == null || newSecretKey == null){
-                    throw new RuntimeException("Valid keys required");
-                }
-
-                if(progressWriter == null){
-                    throw new RuntimeException("Progress update callback cannot be null");
-                }
-                    
-                PipedOutputStream decryptedOutput = new PipedOutputStream();
-                PipedOutputStream parsedOutput = new PipedOutputStream();
+        if(oldSecretKey == null || newSecretKey == null){
+            return CompletableFuture.failedFuture(new RuntimeException("Valid keys required"));
+        }
+        if(
+            !pathLedger.exists() || 
+            !pathLedger.isFile() || 
+            pathLedger.length() < CryptoService.AES_IV_SIZE
+        ){
+            return CompletableFuture.failedFuture(new RuntimeException("Path ledger file is not valid"));
+        }
+        if(progressWriter == null){
+            return CompletableFuture.failedFuture(new RuntimeException("Progress update callback cannot be null"));
+        }
             
-                try {
-   
-                    CompletableFuture<NoteBytesObject> decryptFuture = 
-                        FileStreamUtils.performDecryption(pathLedger, decryptedOutput, oldSecretKey, execService);
-                    
-                    CompletableFuture<Void> parseFuture = parseStreamUpdateEncryption(batchSize, pathLedger.length(), 
-                        oldSecretKey, newSecretKey, decryptedOutput, parsedOutput, progressWriter, execService);
-                    
-                    CompletableFuture<NoteBytesObject> saveFuture = 
-                        FileStreamUtils.saveEncryptedFileSwap(pathLedger, newSecretKey, parsedOutput);
-                    
-                    return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
-                        .thenCompose(v -> saveFuture) // Return the file ledger encryption result
-                        .join(); // Block for this async operation
-                    
-                        
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to process existing data file", e);
-                }finally{
-                    StreamUtils.safeClose(decryptedOutput);
-                    StreamUtils.safeClose(parsedOutput);
-                }
-               
-            }, execService);
+        PipedOutputStream decryptedOutput = new PipedOutputStream();
+        PipedOutputStream parsedOutput = new PipedOutputStream();
+    
+        CompletableFuture<NoteBytesObject> decryptFuture = 
+            FileStreamUtils.performDecryption(pathLedger, decryptedOutput, oldSecretKey, execService);
+        
+        CompletableFuture<CompletableFuture<Void>> parseFuture = parseStreamUpdateEncryption(batchSize, pathLedger.length(), 
+            oldSecretKey, newSecretKey, decryptedOutput, parsedOutput, progressWriter, execService);
+        
+        CompletableFuture<NoteBytesObject> saveFuture = 
+            FileStreamUtils.saveEncryptedFileSwap(pathLedger, newSecretKey, parsedOutput, execService);
+        
+        return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
+            .whenComplete((v,ex) ->{
+                //close streams as soon as they complete
+                StreamUtils.safeClose(decryptedOutput);
+                StreamUtils.safeClose(parsedOutput);
+            })    
+            .thenCompose(v -> parseFuture) // wait for all files to finish updating
+            .thenCompose(v-> saveFuture);
     }
 
-    public static CompletableFuture<Void> parseStreamUpdateEncryption(int batchSize, long fileSize,
+    public static CompletableFuture<CompletableFuture<Void>> parseStreamUpdateEncryption(int batchSize, long fileSize,
         SecretKey oldKey, SecretKey newKey, PipedOutputStream decryptedOutput, PipedOutputStream parsedOutput,
         AsyncNoteBytesWriter progressWriter, ExecutorService execService
     ){
         return CompletableFuture
-            .runAsync(() -> {
+            .supplyAsync(() -> {
                 Semaphore fileUpdateSemaphore = new Semaphore(batchSize, true);
                 List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -109,14 +97,14 @@ public class FilePathEncryptionUpdate {
                 AtomicInteger completedCount = new AtomicInteger(0);
                 int totalFutures = futures.size();
 
-                CompletableFuture.allOf(
+                return CompletableFuture.allOf(
                     futures.stream()
                         .map(future -> future.whenComplete((result, ex) -> {
                             int completed = completedCount.incrementAndGet();
                             ProgressMessage.writeAsync(NoteMessaging.Status.UPDATED,
                                 completed, totalFutures, NoteMessaging.General.SUCCESS, progressWriter);
                     })).toArray(CompletableFuture[]::new)
-                ).join();
+                );
 
         }, execService);
 
@@ -214,13 +202,12 @@ public class FilePathEncryptionUpdate {
                         FileStreamUtils.updateFileEncryption(oldKey, newKey, file, tmpFile, progressWriter);
 
                     }catch(Exception e){
-                        TaskMessages.writeErrorAsync(NoteMessaging.Error.IO, file.getAbsolutePath() , e, progressWriter);
+                        TaskMessages.writeErrorAsync(NoteMessaging.General.ERROR, file.getAbsolutePath() , e, progressWriter);
                     }finally{
                         try{
                             Files.deleteIfExists(tmpFile.toPath());
                         }catch(IOException e){
-                            TaskMessages.writeErrorAsync("Delete_Error", tmpFile.getAbsolutePath() , e, progressWriter);
-                            System.err.println("Failed to delete temp file:" + tmpFile.getAbsolutePath());
+                            TaskMessages.writeErrorAsync(NoteMessaging.Error.IO_DELETION, tmpFile.getAbsolutePath() , e, progressWriter);
                         }
                         fileUpdateSemaphore.release();
                     }

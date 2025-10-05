@@ -26,11 +26,11 @@ public class NodeBroadcaster {
     public static final long MAX_TOTAL_BROADCAST_SIZE = 500 * 1024 * 1024; // 500MB total (50MB * 10 recipients)
     public static final int MAX_RECIPIENTS = 1000; // Prevent broadcast bombs
 
-    private final Map<NoteBytesReadOnly, Node> nodeRegistry;
+    private final Map<NoteBytesReadOnly, INode> nodeRegistry;
     private final Executor exec;
     private final NoteBytesReadOnly broadcasterId;
 
-    public NodeBroadcaster(Map<NoteBytesReadOnly, Node> nodeRegistry,
+    public NodeBroadcaster(Map<NoteBytesReadOnly, INode> nodeRegistry,
                        Executor exec,
                        NoteBytesReadOnly broadcasterId) {
 
@@ -139,7 +139,7 @@ public class NodeBroadcaster {
             byte[] messageBytes,
             NoteBytesConcurrentMap resultMap) {
 
-        Node targetNode = nodeRegistry.get(recipientId);
+        INode targetNode = nodeRegistry.get(recipientId);
 
         if (targetNode == null) {
             resultMap.put(recipientId.copy(), TaskMessages.getTaskMessage("processRecipient", General.ERROR, "Node not found"));

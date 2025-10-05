@@ -109,7 +109,7 @@ public class FileStreamUtils {
                 NoteBytesReader initialReader = new NoteBytesReader(fileInputStream);
             ){
                 
-                byte[] oldIV = initialReader.readByteAmount(CryptoService.AES_IV_SIZE);
+                byte[] oldIV = initialReader.readNextBytes(CryptoService.AES_IV_SIZE);
                 byte[] outIV = RandomService.getIV();
 
                 Cipher decryptCipher = CryptoService.getAESDecryptCipher(oldIV, newAppKey);
@@ -165,7 +165,7 @@ public class FileStreamUtils {
                 OutputStream outStream = Files.newOutputStream(decryptedFile.toPath());
             ){
                 
-                byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
+                byte[] iV = reader.readNextBytes(CryptoService.AES_IV_SIZE);
 
                 Cipher cipher = CryptoService.getAESDecryptCipher(iV, appKey);
 
@@ -220,7 +220,7 @@ public class FileStreamUtils {
                     return new byte[0];
                 }
 
-                byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
+                byte[] iV = reader.readNextBytes(CryptoService.AES_IV_SIZE);
 
                
                 Cipher cipher = CryptoService.getAESDecryptCipher(iV, appKey);
@@ -246,7 +246,9 @@ public class FileStreamUtils {
 
     }
 
-    public static CompletableFuture<NoteBytesObject> saveEncryptedFile( File file, SecretKey secretKey, PipedOutputStream pipedOutputStream){
+    public static CompletableFuture<NoteBytesObject> saveEncryptedFile( File file, SecretKey secretKey, PipedOutputStream pipedOutputStream,
+        ExecutorService execService
+    ){
         return CompletableFuture.supplyAsync(() -> {
             try(
                 PipedInputStream inputStream = new PipedInputStream(pipedOutputStream);
@@ -273,14 +275,15 @@ public class FileStreamUtils {
                 throw new RuntimeException(e);
             }
 
-        });
+        }, execService);
     
     }
 
     public static CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(
         File file,
         SecretKey secretKey,
-        PipedOutputStream pipedOutputStream
+        PipedOutputStream pipedOutputStream,
+        ExecutorService execService
     ) {
         
         return CompletableFuture.supplyAsync(() -> {
@@ -314,7 +317,7 @@ public class FileStreamUtils {
                 throw new RuntimeException("Failed to write encrypted data", e);
             }
             return FileSwapUtils.performAtomicFileSwap(file, tmpFile, bytesWritten);
-        });
+        }, execService);
     }
 
     public static CompletableFuture<NoteBytesObject> performDecryption(
@@ -330,7 +333,7 @@ public class FileStreamUtils {
             ) {
            
                 if (file.exists() && file.isFile() && file.length() > CryptoService.AES_IV_SIZE - 1) {
-                    byte[] iV = reader.readByteAmount(CryptoService.AES_IV_SIZE);
+                    byte[] iV = reader.readNextBytes(CryptoService.AES_IV_SIZE);
                     
                     Cipher decryptCipher = CryptoService.getAESDecryptCipher(iV, secretKey);
                     

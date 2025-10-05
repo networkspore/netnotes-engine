@@ -1,31 +1,36 @@
 package io.netnotes.engine.utils;
 
 public class Version implements Comparable<Version> {
-
+    public final static String UKNOWN_VERSION = "0.0.0";
     private String m_version;
 
-    public final String get() {
-        return m_version;
-    }
-    
-    public Version(){
+     public Version(){
         m_version = "0.0.0";
     }
 
     public Version(String version) {
-        if (version == null) {
-            m_version = "0.0.0";
+       set(version);
+    }
+
+    public final String get() {
+        return m_version;
+    }
+
+    private void set(String version){
+         if (version == null) {
+            this.m_version = UKNOWN_VERSION;
         }
         if (!version.matches("[0-9]+(\\.[0-9]+)*")) {
-            m_version = "0.0.0";
+            this.m_version = UKNOWN_VERSION;
         }
-        m_version = version;
+        this.m_version = version;
     }
+    
 
     @Override
     public int compareTo(Version that) {
         if (that == null) {
-            return 1;
+            throw new NullPointerException("Version.compareTo(Version that - is null)");
         }
         String[] thisParts = m_version.split("\\.");
         String[] thatParts = that.get().split("\\.");
@@ -47,13 +52,13 @@ public class Version implements Comparable<Version> {
 
     @Override
     public boolean equals(Object that) {
+        if (that == null) {
+            throw new NullPointerException("Version.equals(Version that - is null)");
+        }
         if (this == that) {
             return true;
         }
-        if (that == null) {
-            return false;
-        }
-        if (this.getClass() != that.getClass()) {
+        if (!(that instanceof Version)) {
             return false;
         }
         return this.compareTo((Version) that) == 0;
@@ -61,8 +66,7 @@ public class Version implements Comparable<Version> {
 
     @Override
     public String toString(){
-
-        return m_version != null ?( m_version.equals("0.0.0") ? "(Unknown)" : m_version) : "(Unknown)";
+        return get();
     }
 
 }

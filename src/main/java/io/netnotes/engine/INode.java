@@ -7,7 +7,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
-public interface Node {
+public interface INode {
     NoteBytesReadOnly getNodeId();
     CompletableFuture<Void> initialize(AppDataInterface appInterface);
     void setNodeControllerInterface(NodeControllerInterface nodeControllerInterface);

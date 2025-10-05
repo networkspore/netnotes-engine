@@ -16,6 +16,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.noteFiles.notePath.NoteFileRegistry;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File file;
@@ -24,13 +25,17 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
 
     private final Map<NoteBytesReadOnly, NoteFile> activeReferences = new ConcurrentHashMap<>();
     private final NoteFileRegistry registry;
-    private final NoteStringArrayReadOnly registryKey;
+    private final NoteStringArrayReadOnly pathKey;
     private AtomicBoolean m_isClosed = new AtomicBoolean(false);
     
-   public ManagedNoteFileInterface(NoteBytes noteFilePath, NoteFileRegistry registry, NoteStringArrayReadOnly registryKey) {
+   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileRegistry registry ) {
         this.file = new File(noteFilePath.getAsString());
         this.registry = registry;
-        this.registryKey = registryKey;   
+        this.pathKey = pathKey;   
+    }
+
+    public NoteStringArrayReadOnly getId(){
+        return pathKey;
     }
 
     public void addReference(NoteFile noteFile) throws IllegalStateException {
@@ -65,7 +70,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
             .execute(() -> {
                 // Double-check cleanup conditions
                 if (activeReferences.isEmpty() && !isLocked()) {
-                    registry.cleanupInterface(registryKey, this);
+                    registry.cleanupInterface(pathKey, this);
                 }
             });
         }

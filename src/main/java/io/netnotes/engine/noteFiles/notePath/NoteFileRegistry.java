@@ -1,14 +1,20 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.noteFiles.notePath;
 
+import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteFiles.ManagedNoteFileInterface;
+import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.noteFiles.SettingsData;
 
 import java.io.File;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -25,19 +31,19 @@ public class NoteFileRegistry extends NotePathFactory {
         super(settingsData);
     }
     
-    public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path) {
+    public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly notePath) {
 
-        ManagedNoteFileInterface existing = m_registry.get(path);
+        ManagedNoteFileInterface existing = m_registry.get(notePath);
         if (existing != null) {
-            return CompletableFuture.completedFuture(new NoteFile(path, existing));
+            return CompletableFuture.completedFuture(new NoteFile(notePath, existing));
         }
 
         return acquireLock()
-            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger, path))
-            .thenApply(noteFilePath -> {
-                ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(path,
-                    k -> new ManagedNoteFileInterface(noteFilePath, this, k));
-                return new NoteFile(path, noteFileInterface);
+            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger, notePath))
+            .thenApply(filePath -> {
+                ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(notePath,
+                    k -> new ManagedNoteFileInterface(k, filePath, this));
+                return new NoteFile(notePath, noteFileInterface);
             }).whenComplete((result, failure)->{
                 releaseLock();
             });
@@ -122,40 +128,84 @@ public class NoteFileRegistry extends NotePathFactory {
 
 
 
-    public CompletableFuture<NoteBytesObject> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive) {
+    public CompletableFuture<NotePath> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive, 
+        OutputStream progressStream
+     ) {
+
+        if(path == null ||  path.byteLength() == 0 || path.size() == 0){
+            StreamUtils.safeClose(progressStream);
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Invalid path provided"));
+        }
+
+        AsyncNoteBytesWriter progressWriter = progressStream != null ? 
+            new AsyncNoteBytesWriter(progressStream, getExecService()) : null;
+
+        if(progressWriter != null){
+            ProgressMessage.writeAsync(NoteMessaging.Status.STARTING,
+                    0, 4, "Aquiring lock", progressWriter);
+        }
+         List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
+
         return acquireLock().thenCompose((filePathLedger)->{
+            
+            if(!filePathLedger.exists() || !filePathLedger.isFile() || 
+                filePathLedger.length() <= CryptoService.AES_IV_SIZE){
+                throw new IllegalArgumentException("Invalid ledger, inaccessible or insufficient size provided");
+            }
+
+            NotePath notePath = new NotePath(filePathLedger, path, recursive, progressWriter);
+
+            notePath.progressMsg(NoteMessaging.Status.STARTING,2, 4,
+                "Initial lock aquired, preparing registry interfaces");
+
             if(recursive){
                 List<CompletableFuture<Void>> list = new ArrayList<>();
-                List<NoteStringArrayReadOnly> toRemove = new ArrayList<>();
-                for(Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry : m_registry.entrySet()) {
-                    if(entry.getKey().arrayStartsWith(path)){
-                        list.add(entry.getValue().perpareForDeletion());
-                        toRemove.add(entry.getKey());
-                    }
+                
+                Iterator<Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface>> iterator = m_registry.entrySet().iterator();
+                while(iterator.hasNext()) {
+                    Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry = iterator.next();
+                    list.add(entry.getValue().perpareForDeletion());
+                    interfaceList.add(entry.getValue());
+                    iterator.remove(); 
                 }
-                return CompletableFuture.allOf(list.toArray(new CompletableFuture[0])).thenCompose(v->{
-                    toRemove.forEach(key->{
-                        ManagedNoteFileInterface managedInterface = m_registry.remove(key);
-                        if(managedInterface != null){
-                            managedInterface.releaseLock();
-                        }
-                    });
-                    return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                
+                return CompletableFuture.allOf(list.toArray(new CompletableFuture[0]))
+                .thenCompose(v->{
+                    return super.deleteNoteFilePath(notePath);
                 });
             }else{
-                ManagedNoteFileInterface managedInterface = m_registry.get(path);
+                ManagedNoteFileInterface managedInterface = m_registry.remove(path);
                 if(managedInterface != null){
                     return managedInterface.perpareForDeletion().thenCompose(v->{
-                        m_registry.remove(path, managedInterface);
-                        managedInterface.releaseLock();
-                        return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                        interfaceList.add(managedInterface);
+                        return super.deleteNoteFilePath(notePath);
                     });
                 }else{
-                    return super.deleteNoteFilePath(filePathLedger, path, recursive);
+                    return super.deleteNoteFilePath(notePath);
                 }
             }
-        }).whenComplete((v, ex)->{
+        }).whenComplete((notePath, ex)->{
+            int toRemoveSize = interfaceList.size();
+            for(int i = 0; i < toRemoveSize; i++){
+                ManagedNoteFileInterface managedInterface= interfaceList.get(i);
+                boolean isDeleted = !managedInterface.isFile();
+                
+                if(managedInterface.isLocked()){
+                    managedInterface.releaseLock();
+                }
+                
+                notePath.progressMsg(NoteMessaging.Status.STOPPING, i, toRemoveSize, managedInterface.getId().getAsString(), new NoteBytesPair[]{
+                    new NoteBytesPair(NoteMessaging.General.STATUS, 
+                        !managedInterface.isLocked() && isDeleted ? 
+                            NoteMessaging.General.SUCCESS : NoteMessaging.General.FAILED
+                    )
+                });
+                
+            }
+            
+            StreamUtils.safeClose(progressWriter);
             releaseLock();
+            
         });
       
 
