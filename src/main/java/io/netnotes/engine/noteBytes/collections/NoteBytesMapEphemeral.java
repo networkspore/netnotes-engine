@@ -193,11 +193,6 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
     }
 
 
-    public NoteBytesEphemeral put(Object key, Object value) {
-        
-        return m_pairs.put(NoteBytes.of(key), NoteBytesEphemeral.create(value));
-    }
-
     @Override
     public NoteBytesEphemeral put(NoteBytes key, NoteBytesEphemeral value) {
         return m_pairs.put(key, value);

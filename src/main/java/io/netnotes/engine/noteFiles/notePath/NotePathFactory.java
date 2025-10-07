@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -27,6 +26,7 @@ import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.noteFiles.SettingsData.InvalidPasswordException;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class NotePathFactory {
    

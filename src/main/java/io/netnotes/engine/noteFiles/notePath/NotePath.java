@@ -9,7 +9,6 @@ import java.util.concurrent.CompletableFuture;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -23,6 +22,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class NotePath{
 

@@ -4,19 +4,16 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.utils.HardwareInfo;
-import io.netnotes.engine.utils.Utils;
-import javafx.concurrent.Task;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
 
 public class NoteUUID extends NoteBytes {
 
@@ -96,34 +93,28 @@ public class NoteUUID extends NoteBytes {
         return bytes;
     }
 
-    public static void createNotesUUID256(ExecutorService execService, EventHandler<WorkerStateEvent> onComplete, EventHandler<WorkerStateEvent> onFailed ){ 
-        HardwareInfo.getHardwareInfo(new NoteStringArray("nic","hdd"), execService, (onHardwareInfo)->{
-            Object obj = onHardwareInfo.getSource().getValue();
-            if(obj != null && obj instanceof HardwareInfo){
-                HardwareInfo hardwareInfo = (HardwareInfo) obj;
-                Task<Object> task = new Task<Object>() {
-                    @Override
-                    public Object call() throws IOException {
-                        try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
-                            NoteBytesPair[] sources = hardwareInfo.getAsArray();
-                            for(NoteBytesPair source : sources){
-                                NoteBytesPair[] sourceItems = source.getValue().getAsNoteBytesObject().getAsArray();
-                                int itemsLength = sourceItems.length;
-                                if(itemsLength > 0){
-                                    outputStream.write( sourceItems[RandomService.getRandomInt(0, itemsLength-1)].getValue().get() );
-                                }
-                            }
-                            return ByteDecoding.concat(createTimeRndBytes(), ByteHashing.digestBytesToBytes(outputStream.toByteArray(), 16));
-                        }
+    public static CompletableFuture<NoteUUID> createNotesUUID256(ExecutorService execService){ 
+       
+        return HardwareInfo.getHardwareInfo(new NoteStringArray("nic","hdd"), execService).thenApply((hardwareInfo)->{
+            try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
+                NoteBytesPair[] sources = hardwareInfo.getAsArray();
+                for(NoteBytesPair source : sources){
+                    NoteBytesPair[] sourceItems = source.getValue().getAsNoteBytesObject().getAsArray();
+                    int itemsLength = sourceItems.length;
+                    if(itemsLength > 0){
+                        outputStream.write( sourceItems[RandomService.getRandomInt(0, itemsLength-1)].getValue().get() );
                     }
-                };
-                task.setOnFailed(onFailed);
-                task.setOnSucceeded(onComplete);
-                execService.submit(task);
-            }else{
-                Utils.returnException(NoteMessaging.Error.INVALID, execService, onFailed);
+                }
+                return new NoteUUID(ByteDecoding.concat(createTimeRndBytes(), ByteHashing.digestBytesToBytes(outputStream.toByteArray(), 16)));
+            } catch (IOException e) {
+                throw new CompletionException(e);
             }
-        }, onFailed);
+        });
+        
+        
+                        
+                    
+         
     }
 
     public static NoteUUID fromURLSafeString(String urlSafeString){

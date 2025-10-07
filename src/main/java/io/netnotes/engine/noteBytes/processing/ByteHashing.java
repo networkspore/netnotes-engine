@@ -1,9 +1,14 @@
 package io.netnotes.engine.noteBytes.processing;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.Files;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.ove.crypto.digest.Blake2b;
 public class ByteHashing  {
     
@@ -123,6 +128,21 @@ public class ByteHashing  {
         digest.update(bytes);
 
         return digest.digest();
+    }
+
+     public static byte[] digestFileToBytes(File file, int digestLength) throws IOException{
+        final Blake2b digest = Blake2b.Digest.newInstance(digestLength);
+
+        try(InputStream inputStream = Files.newInputStream(file.toPath())){
+            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+            int length = 0;
+
+            while((length = inputStream.read(buffer)) != -1){
+                digest.update(buffer, 0, length);
+            }
+
+            return digest.digest();
+        }
     }
    
     public int hashLongToInt(long l){

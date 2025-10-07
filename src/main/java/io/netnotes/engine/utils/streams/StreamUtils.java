@@ -1,4 +1,4 @@
-package io.netnotes.engine.messaging;
+package io.netnotes.engine.utils.streams;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -163,6 +163,22 @@ public class StreamUtils {
         byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
         while ((length = reader.read(buffer)) != -1) {
             writer.write(buffer, 0, length);
+        }
+    }
+
+    public static byte[] readInputStreamAsBytes(InputStream inputStream) throws IOException{
+   
+        try(
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ){
+            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+            int length = 0;
+
+            while((length = inputStream.read(buffer)) != -1){
+                outputStream.write(buffer, 0, length);
+            }
+
+            return outputStream.toByteArray();
         }
     }
 

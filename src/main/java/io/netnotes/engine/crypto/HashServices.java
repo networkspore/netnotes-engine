@@ -2,23 +2,19 @@ package io.netnotes.engine.crypto;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.nio.file.Files;
-import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
-import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.ove.crypto.digest.Blake2b;
-import javafx.concurrent.Task;
-import javafx.concurrent.WorkerStateEvent;
-import javafx.event.EventHandler;
-import javafx.scene.control.ProgressIndicator;
 
 public class HashServices {
 
@@ -60,60 +56,51 @@ public class HashServices {
     }
 
 
+    public static CompletableFuture<byte[]> copyFileAndReturnHash(File inputFile, File outputFile, ExecutorService execService) {
 
-    public static Future<?> copyFileAndHash(File inputFile, File outputFile, ExecutorService execService, EventHandler<WorkerStateEvent> onSucceeded, EventHandler<WorkerStateEvent> onFailed, ProgressIndicator progressIndicator) {
+        return CompletableFuture.supplyAsync(()->{
+            long contentLength = -1;
 
-        Task<HashData> task = new Task<HashData>() {
-            @Override
-            public HashData call() throws NoSuchAlgorithmException, MalformedURLException, IOException {
-                long contentLength = -1;
-
-                if (inputFile != null && inputFile.isFile() && outputFile != null && !inputFile.getAbsolutePath().equals(outputFile.getAbsolutePath())) {
+            if (inputFile != null && inputFile.isFile() && outputFile != null && !inputFile.getAbsolutePath().equals(outputFile.getAbsolutePath())) {
+                try{
                     contentLength = Files.size(inputFile.toPath());
-                } else {
-                    return null;
+                }catch(IOException e){
+                    throw new CompletionException("Cannot read input file",e);
                 }
-                final Blake2b digest = Blake2b.Digest.newInstance(32);
+            } else {
+                throw new CompletionException("Cannot process input file", inputFile == null || outputFile == null ? 
+                    new NullPointerException(inputFile == null ? "inputFile null" : "outputFile null") : new IllegalStateException("inputFile and outputFile are the same"));
+            }
+            final Blake2b digest = Blake2b.Digest.newInstance(32);
 
-                try(
-                    FileInputStream inputStream = new FileInputStream(inputFile);
-                    FileOutputStream outputStream = new FileOutputStream(outputFile);
-                ){
-                    byte[] buffer = new byte[contentLength < (long) StreamUtils.BUFFER_SIZE ? (int) contentLength : StreamUtils.BUFFER_SIZE];
+            try(
+                FileInputStream inputStream = new FileInputStream(inputFile);
+                FileOutputStream outputStream = new FileOutputStream(outputFile);
+            ){
+                byte[] buffer = new byte[contentLength < (long) StreamUtils.BUFFER_SIZE ? (int) contentLength : StreamUtils.BUFFER_SIZE];
 
-                    int length;
-                    long copied = 0;
+                int length;
+                //long copied = 0;
 
-                    while ((length = inputStream.read(buffer)) != -1) {
+                while ((length = inputStream.read(buffer)) != -1) {
 
-                        outputStream.write(buffer, 0, length);
-                        digest.update(buffer, 0, length);
+                    outputStream.write(buffer, 0, length);
+                    digest.update(buffer, 0, length);
 
-                        copied += (long) length;
-                        if(progressIndicator != null){
-                            updateProgress(copied, contentLength);
-                        }
-                    }
-
-
-
+                  //  copied += (long) length;
                 }
 
-                return new HashData(digest.digest());
 
+
+            } catch (FileNotFoundException e) {
+                throw new CompletionException(e);
+            } catch (IOException e) {
+                throw new CompletionException(e);
             }
 
-        };
+            return digest.digest();
 
-        if (progressIndicator != null) {
-            progressIndicator.progressProperty().bind(task.progressProperty());
-        }
-
-        task.setOnFailed(onFailed);
-
-        task.setOnSucceeded(onSucceeded);
-
-        return execService.submit(task);
+        }, execService);
     }
 
 

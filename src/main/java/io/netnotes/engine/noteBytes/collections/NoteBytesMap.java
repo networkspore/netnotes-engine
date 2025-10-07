@@ -260,14 +260,13 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
     }
 
 
-    public NoteBytes put(Object key, Object value) {
-        
-        return m_pairs.put(NoteBytes.of(key), NoteBytes.of(value));
-    }
-
     @Override
     public NoteBytes put(NoteBytes key, NoteBytes value) {
         return m_pairs.put(key, value);
+    }
+
+    public NoteBytes putAny(Object key, Object value){
+        return m_pairs.put(NoteBytes.of(key), NoteBytes.of(value));
     }
 
     @Override

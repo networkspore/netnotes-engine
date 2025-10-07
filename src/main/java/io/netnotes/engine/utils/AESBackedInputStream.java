@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteFiles;
+package io.netnotes.engine.utils;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,7 +13,7 @@ import org.apache.commons.io.input.UnsynchronizedByteArrayInputStream;
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.messaging.StreamUtils;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 public final class AESBackedInputStream extends InputStream {
     private final File m_file;

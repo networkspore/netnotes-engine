@@ -20,7 +20,7 @@ import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
 import io.netnotes.engine.noteBytes.NoteShort;
-import io.netnotes.engine.utils.Utils;
+import io.netnotes.engine.utils.CollectionHelpers;
 
 public class ByteDecoding{
 
@@ -104,7 +104,8 @@ public class ByteDecoding{
         }
     }
 
-    
+ 
+
 
     //Types
     
@@ -1151,7 +1152,7 @@ public class ByteDecoding{
         int scale = bigDecimal.scale();
         byte[] scaleBytes = intToBytesBigEndian(scale);
         byte[] bytes = bigDecimal.unscaledValue().toByteArray();
-        return Utils.appendBytes(scaleBytes, bytes);
+        return CollectionHelpers.appendBytes(scaleBytes, bytes);
     }
 
     public static BigDecimal scaleAndBigIntegerBytesToBigDecimal(byte[] bytes) {
@@ -1243,6 +1244,16 @@ public class ByteDecoding{
         }
         return bytes;
     }
+
+    public static byte[] unboxInts(Integer[] integerObjects){
+        byte[] bytes = new byte[integerObjects.length];
+        int i = 0;
+        for(Integer myInt: integerObjects)
+            bytes[i++] = (byte) (myInt & 0xff); 
+        return bytes;
+    }
+
+    
 
     @Override
     public int hashCode() {

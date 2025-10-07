@@ -261,11 +261,6 @@ public class NoteBytesConcurrentMap implements ConcurrentMap<NoteBytes, NoteByte
     }
 
 
-    public NoteBytes put(Object key, Object value) {
-        
-        return m_pairs.put(NoteBytes.of(key), NoteBytes.of(value));
-    }
-
     @Override
     public NoteBytes put(NoteBytes key, NoteBytes value) {
         return m_pairs.put(key, value);

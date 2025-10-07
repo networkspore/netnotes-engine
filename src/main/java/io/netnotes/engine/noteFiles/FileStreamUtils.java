@@ -25,12 +25,12 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class FileStreamUtils {
  

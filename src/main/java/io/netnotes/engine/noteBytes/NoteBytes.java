@@ -25,7 +25,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
-import javafx.scene.image.Image;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -268,12 +267,6 @@ public class NoteBytes {
         byte[] bytes = get();
         int len = bytes.length;
         return len == 0 ? 0 : ByteDecoding.bytesToIntLittleEndian(Arrays.copyOf(bytes, 4));
-    }
-
-    public Image getAsImage() throws IOException {
-        byte[] data = getBytes();
-        InputStream is = new ByteArrayInputStream(data);
-        return new Image(is);
     }
 
      public InputStream getAsInputStream() {

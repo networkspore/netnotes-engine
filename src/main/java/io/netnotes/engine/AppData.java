@@ -3,18 +3,11 @@ package io.netnotes.engine;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.noteFiles.notePath.NoteFileRegistry;
-import io.netnotes.engine.utils.GitHubAPI;
-import io.netnotes.engine.utils.UpdateInformation;
-import io.netnotes.engine.utils.Utils;
-import io.netnotes.engine.utils.GitHubAPI.GitHubAsset;
-
-import javafx.beans.property.SimpleObjectProperty;
 
 
 public class AppData {
@@ -44,55 +37,6 @@ public class AppData {
 
     public NoteFileRegistry getNoteFileRegistry(){
         return m_noteFileRegistry;
-    }
-
-    public Future<?> checkForUpdates(String gitHubUser, String githubProject, SimpleObjectProperty<UpdateInformation> updateInformation){
-        GitHubAPI gitHubAPI = new GitHubAPI(gitHubUser, githubProject);
-        return gitHubAPI.getAssetsLatestRelease(getExecService(), (onFinished)->{
-            UpdateInformation tmpInfo = new UpdateInformation();
-
-                Object finishedObject = onFinished.getSource().getValue();
-                if(finishedObject != null && finishedObject instanceof GitHubAsset[] && ((GitHubAsset[]) finishedObject).length > 0){
-            
-                    GitHubAsset[] assets = (GitHubAsset[]) finishedObject;
-              
-                    for(GitHubAsset asset : assets){
-                        if(asset.getName().equals("releaseInfo.json")){
-                            tmpInfo.setReleaseUrl(asset.getUrl());
-                            
-                        }else{
-                            if(asset.getContentType().equals("application/x-java-archive")){
-                                if(asset.getName().startsWith("netnotes-")){
-                                   
-                                    tmpInfo.setJarName(asset.getName());
-                                    tmpInfo.setTagName(asset.getTagName());
-                                    tmpInfo.setJarUrl(asset.getUrl());
-                                                                
-                                }
-                            }
-                        }
-                    }
-
-                    Utils.getUrlJson(tmpInfo.getReleaseUrl(), getExecService(), (onReleaseInfo)->{
-                        Object sourceObject = onReleaseInfo.getSource().getValue();
-                        if(sourceObject != null && sourceObject instanceof com.google.gson.JsonObject){
-                            com.google.gson.JsonObject releaseInfoJson = (com.google.gson.JsonObject) sourceObject;
-                            UpdateInformation upInfo = new UpdateInformation(tmpInfo.getJarUrl(),tmpInfo.getTagName(),tmpInfo.getJarName(),null,tmpInfo.getReleaseUrl());
-                            upInfo.setReleaseInfoJson(releaseInfoJson);
-             
-                            updateInformation.set(upInfo);
-                        }
-                    }, (releaseInfoFailed)->{
-
-                    });
-                    
-                 
-
-                }
-            },(onFailed)->{
-
-            });
-
     }
 
 

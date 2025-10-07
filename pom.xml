@@ -26,19 +26,14 @@
             <version>7.0.5</version>
         </dependency>
 
-        <!-- Optional but recommended -->
+        <!-- Optional but recommended 
         <dependency>
             <groupId>org.osgi</groupId>
             <artifactId>org.osgi.util.tracker</artifactId>
             <version>1.5.4</version>
         </dependency>
-
-        <dependency>
-            <groupId>org.apache.xmlgraphics</groupId>
-            <artifactId>batik-all</artifactId>
-            <version>1.18</version>
-        </dependency>
-
+-->
+  
 
         <dependency>
             <groupId>org.bouncycastle</groupId>
@@ -52,20 +47,6 @@
             <artifactId>oshi-core</artifactId>
             <version>6.8.2</version>
         </dependency>
-
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-swing</artifactId>
-            <version>17</version>
-        </dependency>
-
-
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-controls</artifactId>
-            <version>17</version>
-        </dependency>
-
 
 
 

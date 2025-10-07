@@ -55,11 +55,11 @@ public class PluginMetaData {
     }
 
 
-    public NoteBytesPair getNoteBytesObject(){
+    public NoteBytesPair getSaveData(){
         NoteBytesMap map = new NoteBytesMap();
 
-        map.put(ENABLED_KEY, m_enabled);
-        map.put(VERSION_KEY, m_version);
+        map.put(ENABLED_KEY, NoteBytes.of(m_enabled));
+        map.put(VERSION_KEY, NoteBytes.of(m_version));
         map.put(NOTE_PATH_KEY, m_notePath);
    
         return new NoteBytesPair(m_id, map.getNoteBytesObject());

@@ -10,20 +10,20 @@ import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 
 import javax.crypto.SecretKey;
-import javax.security.auth.DestroyFailedException;
 
 import org.bouncycastle.crypto.RuntimeCryptoException;
 
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.crypto.HashData;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteRandom;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.utils.Utils;
+import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.Version;
 
 public class SettingsData {
@@ -39,7 +39,7 @@ public class SettingsData {
     private static final int m_saltLength = 16;
     private static File m_appDir = null;
     private static File m_appFile = null;
-    private static HashData m_appHashData = null;
+    private static NoteBytesReadOnly m_appHash = null;
 
     private static Version m_javaVersion = null;
 
@@ -53,10 +53,10 @@ public class SettingsData {
         try{
             URL classLocation;
         
-            classLocation = Utils.getLocation(SettingsData.class);
+            classLocation = JarHelpers.getLocation(SettingsData.class);
         
-            m_appFile = Utils.urlToFile(classLocation);
-            m_appHashData = new HashData(m_appFile);
+            m_appFile = JarHelpers.urlToFile(classLocation);
+            m_appHash = new NoteBytesReadOnly(ByteHashing.digestFileToBytes(m_appFile, 16));
             m_appDir = m_appFile.getParentFile();
         }catch(Exception e){
             throw new RuntimeException(e);
@@ -109,8 +109,8 @@ public class SettingsData {
         save();
     }
 
-    public HashData getAppHashData(){
-        return m_appHashData;
+    public NoteBytes getAppHash(){
+        return m_appHash;
     }
 
 
@@ -186,11 +186,6 @@ public class SettingsData {
 
     public void shutdown(){
 
-        try {
-            getSecretKey().destroy();
-        } catch (DestroyFailedException e) {
-            Utils.writeLogMsg("NetworsData.onClosing", "Cannot destroy");
-        }
     }
 
 
@@ -240,5 +235,7 @@ public class SettingsData {
 
     
     }
+
+    
 
 }

@@ -8,13 +8,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-import io.netnotes.engine.messaging.StreamUtils;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 
-import io.netnotes.engine.utils.Utils;
+import io.netnotes.engine.utils.CollectionHelpers;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 
 
@@ -86,7 +86,7 @@ public class NoteFile implements AutoCloseable  {
                 try{
                     StreamUtils.pipedOutputDuplicate(decryptedOutput, readOutput, encryptOutput, null);
 
-                    return m_noteFileInterface.encryptFile(encryptOutput);
+                    return m_noteFileInterface.saveEncryptedFileSwap(encryptOutput);
                 }catch(IOException e){
                     throw new RuntimeException("readOnly: Duplication failed", e);
                 }finally{
@@ -101,9 +101,11 @@ public class NoteFile implements AutoCloseable  {
     public CompletableFuture<NoteBytesObject> writeOnly(PipedOutputStream pipedOutput) {
         checkNotClosed();
         return m_noteFileInterface.acquireLock()
-            .thenCompose(v -> m_noteFileInterface.encryptFile(pipedOutput))
+            .thenCompose(v -> m_noteFileInterface.saveEncryptedFileSwap(pipedOutput))
             .whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
     }
+
+
 
     public CompletableFuture<NoteBytesObject> readWriteNoLock(PipedOutputStream inParseStream, PipedOutputStream modifiedInParseStream) {
         checkNotClosed();
@@ -119,7 +121,7 @@ public class NoteFile implements AutoCloseable  {
     }
     
     // Specialized read-write operation using functional approach
-    public CompletableFuture<NoteBytesObject> readWriteLock(
+    public CompletableFuture<NoteBytesObject> readWrite(
             PipedOutputStream inParseStream, 
             PipedOutputStream modifiedInParseStream) {
      
@@ -211,7 +213,7 @@ public class NoteFile implements AutoCloseable  {
     }
 
     public static URL getResourceURL(String resourceLocation){
-        return resourceLocation != null ? Utils.class.getResource(resourceLocation) : null;
+        return resourceLocation != null ? CollectionHelpers.class.getResource(resourceLocation) : null;
     }
 
 
@@ -299,7 +301,7 @@ public class NoteFile implements AutoCloseable  {
         void removeReference(NoteBytesReadOnly noteUUID);
         int getReferenceCount();
         CompletableFuture<NoteBytesObject> decryptFile(PipedOutputStream pipedOutput) ;
-        CompletableFuture<NoteBytesObject> encryptFile( PipedOutputStream pipedOutputStream);
+        CompletableFuture<NoteBytesObject> saveEncryptedFileSwap( PipedOutputStream pipedOutputStream);
         CompletableFuture<NoteBytesObject> readWriteFile(PipedOutputStream inParseStream, PipedOutputStream modifiedInParseStream);
         CompletableFuture<Void> acquireLock();
         void releaseLock();

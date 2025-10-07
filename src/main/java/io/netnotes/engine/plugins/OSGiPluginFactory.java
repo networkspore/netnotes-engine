@@ -8,6 +8,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.felix.framework.FrameworkFactory;
@@ -18,10 +19,13 @@ import org.osgi.framework.launch.Framework;
 import io.netnotes.engine.AppDataInterface;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.utils.Version;
@@ -35,30 +39,60 @@ public class OSGiPluginFactory {
     
     private final AppDataInterface m_appData;
     private final Framework m_framework;
+    private String m_pluginSaveFormat = PLUGIN_DATA_V1;
 
     public OSGiPluginFactory(AppDataInterface appDataInterface){
         m_appData = appDataInterface;
         m_framework = new FrameworkFactory().newFramework(new HashMap<>());
     }
-    /**
-     * Bootstrap method - discovers and loads all plugins from persistence
-     */
-    public CompletableFuture<Map<NoteBytesReadOnly, Bundle>> getPluginBundles(NoteStringArrayReadOnly pluginsPath) {
-        return m_appData.getNoteFile(pluginsPath)
-            .thenCompose(noteFile ->getPluginFilePaths(noteFile))
-            .thenCompose(pluginsStream -> loadDiscoveredNodePlugins(pluginsStream));
-          
-    }
     
-    /**
-     * Load plugin registry file and parse plugin metadata
-     */
-    private  CompletableFuture<Stream<PluginMetaData>> getPluginFilePaths(NoteFile registryFile) {
+
+   /* public CompletableFuture<NoteBytesObject> addPlugin(NoteFile pluginsNoteFile, List<PluginMetaData> pluginList){
+        PipedOutputStream readOutput = new PipedOutputStream();
+        PipedOutputStream writeOutput = new PipedOutputStream();
+        
+        if(m_pluginSaveFormat == null){
+            return CompletableFuture.failedFuture(new CompletionException("savePlugins.m_pluginsSaveFormat NullPointerException",
+                new NullPointerException("m_pluginSaveFormat is null")));
+        }
+
+         pluginsNoteFile.readWrite(readOutput, writeOutput);
+
+
+        switch(m_pluginSaveFormat){
+            case PLUGIN_DATA_V1:
+                savePluginsRegistryV1(writeOnlyOutput, pluginList);
+            break;
+            default:
+                return CompletableFuture.failedFuture(new IllegalStateException("No suitable save format selected"));
+        }
+
+        return;
+    }*/
+
+    private CompletableFuture<Void> savePluginsRegistryV1(PipedOutputStream outputStream, List<PluginMetaData> pluginsList){
+        return CompletableFuture.runAsync(()->{
+            try(NoteBytesWriter writer = new NoteBytesWriter(outputStream)){
+                writer.write(new NoteBytesPair(HEADER, new NoteBytesPair[]{
+                    new NoteBytesPair(NoteMessaging.Headings.VERSION_KEY, PLUGIN_DATA_V1)
+                }));
+                
+                for(PluginMetaData pluginMetaData : pluginsList){
+                    writer.write(pluginMetaData.getSaveData());
+                }
+                 
+            }catch(IOException e){
+                throw new CompletionException("savePlugins IOException", e);
+            }
+        });
+    }
+
+    public CompletableFuture<Stream<PluginMetaData>> getSavedPlugins(NoteFile pluginsNoteFile) {
        
         PipedOutputStream readOnlyOutput = new PipedOutputStream();
         
         // Start the read operation
-        registryFile.readOnly(readOnlyOutput);
+        pluginsNoteFile.readOnly(readOnlyOutput);
         
         return CompletableFuture.supplyAsync(() -> {
             try (
@@ -95,6 +129,13 @@ public class OSGiPluginFactory {
         }, m_appData.getExecService());
     }
 
+    
+    public CompletableFuture<Map<NoteBytesReadOnly, Bundle>> loadEnabledPluginBundles(NoteFile noteFile) {
+        return getSavedPlugins(noteFile)
+            .thenCompose(pluginsStream -> filterEnabledLoadToHashMap(pluginsStream));
+          
+    }
+    
     private Stream<PluginMetaData> loadPluginMetaDataV1(NoteBytesReader reader) throws IOException{
         Stream.Builder<PluginMetaData> builder = Stream.builder();
         NoteBytes pluginIdBytes = reader.nextNoteBytes();
@@ -125,29 +166,23 @@ public class OSGiPluginFactory {
         return builder.build();
     }
  
-    /**
-     * Start all discovered plugins
-     */
-    private CompletableFuture<Map<NoteBytesReadOnly, Bundle>> loadDiscoveredNodePlugins(Stream<PluginMetaData> plugins) { 
+    private CompletableFuture<Map<NoteBytesReadOnly, Bundle>> filterEnabledLoadToHashMap(Stream<PluginMetaData> plugins) { 
         
         ConcurrentHashMap<NoteBytesReadOnly, Bundle> hashMap = new ConcurrentHashMap<>();
         BundleContext ctx = m_framework.getBundleContext();
-        return CompletableFuture.allOf( plugins.map(map ->
-            loadPluginNode(ctx, map.getPluginId(), map) .thenAccept(bundle -> hashMap.put(map.getPluginId(), bundle))
+        return CompletableFuture.allOf( plugins.filter(metaData->metaData.isEnabled()).map(map ->
+            loadPlugin(ctx, map.getPluginId(), map) .thenAccept(bundle -> hashMap.put(map.getPluginId(), bundle))
             .exceptionally(ex -> {
                 System.err.println("Failed to load plugin: " + map.getPluginId() + " err: " + ex.getMessage());
                 return null;
             })).toArray(CompletableFuture[]::new)).thenCompose(v ->CompletableFuture.completedFuture(hashMap));
     }
     
-    private CompletableFuture<Bundle> loadPluginNode(BundleContext ctx, NoteBytesReadOnly pluginId, PluginMetaData metadata) {
+    private CompletableFuture<Bundle> loadPlugin(BundleContext ctx, NoteBytesReadOnly pluginId, PluginMetaData metadata) {
         return m_appData.getNoteFile(metadata.geNotePath())
             .thenCompose(pluginFile -> loadPluginFromNoteFile(ctx, pluginId, pluginFile));
     }
     
-    /**
-     * Load plugin bundle from NoteFile stream
-     */
     private CompletableFuture<Bundle> loadPluginFromNoteFile(BundleContext ctx, NoteBytesReadOnly pluginId,
         NoteFile pluginFile
     ) {
@@ -171,6 +206,8 @@ public class OSGiPluginFactory {
  
     }
 
+
+   
     public void shutdown() throws Exception {
         m_framework.stop();
         m_framework.waitForStop(5000);

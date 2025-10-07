@@ -12,7 +12,7 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
-import io.netnotes.engine.utils.Utils;
+import io.netnotes.engine.utils.CollectionHelpers;
 
 public class NoteBytesArrayAsync extends NoteBytesAsync{
 
@@ -43,8 +43,8 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                 byte[] intBytes = ByteDecoding.intToBytesBigEndian(noteBytes.byteLength());
                 byte[] buffer = noteBytes.get();                
                 dstBytes[dstOffset++] = type;
-                dstOffset = Utils.arrayCopy(intBytes, 0, dstBytes, dstOffset, 4);
-                dstOffset = Utils.arrayCopy(buffer, 0, dstBytes, dstOffset, buffer.length);
+                dstOffset = CollectionHelpers.arrayCopy(intBytes, 0, dstBytes, dstOffset, 4);
+                dstOffset = CollectionHelpers.arrayCopy(buffer, 0, dstBytes, dstOffset, buffer.length);
             }
             return dstBytes;
         }

@@ -3,6 +3,12 @@ package io.netnotes.engine.utils;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonElement;
 
+import java.io.IOException;
+import java.net.InetAddress;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 
 
 public class Ping{
@@ -71,4 +77,19 @@ public class Ping{
         json.addProperty("error", m_error);
         return json;
     }
+
+
+    public static CompletableFuture<Boolean> pingIP(String ip, int timeout, ExecutorService execService){
+        return CompletableFuture.supplyAsync(()->{
+            try{
+                InetAddress address = InetAddress.getByName(ip);
+                return address.isReachable(timeout);
+            }catch(IOException e){
+                throw new CompletionException(e);
+            }
+        }, execService);
+    }
+
+
+
 }

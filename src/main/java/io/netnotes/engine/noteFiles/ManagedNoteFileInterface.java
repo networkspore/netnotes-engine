@@ -136,7 +136,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     
 
     @Override
-    public CompletableFuture<NoteBytesObject> encryptFile(PipedOutputStream pipedOutputStream) {
+    public CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(PipedOutputStream pipedOutputStream) {
         if (!isLocked()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("readWriteEncryptedFile called without holding lock"));
@@ -146,7 +146,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                 new IllegalStateException("readWriteEncryptedFile called while interface is cloased"));
         }
         
-        return  this.registry.saveEncryptedFileSwap(file, pipedOutputStream);
+        return this.registry.saveEncryptedFileSwap(file, pipedOutputStream);
     }
     
     @Override
