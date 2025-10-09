@@ -1,4 +1,4 @@
-package io.netnotes.engine.messaging;
+package io.netnotes.engine.messaging.header;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
+import io.netnotes.engine.messaging.TypedMessageMap;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;

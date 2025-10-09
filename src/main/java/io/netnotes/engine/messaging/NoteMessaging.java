@@ -92,7 +92,7 @@ public class NoteMessaging {
      * ========================= */
     public static class Error {
         // General
-        public static final String UNKNOWN = "Error_Unknown error";
+        public static final String UNKNOWN = "Error_Unknown";
         public static final String TIMEOUT = "Error_Timeout";
         public static final String INTERRUPTED = "Error_Interrupted";
         public static final String IO = "Error_IO failed";
@@ -100,62 +100,51 @@ public class NoteMessaging {
         public static final String CLOSING = "Error_Closing";
 
         //IO
-        public static final String IO_DELETION = "Disk error: onDelete";
+        public static final String IO_DELETION = "Disk_error_onDelete";
 
         // Availability / lifecycle
-        public static final String NOT_STARTED = "Error_Not started";
-        public static final String NOT_READY = "Error_Not ready";
-        public static final String NOT_AVAILABLE = "Error_Not available";
-        public static final String NOT_STOPPED = "Error_Not stopped";
-        public static final String NOT_SHUTDOWN = "Error_Not shutdown";
-        public static final String NOT_SHUTTING_DOWN = "Error_Not shutting down";
-        public static final String NOT_UPDATED = "Error_Not updated";
+        public static final String NOT_STARTED = "Error_Not_Started";
+        public static final String NOT_READY = "Error_Not_Ready";
+        public static final String NOT_AVAILABLE = "Error_Not_Available";
+        public static final String NOT_STOPPED = "Error_Not_Stopped";
+        public static final String NOT_SHUTDOWN = "Error_Not_Shutdown";
+        public static final String NOT_SHUTTING_DOWN = "Error_Not_Shutting_Down";
+        public static final String NOT_UPDATED = "Error_Not_Updated";
 
         // Validation
         public static final String INVALID = "Error_Invalid";
-        public static final String NOT_EXISTS = "Error_Does not exist";
-        public static final String NOT_FOUND = "Error_Not found";
-        public static final String OUT_OF_RANGE = "Error_Out of range";
+        public static final String NOT_EXISTS = "Error_Not_Exist";
+        public static final String NOT_FOUND = "Error_Not_Found";
+        public static final String OUT_OF_RANGE = "Error_Out_Of_Range";
 
         // Permissions / security
-        public static final String PERMISSION_DENIED = "Error_Permission denied";
+        public static final String PERMISSION_DENIED = "Error_Permission_Denied";
         public static final String UNAUTHORIZED = "Error_Unauthorized";
         public static final String FORBIDDEN = "Error_Forbidden";
 
         // Protocol / control
-        public static final String CONTROL_NOT_AVAILABLE = "Error_Control not available";
-        public static final String MALFORMED_REQUEST = "Error_Malformed request";
-        public static final String UNSUPPORTED_OPERATION = "Error_Unsupported operation";
+        public static final String CONTROL_NOT_AVAILABLE = "Error_Control_Not_Available";
+        public static final String MALFORMED_REQUEST = "Error_Malformed_Request";
+        public static final String UNSUPPORTED_OPERATION = "Error_Unsupported_Operation";
     
-        public static final String AUTH_REQUIRED = "Auth required";
-        public static final String BAD_SIGNATURE = "Bad signature";
-        public static final String KEY_UNKNOWN   = "Key unknown";
-        public static final String REPLAY        = "Replay detected";
-        public static final String STALE_MESSAGE = "Stale message";
-        public static final String DECRYPT_FAIL  = "Decrypt failed";
-        public static final String NOT_PERMITTED = "Not permitted";
+        public static final String AUTH_REQUIRED = "Auth_Required";
+        public static final String BAD_SIGNATURE = "Bad_Signature";
+        public static final String KEY_UNKNOWN   = "Key_Unknown";
+        public static final String REPLAY        = "Replay_Detected";
+        public static final String STALE_MESSAGE = "Stale_Message";
+        public static final String DECRYPT_FAIL  = "Decrypt_Failed";
+        public static final String NOT_PERMITTED = "Not_Permitted";
     }
 
 
     public static class Logging{
-        public static final String FULL = "full";
-        public static final String CRITICAL = "critical";
-        public static final String NONE = "none";
+        public static final String FULL = "Full";
+        public static final String CRITICAL = "Critical";
+        public static final String NONE = "None";
     }
 
-    /*
-     * =========================
-     * Image constants
-     * =========================
-     */
-    public static class ImageEncoding {
-        public static final String PNG = "png";
-        public static final String JPG = "jpg";
-        public static final String JPEG = "jpeg";
-        public static final String BMP = "bmp";
-        public static final String GIF = "gif";
-    }
 
+    
     /* =========================
      * Search / sorting
      * ========================= */
@@ -300,5 +289,41 @@ public class NoteMessaging {
     }
 
 
+
+    //Standard messages
+
+     NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, NoteBytes receiverId, NoteBytes senderId, NoteBytesObject data){
+        NoteBytesObject obj = getNoteDataObject(type, code, System.currentTimeMillis(), receiverId, senderId);
+        obj.add("data", data);
+        return obj;
+    }
+
+    NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, NoteBytes receiverId, NoteBytes senderId, NoteBytes... data){
+        NoteBytesObject obj = getNoteDataObject(type, code, System.currentTimeMillis(), receiverId, senderId);
+        obj.add("data", data);
+        return obj;
+    }
+
+    NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, NoteBytes receiverId, NoteBytes senderId, NoteBytesArray data){
+        NoteBytesObject obj = getNoteDataObject(type, code, System.currentTimeMillis(), receiverId, senderId);
+        obj.add("data", data);
+        return obj;
+    }
+
+     NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, NoteBytes receiverId, NoteBytes senderId, String... data){
+        NoteBytesObject obj = getNoteDataObject(type, code, System.currentTimeMillis(), receiverId, senderId);
+        obj.add("data", data);
+        return obj;
+    }
+
+    
+    public static NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, long timeStamp, NoteBytes receiverId, NoteBytes senderId){
+        NoteBytesObject nbo = new NoteBytesObject();
+        nbo.add("timeStamp", timeStamp);
+        nbo.add("receiverId", receiverId);
+        nbo.add("senderId", senderId);
+        nbo.add("code", code);
+        return nbo;
+    }
     
 }

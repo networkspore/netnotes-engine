@@ -1,4 +1,4 @@
-package io.netnotes.engine.messaging;
+package io.netnotes.engine.messaging.header;
 
 import java.io.EOFException;
 import java.io.IOException;

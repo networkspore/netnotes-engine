@@ -174,7 +174,7 @@ public interface Blake2b {
 	// ---------------------------------------------------------------------
 
 	/** Generalized Blake2b digest. */
-	public static class Digest extends Engine implements Blake2b {
+	public static class Digest extends Engine {
 		private Digest (final Param p) { super (p); }
 		private Digest () { super (); }
 		private Digest(Param p, State state) {
@@ -200,7 +200,7 @@ public interface Blake2b {
 	// ---------------------------------------------------------------------
 
 	/** Message Authentication Code (MAC) digest. */
-	public static class Mac extends Engine implements Blake2b {
+	public static class Mac extends Engine  {
 		private Mac (final Param p, State state) { super (state, p); }
 		private Mac (final Param p) { super (p); }
 		private Mac () { super (); }
@@ -405,8 +405,8 @@ public interface Blake2b {
 		}
 
 		public static void main(String... args) {
-			Blake2b mac = Blake2b.Mac.newInstance("LOVE".getBytes());
-			final byte[] hash = mac.digest("Salaam!".getBytes());
+			//Blake2b mac = Blake2b.Mac.newInstance("LOVE".getBytes());
+			//final byte[] hash = mac.digest("Salaam!".getBytes());
 //			Debug.dumpBuffer(System.out, "-- mac hash --", hash);
 		}
 

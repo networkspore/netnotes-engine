@@ -3,7 +3,7 @@ package io.netnotes.engine.noteBytes.processing;
 public class NoteBytesMetaData {
     public final static int STANDARD_META_DATA_SIZE = 5;
 
-    public final static byte RAW_BYTES_TYPE = ByteDecoding.NO_FLAG;
+    public final static byte RAW_BYTES_TYPE = NoteBytesMetaData.NO_FLAG;
     public final static byte LONG_TYPE = (byte) 2;
     public final static byte DOUBLE_TYPE = (byte) 3;
     public final static byte INTEGER_TYPE = (byte) 4;
@@ -36,6 +36,8 @@ public class NoteBytesMetaData {
 
     private byte m_type;
     private int m_len;
+
+    public static final byte NO_FLAG = (byte)0;
 
     public NoteBytesMetaData(byte type, int len) {
         this.m_type = type;

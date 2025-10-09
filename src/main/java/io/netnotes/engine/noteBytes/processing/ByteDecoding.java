@@ -9,29 +9,28 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
+
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
+
 import java.util.Collections;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import java.util.Base64;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
+import io.netnotes.engine.noteBytes.NoteBase64;
 import io.netnotes.engine.noteBytes.NoteShort;
+
 import io.netnotes.engine.utils.CollectionHelpers;
 
 public class ByteDecoding{
 
-
-    public static final byte NO_FLAG = (byte)0;
-    public final static byte NO_ENCODING = NO_FLAG;
-   
     public static final int MAX_SHORT_BYTES_SIZE = NoteShort.UNSIGNED_MAX + 2;
     public static final byte[] SHORT_MAX_BYTES = { (byte) 0xFF, (byte) 0xFF };
     public static final int MAX_SHORT_ITEMS = (int) Math.floor(Integer.MAX_VALUE / MAX_SHORT_BYTES_SIZE);
-
 
 
     public static byte[] detectContentType(byte[] bytes) {
@@ -305,7 +304,7 @@ public class ByteDecoding{
             case NoteBytesMetaData.LONG_LE_TYPE:
                 return bytesToLongLittleEndian(bytes) + "";
             default:
-                return new String(bytes);
+                return new NoteBase64(bytes).getAsJsonObject().toString();
         }
 
  

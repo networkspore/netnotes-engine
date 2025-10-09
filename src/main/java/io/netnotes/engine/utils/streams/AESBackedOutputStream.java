@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils;
+package io.netnotes.engine.utils.streams;
 
 import java.io.File;
 import java.io.IOException;

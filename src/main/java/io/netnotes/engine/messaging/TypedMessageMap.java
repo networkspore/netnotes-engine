@@ -3,6 +3,7 @@ package io.netnotes.engine.messaging;
 import java.io.EOFException;
 import java.io.IOException;
 
+import io.netnotes.engine.messaging.header.MessageHeader;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;

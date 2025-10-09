@@ -20,7 +20,6 @@
 package io.netnotes.ove.crypto.digest;
 
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.ove.alphazero.util.CmdLineArgs;
