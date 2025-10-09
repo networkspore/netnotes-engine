@@ -25,7 +25,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;

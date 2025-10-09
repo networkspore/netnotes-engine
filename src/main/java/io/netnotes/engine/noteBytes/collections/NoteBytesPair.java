@@ -8,7 +8,7 @@ import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesPair {
     private NoteBytes m_key;

@@ -13,7 +13,7 @@ import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytes {

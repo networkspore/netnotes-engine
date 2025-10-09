@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteDecodingSecure;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 /*
  * =========================================================================

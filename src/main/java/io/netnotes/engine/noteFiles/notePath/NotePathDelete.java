@@ -11,10 +11,10 @@ import javax.crypto.SecretKey;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.utils.AESBackedInputStream;
 import io.netnotes.engine.utils.AESBackedOutputStream;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 

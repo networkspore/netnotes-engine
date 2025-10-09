@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>, AutoCloseable{
     private ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> m_pairs = null;

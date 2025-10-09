@@ -11,8 +11,8 @@ import java.util.stream.Stream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesConcurrentMap implements ConcurrentMap<NoteBytes, NoteBytes>{
     private ConcurrentHashMap<NoteBytes, NoteBytes> m_pairs = null;

@@ -2,7 +2,7 @@ package io.netnotes.engine.noteBytes.collections;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesPairEphemeral implements AutoCloseable {
     private NoteBytes m_key;

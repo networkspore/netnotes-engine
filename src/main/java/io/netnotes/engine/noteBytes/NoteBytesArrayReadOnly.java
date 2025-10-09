@@ -7,8 +7,8 @@ import java.util.stream.Stream;
 
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesArrayReadOnly extends NoteBytesArray{
 

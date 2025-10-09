@@ -2,7 +2,7 @@ package io.netnotes.engine.noteBytes;
 
 import java.math.BigInteger;
 
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBigInteger extends NoteBytes {
     public NoteBigInteger(BigInteger bigInt){

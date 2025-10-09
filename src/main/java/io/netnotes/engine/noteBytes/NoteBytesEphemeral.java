@@ -16,7 +16,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
     private static final Cleaner cleaner = Cleaner.create();

@@ -1,7 +1,7 @@
 package io.netnotes.engine.noteBytes;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteHex extends NoteBytes {
     public NoteHex(String hex){

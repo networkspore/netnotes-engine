@@ -26,108 +26,13 @@ public class ByteDecoding{
 
 
     public static final byte NO_FLAG = (byte)0;
-
-    
-
-    public static class NoteBytesMetaData {
-        public final static int STANDARD_META_DATA_SIZE = 5;
-
-        public final static byte RAW_BYTES_TYPE = NO_FLAG;
-        public final static byte LONG_TYPE = (byte) 2;
-        public final static byte DOUBLE_TYPE = (byte) 3;
-        public final static byte INTEGER_TYPE = (byte) 4;
-        public final static byte STRING_UTF16_TYPE = (byte) 5;
-        public final static byte STRING_TYPE = (byte) 6;
-        public final static byte UTF_8_TYPE = (byte) 6;
-        public final static byte BOOLEAN_TYPE = (byte) 7;
-        public final static byte SHORT_TYPE = (byte) 8;
-        public final static byte FLOAT_TYPE = (byte) 9;
-        public final static byte NOTE_BYTES_ARRAY_TYPE = (byte) 10;
-        public final static byte NOTE_BYTES_OBJECT_TYPE = (byte) 11;
-        public final static byte NOTE_BYTES_TREE_TYPE = (byte) 12;
-        public final static byte BIG_INTEGER_TYPE = (byte) 13;
-        public final static byte BIG_DECIMAL_TYPE = (byte) 14;
-        public final static byte BASE_16_TYPE = (byte) 15;
-        public final static byte STRING_ISO_8859_1_TYPE = (byte) 16;
-        public final static byte STRING_US_ASCII_TYPE = (byte) 17;
-        public final static byte BASE_32_TYPE = (byte) 18;
-        public final static byte BASE_64_TYPE = (byte) 19;
-        public final static byte URL_SAFE_TYPE = (byte) 20;      
-        public final static byte LONG_LE_TYPE = (byte) 21;
-        public final static byte DOUBLE_LE_TYPE = (byte) 22;
-        public final static byte INTEGER_LE_TYPE = (byte) 23;
-        public final static byte STRING_UTF16_LE_TYPE = (byte) 24;
-        public final static byte SHORT_LE_TYPE = (byte) 25;
-        public final static byte FLOAT_LE_TYPE = (byte) 26;
-        public final static byte VIDEO_TYPE = (byte) 30;
-        public final static byte IMAGE_TYPE = (byte) 31;
-        public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 32;
-
-        private byte m_type;
-        private int m_len;
-
-        public NoteBytesMetaData(byte type, int len) {
-            this.m_type = type;
-            this.m_len = len;
-        }
-
-        public NoteBytesMetaData(byte type, byte[] byteLen) {
-            this.m_type = type;
-            setLength(byteLen);
-        }
-
-        public byte getType() {
-            return m_type;
-        }
-
-        public int getLength() {
-            return m_len;
-        }
-
-        public void setLength(int len) {
-            this.m_len = len;
-        }
-
-        public void setLength(byte[] bytes) {
-            m_len = bytesToIntBigEndian(bytes);
-        }
-
-        public void setType(byte type) {
-            this.m_type = type;
-        }
-
-        public static int write(byte type, int len, byte[] dst, int offset){
-            dst[offset] = type;
-            dst[offset + 1] = (byte) (len >>> 24);
-            dst[offset + 2] = (byte) (len >>> 16);
-            dst[offset + 3] = (byte) (len >>> 8);
-            dst[offset + 4] = (byte) (len);
-            return offset + STANDARD_META_DATA_SIZE;
-        }
-    }
-
- 
-
-
-    //Types
-    
-    //
-    public final static byte BIG_ENDIAN = NO_FLAG;
-    public final static byte LITTLE_ENDIAN = 0x60;
-
-
     public final static byte NO_ENCODING = NO_FLAG;
    
-
-
-
     public static final int MAX_SHORT_BYTES_SIZE = NoteShort.UNSIGNED_MAX + 2;
     public static final byte[] SHORT_MAX_BYTES = { (byte) 0xFF, (byte) 0xFF };
     public static final int MAX_SHORT_ITEMS = (int) Math.floor(Integer.MAX_VALUE / MAX_SHORT_BYTES_SIZE);
 
 
-
-    
 
     public static byte[] detectContentType(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
@@ -739,13 +644,8 @@ public class ByteDecoding{
         return new BigInteger(bytes, offset, len);
     }
 
-    public static  ByteBuffer longToByteBuffer(long l, byte endiness){
-        return ByteBuffer.allocate(Long.BYTES).order(endiness == LITTLE_ENDIAN ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN).putLong(l);
-    } 
 
-    public static  ByteBuffer intToByteBuffer(int integer, byte endiness){
-        return ByteBuffer.allocate(Integer.BYTES).order(endiness == LITTLE_ENDIAN ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN).putInt(integer);
-    } 
+ 
 
     public static  ByteBuffer intToByteBufferBigEndian(int integer){
         ByteBuffer byteBuffer = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN).putInt(integer);
