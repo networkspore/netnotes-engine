@@ -4,11 +4,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteStringArray extends NoteBytesArray {
 
-    public final static String DELIMITER = ",";
+    public final static String DELIMITER = "/";
 
     private String m_delimiter = new String(DELIMITER);
 
@@ -20,14 +21,10 @@ public class NoteStringArray extends NoteBytesArray {
         super(stringArrayToNoteBytes(str));
     }
 
-    public NoteStringArray(String list, String delim){
-        super(stringArrayToNoteBytes(list.split(delim)));
-        m_delimiter = delim;
-    }
-
     public NoteStringArray(NoteBytes... noteBytes){
         super(noteBytes);
     }
+
 
     public static NoteBytes[] stringArrayToNoteBytes(String[] array){
         NoteBytes[] noteBytes = new NoteBytes[array.length];
@@ -54,6 +51,7 @@ public class NoteStringArray extends NoteBytesArray {
         return m_delimiter;
     }
 
+    @Override
     public String getAsString(){
         NoteBytes[] array = getAsArray();
         return noteBytesArrayToString(array, m_delimiter);
@@ -65,7 +63,7 @@ public class NoteStringArray extends NoteBytesArray {
     }
 
     public NoteBytes remove(String item){
-        return remove(new NoteBytes(item, getByteDecoding()));
+        return remove(new NoteBytes(item));
     }
 
     public void add(String str){
@@ -81,28 +79,36 @@ public class NoteStringArray extends NoteBytesArray {
     }
 
     public String[] getAsStringArray(){
-        return getAsStringStream().toArray(String[]::new);
+        int size = size();
+        String[] arr = new String[size];
+        byte[] bytes = get();
+        int length = bytes.length;
+        int offset = 0;
+        int i = 0;
+        while(offset < length){
+            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
+            arr[i] = noteBytes.getAsString();
+            i++;
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
+        }
+        return arr;
     }
 
     public List<String> getAsStringList(){
-         return getAsStringStream().toList();
+         return Arrays.asList(getAsStringArray());
     }
+
 
     public Stream<String> getAsStringStream(){
-        return getAsStringStream(get(), getByteDecoding());
-    }
-
-    public static Stream<String> getAsStringStream(byte[] bytes, ByteDecoding byteDecoding){
         Stream.Builder<String> noteBytesBuilder = Stream.builder();
+
+        byte[] bytes = get();
         int length = bytes.length;
         int offset = 0;
         while(offset < length){
-            byte type = bytes[offset++];
-            int size = byteDecoding.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
-            offset += 4;
-            NoteBytes noteBytes = new NoteBytes(Arrays.copyOfRange(bytes, offset, offset + size), ByteDecoding.of(type));
+            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
             noteBytesBuilder.accept(noteBytes.getAsString());
-            offset += size;
+            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
         }
         return noteBytesBuilder.build();
     }

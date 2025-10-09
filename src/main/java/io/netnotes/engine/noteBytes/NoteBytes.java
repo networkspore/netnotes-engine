@@ -1,18 +1,19 @@
 package io.netnotes.engine.noteBytes;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 import io.netnotes.engine.crypto.RandomService;
@@ -33,75 +34,71 @@ import com.google.gson.JsonObject;
 public class NoteBytes {
 
     public final static int MAX_SHORT_INDEX_VALUE = NoteShort.UNSIGNED_MAX;
- 
-
-    private ByteDecoding m_byteDecoding = ByteDecoding.RAW_BYTES;
+    
     private byte[] m_value = null;
+    private byte m_type = NoteBytesMetaData.RAW_BYTES_TYPE;
 
+    public NoteBytes( byte[] value, byte type){
+        m_value = value != null ? value : new byte[0];
+        m_type = type;
+    }
 
     public NoteBytes( byte[] value){
-        this(value , ByteDecoding.RAW_BYTES);
+        this(value , NoteBytesMetaData.RAW_BYTES_TYPE);
     }
     
+    public NoteBytes( Byte[] value, byte type){
+        this(ByteDecoding.unboxBytes(value), type);
+    }
+
     public NoteBytes( Object value){
          this(of(value));
     }
 
     public NoteBytes( NoteBytes value){
-         this(value.get(), value.getByteDecoding());
+         this(value.get(), value.getType());
     }
 
-    public NoteBytes( String value, ByteDecoding byteDecoding){
-        this(ByteDecoding.charsToByteArray(CharBuffer.wrap(value), byteDecoding), byteDecoding);
+    public NoteBytes( String value, byte type){
+        this(ByteDecoding.stringToBytes(value, type), type);
+    }
+    public NoteBytes( String value){
+        this(value, NoteBytesMetaData.STRING_TYPE);
     }
 
-    public NoteBytes( CharBuffer charBuffer, ByteDecoding byteDecoding){
-        this( ByteDecoding.charsToByteArray(charBuffer, byteDecoding), byteDecoding);
+
+    public NoteBytes( char[] value, byte type){
+        this( ByteDecoding.charsToByteArray(value, type), type);
     }
 
-
-    public NoteBytes( char[] value, ByteDecoding byteDecoding){
-        this( ByteDecoding.charsToByteArray(value, byteDecoding), byteDecoding);
+    public boolean isLittleEndian(){
+        return ByteDecoding.isLittleEndian(m_type);
     }
-
-    public NoteBytes( byte[] value, ByteDecoding byteDecoding){
-        m_value = value != null ? value : new byte[0];
-        m_byteDecoding = byteDecoding;
-    }
-
-    public NoteBytes( byte[] value, byte type){
-        this(value, ByteDecoding.of(type));
-    }
-
-    
-
+ 
     public ByteBuffer getByteByffer(){
         return ByteBuffer.wrap(getBytes());
     }
 
-    public void set(byte[] value, ByteDecoding byteDecoding) {
-  
-            m_value = value != null ? value : new byte[0];
-            m_byteDecoding = byteDecoding;
-            dataUpdated();
-
+    public void set(byte[] value, byte type) {
+        m_value = value != null ? value : new byte[0];
+        m_type = type;
+        dataUpdated();
     }
 
     public void set( byte[] value){
-        set(value, m_byteDecoding);
+        set(value, m_type);
     }
 
 
-    public ByteDecoding getByteDecoding(){
-        return m_byteDecoding;
+    public byte getType(){
+        return m_type;
     }
 
-    public void setByteDecoding(ByteDecoding byteDecoding){
-        m_byteDecoding = byteDecoding;
+    public void setType(byte type){
+        m_type = type;
         dataUpdated();
     }
     
-
 
     public void dataUpdated(){
     
@@ -113,31 +110,35 @@ public class NoteBytes {
     }
    
     public byte[] getAsBase64Decoded(){
-        return ByteDecoding.decodeBytes(get(), ByteDecoding.BASE_64);
+        return Base64.getDecoder().decode(m_value);
     }
 
-     public byte[] getAsBase64Encoded(){
-        return ByteDecoding.encodeBytes(get(), ByteDecoding.BASE_64);
+    public byte[] getAsBase64Encoded(){
+        return Base64.getEncoder().encode(m_value);
     }
+    public byte[] getAsUrlSafeBase64Encoded(){
+        return Base64.getUrlEncoder().encode(m_value);
+    }
+
 
     public String getAsBase64String(){
-        return ByteDecoding.encodeBytesString(get(), ByteDecoding.BASE_64) ;
+        return ByteDecoding.bytesToString(m_value, NoteBytesMetaData.BASE_64_TYPE);
     }
 
      public char[] getAsUrlSafeChars(){ 
-        return ByteDecoding.encodeBytesToChars(get(), ByteDecoding.URL_SAFE, ByteDecoding.ISO_8859_1);
+        return ByteDecoding.bytesToCharArray(getAsUrlSafeBase64Encoded(), NoteBytesMetaData.STRING_US_ASCII_TYPE);
     }
 
     public String getAsUrlSafeString(){ 
-        return ByteDecoding.encodeBytesString(get(), ByteDecoding.URL_SAFE);
+        return ByteDecoding.bytesToString(get(),  NoteBytesMetaData.URL_SAFE_TYPE);
     }
 
     public String getAsHexString(){
-       return ByteDecoding.encodeBytesString(get(), ByteDecoding.BASE_16);
+       return ByteDecoding.bytesToString(get(),  NoteBytesMetaData.BASE_16_TYPE);
     }
 
     public String getAsBase32String(){
-       return ByteDecoding.encodeBytesString(get(), ByteDecoding.BASE_32);
+       return ByteDecoding.bytesToString(get(),  NoteBytesMetaData.BASE_32_TYPE);
     }
 
     public byte[] get(){
@@ -152,17 +153,16 @@ public class NoteBytes {
     }
 
     public char[] getAsCharsUTF8(){
-        return ByteDecoding.bytesToCharArray(getBytes(), ByteDecoding.STRING_UTF8);
+        return ByteDecoding.bytesToCharArray(getBytes(), NoteBytesMetaData.UTF_8_TYPE);
     }
 
     public String getAsString(){
-        return new String(decodeCharArray());
-        
+        return ByteDecoding.bytesToString(m_value, m_type);
     }
 
     @Override
     public String toString(){
-        switch(getByteDecoding().getType()){
+        switch(m_type){
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
                 return getAsBigInteger().toString();
             case NoteBytesMetaData.LONG_TYPE:
@@ -184,12 +184,12 @@ public class NoteBytes {
             case NoteBytesMetaData.STRING_TYPE:
             case NoteBytesMetaData.STRING_UTF16_TYPE:
             default:
-                return new String(decodeCharArray());
+                return getAsString();
         }
     }
 
     public char[] decodeCharArray(){
-        return get().length > 0 ? ByteDecoding.bytesToCharArray(getBytes(), getByteDecoding()) : new char[0];
+        return get().length > 0 ? ByteDecoding.bytesToCharArray(getBytes(), m_type) : new char[0];
     }
 
     public char[] getChars(){
@@ -201,7 +201,7 @@ public class NoteBytes {
         byte[] bytes = getBytes();
         if(bytes != null && bytes.length > 0){
             ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
-            return ByteDecoding.bytesToChars(byteBuffer, getByteDecoding());
+            return ByteDecoding.bytesToChars(byteBuffer, m_type);
             
         }
         return CharBuffer.wrap( new char[0]);
@@ -209,7 +209,7 @@ public class NoteBytes {
 
     public void setValueInteger(int value){
 
-        set(getByteDecoding().isLittleEndian() ? ByteDecoding.intToBytesLittleEndian(value) : ByteDecoding.intToBytesBigEndian(value));
+        set(ByteDecoding.isLittleEndian(m_type) ? ByteDecoding.intToBytesLittleEndian(value) : ByteDecoding.intToBytesBigEndian(value));
     }
 
 
@@ -224,7 +224,7 @@ public class NoteBytes {
    
         byte[] bytes = get();
         int len = bytes.length;
-        return len == 0 ? 0 : (m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToDoubleLittleEndian(bytes) : ByteDecoding.bytesToDoubleBigEndian(bytes));
+        return len == 0 ? 0 : ( m_type == NoteBytesMetaData.DOUBLE_LE_TYPE  ? ByteDecoding.bytesToDoubleLittleEndian(bytes) : ByteDecoding.bytesToDoubleBigEndian(bytes));
     }
 
     public byte getAsByte(){
@@ -238,19 +238,19 @@ public class NoteBytes {
     public int getAsInt(){
         byte[] bytes = get();
         int len = bytes.length;
-        return len == 0 ? 0 : m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
+        return len == 0 ? 0 : m_type == NoteBytesMetaData.INTEGER_LE_TYPE ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
     }
 
     public short getAsShort(){
         byte[] bytes = get();
         int len = bytes.length;
-        return len == 0 ? 0 : m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToShortLittleEndian(bytes) : ByteDecoding.bytesToShortBigEndian(bytes);
+        return len == 0 ? 0 : m_type == NoteBytesMetaData.SHORT_LE_TYPE ? ByteDecoding.bytesToShortLittleEndian(bytes) : ByteDecoding.bytesToShortBigEndian(bytes);
     }
 
      public long getAsLong(){
         byte[] bytes = get();
         int len = bytes.length;
-        return len == 0 ? 0 : m_byteDecoding.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
+        return len == 0 ? 0 : m_type == NoteBytesMetaData.LONG_LE_TYPE ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
     }
 
     public BigDecimal getAsBigDecimal(){
@@ -259,7 +259,7 @@ public class NoteBytes {
         if(len < 5) {
             return BigDecimal.ZERO;
         }
-        return ByteDecoding.scaleAndBigIntegerBytesToBigDecimal(bytes);
+        return ByteDecoding.bytesToBigDecimal(bytes);
     }
 
     
@@ -276,11 +276,11 @@ public class NoteBytes {
 
     public String getAsUTF8(){
         byte[] bytes = get();
-        return new String(ByteDecoding.bytesToCharArray(bytes, ByteDecoding.STRING_UTF8));
+        return new String(bytes);
     }
 
     public String getAsISO(){
-        return new String(getAsISOChars());
+        return new String(get(), StandardCharsets.ISO_8859_1);
     }
 
     public char[] getAsISOChars(){
@@ -299,10 +299,9 @@ public class NoteBytes {
         final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
         byte[] src = noteBytes.get(); 
         int srcLength = src.length;
-        ByteDecoding byteDecoding = noteBytes.getByteDecoding();
-
+   
         if(dstLength >= dstOffset + metaDataSize + srcLength){
-            dstOffset = NoteBytesMetaData.write(byteDecoding, srcLength, dst, dstOffset);
+            dstOffset = NoteBytesMetaData.write(noteBytes.getType(), srcLength, dst, dstOffset);
             System.arraycopy(src, 0, dst, dstOffset, srcLength);
             return dstOffset + srcLength;
         }else{
@@ -310,15 +309,17 @@ public class NoteBytes {
         }
     }
 
-      public NoteBytes copy(){
-        return new NoteBytes(Arrays.copyOf(get(), byteLength()), getByteDecoding());
+    public NoteBytes copy(){
+        return new NoteBytes(Arrays.copyOf(get(), byteLength()), m_type);
     }
 
-    public static void writeNote(NoteBytes noteBytes, ByteArrayOutputStream outputStream) throws IOException {
-        byte type = noteBytes.getByteDecoding().getType();
+    public static int writeNote(NoteBytes noteBytes, OutputStream outputStream) throws IOException {
+        byte type = noteBytes.getType();
+        byte[] bytes = noteBytes.get();
         outputStream.write(type);
         outputStream.write(ByteDecoding.intToBytesBigEndian(noteBytes.byteLength()));
-        outputStream.write(noteBytes.get());
+        outputStream.write(bytes);
+        return NoteBytesMetaData.STANDARD_META_DATA_SIZE + bytes.length;
     }
 
     public static NoteBytes readNote(byte[] src, int srcOffset){
@@ -331,15 +332,8 @@ public class NoteBytes {
         // 1. Read type
         byte type = src[srcOffset];
 
-        ByteDecoding decoding = ByteDecoding.of(type);
-
-        // 2. Read length (4 bytes little-endian or big-endian)
-        int length = decoding.isLittleEndian() ? 
-            (src[srcOffset + 1] & 0xFF) |
-            ((src[srcOffset + 2] & 0xFF) << 8) |
-            ((src[srcOffset + 3] & 0xFF) << 16) |
-            ((src[srcOffset + 4] & 0xFF) << 24) 
-            : 
+        // 2. Read length
+        int length = 
             ((src[srcOffset + 1] & 0xFF) << 24) |
             ((src[srcOffset + 2] & 0xFF) << 16) |
             ((src[srcOffset + 3] & 0xFF) << 8)  |
@@ -355,7 +349,7 @@ public class NoteBytes {
 
         // 4. Construct NoteBytes
         
-        return new NoteBytes(data, decoding);
+        return new NoteBytes(data, type);
     }
 
     public static NoteBytes readNote(byte[] bytes, int offset, boolean isLittleEndian){
@@ -364,14 +358,14 @@ public class NoteBytes {
         int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytes(dst, ByteDecoding.of(type));
+        return new NoteBytes(dst, type);
     }
 
 
     @Override
     public int hashCode(){
         byte[] bytes = get();
-        return bytes.length == 0 ? 0 : ByteHashing.getHashCode(bytes, m_byteDecoding);
+        return bytes.length == 0 ? 0 : ByteHashing.getHashCode(bytes, m_type);
     }
 
     @Override
@@ -390,8 +384,8 @@ public class NoteBytes {
             if(noteBytesObj.isRuined()){
                 return false;
             }
-            byte objType = noteBytesObj.getByteDecoding().getType();
-            byte thisType = getByteDecoding().getType();
+            byte objType = noteBytesObj.getType();
+            byte thisType = m_type;
             if(objType != thisType){
                 return false;
             }
@@ -425,10 +419,16 @@ public class NoteBytes {
     }
 
     public boolean equalsString(String str){
+        if(str == null){
+            throw new NullPointerException("NoteBytes.equalsString str is null");
+        }
         return getAsString().equals(str);
     }
 
     public boolean startsWithString(String str){
+        if(str == null){
+            throw new NullPointerException("NoteBytes.startsWithString str is null");
+        }
         return getAsString().startsWith(str);
     }
 
@@ -511,9 +511,8 @@ public class NoteBytes {
 
 
     public JsonElement getAsJsonElement() {
-        byte type = getByteDecoding().getType();
         
-        switch(type) {
+        switch(m_type) {
             case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                 return getAsJsonObject();
             case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
@@ -522,24 +521,26 @@ public class NoteBytes {
                 return new JsonPrimitive(getAsBigDecimal());
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
                 return new JsonPrimitive(getAsBigInteger());
+            case NoteBytesMetaData.LONG_LE_TYPE:
             case NoteBytesMetaData.LONG_TYPE:
                 return new JsonPrimitive(getAsLong());
+            case NoteBytesMetaData.INTEGER_LE_TYPE:
             case NoteBytesMetaData.INTEGER_TYPE:
                 return new JsonPrimitive(getAsInt());
+            case NoteBytesMetaData.DOUBLE_LE_TYPE:
             case NoteBytesMetaData.DOUBLE_TYPE:
                 return new JsonPrimitive(getAsDouble());
             case NoteBytesMetaData.BOOLEAN_TYPE:
                 return new JsonPrimitive(getAsBoolean());
             case NoteBytesMetaData.STRING_TYPE:
             case NoteBytesMetaData.STRING_UTF16_TYPE:
-                return new JsonPrimitive(getAsString());
             default:
                 return new JsonPrimitive(getAsString());
         }
     }
 
     public JsonObject getAsJsonObject(){
-        byte type = getByteDecoding().getType();
+        byte type = m_type;
         try{
             switch(type){
 
@@ -548,7 +549,10 @@ public class NoteBytes {
                 case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
                     return new NoteBytesArray(get()).getAsJsonObject();
                 default:
-                    return new JsonParser().parse(getAsString()).getAsJsonObject();
+                    JsonObject json = new JsonObject();
+                    json.add("value", getAsJsonElement());
+                    json.add("type", new JsonPrimitive((int) m_type));
+                    return json;
             }
         }catch(Exception e){
             return new JsonObject();
@@ -556,7 +560,7 @@ public class NoteBytes {
     }
 
     public JsonArray getAsJsonArray(){
-        byte type = getByteDecoding().getType();
+        byte type = m_type;
         try{
             switch(type){
                 case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
@@ -564,7 +568,9 @@ public class NoteBytes {
                 case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
                     return new NoteBytesArray(get()).getAsJsonArray();
                 default:
-                    return new JsonParser().parse(getAsString()).getAsJsonArray();
+                    JsonArray jsonArray = new JsonArray();
+                    jsonArray.add(getAsJsonObject());
+                    return jsonArray;
             }
         }catch(Exception e){
             return new JsonArray();
@@ -622,12 +628,14 @@ public class NoteBytes {
         } else if (element.isJsonPrimitive()) {
             JsonPrimitive primitive = element.getAsJsonPrimitive();
             if (primitive.isBoolean()) {
-                return new NoteBytes(new byte[]{(byte)(primitive.getAsBoolean() ? 1 : 0)}, ByteDecoding.BOOLEAN);
+                return new NoteBytes(new byte[]{(byte)(primitive.getAsBoolean() ? 1 : 0)}, NoteBytesMetaData.BOOLEAN_TYPE);
             } else if (primitive.isNumber()) {
-                if (primitive.getAsString().contains(".")) {
-                    return new NoteBytes(ByteDecoding.doubleToBytesLittleEndian(primitive.getAsDouble()), ByteDecoding.DOUBLE);
+                String numbericString = primitive.getAsString();
+                int numbericStringLength = numbericString.length();
+                if (numbericString.contains(".")) {
+                    return numbericStringLength > 14 ? new NoteBigDecimal(new BigDecimal(numbericString)) : new NoteDouble(primitive.getAsDouble());
                 } else {
-                    return new NoteBytes(ByteDecoding.longToBytesLittleEndian(primitive.getAsLong()), ByteDecoding.LONG);
+                    return numbericStringLength > 18 ? new NoteBigInteger(new BigInteger(numbericString)) : (numbericStringLength > 9 ? new NoteLong(primitive.getAsLong()) : new NoteInteger(primitive.getAsInt()));
                 }
             } else {
                 return new NoteBytes(primitive.getAsString());
@@ -645,25 +653,36 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
-    public static NoteBytes of(byte[] bytes, byte type) {
-        
-        switch(type) {
-            case NoteBytesMetaData.STRING_TYPE: return new NoteString(bytes); 
-            case NoteBytesMetaData.STRING_UTF16_TYPE: return new NoteString(bytes, ByteDecoding.STRING_UTF16);
-            case NoteBytesMetaData.BOOLEAN_TYPE: return new NoteBoolean(bytes);
-            case NoteBytesMetaData.INTEGER_TYPE: return new NoteInteger(bytes);
-            case NoteBytesMetaData.DOUBLE_TYPE: return new NoteDouble(bytes);
-            case NoteBytesMetaData.LONG_TYPE: return new NoteLong(bytes);
-            case NoteBytesMetaData.FLOAT_TYPE: return new NoteFloat(bytes);
-            case NoteBytesMetaData.SHORT_TYPE: return new NoteShort(bytes);
-            case NoteBytesMetaData.BIG_INTEGER_TYPE: return new NoteBigInteger(bytes);
-            case NoteBytesMetaData.BIG_DECIMAL_TYPE: return new NoteBigDecimal(bytes);
-            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE: return new NoteBytesArray(bytes);
-            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE: return new NoteBytesObject(bytes);
-            case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE: return new NoteSerializable(bytes);
-            default: return new NoteBytes(bytes, ByteDecoding.of(type));
+    public static NoteBytes of(byte[] bytes, byte type){
+        switch(type){
+            case NoteBytesMetaData.LONG_TYPE:
+                return new NoteLong(bytes);
+            case NoteBytesMetaData.DOUBLE_TYPE:
+                return new NoteDouble(bytes);
+            case NoteBytesMetaData.INTEGER_TYPE:
+                return new NoteInteger(bytes);
+            case NoteBytesMetaData.STRING_TYPE:
+                return new NoteString(bytes);
+            case NoteBytesMetaData.BOOLEAN_TYPE:
+                return new NoteBoolean(bytes);
+            case NoteBytesMetaData.SHORT_TYPE:
+                return new NoteShort(bytes);
+            case NoteBytesMetaData.FLOAT_TYPE:
+                return new NoteFloat(bytes);
+            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
+                return new NoteBytesArray(bytes);
+            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
+                return new NoteBytesObject(bytes);
+            case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+                return new NoteBigDecimal(bytes);
+            case NoteBytesMetaData.BIG_INTEGER_TYPE:
+                return new NoteBigDecimal(bytes);
+            case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE:
+                return new NoteSerializable(bytes);
+            case NoteBytesMetaData.RAW_BYTES_TYPE:
+            default:
+                return new NoteBytes(bytes, type);
         }
-
     }
 
     public static NoteBytes of(Object obj) {

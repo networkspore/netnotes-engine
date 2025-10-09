@@ -6,6 +6,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,11 +18,11 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 public class NoteBytesArray extends NoteBytes{
 
     public NoteBytesArray(){
-        super(new byte[0], ByteDecoding.NOTE_BYTES_ARRAY);
+        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
     public NoteBytesArray(byte[] bytes){
-        super(bytes, ByteDecoding.NOTE_BYTES_ARRAY);
+        super(bytes, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
     public NoteBytesArray(NoteBytes[] noteBytes){
@@ -31,10 +33,7 @@ public class NoteBytesArray extends NoteBytes{
         this(getBytesFromStream(stream));
     }
 
-    public NoteBytesArray(byte[] bytes, ByteDecoding byteDecoding){
-        super(bytes,byteDecoding);
-    }
-
+  
     public static byte[]  getBytesFromStream(Stream<NoteBytes> stream){
         NoteBytes[] noteBytesArray = stream.toArray(NoteBytes[]::new);
         return getBytesFromArray(noteBytesArray);
@@ -99,16 +98,16 @@ public class NoteBytesArray extends NoteBytes{
         int length = bytes.length;
         int offset = 0;
         int counter = 0;
-        boolean isLittleEndian = getByteDecoding().isLittleEndian();
+
         while(offset < length){
             byte type = bytes[offset];
             offset++;
-            int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
             offset += 4;
             if(counter == index){
                 byte[] dst = new byte[size];
                 System.arraycopy(bytes, offset, dst, 0, size);
-                return new NoteBytes(dst, ByteDecoding.of(type));
+                return NoteBytes.of(dst, type);
             }
             offset += size;
             counter++;
@@ -143,10 +142,9 @@ public class NoteBytesArray extends NoteBytes{
         int length = bytes.length;
         int offset = 0;
         int counter = 0;
-        boolean isLittleEndian = getByteDecoding().isLittleEndian();
         while(offset < length){
             offset++;
-            int size = isLittleEndian ?  ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
             offset += 4;
             byte[] buffer = new byte[size];
             System.arraycopy(bytes, offset, buffer, 0, size);
@@ -212,90 +210,97 @@ public class NoteBytesArray extends NoteBytes{
     }
     
     public NoteBytes remove(NoteBytes noteBytes) {
-        
-          
         byte[] bytes = get();
         int length = bytes.length;
-        
+        byte[] removeBytes = noteBytes.get(); 
+        int noteBytesLength = removeBytes.length;
+
         if (bytes == null || length == 0) {
             return null;
         }
-        
-        try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream(length);){
-            NoteBytes removedBytes = null;
-            int offset = 0;
-            
-            while (offset < length) {
-                byte type = bytes[offset];
-                int size = getByteDecoding().isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes, offset + 1) : ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
-                
-                byte[] contentBytes = new byte[size];
-                System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
-                
-                if (removedBytes == null && Arrays.equals(contentBytes, noteBytes.get())) {
-                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
-                } else {
-                    outputStream.write(type);
-                    outputStream.write(getByteDecoding().isLittleEndian() ? ByteDecoding.intToBytesLittleEndian(size) : ByteDecoding.intToBytesBigEndian(size));
-                    outputStream.write(contentBytes);
-                }
-                
-                offset += 5 + size;
-            }
-            
-            set(outputStream.toByteArray());
-            return removedBytes;
-        } catch(IOException e){
+        if(length < noteBytesLength){
             return null;
         }
-           
-     
+        int dstLength =length - noteBytesLength;
+        byte[] dst = new byte[dstLength];
+      
+        NoteBytes removedBytes = null;
+        int offset = 0;
+        int dstOffset = 0;
+        while (offset < length) {
+            byte type = bytes[offset];
+            offset ++;
+
+            int srcLength = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += 4;
+
+            byte[] src = new byte[srcLength];
+            System.arraycopy(bytes, offset, src, 0, srcLength);
+            offset += srcLength;
+
+            if (removedBytes == null && Arrays.equals(src, noteBytes.get())) {
+                removedBytes = new NoteBytes(src, type);
+            } else if(dstLength >= dstOffset + 5 + srcLength) {
+                dstOffset = NoteBytesMetaData.write(type, srcLength, dst, dstOffset);
+                System.arraycopy(src, 0, dst, dstOffset, srcLength);
+                dstOffset += srcLength;
+            }else{
+                return null;
+            }
+        }
+        if(removedBytes != null){
+            set(dst);
+        }
+        return removedBytes;
     }
 
     public NoteBytes remove(int noteBytesIndex) {
       
         byte[] bytes = get();
-        if (bytes == null || bytes.length == 0) {
+        int byteLength = bytes.length;
+        if (bytes == null || byteLength == 0) {
             return null;
         }
         
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream()) {
             int offset = 0;
             int currentIndex = 0;
             NoteBytes removedBytes = null;
             
-            while (offset < bytes.length) {
+            while (offset < byteLength) {
                 // Read metadata (1 byte type + 4 bytes length)
+                 if(offset + 5 > byteLength){
+                    throw new IllegalStateException("Corrupt data detected");
+                }
                 byte type = bytes[offset];
-                int size = getByteDecoding().isLittleEndian() ? 
-                    ByteDecoding.bytesToIntLittleEndian(bytes, offset + 1) : 
-                    ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
-                
-                // Validate size to prevent buffer overrun
-                if (offset + 5 + size > bytes.length) {
+                offset++;
+               
+                int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                offset += 4;
+
+                if (offset + size > byteLength) {
                     break;
                 }
-                
                 if (currentIndex == noteBytesIndex) {
                     // Store the bytes being removed
                     byte[] contentBytes = new byte[size];
-                    System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
-                    removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
+                    System.arraycopy(bytes, offset, contentBytes, 0, size);
+                    removedBytes = new NoteBytes(contentBytes, type);
                 } else {
                     // Write metadata
                     outputStream.write(type);
-                    outputStream.write(getByteDecoding().isLittleEndian() ? 
-                        ByteDecoding.intToBytesLittleEndian(size) : 
-                        ByteDecoding.intToBytesBigEndian(size));
+                    outputStream.write(ByteDecoding.intToBytesBigEndian(size));
                     // Write content
-                    outputStream.write(bytes, offset + 5, size);
+                    outputStream.write(bytes, offset, size);
                 }
                 
                 offset += 5 + size; // Move to next entry (5 bytes metadata + content)
                 currentIndex++;
             }
-            
-            set(outputStream.toByteArray());
+
+            if(removedBytes != null){
+                set(outputStream.toByteArray());
+            }
             return removedBytes;
             
         } catch (IOException e) {
@@ -315,10 +320,10 @@ public class NoteBytesArray extends NoteBytes{
             int length = bytes.length;
             int offset = 0;
             int counter = 0;
-            boolean isLittleEndian = getByteDecoding().isLittleEndian();
+           
             while(offset < length){
                 offset++;
-                int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
                 offset += 4 + size;
                 counter++;
             }
@@ -344,7 +349,7 @@ public class NoteBytesArray extends NoteBytes{
     
             while(offset < length){
                 NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-                byte type = noteBytes.getByteDecoding().getType();
+                byte type = noteBytes.getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonArray.add(noteBytes.getAsJsonArray());
@@ -375,7 +380,7 @@ public class NoteBytesArray extends NoteBytes{
             int i = 0;
             while(offset < length){
                 NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-                byte type = noteBytes.getByteDecoding().getType();
+                byte type = noteBytes.getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonObject.add(i + "", noteBytes.getAsJsonArray());

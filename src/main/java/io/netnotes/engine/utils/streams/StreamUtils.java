@@ -3,12 +3,21 @@ package io.netnotes.engine.utils.streams;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonIOException;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
@@ -70,7 +79,7 @@ public class StreamUtils {
         }
     }
 
-    public static void pipedOutputDuplicate(PipedOutputStream pipedOutput, PipedOutputStream output1,
+    public static void duplicateEntireStream(PipedOutputStream pipedOutput, PipedOutputStream output1,
             PipedOutputStream output2,
             StreamProgressTracker progressTracker) throws IOException {
         byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
@@ -107,7 +116,7 @@ public class StreamUtils {
 
   
 
-    public static byte[] readOutputStream(PipedOutputStream outStream) throws IOException {
+    public static byte[] readEntireOutputStream(PipedOutputStream outStream) throws IOException {
         try (ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                 PipedInputStream input = new PipedInputStream(outStream, PIPE_BUFFER_SIZE);) {
 
@@ -121,8 +130,8 @@ public class StreamUtils {
         }
     }
 
-     public static byte[] readByteAmount(int size, InputStream inputStream) throws IOException{
-        try(ByteArrayOutputStream byteOutput = new ByteArrayOutputStream(size)){
+    public static byte[] readByteAmount(int size, InputStream inputStream) throws IOException{
+        try(UnsynchronizedByteArrayOutputStream byteOutput = new UnsynchronizedByteArrayOutputStream(size)){
             int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
             byte[] buffer = new byte[bufferSize];
             int length = 0;
@@ -167,10 +176,8 @@ public class StreamUtils {
     }
 
     public static byte[] readInputStreamAsBytes(InputStream inputStream) throws IOException{
-   
-        try(
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        ){
+     
+        try(UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream()){
             byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
             int length = 0;
 
@@ -181,6 +188,43 @@ public class StreamUtils {
             return outputStream.toByteArray();
         }
     }
+    
 
-   
+    public static String readAsString(InputStreamReader reader) throws IOException{
+        StringBuilder stringBuilder = new StringBuilder();
+        char[] chars = new char[BUFFER_SIZE];
+        int length;
+        while ((length = reader.read(chars)) != -1) {
+            stringBuilder.append(chars, 0, length);
+        }
+        return stringBuilder.toString();
+        
+    }
+
+    public static String readAsString(InputStream inputStream, StreamProgressTracker progressTracker) throws IOException{
+        StringBuilder stringBuilder = new StringBuilder();
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int length;
+        while ((length =  inputStream.read(buffer)) != -1) {
+            if (progressTracker != null && progressTracker.isCancelled()) {
+                throw new IOException("Operation cancelled");
+            }
+         
+            stringBuilder.append(new String(buffer, 0, length, StandardCharsets.UTF_8));
+         
+            if (progressTracker != null) {
+                progressTracker.addBytesProcessed(length);
+            }
+        }
+        return stringBuilder.toString();
+    }
+
+
+    public static JsonObject readJson(InputStreamReader reader) throws JsonIOException, JsonSyntaxException, IOException{
+        return JsonParser.parseReader(reader).getAsJsonObject();
+    }
+
+    public static JsonArray readJsonArray(InputStreamReader reader) throws JsonIOException, JsonSyntaxException, IOException{
+        return JsonParser.parseReader(reader).getAsJsonArray();
+    }
 }

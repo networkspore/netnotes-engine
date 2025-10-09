@@ -25,34 +25,43 @@ import io.netnotes.engine.utils.CollectionHelpers;
 public class ByteDecoding{
 
 
-    public static final byte NO_FLAG = 0x00;
+    public static final byte NO_FLAG = (byte)0;
 
     
 
     public static class NoteBytesMetaData {
         public final static int STANDARD_META_DATA_SIZE = 5;
 
-
-        
-        
-        public final static byte RAW_BYTES_TYPE = 0x01;
-        public final static byte LONG_TYPE = 0x02;
-        public final static byte DOUBLE_TYPE = 0x03;
-        public final static byte INTEGER_TYPE = 0x04;
-        public final static byte STRING_UTF16_TYPE = 0x05;
-        public final static byte STRING_TYPE = 0x06;
-        public final static byte BOOLEAN_TYPE = 0x07;
-        public final static byte SHORT_TYPE = 0x08;
-        public final static byte FLOAT_TYPE = 0x09;
-
-        public final static byte NOTE_BYTES_ARRAY_TYPE = 0x10;
-        public final static byte NOTE_BYTES_OBJECT_TYPE = 0x11;
-        public final static byte BIG_DECIMAL_TYPE = 0x12;
-        public final static byte BIG_INTEGER_TYPE = 0x13;
-       
-        public final static byte SERIALIZABLE_OBJECT_TYPE = 0x20;
-        public final static byte VIDEO_TYPE = 0x21;
-        public final static byte IMAGE_TYPE = 0x22;
+        public final static byte RAW_BYTES_TYPE = NO_FLAG;
+        public final static byte LONG_TYPE = (byte) 2;
+        public final static byte DOUBLE_TYPE = (byte) 3;
+        public final static byte INTEGER_TYPE = (byte) 4;
+        public final static byte STRING_UTF16_TYPE = (byte) 5;
+        public final static byte STRING_TYPE = (byte) 6;
+        public final static byte UTF_8_TYPE = (byte) 6;
+        public final static byte BOOLEAN_TYPE = (byte) 7;
+        public final static byte SHORT_TYPE = (byte) 8;
+        public final static byte FLOAT_TYPE = (byte) 9;
+        public final static byte NOTE_BYTES_ARRAY_TYPE = (byte) 10;
+        public final static byte NOTE_BYTES_OBJECT_TYPE = (byte) 11;
+        public final static byte NOTE_BYTES_TREE_TYPE = (byte) 12;
+        public final static byte BIG_INTEGER_TYPE = (byte) 13;
+        public final static byte BIG_DECIMAL_TYPE = (byte) 14;
+        public final static byte BASE_16_TYPE = (byte) 15;
+        public final static byte STRING_ISO_8859_1_TYPE = (byte) 16;
+        public final static byte STRING_US_ASCII_TYPE = (byte) 17;
+        public final static byte BASE_32_TYPE = (byte) 18;
+        public final static byte BASE_64_TYPE = (byte) 19;
+        public final static byte URL_SAFE_TYPE = (byte) 20;      
+        public final static byte LONG_LE_TYPE = (byte) 21;
+        public final static byte DOUBLE_LE_TYPE = (byte) 22;
+        public final static byte INTEGER_LE_TYPE = (byte) 23;
+        public final static byte STRING_UTF16_LE_TYPE = (byte) 24;
+        public final static byte SHORT_LE_TYPE = (byte) 25;
+        public final static byte FLOAT_LE_TYPE = (byte) 26;
+        public final static byte VIDEO_TYPE = (byte) 30;
+        public final static byte IMAGE_TYPE = (byte) 31;
+        public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 32;
 
         private byte m_type;
         private int m_len;
@@ -80,26 +89,19 @@ public class ByteDecoding{
         }
 
         public void setLength(byte[] bytes) {
-            m_len = ByteDecoding.bytesToInt(bytes, ByteDecoding.of(m_type));
+            m_len = bytesToIntBigEndian(bytes);
         }
 
         public void setType(byte type) {
             this.m_type = type;
         }
 
-        public static int write(ByteDecoding byteDecoding, int len, byte[] dst, int offset){
-            dst[offset] = byteDecoding.getType();
-            if(byteDecoding.isLittleEndian()){
-                dst[offset + 1] = (byte) (len);
-                dst[offset + 2] = (byte) (len >>> 8);
-                dst[offset + 3] = (byte) (len >>> 16);
-                dst[offset + 4] = (byte) (len >>> 24);
-            }else{
-                dst[offset + 1] = (byte) (len >>> 24);
-                dst[offset + 2] = (byte) (len >>> 16);
-                dst[offset + 3] = (byte) (len >>> 8);
-                dst[offset + 4] = (byte) (len);
-            }
+        public static int write(byte type, int len, byte[] dst, int offset){
+            dst[offset] = type;
+            dst[offset + 1] = (byte) (len >>> 24);
+            dst[offset + 2] = (byte) (len >>> 16);
+            dst[offset + 3] = (byte) (len >>> 8);
+            dst[offset + 4] = (byte) (len);
             return offset + STANDARD_META_DATA_SIZE;
         }
     }
@@ -115,72 +117,14 @@ public class ByteDecoding{
 
 
     public final static byte NO_ENCODING = NO_FLAG;
-    public final static byte BASE_10 = 0x20;
-    public final static byte BASE_32 = 0x23;
-    public final static byte BASE_64 = 0x24;
-    public final static byte URL_SAFE = 0x25;
-    public final static byte BASE_16 = 0x26;
-
-    public static final byte UTF_8 = NO_FLAG;
-    public static final byte ISO_8859_1 = 0x11;
-    public static final byte UTF_16 = 0x12;
-    public static final byte US_ASCII = 0x13;
+   
 
 
-    public final static ByteDecoding HEX = hexDecoding();
-    public final static ByteDecoding RAW_BYTES = rawBytesNoDecoding();
-    public final static ByteDecoding STRING_BASE64_IISO = stringBase64ISODecoding();
-    public final static ByteDecoding STRING_UTF8 = stringUTF8Decoding();
-    public final static ByteDecoding STRING_UTF16 = stringUTF16Decoding();
-    public final static ByteDecoding BOOLEAN = booleanDecoding();
-    public final static ByteDecoding INTEGER = integerDecoding();
-    public final static ByteDecoding INTEGER_LITTLE_ENDIAN = integerLittleEndianDecoding();
-    public final static ByteDecoding DOUBLE = doubleDecoding();
-    public final static ByteDecoding DOUBLE_LITTLE_ENDIAN = doubleLittleEndianDecoding();
-    public final static ByteDecoding LONG = longDecoding();
-    public final static ByteDecoding LONG_LITTLE_ENDIAN = longLittleEndianDecoding();
-    public final static ByteDecoding FLOAT = floatDecoding();
-    public final static ByteDecoding FLOAT_LITTLE_ENDIAN = floatLittleEndianDecoding();
-    public final static ByteDecoding SHORT = shortDecoding();
-    public final static ByteDecoding SHORT_LITTLE_ENDIAN = shortLittleEndianDecoding();
-    public final static ByteDecoding BIG_INTEGER = bigIntegerDecoding();
-    public final static ByteDecoding BIG_DECIMAL = bigDecimalDecoding();
-    public final static ByteDecoding NOTE_BYTES_OBJECT = noteBytesObjectDecoding();
-    public final static ByteDecoding NOTE_BYTES_ARRAY = noteBytesArrayDecoding();
-    public final static ByteDecoding NOTE_BYTES_TREE = noteBytesObjectDecoding();
-    public final static ByteDecoding SERIALIZABLE_OBJECT = serializableObjectDecoding();
 
     public static final int MAX_SHORT_BYTES_SIZE = NoteShort.UNSIGNED_MAX + 2;
     public static final byte[] SHORT_MAX_BYTES = { (byte) 0xFF, (byte) 0xFF };
     public static final int MAX_SHORT_ITEMS = (int) Math.floor(Integer.MAX_VALUE / MAX_SHORT_BYTES_SIZE);
 
-
-    private byte[] m_bytes;
-
-    public ByteDecoding(byte... bytes){
-        m_bytes = bytes;
-    }
-
-
-    public static ByteDecoding of(byte type) {
-        switch(type) {
-            case NoteBytesMetaData.STRING_TYPE: return STRING_UTF8;
-            case NoteBytesMetaData.STRING_UTF16_TYPE: return STRING_UTF16;
-            case NoteBytesMetaData.BOOLEAN_TYPE: return BOOLEAN;
-            case NoteBytesMetaData.INTEGER_TYPE: return INTEGER;
-            case NoteBytesMetaData.DOUBLE_TYPE: return DOUBLE;
-            case NoteBytesMetaData.LONG_TYPE: return LONG;
-            case NoteBytesMetaData.FLOAT_TYPE: return FLOAT;
-            case NoteBytesMetaData.SHORT_TYPE: return SHORT;
-            case NoteBytesMetaData.BIG_INTEGER_TYPE: return BIG_INTEGER;
-            case NoteBytesMetaData.BIG_DECIMAL_TYPE: return BIG_DECIMAL;
-            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE: return NOTE_BYTES_ARRAY;
-            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE: return NOTE_BYTES_OBJECT;
-            case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE: return SERIALIZABLE_OBJECT;
-            case NoteBytesMetaData.RAW_BYTES_TYPE:
-            default: return RAW_BYTES;
-        }
-    }
 
 
     
@@ -358,190 +302,124 @@ public class ByteDecoding{
         return 2; // NoteBytesArray
     }
 
-  
-    public byte[] getByteArray(){
-        return m_bytes;
+
+
+    public static boolean isLittleEndian(byte type){
+        switch(type){
+            case NoteBytesMetaData.LONG_LE_TYPE:
+            case NoteBytesMetaData.DOUBLE_LE_TYPE:
+            case NoteBytesMetaData.INTEGER_LE_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+            case NoteBytesMetaData.SHORT_LE_TYPE:
+            case NoteBytesMetaData.FLOAT_LE_TYPE:
+                return true;
+            default:
+                return false;
+        }
     }
 
-
-    public static ByteDecoding stringBase64ISODecoding(){
-        return new ByteDecoding(NoteBytesMetaData.STRING_TYPE, BIG_ENDIAN, ISO_8859_1, BASE_64);
-    }
-
-     public static ByteDecoding noteUUIDDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.RAW_BYTES_TYPE, BIG_ENDIAN, ISO_8859_1);
-    }
-
-
-    public static ByteDecoding hexDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.STRING_TYPE, BIG_ENDIAN, UTF_8, BASE_16);
-    }
-
-    public static ByteDecoding rawBytesNoDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.RAW_BYTES_TYPE, BIG_ENDIAN, ISO_8859_1);
-    }
-
-    public static ByteDecoding noteBytesObjectDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE, BIG_ENDIAN, UTF_8);
-    }
-
-     public static ByteDecoding serializableObjectDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE, BIG_ENDIAN, UTF_8);
+    public static boolean isBigEndian(byte type){
+        return !isLittleEndian(type);
     }
 
 
 
-    public static ByteDecoding noteBytesArrayDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE, BIG_ENDIAN, UTF_8);
-    }
 
-    public static ByteDecoding stringUTF8Decoding(){
-        return new ByteDecoding(NoteBytesMetaData.STRING_TYPE, BIG_ENDIAN, UTF_8);
-    }
-
-    public static ByteDecoding stringUTF16Decoding(){
-        return new ByteDecoding(NoteBytesMetaData.STRING_TYPE, BIG_ENDIAN, UTF_16);
-    }
-
-     public static ByteDecoding booleanDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.BOOLEAN_TYPE, BIG_ENDIAN);
-    }
-
-    public static ByteDecoding integerDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.INTEGER_TYPE, BIG_ENDIAN);
-    }
-
-    public static ByteDecoding integerLittleEndianDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.INTEGER_TYPE, LITTLE_ENDIAN);
-    }
-
-    public static ByteDecoding longDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.LONG_TYPE, BIG_ENDIAN);
-    }
-    public static ByteDecoding longLittleEndianDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.LONG_TYPE, LITTLE_ENDIAN);
-    }
-
-    public static ByteDecoding doubleDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.DOUBLE_TYPE, BIG_ENDIAN);
-    }
-    public static ByteDecoding doubleLittleEndianDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.DOUBLE_TYPE, LITTLE_ENDIAN);
-    }
-    public static ByteDecoding floatDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.FLOAT_TYPE, BIG_ENDIAN);
-    }
-    public static ByteDecoding floatLittleEndianDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.FLOAT_TYPE, LITTLE_ENDIAN);
-    }
-    public static ByteDecoding shortDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.SHORT_TYPE, BIG_ENDIAN);
-    }
-    public static ByteDecoding shortLittleEndianDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.SHORT_TYPE, LITTLE_ENDIAN);
-    }
-
-    public static ByteDecoding bigIntegerDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.BIG_INTEGER_TYPE, BIG_ENDIAN);
-    }
-    public static ByteDecoding bigDecimalDecoding(){
-        return new ByteDecoding(NoteBytesMetaData.BIG_DECIMAL_TYPE, BIG_ENDIAN);
-    }
-
-
-    public byte getType(){
-        return m_bytes != null && m_bytes.length > 0 ? getByteArray()[0] : NO_FLAG;
-    }
-
-    public byte getEndiness(){
-        return m_bytes != null && m_bytes.length > 1 ?  getByteArray()[1] : NO_FLAG;
-    }
-
-    public byte getCharacterEncoding(){
-        return m_bytes != null && m_bytes.length > 2 ? getByteArray()[2] : NO_FLAG;
-    }
-
-     public byte getBaseEncoding(){
-        return m_bytes != null && m_bytes.length > 3 ?  getByteArray()[3] : NO_FLAG;
-    }
-
-    public boolean isLittleEndian(){
-        return getEndiness() == LITTLE_ENDIAN;
-    }
-
-    public boolean isBigEndian(){
-        return getEndiness() == BIG_ENDIAN;
-    }
-
-    public boolean isNotBigEndian(){
-        return getEndiness() != BIG_ENDIAN;
-    }
-
-    public boolean isUTF16(){
-        return getCharacterEncoding() == UTF_16;
-    }
-    public boolean isNotUTF8(){
-        return getCharacterEncoding() != UTF_8;
-    }
-
-    public boolean isUTF8(){
-        return getCharacterEncoding() == UTF_8;
-    }
-
-    public boolean isNotBase10(){
-        return getBaseEncoding() != BASE_10;
-    }
-
-    public boolean isBase16(){
-        return getBaseEncoding() == BASE_16;
-    }
-
-    public boolean isBase64(){
-        return getEndiness() != BASE_64;
-    }
 
     //chars
 
-    public static byte[] charsToByteArray(CharBuffer buffer, ByteDecoding byteDecoding){
-        ByteBuffer byteBuffer = charsToBytes(buffer, byteDecoding);
-        return Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
+    public static byte[] stringToBytes(String string, byte type){
+        switch(type){
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return string.getBytes(StandardCharsets.UTF_16);
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                return string.getBytes(StandardCharsets.US_ASCII);
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                return string.getBytes(StandardCharsets.ISO_8859_1);
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                return string.getBytes(StandardCharsets.UTF_16LE);
+            case NoteBytesMetaData.BASE_16_TYPE:
+                return Hex.decode(string);
+            case NoteBytesMetaData.BASE_32_TYPE:
+                return Base32.decode(string);
+            case NoteBytesMetaData.BASE_64_TYPE:
+                return Base64.getDecoder().decode(string);
+            case NoteBytesMetaData.URL_SAFE_TYPE:
+                return Base64.getUrlDecoder().decode(string);
+            case NoteBytesMetaData.STRING_TYPE:
+                return string.getBytes();
+        }
+
+        throw new IllegalArgumentException("Unspported string decoding");
     }
 
-
-
-    public byte[] getRawBytesAsEncoded(byte[] bytes, ByteDecoding byteDecoding){
-        return encodeBytes(bytes, byteDecoding.getBaseEncoding());
-    }
-
-
-    public static char[] encodeBytesToChars( byte[] bytes, byte baseEncoding, byte charEncoding){
-        CharBuffer charBuffer = encodeBytesToCharBuffer(bytes, baseEncoding, charEncoding);
-        char[] chars = Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
-        charBuffer.clear();
-        return chars;
-    }
-
-    public static CharBuffer encodeBytesToCharBuffer( byte[] bytes, byte baseEncoding, byte charEncoding){
-        return encodeBytesToCharBuffer(bytes, baseEncoding, charEncoding, false);
-    }
-
-    public static CharBuffer encodeBytesToCharBuffer( byte[] bytes, byte baseEncoding, byte charEncoding, boolean isLittleEndian){
-        return bytesToChars(ByteBuffer.wrap(encodeBytes(bytes, baseEncoding)), charEncoding, isLittleEndian);
-    }
-
-    public static byte[] decodeString( String str, byte baseEncoding){
-      
-        switch(baseEncoding){
-            case ByteDecoding.BASE_32:
-                return Base32.decode(str);
-            case ByteDecoding.BASE_16:
-                return Hex.decode(str);
-            case ByteDecoding.BASE_64:
-                return Base64.getDecoder().decode(str);
-            case ByteDecoding.URL_SAFE:
-                return Base64.getUrlDecoder().decode(str);
+    public static String bytesToString(byte[] bytes, byte type){
+        switch(type){
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return new String(bytes, StandardCharsets.UTF_16);
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                return new String(bytes, StandardCharsets.US_ASCII);
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                return new String(bytes, StandardCharsets.ISO_8859_1);
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                return new String(bytes, StandardCharsets.UTF_16LE);
+            case NoteBytesMetaData.BASE_16_TYPE:
+                return Hex.toHexString(bytes);
+            case NoteBytesMetaData.BASE_32_TYPE:
+                return Base32.toBase32String(bytes);
+            case NoteBytesMetaData.BASE_64_TYPE:
+                return Base64.getEncoder().encodeToString(bytes);
+            case NoteBytesMetaData.URL_SAFE_TYPE:
+                return Base64.getUrlEncoder().encodeToString(bytes);
+            case NoteBytesMetaData.STRING_TYPE:
+                return new String(bytes);
+            case NoteBytesMetaData.BIG_INTEGER_TYPE:
+                return bytesToBigInteger(bytes).toString();
+            case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+                return bytesToBigDecimal(bytes).toString();
+            case NoteBytesMetaData.SHORT_TYPE:
+                return bytesToShortBigEndian(bytes) + "";
+            case NoteBytesMetaData.SHORT_LE_TYPE:
+                return bytesToShortLittleEndian(bytes) + "";
+            case NoteBytesMetaData.BOOLEAN_TYPE:
+                return bytesToBoolean(bytes) ? "true" : "false";
+            case NoteBytesMetaData.INTEGER_TYPE:
+                return bytesToIntBigEndian(bytes) + "";
+            case NoteBytesMetaData.INTEGER_LE_TYPE:
+                return bytesToIntLittleEndian(bytes) + "";
+            case NoteBytesMetaData.DOUBLE_TYPE:
+                return bytesToDoubleBigEndian(bytes) + "";
+            case NoteBytesMetaData.DOUBLE_LE_TYPE:
+                return bytesToDoubleLittleEndian(bytes) + "";
+            case NoteBytesMetaData.FLOAT_TYPE:
+                return bytesToFloatBigEndian(bytes) + "";
+            case NoteBytesMetaData.FLOAT_LE_TYPE:
+                return bytesToFloatLittleEndian(bytes) + "";
+            case NoteBytesMetaData.LONG_TYPE:
+                return bytesToLongBigEndian(bytes) + "";
+            case NoteBytesMetaData.LONG_LE_TYPE:
+                return bytesToLongLittleEndian(bytes) + "";
             default:
-                return numberStringToBytes(str);
+                return new String(bytes);
+        }
+
+ 
+    }
+
+    public static CharBuffer bytesToChars(ByteBuffer byteBuffer, byte type) {
+        switch (type) {
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return StandardCharsets.UTF_16.decode(byteBuffer);
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                return StandardCharsets.UTF_16LE.decode(byteBuffer);
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                return StandardCharsets.ISO_8859_1.decode(byteBuffer);
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                return StandardCharsets.US_ASCII.decode(byteBuffer);
+            case NoteBytesMetaData.STRING_TYPE:
+            default:
+                return StandardCharsets.UTF_8.decode(byteBuffer);
+            
         }
     }
 
@@ -667,16 +545,26 @@ public class ByteDecoding{
     }
 
 
-    public static char[] parseBuffer(CharBuffer buffer){
-        if(!buffer.isEmpty()){
-            return copyOfRange(buffer.array(),  buffer.position(), buffer.limit());
+    
+
+    public static byte[] parseBuffer(ByteBuffer buffer){
+        if(buffer.remaining() > 0){
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            return bytes;
         }else{
-            return new char[0];
+            return new byte[0];
         }
     }
 
-    public static byte[] parseBuffer(ByteBuffer buffer){
-        return Arrays.copyOfRange(buffer.array(),  buffer.position(), buffer.limit());
+    public static char[] parseBuffer(CharBuffer buffer){
+         if(!buffer.isEmpty()){
+            char[] chars = new char[buffer.remaining()];
+            buffer.get(chars);
+            return chars;
+        }else{
+            return new char[0];
+         }
     }
 
     public static byte[] concat(byte[] a, byte[] b) {
@@ -696,8 +584,8 @@ public class ByteDecoding{
         
         ByteBuffer byteBuffer = ByteBuffer.wrap(bytes, offset, length);
         CharBuffer charBuffer = StandardCharsets.UTF_16.decode(byteBuffer);
-        char[] chars = Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
-        return chars;
+       
+        return parseBuffer(charBuffer);
     }
 
     public static byte[] utf16BytesToUtf8Bytes(byte[] bytes){
@@ -708,10 +596,7 @@ public class ByteDecoding{
         
         CharBuffer charBuffer = CharBuffer.wrap(chars);
         ByteBuffer byteBuffer = StandardCharsets.ISO_8859_1.encode(charBuffer);
-        byte[] bytes = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
-        byteBuffer.clear();
-        charBuffer.clear();
-        return bytes;
+        return parseBuffer(byteBuffer);
     }
 
 
@@ -724,9 +609,10 @@ public class ByteDecoding{
     public static char[] getCharsFromBytes(byte[] encodedBytes){
         ByteBuffer byteBuffer = ByteBuffer.wrap(encodedBytes);
         CharBuffer charBuffer = StandardCharsets.UTF_8.decode(byteBuffer);
-        return Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
+        return parseBuffer(charBuffer);
     }
-
+    
+    
 
 
     public static char[] unboxCharacters(Character[] boxedChars){
@@ -761,10 +647,10 @@ public class ByteDecoding{
         return stream.collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append).toString();
     }
 
-    public static IntStream getBytestoIntStream( ByteBuffer byteBuffer, int length, ByteDecoding byteDecoding){
+    public static IntStream getBytestoIntStream( ByteBuffer byteBuffer, int length, byte type){
         byte[] bytes = new byte[length];
         byteBuffer.get(bytes);
-        CharBuffer charBuffer = ByteDecoding.bytesToChars(ByteBuffer.wrap(bytes), byteDecoding);
+        CharBuffer charBuffer = ByteDecoding.bytesToChars(ByteBuffer.wrap(bytes), type);
         
         return charBuffer.codePoints();
     }
@@ -822,7 +708,7 @@ public class ByteDecoding{
         ByteBuffer bigEndianBuffer = ByteBuffer.allocate(length);
         bigEndianBuffer.order(ByteOrder.BIG_ENDIAN);
         bigEndianBuffer.put(buffer);
-        return Arrays.copyOfRange(bigEndianBuffer.array(), bigEndianBuffer.position(), bigEndianBuffer.limit());
+        return parseBuffer(bigEndianBuffer);
     }
 
     public static byte[] bigEndianToLittleEndian(byte[] bigEndianBytes) {
@@ -836,7 +722,7 @@ public class ByteDecoding{
         ByteBuffer littleEndianBuffer = ByteBuffer.allocate(length);
         littleEndianBuffer.order(ByteOrder.BIG_ENDIAN);
         littleEndianBuffer.put(buffer);
-        return Arrays.copyOfRange(littleEndianBuffer.array(), littleEndianBuffer.position(), littleEndianBuffer.limit());
+        return parseBuffer(littleEndianBuffer);
     }
 
 
@@ -1076,8 +962,8 @@ public class ByteDecoding{
 
     // ===== UTILITY METHODS FOR DYNAMIC CONVERSION =====
 
-    public static int bytesToInt(byte[] bytes, ByteDecoding byteDecoding) {
-        return byteDecoding.isLittleEndian() ? 
+    public static int bytesToInt(byte[] bytes, byte type) {
+        return isLittleEndian(type) ? 
             bytesToIntLittleEndian(bytes) : 
             bytesToIntBigEndian(bytes);
     }
@@ -1096,56 +982,49 @@ public class ByteDecoding{
     }
 
     // Character conversion methods (using ByteBuffer for complexity)
-    public static byte[] charsToByteArray(char[] chars, ByteDecoding byteDecoding) {
-        ByteBuffer byteBuffer = charsToBytes(CharBuffer.wrap(chars), byteDecoding);
-        return Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
+    public static byte[] charsToByteArray(char[] chars, byte type) {
+        ByteBuffer byteBuffer = charsToBytes(CharBuffer.wrap(chars), type);
+        return parseBuffer(byteBuffer);
     }
 
-    public static char[] bytesToCharArray(byte[] bytes, ByteDecoding byteDecoding) {
-        CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), byteDecoding);
-        return Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
+    public static char[] bytesToCharArray(byte[] bytes, byte type) {
+        switch(type){
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+            case NoteBytesMetaData.STRING_TYPE:
+                CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), type);
+                return parseBuffer(charBuffer);
+            default:
+                return bytesToString(bytes, type).toCharArray();
+        }
+     
     }
 
     public static char[] bytesToCharArray(byte[] bytes) {
-        CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), STRING_UTF8);
-        return Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
+        CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), NoteBytesMetaData.STRING_TYPE);
+        return parseBuffer(charBuffer);
     }
 
-    public static ByteBuffer charsToBytes(CharBuffer charBuffer, ByteDecoding byteDecoding) {
-        switch (byteDecoding.getCharacterEncoding()) {
-            case UTF_16:
-                return byteDecoding.isLittleEndian() ? 
-                    StandardCharsets.UTF_16LE.encode(charBuffer) : 
-                    StandardCharsets.UTF_16.encode(charBuffer);
-            case ISO_8859_1:
+    public static ByteBuffer charsToBytes(CharBuffer charBuffer, byte type) {
+        switch (type) {
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return StandardCharsets.UTF_16.encode(charBuffer);
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                return StandardCharsets.UTF_16LE.encode(charBuffer);
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
                 return StandardCharsets.ISO_8859_1.encode(charBuffer);
-            case US_ASCII:
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
                 return StandardCharsets.US_ASCII.encode(charBuffer);
-            case UTF_8:
+            case NoteBytesMetaData.UTF_8_TYPE:
             default:
                 return StandardCharsets.UTF_8.encode(charBuffer);
         }
     }
 
-    public static CharBuffer bytesToChars(ByteBuffer byteBuffer, ByteDecoding byteDecoding) {
-        return bytesToChars(byteBuffer, byteDecoding.getCharacterEncoding(), byteDecoding.isLittleEndian());
-    }
 
-    public static CharBuffer bytesToChars(ByteBuffer byteBuffer, byte characterEncoding, boolean isLittleEndian) {
-        switch (characterEncoding) {
-            case UTF_16:
-                return isLittleEndian ? 
-                    StandardCharsets.UTF_16LE.decode(byteBuffer) : 
-                    StandardCharsets.UTF_16.decode(byteBuffer);
-            case ISO_8859_1:
-                return StandardCharsets.ISO_8859_1.decode(byteBuffer);
-            case US_ASCII:
-                return StandardCharsets.US_ASCII.decode(byteBuffer);
-            case UTF_8:
-            default:
-                return StandardCharsets.UTF_8.decode(byteBuffer);
-        }
-    }
+    
 
     // BigDecimal/BigInteger methods
     public static byte[] bigDecimalToScaleAndBigInteger(BigDecimal bigDecimal) {
@@ -1155,7 +1034,7 @@ public class ByteDecoding{
         return CollectionHelpers.appendBytes(scaleBytes, bytes);
     }
 
-    public static BigDecimal scaleAndBigIntegerBytesToBigDecimal(byte[] bytes) {
+    public static BigDecimal bytesToBigDecimal(byte[] bytes) {
         return new BigDecimal(new BigInteger(bytes, 4, bytes.length - 4), bytesToIntBigEndian(bytes, 0));
     }
 
@@ -1163,70 +1042,19 @@ public class ByteDecoding{
         return new BigInteger(bytes);
     }
 
-    // Encoding methods (Base64, Base32, etc.)
-    public static byte[] encodeBytes(byte[] bytes, byte baseEncoding) {
-        switch (baseEncoding) {
-            case BASE_32:
-                return Base32.encode(bytes);
-            case BASE_16:
-                return Hex.encode(bytes);
-            case BASE_64:
-                return Base64.getEncoder().encode(bytes);
-            case URL_SAFE:
-                return Base64.getUrlEncoder().encode(bytes);
-            default:
-            case BASE_10:
-                return bytes;
-        }
-    }
-
-    public static String encodeBytesString(byte[] bytes, byte baseEncoding) {
-        switch (baseEncoding) {
-            case BASE_32:
-                return Base32.toBase32String(bytes);
-            case BASE_16:
-                return Hex.toHexString(bytes);
-            case BASE_64:
-                return Base64.getEncoder().encodeToString(bytes);
-            case URL_SAFE:
-                return Base64.getUrlEncoder().encodeToString(bytes);
-            default:
-            case BASE_10:
-                return new BigInteger(bytes).toString();
-        }
-    }
-
-    public static byte[] decodeBytes(byte[] bytes, byte baseEncoding) {
-        switch (baseEncoding) {
-            case BASE_32:
-                return Base32.decode(bytes);
-            case BASE_16:
-                return Hex.decode(bytes);
-            case BASE_64:
-                return Base64.getDecoder().decode(bytes);
-            case URL_SAFE:
-                return Base64.getUrlDecoder().decode(bytes);
-            default:
-                return bytes;
-        }
-    }
+   
 
     // Utility methods
     public static byte[] charsToBytes(char[] chars) {
         CharBuffer charBuffer = CharBuffer.wrap(chars);
         ByteBuffer byteBuffer = StandardCharsets.UTF_8.encode(charBuffer);
-        byte[] bytes = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
-        byteBuffer.clear();
-        return bytes;
+        return parseBuffer(byteBuffer);
     }
 
     public static char[] isoBytesToChars(byte[] bytes) {
         ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
         CharBuffer charBuffer = StandardCharsets.ISO_8859_1.decode(byteBuffer);
-        char[] chars = Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
-        byteBuffer.clear();
-        charBuffer.clear();
-        return chars;
+        return parseBuffer(charBuffer);
     }
 
     public static Byte[] boxBytes(byte[] bytes) {
@@ -1254,12 +1082,6 @@ public class ByteDecoding{
     }
 
     
-
-    @Override
-    public int hashCode() {
-        return isLittleEndian() ? bytesToIntLittleEndian(m_bytes) : bytesToIntBigEndian(m_bytes);
-    }
-
     public static byte[] serializeObject(Object e) throws IOException{
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 ObjectOutputStream out = new ObjectOutputStream(baos)) {

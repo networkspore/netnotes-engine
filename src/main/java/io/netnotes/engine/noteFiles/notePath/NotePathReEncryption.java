@@ -126,7 +126,7 @@ public class NotePathReEncryption {
                 byteCounter.add(writer.write(filePath));
                 futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 
                     progressWriter, execService));
-            }else if(rootKey.getByteDecoding().getType() == NoteBytesMetaData.STRING_TYPE){
+            }else if(rootKey.getType() == NoteBytesMetaData.STRING_TYPE){
                 NoteBytesMetaData metaData = reader.nextMetaData();
                 if(metaData != null && metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     byteCounter.add(writer.write(metaData));
@@ -141,7 +141,7 @@ public class NotePathReEncryption {
                         "metadata null" : "type: " + (int) metaData.getType());
                 }
             }else{
-                throw new IllegalStateException("Invalid key type: " + (int) rootKey.getByteDecoding().getType());
+                throw new IllegalStateException("Invalid key type: " + (int) rootKey.getType());
             }
 
             rootKey = reader.nextNoteBytes();
@@ -166,7 +166,7 @@ public class NotePathReEncryption {
                 byteCounter.add(writer.write(filePath));
                 futures.add(queueEncryptionUpdate(fileUpdateSemaphore, byteCounter, fileSize, oldKey, newKey, filePath, 
                     progressWriter, execService));
-            }else if (foundKey.getByteDecoding().getType() == NoteBytesMetaData.STRING_TYPE){
+            }else if (foundKey.getType() == NoteBytesMetaData.STRING_TYPE){
                 NoteBytesMetaData metaData = reader.nextMetaData();
                 if(metaData != null && metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     byteCounter.add(writer.write(metaData));
@@ -178,7 +178,7 @@ public class NotePathReEncryption {
                         "metadata null" : "type: " + (int) metaData.getType());
                 }
             }else{
-                throw new IllegalStateException("Invalid key type: " + (int) foundKey.getByteDecoding().getType());
+                throw new IllegalStateException("Invalid key type: " + (int) foundKey.getType());
             }
         }
         return true;

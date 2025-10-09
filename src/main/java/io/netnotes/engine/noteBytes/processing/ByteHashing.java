@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
@@ -149,49 +150,63 @@ public class ByteHashing  {
         return (int)(l ^ l >>> 32);
     }
   
-    public static int getHashCode(byte[] bytes, ByteDecoding byteDecoding){
+    public static int getHashCode(byte[] bytes, byte type){
 
-        boolean isLittleEndian = byteDecoding.isLittleEndian();
+
         int code = -1;
     
-        switch(byteDecoding.getType()){
+        switch(type){
             case NoteBytesMetaData.SHORT_TYPE:
-                code =  (isLittleEndian ? ByteDecoding.bytesToShortLittleEndian(bytes) : ByteDecoding.bytesToShortBigEndian(bytes)) << 32;
+                code =  ByteDecoding.bytesToShortBigEndian(bytes) << 32;
+                break;
+            case NoteBytesMetaData.SHORT_LE_TYPE:
+                code =  ByteDecoding.bytesToShortLittleEndian(bytes) << 32;
                 break;
             case NoteBytesMetaData.INTEGER_TYPE:
-                code = isLittleEndian ?ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
+                code = ByteDecoding.bytesToIntBigEndian(bytes);
+                break;
+            case NoteBytesMetaData.INTEGER_LE_TYPE:
+                code =  ByteDecoding.bytesToIntLittleEndian(bytes);
                 break;
             case NoteBytesMetaData.LONG_TYPE:
-                code = Long.hashCode(isLittleEndian ?ByteDecoding.bytesToLongLittleEndian(bytes) : ByteDecoding.bytesToLongBigEndian(bytes));
+                code = Long.hashCode(ByteDecoding.bytesToLongBigEndian(bytes));
+                break;
+            case NoteBytesMetaData.LONG_LE_TYPE:
+                code = Long.hashCode(ByteDecoding.bytesToLongLittleEndian(bytes));
                 break;
             case NoteBytesMetaData.DOUBLE_TYPE:
-                double d = (isLittleEndian ?ByteDecoding.bytesToDoubleBigEndian(bytes) : ByteDecoding.bytesToDoubleLittleEndian(bytes));
-                code = Double.hashCode(d);
+                code = Double.hashCode(ByteDecoding.bytesToDoubleBigEndian(bytes));
+                break;
+             case NoteBytesMetaData.DOUBLE_LE_TYPE:
+                code = Double.hashCode( ByteDecoding.bytesToDoubleLittleEndian(bytes));
                 break;
             case NoteBytesMetaData.FLOAT_TYPE:
-                float f = (isLittleEndian ?ByteDecoding.bytesToFloatLittleEndian(bytes) : ByteDecoding.bytesToFloatBigEndian(bytes));
-                code = Float.hashCode(f);
+                code = Float.hashCode(ByteDecoding.bytesToFloatBigEndian(bytes));
+                break;
+             case NoteBytesMetaData.FLOAT_LE_TYPE:
+                code = Float.hashCode(ByteDecoding.bytesToFloatLittleEndian(bytes));
                 break;
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
                 code =  bytes.length < 1 ? -1 : new BigInteger(bytes).hashCode();
                 break;
             case NoteBytesMetaData.BIG_DECIMAL_TYPE:
-                code = bytes.length < 5 ? -1 : new BigDecimal(new BigInteger(bytes, 4, bytes.length-4), isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes,0) :  ByteDecoding.bytesToIntBigEndian(bytes, 0)).hashCode();
+                code = bytes.length < 5 ? -1 : new BigDecimal(new BigInteger(bytes, 4, bytes.length-4), ByteDecoding.bytesToIntBigEndian(bytes, 0)).hashCode();
                 break;
             case NoteBytesMetaData.STRING_TYPE:
-                switch(byteDecoding.getCharacterEncoding()){
-                    case ByteDecoding.UTF_16:
-                        code = hashCodeUTF16(bytes, byteDecoding.isLittleEndian());
-                    break;
-                    case ByteDecoding.ISO_8859_1:
-                    case ByteDecoding.US_ASCII:
-                    case ByteDecoding.UTF_8:
-                    default:
-                        code = hashCodeUTF8(bytes);
-
-                }
+                code = new String(bytes).hashCode();
                 break;
-            case NoteBytesMetaData.RAW_BYTES_TYPE:
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                code = new String(bytes, StandardCharsets.ISO_8859_1).hashCode();
+                break;
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                code = new String(bytes, StandardCharsets.US_ASCII).hashCode();
+                break;
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                code = new String(bytes, StandardCharsets.UTF_16).hashCode();
+                break;
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                code = new String(bytes, StandardCharsets.UTF_16LE).hashCode();
+                break;
             default:
                 code = ByteDecoding.bytesToIntBigEndian(digestBytesToBytes(bytes,4));
               

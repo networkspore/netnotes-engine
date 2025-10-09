@@ -14,9 +14,8 @@ import com.google.gson.stream.JsonWriter;
 public class JsonHelpers {
     public static String parseMsgForJsonId(String msg){
         if(msg != null){
-            JsonParser jsonParser = new JsonParser();
 
-            JsonElement jsonElement = jsonParser.parse(msg);
+            JsonElement jsonElement = JsonParser.parseString(msg);
 
             if(jsonElement != null && jsonElement.isJsonObject()){
                 JsonObject json = jsonElement.getAsJsonObject();

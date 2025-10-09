@@ -19,7 +19,6 @@ import org.osgi.framework.launch.Framework;
 import io.netnotes.engine.AppDataInterface;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -141,12 +140,12 @@ public class OSGiPluginFactory {
         NoteBytes pluginIdBytes = reader.nextNoteBytes();
         while(pluginIdBytes != null && pluginIdBytes.byteLength() > 0){
             NoteBytes value = reader.nextNoteBytes();
-            if(value.getByteDecoding().getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+            if(value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                 NoteBytesMap map = new NoteBytesMap(value.get());
                 NoteBytes enabled = map.get(PluginMetaData.ENABLED_KEY);
                 if(enabled != null && enabled.getAsBoolean()){
                     NoteBytes pathValue = map.get(PluginMetaData.NOTE_PATH_KEY);
-                    if(pathValue != null && pathValue.getByteDecoding().getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+                    if(pathValue != null && pathValue.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                         NoteBytes versionValue = map.get(PluginMetaData.VERSION_KEY);
 
                         PluginMetaData pluginMetaData = new PluginMetaData(

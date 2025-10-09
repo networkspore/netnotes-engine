@@ -8,7 +8,7 @@ import java.util.Set;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>, AutoCloseable{
     private HashMap<NoteBytes, NoteBytesEphemeral> m_pairs = null;
@@ -78,7 +78,7 @@ public class NoteBytesMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>
             offset = NoteBytes.writeNote(entry.getKey(), bytes, offset);
             offset = NoteBytes.writeNote(entry.getValue(), bytes, offset);
         }
-        return new NoteBytesEphemeral(bytes, ByteDecoding.NOTE_BYTES_OBJECT);
+        return new NoteBytesEphemeral(bytes, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
     }
 
 

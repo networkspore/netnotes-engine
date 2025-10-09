@@ -10,7 +10,6 @@ import java.util.ListIterator;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
@@ -124,16 +123,6 @@ public class NoteBytesArrayList implements List<NoteBytes>{
         return length;
     }
 
-
-    public NoteBytes getNoteBytes() {
-
-        byte[] bytes = new byte[byteLength_w_MetaData()];
-        int offset = 0;
-        for(NoteBytes value : m_list) {
-            offset = NoteBytes.writeNote(value, bytes, offset);
-        }
-        return new NoteBytes(bytes, ByteDecoding.NOTE_BYTES_ARRAY);
-    }
 
     public NoteBytesArray getNoteBytesArray() {
 

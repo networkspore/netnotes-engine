@@ -169,7 +169,7 @@ public class NodeBroadcaster {
 
             CompletableFuture<Void> replyFuture = CompletableFuture.runAsync(() -> {
                 try {
-                    byte[] bytes = StreamUtils.readOutputStream(replyOut);
+                    byte[] bytes = StreamUtils.readEntireOutputStream(replyOut);
                     resultMap.put(recipientId.copy(), new NoteBytes(bytes));
                 } catch (Exception e) {
                     resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage(NoteMessaging.General.PROCESSING, "Failed to read reply", e));

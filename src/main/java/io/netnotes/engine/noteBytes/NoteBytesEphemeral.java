@@ -16,6 +16,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
     private static final Cleaner cleaner = Cleaner.create();
@@ -50,50 +51,37 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
     }
 
     public NoteBytesEphemeral( byte[] value){
-        super(value , ByteDecoding.RAW_BYTES);
+        super(value , NoteBytesMetaData.RAW_BYTES_TYPE);
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
     
     public NoteBytesEphemeral(NoteBytesPairEphemeral[] pairs){
-        this(noteBytePairsEphemeralToByteArray(pairs), ByteDecoding.NOTE_BYTES_OBJECT);
+        this(noteBytePairsEphemeralToByteArray(pairs), NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
     }
     public NoteBytesEphemeral(NoteBytesPairEphemeral pair){
-        this(noteBytePairsEphemeralToByteArray(new NoteBytesPairEphemeral[]{pair}), ByteDecoding.NOTE_BYTES_OBJECT);
+        this(noteBytePairsEphemeralToByteArray(new NoteBytesPairEphemeral[]{pair}), NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
     }
 
-    public NoteBytesEphemeral( byte[] value, ByteDecoding byteDecoding){
-        super(value , byteDecoding);
-        this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
-    }
 
     public NoteBytesEphemeral( byte[] value, byte type){
-        super(value , ByteDecoding.of(type));
+        super(value , type);
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
 
     public NoteBytesEphemeral(NoteBytes other) {
-        super(other.getBytes(), other.getByteDecoding());
+        super(other.getBytes(), other.getType());
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
 
-    public NoteBytesEphemeral(NoteBytesReadOnly other) {
-        super(other.getBytes(), other.getByteDecoding());
-        this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
-    }
 
     public static NoteBytesEphemeral readNote(byte[] bytes, int offset){
-        return readNote(bytes, offset, false);
-    }
-
-    public static NoteBytesEphemeral readNote(byte[] bytes, int offset, boolean isLittleEndian){
         byte type = bytes[offset];
         offset++;
-        int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+        int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytesEphemeral(dst, ByteDecoding.of(type));
+        return new NoteBytesEphemeral(dst, type);
     }
-
 
      /**
      * Explicitly clean up resources - called by try-with-resources

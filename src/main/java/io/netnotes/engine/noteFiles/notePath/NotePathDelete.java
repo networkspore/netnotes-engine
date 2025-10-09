@@ -204,7 +204,7 @@ public class NotePathDelete {
                 notePath.getByteCounter().add(keyByteSize);
 
 
-                byte keyType = key.getByteDecoding().getType();
+                byte keyType = key.getType();
 
                 if(key.equals(NotePath.FILE_PATH)){
 

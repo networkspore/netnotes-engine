@@ -21,27 +21,28 @@ public class NoteBytesMerkleTree extends NoteBytes {
     private NoteBytesNode m_root = null;
     private int m_size = 0;
     private final int HASH_SIZE = 32;
-    private byte[] m_merkleRoot = new byte[HASH_SIZE];;
+    private byte[] m_merkleRoot = new byte[HASH_SIZE];
     
     public NoteBytesMerkleTree() {
-        this(new byte[0]);
+        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_TREE_TYPE);
     }
     
     public NoteBytesMerkleTree(byte[] bytes) {
-        super(bytes, ByteDecoding.NOTE_BYTES_TREE);
+        this();
+        set(bytes);
     }
 
 
     @Override
     public void set(byte[] bytes){
-        set(bytes, ByteDecoding.NOTE_BYTES_TREE);
+        set(bytes, NoteBytesMetaData.NOTE_BYTES_TREE_TYPE);
     }
 
     @Override
-    public void set(byte[] bytes, ByteDecoding byteDecoding) {
+    public void set(byte[] bytes, byte type) {
         deserialize(bytes);
         updateMerkleRoot();
-        super.set(new byte[0], byteDecoding);
+        super.set(new byte[0], type);
     }
 
 
@@ -214,7 +215,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         try {
             List<NoteBytes> elements = inOrderTraversal();
             for (NoteBytes element : elements) {
-                byte type = element.getByteDecoding().getType();
+                byte type = element.getType();
                 
                 if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
                     elementsArray.add(element.getAsJsonArray());
@@ -244,7 +245,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         try {
             List<NoteBytes> elements = inOrderTraversal();
             for (NoteBytes element : elements) {
-                byte type = element.getByteDecoding().getType();
+                byte type = element.getType();
                 
                 if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
                     elementsArray.add(element.getAsJsonArray());
@@ -303,7 +304,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         // Write node data
         NoteBytes data = node.getData();
         byte[] dataBytes = data.get();
-        byte type = data.getByteDecoding().getType();
+        byte type = data.getType();
         
         // Write type
         outputStream.write(type);

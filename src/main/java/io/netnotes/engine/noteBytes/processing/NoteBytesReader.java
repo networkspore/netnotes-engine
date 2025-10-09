@@ -36,11 +36,11 @@ public class NoteBytesReader implements AutoCloseable{
         if(type != -1){
             byte[] fourBytes = new byte[4];
             m_in.read(fourBytes);
-            ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
-            int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
+            
+            int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
             byte[] data = readNextBytes(len);
      
-            return new NoteBytesEphemeral(data, byteDecoding);
+            return new NoteBytesEphemeral(data, (byte) type);
         }
         return null;
     }
@@ -50,11 +50,10 @@ public class NoteBytesReader implements AutoCloseable{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
-            m_in.read(fourBytes);
-            ByteDecoding byteDecoding = ByteDecoding.of((byte)type);
-            int len = ByteDecoding.bytesToInt(fourBytes, byteDecoding);
+
+            int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
             byte[] data = readNextBytes(len);
-            return new NoteBytesReadOnly(data, byteDecoding);
+            return new NoteBytesReadOnly(data, (byte) type);
         }
         return null;
     }

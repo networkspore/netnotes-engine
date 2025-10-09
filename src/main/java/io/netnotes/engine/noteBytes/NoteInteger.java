@@ -1,27 +1,29 @@
 package io.netnotes.engine.noteBytes;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteInteger extends NoteBytes  {
 
     public NoteInteger(int integer){
-        super(ByteDecoding.intToBytesBigEndian(integer), ByteDecoding.INTEGER);
+        super(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
 
     }
 
     public NoteInteger(byte[] bytes){
-        super(bytes, ByteDecoding.INTEGER);
+        super(bytes, NoteBytesMetaData.INTEGER_TYPE);
     }
 
-    public static int getInteger(int a, int b, int c, int d, ByteDecoding type){
+    public static int getInteger(int a, int b, int c, int d, byte type){
 
         byte[] bytes = new byte[]{(byte)a, (byte) b, (byte) c, (byte) d};
-        return type.isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes) ; 
+        return ByteDecoding.isLittleEndian(type) ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes) ; 
         
     }
 
+ 
     public static int getInteger(int a, int b, int c, int d){
-        return getInteger(a, b, c, d, ByteDecoding.INTEGER);
+        return getInteger(a, b, c, d, NoteBytesMetaData.INTEGER_TYPE);
     }
     
 
@@ -30,7 +32,7 @@ public class NoteInteger extends NoteBytes  {
     }
     
     public int getInteger(){
-        return getInteger(getByteDecoding().isLittleEndian());
+        return getInteger(isLittleEndian());
     }
     public int getInteger(boolean isLittleEndian){
         return isLittleEndian? ByteDecoding.bytesToIntLittleEndian(getBytes()) : ByteDecoding.bytesToIntBigEndian(getBytes()); 

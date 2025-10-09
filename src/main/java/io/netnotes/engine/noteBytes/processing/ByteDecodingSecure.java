@@ -7,9 +7,6 @@ package io.netnotes.engine.noteBytes.processing;
  */
 public class ByteDecodingSecure extends ByteDecoding {
 
-    public ByteDecodingSecure(byte... bytes) {
-        super(bytes);
-    }
 
     // ===== VALIDATED INTEGER CONVERSIONS =====
 
@@ -408,16 +405,6 @@ public class ByteDecodingSecure extends ByteDecoding {
         return ByteDecoding.bytesToBoolean(bytes, offset);
     }
 
-    // ===== VALIDATED UTILITY METHODS =====
-
-    public static int bytesToIntSecure(byte[] bytes, ByteDecoding byteDecoding) {
-        if (byteDecoding == null) {
-            throw new IllegalArgumentException("ByteDecoding cannot be null");
-        }
-        return byteDecoding.isLittleEndian() ? 
-            bytesToIntLittleEndianSecure(bytes) : 
-            bytesToIntBigEndianSecure(bytes);
-    }
 
     // ===== VALIDATED ARRAY METHODS =====
 

@@ -1,10 +1,6 @@
 package io.netnotes.engine.noteBytes;
 
-import java.nio.CharBuffer;
 import java.util.concurrent.locks.ReentrantLock;
-
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBytesAsync extends NoteBytes{
 
@@ -14,42 +10,37 @@ public class NoteBytesAsync extends NoteBytes{
         super(bytes);        
     }
  
-
     public NoteBytesAsync( String value){
-        this(value.toCharArray());
+        super(value);
     }
 
     public NoteBytesAsync(long _long){
-        this(ByteDecoding.longToBytesBigEndian(_long), NoteBytesMetaData.LONG_TYPE);
+        super(_long);
     }
 
-    public NoteBytesAsync( Byte[] value){
-        this(ByteDecoding.unboxBytes(value));
+    public NoteBytesAsync( Byte[] value, byte type){
+        super(value, type);
     }
 
     public NoteBytesAsync( char[] value){
-        this( ByteDecoding.charsToBytes(value), ByteDecoding.STRING_UTF8);
+        super(value);
     }
     
-    public NoteBytesAsync( String value, ByteDecoding byteDecoding){
-        this(ByteDecoding.charsToByteArray(CharBuffer.wrap(value), byteDecoding), byteDecoding);
-    }
-
-    public NoteBytesAsync( CharBuffer charBuffer, ByteDecoding byteDecoding){
-        this( ByteDecoding.charsToByteArray(charBuffer, byteDecoding), byteDecoding);
+    public NoteBytesAsync( String value, byte type){
+        super(value, type);
     }
 
 
-    public NoteBytesAsync( char[] value, ByteDecoding byteDecoding){
-        this( ByteDecoding.charsToByteArray(value, byteDecoding), byteDecoding);
-    }
-
-    public NoteBytesAsync( byte[] value, ByteDecoding byteDecoding){
-        super(value, byteDecoding);
+    public NoteBytesAsync( char[] value, byte type){
+        super(value, type);
     }
 
     public NoteBytesAsync( byte[] value, byte type){
-        this(value, ByteDecoding.of(type));
+        super(value, type);
+    }
+
+    public NoteBytesAsync(NoteBytes noteBytes){
+        super(noteBytes.get(), noteBytes.getType());
     }
 
     protected void acquireLock() throws InterruptedException {
@@ -60,16 +51,6 @@ public class NoteBytesAsync extends NoteBytes{
         m_lock.unlock();
     }
 
-       public void set(byte[] value, ByteDecoding byteDecoding) {
-        try {
-            acquireLock();
-            super.set(value, byteDecoding);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            releaseLock();
-        }
-    }
 
     public ReentrantLock getLock(){
         return m_lock;

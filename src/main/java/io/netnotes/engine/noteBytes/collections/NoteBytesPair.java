@@ -35,6 +35,7 @@ public class NoteBytesPair {
     public NoteBytesPair(String key, Object value){
         this(new NoteBytes(key), NoteBytes.of(value));    
     }
+    
     public NoteBytesPair(NoteBytes key, Object value){
         this(key, NoteBytes.of(value));    
     }
@@ -47,18 +48,9 @@ public class NoteBytesPair {
 
     public NoteBytesPair(String key, Byte[] value, byte type){
         m_key = new NoteBytes(key);
-        m_value = new NoteBytes(ByteDecoding.unboxBytes(value), ByteDecoding.of(type));
+        m_value = NoteBytes.of(ByteDecoding.unboxBytes(value), type);
     }
 
-    public NoteBytesPair(NoteBytes key, NoteBytes value, byte type){
-        m_key = key;
-        m_value = new NoteBytes(value.get(), ByteDecoding.of(type));
-    }
-
-    public NoteBytesPair(NoteBytes key, NoteBytes value, ByteDecoding byteDecoding){
-        m_key = key;
-        m_value = new NoteBytes(value.get(), byteDecoding);
-    }
 
     public NoteBytes getKey(){
         return m_key;

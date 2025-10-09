@@ -21,7 +21,7 @@ public class NoteBytesWriter implements AutoCloseable {
     public int write(NoteBytes noteBytes) throws IOException{
         byte[] bytes = noteBytes.get();
         int byteLength = bytes.length;
-        m_out.write(noteBytes.getByteDecoding().getType());
+        m_out.write(noteBytes.getType());
         m_out.writeInt(byteLength);
         m_out.write(bytes);
         return NoteBytesMetaData.STANDARD_META_DATA_SIZE + byteLength;

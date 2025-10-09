@@ -23,11 +23,11 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 public class NoteBytesObject extends NoteBytes{
 
     public NoteBytesObject(){
-        super(new byte[0], ByteDecoding.NOTE_BYTES_OBJECT);
+        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
     }
 
     public NoteBytesObject(byte[] bytes){
-        super(bytes, ByteDecoding.NOTE_BYTES_OBJECT);        
+        super(bytes, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);        
     }
 
     public NoteBytesObject(NoteBytesPair[] pairs){
@@ -258,18 +258,8 @@ public class NoteBytesObject extends NoteBytes{
         add(new NoteBytes(key), new NoteBigDecimal(value));
     }
 
-    public void add(String key, NoteBytesObject value) {
-        add(new NoteBytes(key), value, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
-    }
-    public void add(String key, NoteBytesArray value) {
-        add(new NoteBytes(key), value, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
-    }
-
-    public void add(NoteBytes key, NoteBytes value, byte type) {
-        add(new NoteBytesPair(key, value, type));       
-    }
-
-
+   
+ 
     public void addAll(Map<? extends NoteBytes, ? extends NoteBytes> m) {
       
         for(Map.Entry<? extends NoteBytes, ? extends NoteBytes> pair : m.entrySet()){
@@ -372,7 +362,7 @@ public class NoteBytesObject extends NoteBytes{
                 if (currentIndex == pairIndex) {
                     removedPair = new NoteBytesPair(
                         new NoteBytes(keyBytes),
-                        new NoteBytes(valueBytes, ByteDecoding.of(valueType))
+                        new NoteBytes(valueBytes, valueType)
                     );
                 } else {
                     // Write key
@@ -422,27 +412,9 @@ public class NoteBytesObject extends NoteBytes{
     
     @Override
     public JsonArray getAsJsonArray(){
-           
-        byte[] bytes = get();
-        if(bytes == null){
-            return null;
-        }
-        
         JsonArray jsonArray = new JsonArray();
-        if(bytes.length == 0){
-            return jsonArray;
-        }
-        int length = bytes.length;
-        int offset = 0;
-        while(offset < length){
-            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-            jsonArray.add(noteBytes.getAsJsonElement());
-            offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content
-        }
-        
+        jsonArray.add(getAsJsonObject());
         return jsonArray;
-    
-     
     }
 
     @Override
@@ -460,7 +432,7 @@ public class NoteBytesObject extends NoteBytes{
             while(offset < length){
                 NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
                 NoteBytes value = pair.getValue();
-                byte type = value.getByteDecoding().getType();
+                byte type = getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonObject.add(pair.getKeyAsString(), value.getAsJsonArray());

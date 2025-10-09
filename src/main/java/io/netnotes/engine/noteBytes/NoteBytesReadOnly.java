@@ -10,15 +10,12 @@ public class NoteBytesReadOnly extends NoteBytes {
     }
 
     public NoteBytesReadOnly(NoteBytes value){
-        super(value.get(), value.getByteDecoding());
+        super(value.get(), value.getType());
     }
 
-    public NoteBytesReadOnly(byte[] bytes, ByteDecoding byteDecoding){
-        super(bytes, byteDecoding);
-    }
-
+   
     public NoteBytesReadOnly( byte[] value, byte type){
-        this(value, ByteDecoding.of(type));
+        super(value, type);
     }
 
     public static NoteBytesReadOnly readNote(byte[] bytes, int offset){
@@ -31,7 +28,7 @@ public class NoteBytesReadOnly extends NoteBytes {
         int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
         byte[] dst = new byte[size];
         System.arraycopy(bytes, offset + 4, dst, 0, size);
-        return new NoteBytesReadOnly(dst, ByteDecoding.of(type));
+        return new NoteBytesReadOnly(dst, type);
     }
 
     @Override 
@@ -45,7 +42,7 @@ public class NoteBytesReadOnly extends NoteBytes {
     
     @Override
     public NoteBytesReadOnly copy(){
-        return new NoteBytesReadOnly(get(), getByteDecoding());
+        return new NoteBytesReadOnly(get(), getType());
     }
 
     @Override
@@ -54,12 +51,12 @@ public class NoteBytesReadOnly extends NoteBytes {
     }
 
     @Override
-    public void set(byte[] disabled, ByteDecoding disabledByteDecoding){
+    public void set(byte[] disabled, byte type){
 
     }
 
     @Override
-    public void setByteDecoding(ByteDecoding disabled){
+    public void setType(byte disabled){
 
     }
 

@@ -408,7 +408,7 @@ public class SecureMessageV1 extends MessageHeader {
         if (senderPublicKeyReadOnly == null || lengthReadOnly == null) {
             throw new SecurityException("Missing signature metadata");
         }
-        byte type = lengthReadOnly.getByteDecoding().getType();
+        byte type = lengthReadOnly.getType();
         
         byte[] senderPublicKeyBytes = senderPublicKeyReadOnly.get();
     

@@ -161,7 +161,7 @@ public class NoteBytesTree{
         // Write node data
         NoteBytes data = node.getData();
         byte[] dataBytes = data.get();
-        byte type = data.getByteDecoding().getType();
+        byte type = data.getType();
         
         // Write type
         outputStream.write(type);

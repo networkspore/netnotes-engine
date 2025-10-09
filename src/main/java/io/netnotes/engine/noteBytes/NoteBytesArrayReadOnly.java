@@ -14,15 +14,11 @@ public class NoteBytesArrayReadOnly extends NoteBytesArray{
 
  
     public NoteBytesArrayReadOnly(byte[] bytes){
-        super(bytes, ByteDecoding.NOTE_BYTES_ARRAY);
+        super(bytes);
     }
 
     public NoteBytesArrayReadOnly(NoteBytes[] noteBytes){
         this(getBytesFromArray(noteBytes));
-    }
-
-    public NoteBytesArrayReadOnly(byte[] bytes, ByteDecoding byteDecoding){
-        super(bytes,byteDecoding);
     }
 
     public Stream<NoteBytesReadOnly> getAsReadOnlyStream(){
@@ -59,8 +55,8 @@ public class NoteBytesArrayReadOnly extends NoteBytesArray{
             if(noteBytesObj.isRuined()){
                 return false;
             }
-            byte objType = noteBytesObj.getByteDecoding().getType();
-            byte thisType = getByteDecoding().getType();
+            byte objType = noteBytesObj.getType();
+            byte thisType = getType();
             if(objType != thisType){
                 return false;
             }
@@ -153,12 +149,12 @@ public class NoteBytesArrayReadOnly extends NoteBytesArray{
     }
 
     @Override
-    public void set(byte[] disabled, ByteDecoding disabledByteDecoding){
+    public void set(byte[] disabled, byte type){
 
     }
 
     @Override
-    public void setByteDecoding(ByteDecoding disabled){
+    public void setType(byte type){
 
     }
 

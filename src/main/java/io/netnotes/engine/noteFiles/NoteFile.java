@@ -84,7 +84,7 @@ public class NoteFile implements AutoCloseable  {
 
                 PipedOutputStream encryptOutput = new PipedOutputStream();
                 try{
-                    StreamUtils.pipedOutputDuplicate(decryptedOutput, readOutput, encryptOutput, null);
+                    StreamUtils.duplicateEntireStream(decryptedOutput, readOutput, encryptOutput, null);
 
                     return m_noteFileInterface.saveEncryptedFileSwap(encryptOutput);
                 }catch(IOException e){

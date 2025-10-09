@@ -2,13 +2,13 @@ package io.netnotes.engine.noteBytes;
 
 import java.math.BigInteger;
 
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteBigInteger extends NoteBytes {
     public NoteBigInteger(BigInteger bigInt){
-        super(bigInt.toByteArray(), ByteDecoding.BIG_INTEGER);
+        super(bigInt.toByteArray(),  NoteBytesMetaData.BIG_INTEGER_TYPE);
     }
     public NoteBigInteger(byte[] bytes){
-        super(bytes, ByteDecoding.BIG_INTEGER);
+        super(bytes, NoteBytesMetaData.BIG_INTEGER_TYPE);
     }
 }

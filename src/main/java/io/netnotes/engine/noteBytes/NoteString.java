@@ -1,15 +1,9 @@
 package io.netnotes.engine.noteBytes;
 
-import java.nio.ByteBuffer;
-import java.util.Arrays;
-
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 
 public class NoteString extends NoteBytes {
-
-    public NoteString(ByteBuffer byteBuffer, ByteDecoding byteDecoding){
-        this(Arrays.copyOfRange(byteBuffer.array(), byteBuffer.position(), byteBuffer.limit() - byteBuffer.position()), byteDecoding);
-    }
 
     public NoteString(String key){
         this(key.toCharArray());
@@ -19,15 +13,15 @@ public class NoteString extends NoteBytes {
         super(key);
     }
 
-    public NoteString(byte[] bytes, ByteDecoding byteDecoding){
-        super(bytes, byteDecoding);
+    public NoteString(byte[] bytes, byte type){
+        super(bytes, type);
     }
 
     public NoteString(byte[] bytes){
-        super(bytes, ByteDecoding.STRING_UTF8);
+        super(bytes, NoteBytesMetaData.STRING_TYPE);
     }
      public NoteString(){
-        super(new byte[0], ByteDecoding.STRING_UTF8);
+        super(new byte[0], NoteBytesMetaData.STRING_TYPE);
     }
 
     public String getString(){
@@ -35,44 +29,23 @@ public class NoteString extends NoteBytes {
     }
 
     public void setString(NoteString str){
-        set(str.getBytes(), str.getByteDecoding());
+        set(str.getBytes(), str.getType());
     }
 
     public void setString(String str){
-        set(ByteDecoding.charsToByteArray(str.toCharArray(), getByteDecoding()));
-    }
-
-    @Override
-    public void set(byte[] bytes, ByteDecoding byteDecoding){
-        super.set(bytes, byteDecoding);
+        set(ByteDecoding.stringToBytes(str, getType()));
     }
 
 
     @Override
     public String toString(){
         
-        return new String(decodeCharArray());
+        return getAsString();
     }
 
 
 
-    public static NoteString getNoteStringFromBuffer(ByteBuffer encodedBytes, int length, ByteDecoding byteDecoding){
-        if(length > 0){
-            byte[] bytes = new byte[length];
-            encodedBytes.get(bytes);
-            return new NoteString(bytes, byteDecoding);
-        }
-        return new NoteString(new byte[0], ByteDecoding.STRING_UTF8);    
-    } 
 
-
-    public static NoteString copyNoteStringFromBuffer(ByteBuffer encodedBytes, int offset, int length, ByteDecoding byteDecoding){
-        length = Math.min(length, encodedBytes.limit() - offset); 
-        if(length > 0){
-            return new NoteString(Arrays.copyOfRange(encodedBytes.array(), offset, length), byteDecoding);
-        }
-        return new NoteString(new byte[0], ByteDecoding.STRING_UTF8);    
-    } 
 
 
 

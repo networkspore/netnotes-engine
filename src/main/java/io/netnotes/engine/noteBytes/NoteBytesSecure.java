@@ -17,7 +17,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
 
 
     public NoteBytesSecure( byte[] value){
-        this(value , ByteDecoding.RAW_BYTES);
+        this(value , NoteBytesMetaData.RAW_BYTES_TYPE);
     }
 
     public NoteBytesSecure( String value){
@@ -33,37 +33,34 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
     }
 
     public NoteBytesSecure( char[] value){
-        this( ByteDecodingSecure.charsToBytes(value), ByteDecodingSecure.STRING_UTF8);
+        this( ByteDecodingSecure.charsToBytes(value), NoteBytesMetaData.STRING_TYPE);
     }
     
 
-    public NoteBytesSecure( char[] value, ByteDecoding byteDecoding){
-        this( ByteDecodingSecure.charsToByteArray(value, byteDecoding), byteDecoding);
+    public NoteBytesSecure( char[] value, byte type){
+        this( ByteDecodingSecure.charsToByteArray(value, type), type);
     }
 
    
     public NoteBytesSecure( byte[] value, byte type){
-        this(value, ByteDecodingSecure.of(type));
+        super(value, type);
     }
     
-    public NoteBytesSecure( byte[] value, ByteDecoding byteDecoding){
-        super(value, byteDecoding);
-    }
-
+ 
     public void close(){
         destroy();
     }
 
 
     @Override
-    public void set(byte[] value, ByteDecoding byteDecoding) {
+    public void set(byte[] value, byte type) {
         byte[] bytes = value != null ? Arrays.copyOf(value, value.length) : new byte[0];
-        super.set(bytes, byteDecoding);
+        super.set(bytes, type);
     }
 
     @Override
     public void set( byte[] value){
-        super.set(value);
+        set(value, getType());
     }
 
 
@@ -88,17 +85,10 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
 
     @Override
     public void setValueInteger(int value){
-        ByteDecoding byteDecoding = getByteDecoding();
-        boolean isLittleEndian = byteDecoding != null && byteDecoding.isLittleEndian();
-
+        byte type = getType();
+        boolean isLittleEndian = ByteDecoding.isLittleEndian(type);
         byte[] bytes = isLittleEndian ? ByteDecodingSecure.intToBytesLittleEndian(value) : ByteDecodingSecure.intToBytesBigEndian(value);
-       
-        if(byteDecoding != null && (byteDecoding.getType() == NoteBytesMetaData.INTEGER_TYPE || byteDecoding.getType() == NoteBytesMetaData.LONG_TYPE)){
-            super.set(bytes, byteDecoding);
-        }else{
-            super.set(bytes, isLittleEndian ? ByteDecodingSecure.INTEGER_LITTLE_ENDIAN : ByteDecodingSecure.INTEGER);
-        }
-   
+        super.set(bytes, type);
     }
 
     @Override
@@ -110,20 +100,11 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
     @Override
     public double getAsDouble(){
         byte[] bytes =  super.get();
-    
-        return  getByteDecoding().isLittleEndian() ? ByteDecodingSecure.bytesToDoubleLittleEndian(bytes) : ByteDecodingSecure.bytesToDoubleBigEndian(bytes);
+        boolean isLittleEndian = isLittleEndian();
+        return  isLittleEndian ? ByteDecodingSecure.bytesToDoubleLittleEndian(bytes) : ByteDecodingSecure.bytesToDoubleBigEndian(bytes);
     }
-    @Override
-    public byte getAsByte(){
-        if(byteLength() == 0){
-            return 0;
-        }
-        if(byteLength() > 1){
-            throw new IllegalStateException("Expected 1 byte for byte conversion, got " + byteLength());
-        }
-        byte[] bytes = Arrays.copyOf( super.get(), 1);
-        return bytes[0];
-    }
+   
+
 
     @Override
     public int getAsInt(){
@@ -135,7 +116,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
         }
          byte[] bytes =  super.get();
 
-        return getByteDecoding().isLittleEndian() ? ByteDecodingSecure.bytesToIntLittleEndian(bytes) : ByteDecodingSecure.bytesToIntBigEndian(bytes);
+        return isLittleEndian() ? ByteDecodingSecure.bytesToIntLittleEndian(bytes) : ByteDecodingSecure.bytesToIntBigEndian(bytes);
     }
     @Override
     public short getAsShort(){
@@ -146,7 +127,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
             throw new IllegalStateException("Expected up to 2 bytes for short conversion, got " + byteLength());
         }
          byte[] bytes =  super.get();
-        return getByteDecoding().isLittleEndian() ? ByteDecodingSecure.bytesToShortLittleEndian(bytes) : ByteDecodingSecure.bytesToShortBigEndian(bytes);
+        return isLittleEndian() ? ByteDecodingSecure.bytesToShortLittleEndian(bytes) : ByteDecodingSecure.bytesToShortBigEndian(bytes);
     }
     @Override
      public long getAsLong(){
@@ -158,7 +139,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
         }
         byte[] bytes =  super.get();
   
-        return getByteDecoding().isLittleEndian() ? ByteDecodingSecure.bytesToIntLittleEndian(bytes) : ByteDecodingSecure.bytesToIntBigEndian(bytes);
+        return isLittleEndian() ? ByteDecodingSecure.bytesToIntLittleEndian(bytes) : ByteDecodingSecure.bytesToIntBigEndian(bytes);
     }
 
     

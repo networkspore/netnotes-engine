@@ -17,20 +17,17 @@ import io.netnotes.engine.utils.CollectionHelpers;
 public class NoteBytesArrayAsync extends NoteBytesAsync{
 
     public NoteBytesArrayAsync(){
-        super(new byte[0], ByteDecoding.NOTE_BYTES_ARRAY);
+        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
     public NoteBytesArrayAsync(byte[] bytes){
-        super(bytes, ByteDecoding.NOTE_BYTES_ARRAY);
+        super(bytes, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
     public NoteBytesArrayAsync(NoteBytes[] noteBytes){
         this(getBytesFromArray(noteBytes));
     }
 
-    public NoteBytesArrayAsync(byte[] bytes, ByteDecoding byteDecoding){
-        super(bytes,byteDecoding);
-    }
     
     public static byte[] getBytesFromArray(NoteBytes[] noteBytesArray){
         int length = noteBytesArray != null && noteBytesArray.length > 0 ? noteBytesArray.length : 0;
@@ -39,7 +36,7 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
             int dstOffset = 0;
             for(int i = 0; i < noteBytesArray.length; i ++){
                 NoteBytes noteBytes = noteBytesArray[i];
-                byte type = noteBytes.getByteDecoding().getType();
+                byte type = noteBytes.getType();
                 byte[] intBytes = ByteDecoding.intToBytesBigEndian(noteBytes.byteLength());
                 byte[] buffer = noteBytes.get();                
                 dstBytes[dstOffset++] = type;
@@ -106,16 +103,16 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                 int length = bytes.length;
                 int offset = 0;
                 int counter = 0;
-                boolean isLittleEndian = getByteDecoding().isLittleEndian();
+          
                 while(offset < length){
                     byte type = bytes[offset];
                     offset++;
-                    int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                    int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
                     offset += 4;
                     if(counter == index){
                         byte[] dst = new byte[size];
                         System.arraycopy(bytes, offset, dst, 0, size);
-                        return new NoteBytes(dst, ByteDecoding.of(type));
+                        return NoteBytes.of(dst, type);
                     }
                     offset += size;
                     counter++;
@@ -144,10 +141,10 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                 int length = bytes.length;
                 int offset = 0;
                 int counter = 0;
-                boolean isLittleEndian = getByteDecoding().isLittleEndian();
+               
                 while(offset < length){
                     offset++;
-                    int size = isLittleEndian ?  ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                    int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
                     offset += 4;
                     byte[] buffer = new byte[size];
                     System.arraycopy(bytes, offset, buffer, 0, size);
@@ -252,16 +249,16 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                     
                     while (offset < length) {
                         byte type = bytes[offset];
-                        int size = getByteDecoding().isLittleEndian() ? ByteDecoding.bytesToIntLittleEndian(bytes, offset + 1) : ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
+                        int size = ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
                         
                         byte[] contentBytes = new byte[size];
                         System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
                         
                         if (removedBytes == null && Arrays.equals(contentBytes, noteBytes.get())) {
-                            removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
+                            removedBytes = NoteBytes.of(contentBytes, type);
                         } else {
                             outputStream.write(type);
-                            outputStream.write(getByteDecoding().isLittleEndian() ? ByteDecoding.intToBytesLittleEndian(size) : ByteDecoding.intToBytesBigEndian(size));
+                            outputStream.write(ByteDecoding.intToBytesBigEndian(size));
                             outputStream.write(contentBytes);
                         }
                         
@@ -299,8 +296,7 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                     while (offset < bytes.length) {
                         // Read metadata (1 byte type + 4 bytes length)
                         byte type = bytes[offset];
-                        int size = getByteDecoding().isLittleEndian() ? 
-                            ByteDecoding.bytesToIntLittleEndian(bytes, offset + 1) : 
+                        int size = 
                             ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
                         
                         // Validate size to prevent buffer overrun
@@ -312,13 +308,11 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                             // Store the bytes being removed
                             byte[] contentBytes = new byte[size];
                             System.arraycopy(bytes, offset + 5, contentBytes, 0, size);
-                            removedBytes = new NoteBytes(contentBytes, ByteDecoding.of(type));
+                            removedBytes = NoteBytes.of(contentBytes, type);
                         } else {
                             // Write metadata
                             outputStream.write(type);
-                            outputStream.write(getByteDecoding().isLittleEndian() ? 
-                                ByteDecoding.intToBytesLittleEndian(size) : 
-                                ByteDecoding.intToBytesBigEndian(size));
+                            outputStream.write(ByteDecoding.intToBytesBigEndian(size));
                             // Write content
                             outputStream.write(bytes, offset + 5, size);
                         }
@@ -355,10 +349,10 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
                     int length = bytes.length;
                     int offset = 0;
                     int counter = 0;
-                    boolean isLittleEndian = getByteDecoding().isLittleEndian();
+             
                     while(offset < length){
                         offset++;
-                        int size = isLittleEndian ? ByteDecoding.bytesToIntLittleEndian(bytes, offset) : ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                        int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
                         offset += 4 + size;
                         counter++;
                     }
@@ -391,7 +385,7 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
     
             while(offset < length){
                 NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-                byte type = noteBytes.getByteDecoding().getType();
+                byte type = noteBytes.getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonArray.add(noteBytes.getAsJsonArray());
@@ -422,7 +416,7 @@ public class NoteBytesArrayAsync extends NoteBytesAsync{
             int i = 0;
             while(offset < length){
                 NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-                byte type = noteBytes.getByteDecoding().getType();
+                byte type = noteBytes.getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonObject.add(i + "", noteBytes.getAsJsonArray());

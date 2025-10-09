@@ -13,6 +13,7 @@ import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding.NoteBytesMetaData;
 import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytes {
@@ -22,14 +23,15 @@ public class NoteUUID extends NoteBytes {
     private boolean m_isInit = false;
 
     public NoteUUID(byte[] bytes){
-        super(bytes, ByteDecoding.RAW_BYTES);
+        super(bytes, NoteBytesMetaData.URL_SAFE_TYPE);
+        m_isInit = true;
     }
 
 
     @Override
-    public void set(byte[] bytes, ByteDecoding byteDecoding){
+    public void set(byte[] bytes, byte type){
         if(!m_isInit){
-            super.set(bytes, byteDecoding);
+            super.set(bytes, type);
             m_isInit = true;
         }
     }
@@ -40,20 +42,7 @@ public class NoteUUID extends NoteBytes {
         return Arrays.copyOf(bytes, byteLength());
     }
 
-    @Override
-    public boolean equals(Object obj){
-        if(obj != null){
-            if( obj.getClass().equals(this.getClass())){
-                return ((NoteBytes) obj).compareBytes(super.get());
-            }else if(obj instanceof NoteBytes){
-                return compareBytes(((NoteBytes) obj).get());
-            }
-        }
-        return false;
-    }
-
-  
-
+      
     public static byte[] littleEndianNanoTimeHash(){
         return ByteDecoding.intToBytesLittleEndian(Long.hashCode(System.nanoTime()));
     }
@@ -94,7 +83,6 @@ public class NoteUUID extends NoteBytes {
     }
 
     public static CompletableFuture<NoteUUID> createNotesUUID256(ExecutorService execService){ 
-       
         return HardwareInfo.getHardwareInfo(new NoteStringArray("nic","hdd"), execService).thenApply((hardwareInfo)->{
             try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
                 NoteBytesPair[] sources = hardwareInfo.getAsArray();
@@ -110,11 +98,6 @@ public class NoteUUID extends NoteBytes {
                 throw new CompletionException(e);
             }
         });
-        
-        
-                        
-                    
-         
     }
 
     public static NoteUUID fromURLSafeString(String urlSafeString){
