@@ -8,3 +8,5 @@ dependency-reduced-pom.xml
 netnotes-log.txt
 **/*.sh
 **/*.erg
+**/*.back
+**/back/

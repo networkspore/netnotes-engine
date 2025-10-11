@@ -19,7 +19,6 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteRandom;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
@@ -36,7 +35,6 @@ public class SettingsData {
     public static final File HOME_DIRECTORY = new File(System.getProperty("user.home"));
     public static final File DESKTOP_DIRECTORY = new File(HOME_DIRECTORY + "/Desktop");
     
-    private static final int m_saltLength = 16;
     private static File m_appDir = null;
     private static File m_appFile = null;
     private static NoteBytesReadOnly m_appHash = null;
@@ -47,7 +45,6 @@ public class SettingsData {
     private SecretKey m_oldKey = null;
     private SecretKey m_secretKey = null;
     private NoteBytes m_bcryptKey;
-    private NoteBytes m_salt = null;
 
     static{
         try{
@@ -63,12 +60,11 @@ public class SettingsData {
         }
     }
 
-    public SettingsData(SecretKey secretKey, NoteBytes bcrypt, NoteBytes salt){
+    public SettingsData(SecretKey secretKey, NoteBytes bcrypt){
    
 
         m_secretKey = secretKey;
         m_bcryptKey = bcrypt;
-        m_salt = salt;
     }
 
     private static File getAppFileDir(){
@@ -99,10 +95,8 @@ public class SettingsData {
     public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws InvalidPasswordException, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
         verifyPassword(oldPassword, m_bcryptKey);
         NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
-        NoteBytes salt = new NoteRandom(m_saltLength);
-        SecretKey secretKey = CryptoService.createKey(newPassword, salt);
+        SecretKey secretKey = CryptoService.createKey(newPassword);
       
-        m_salt = salt;
         m_bcryptKey = bcrypt;
         m_secretKey = secretKey;
 
@@ -126,15 +120,6 @@ public class SettingsData {
         return m_javaVersion;
     }
 
-
-
-     public NoteBytes getSalt(){
-        return m_salt;
-    }
-
-    public void setSalt(NoteBytes salt){
-        m_salt = salt;
-    }
 
     public SecretKey getSecretKey(){
         return m_secretKey;
@@ -172,14 +157,13 @@ public class SettingsData {
     }
 
     public void save() throws IOException {
-        save(m_bcryptKey, m_salt);
+        save(m_bcryptKey);
     }
 
-    private static void save( NoteBytes bcryptKey, NoteBytes salt)throws IOException{
+    private static void save( NoteBytes bcryptKey)throws IOException{
            File file = getSettingsFile();
         NoteBytesObject obj = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair("appKey", bcryptKey),
-            new NoteBytesPair("salt", salt)
+            new NoteBytesPair("appKey", bcryptKey)
         });
         FileStreamUtils.writeFileBytes(file, obj.get());
     }
@@ -188,11 +172,20 @@ public class SettingsData {
 
     }
 
+    public static boolean isSettingsData() throws IOException{
+        File settingsFile = getSettingsFile();
+        if(settingsFile.exists() && settingsFile.isFile()){
+            return true;
+        }
+
+        return false;
+    }
+
 
     public static SettingsData createSettings(NoteBytesEphemeral password) throws InvalidKeySpecException, NoSuchAlgorithmException, IOException{
         NoteBytes bcrypt = HashServices.getBcryptHash(password);
-        NoteBytes salt = new NoteRandom(m_saltLength);
-        SettingsData settingsData = new SettingsData(CryptoService.createKey(password, salt), bcrypt, salt);
+  
+        SettingsData settingsData = new SettingsData(CryptoService.createKey(password), bcrypt);
         settingsData.save();
         return settingsData;
     }
@@ -208,7 +201,7 @@ public class SettingsData {
             ){
                 NoteBytes nextNoteBytes = null;
                 NoteBytes bcryptKey = null;
-                NoteBytes salt = null;
+    
                 while((nextNoteBytes = reader.nextNoteBytes()) != null){
 
                     switch(nextNoteBytes.getAsString()){
@@ -216,15 +209,13 @@ public class SettingsData {
                             bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
                         break;
                      
-                        case "salt":
-                            salt = salt == null ? reader.nextNoteBytes() : salt;
-                        break;
+                     
                     }
                 }
                
                 verifyPassword(password, bcryptKey);
 
-                return new SettingsData(CryptoService.createKey(password, salt), bcryptKey, salt);
+                return new SettingsData(CryptoService.createKey(password), bcryptKey);
             } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
                 throw new RuntimeCryptoException("Specification error");
             } 

@@ -34,7 +34,7 @@ import com.google.gson.JsonObject;
 public class NoteBytes {
 
     public final static int MAX_SHORT_INDEX_VALUE = NoteShort.UNSIGNED_MAX;
-    
+    public static volatile int clearanceVerifier = 0;
     private byte[] m_value = null;
     private byte m_type = NoteBytesMetaData.RAW_BYTES_TYPE;
 
@@ -313,6 +313,10 @@ public class NoteBytes {
         return new NoteBytes(Arrays.copyOf(get(), byteLength()), m_type);
     }
 
+    public NoteBytes copyOf(int length){
+        return new NoteBytes(Arrays.copyOf(get(), length), m_type);
+    }
+
     public static int writeNote(NoteBytes noteBytes, OutputStream outputStream) throws IOException {
         byte type = noteBytes.getType();
         byte[] bytes = noteBytes.get();
@@ -447,8 +451,6 @@ public class NoteBytes {
         }
     }
     
-
-
     /**
      * Securely destroys the byte array contents before clearing.
      * Attempts to prevent JIT optimization of the clearing process.
@@ -459,14 +461,16 @@ public class NoteBytes {
         }
         
         if (m_value.length > 0) {
-            // Step 1: Fill with random data to make recovery harder
             RandomService.getSecureRandom().nextBytes(m_value);
-            
-            // Step 2: Zero out the array
             Arrays.fill(m_value, (byte) 0);
-            // Step 5: Replace with empty array
-            clear();
-        }
+            for (int i = 0; i < m_value.length; i++) {
+                clearanceVerifier ^= m_value[i]; 
+                if (m_value[i] != 0) {
+                    System.err.println("Warning: Memory clear verification failed at index " + i);
+                }
+            }
+            Thread.yield();
+    }
     }
 
      /**

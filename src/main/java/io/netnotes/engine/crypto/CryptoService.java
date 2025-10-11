@@ -78,14 +78,14 @@ public class CryptoService {
     }
 
     
-    public static SecretKeySpec createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException {
-        try(NoteBytesEphemeral encoded = createPBKDF2Key(password, salt)){
+    public static SecretKeySpec createKey(NoteBytes password) throws InvalidKeySpecException, NoSuchAlgorithmException {
+        try(NoteBytesEphemeral encoded = createPBKDF2Key(password, null)){
             return new SecretKeySpec(encoded.get(), "AES");
         }
     }
 
-    public static NoteBytesEphemeral createPBKDF2Key(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException  {
-        return new NoteBytesEphemeral(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(new PBEKeySpec(password.getChars(), salt.get(), 65536, 256)).getEncoded());
+    public static NoteBytesEphemeral createPBKDF2Key(NoteBytes password, byte[] salt) throws InvalidKeySpecException, NoSuchAlgorithmException  {
+        return new NoteBytesEphemeral(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(new PBEKeySpec(password.getChars(), salt, 65536, 256)).getEncoded());
     }
 
 
