@@ -71,12 +71,27 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
 
     @Override
     public NoteBytesEphemeral copy(){
-        return new NoteBytesEphemeral(get(), getType());
+        if(byteLength() > 0){
+            byte[] bytes = get();
+            byte[] newbytes = new byte[bytes.length];
+            System.arraycopy(bytes,0, newbytes, 0, bytes.length);
+            return new NoteBytesEphemeral(newbytes, getType());
+        }else{
+            return new NoteBytesEphemeral(new byte[0], getType());
+        }
     }
 
     @Override
     public NoteBytesEphemeral copyOf(int length){
-        return new NoteBytesEphemeral(Arrays.copyOf(get(), length), getType());
+        if(byteLength() > 0 && length > 0){
+            int maxLen = Math.min(length, byteLength());
+            byte[] bytes = get();
+            byte[] newbytes = new byte[maxLen];
+            System.arraycopy(bytes,0, newbytes, 0, maxLen);
+            return new NoteBytesEphemeral(newbytes, getType());
+        }else{
+            return new NoteBytesEphemeral(new byte[0], getType());
+        }
     }
 
     public static NoteBytesEphemeral readNote(byte[] bytes, int offset){

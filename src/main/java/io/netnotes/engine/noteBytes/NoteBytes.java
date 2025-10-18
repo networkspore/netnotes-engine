@@ -160,32 +160,10 @@ public class NoteBytes {
         return ByteDecoding.bytesToString(m_value, m_type);
     }
 
+
     @Override
     public String toString(){
-        switch(m_type){
-            case NoteBytesMetaData.BIG_INTEGER_TYPE:
-                return getAsBigInteger().toString();
-            case NoteBytesMetaData.LONG_TYPE:
-                return String.valueOf(getAsLong());
-            case NoteBytesMetaData.INTEGER_TYPE:
-                return String.valueOf(getAsInt());
-            case NoteBytesMetaData.SHORT_TYPE:
-                return String.valueOf(getAsShort());
-            case NoteBytesMetaData.DOUBLE_TYPE:
-                return String.valueOf(getAsDouble());
-            case NoteBytesMetaData.BOOLEAN_TYPE:
-                return String.valueOf(getAsBoolean());
-            case NoteBytesMetaData.BIG_DECIMAL_TYPE:
-                return getAsBigDecimal().toString();
-            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
-                return getAsJsonObject().toString();
-            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
-                return getAsJsonArray().toString();
-            case NoteBytesMetaData.STRING_TYPE:
-            case NoteBytesMetaData.STRING_UTF16_TYPE:
-            default:
-                return getAsString();
-        }
+        return getAsString();
     }
 
     public char[] decodeCharArray(){
@@ -310,7 +288,14 @@ public class NoteBytes {
     }
 
     public NoteBytes copy(){
-        return new NoteBytes(Arrays.copyOf(get(), byteLength()), m_type);
+        if(byteLength() > 0){
+            byte[] bytes = get();
+            byte[] newbytes = new byte[bytes.length];
+            System.arraycopy(bytes,0, newbytes, 0, bytes.length);
+            return new NoteBytes(newbytes, m_type);
+        }else{
+            return new NoteBytes(new byte[0], m_type);
+        }
     }
 
     public NoteBytes copyOf(int length){
