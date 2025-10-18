@@ -14,6 +14,10 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         super(noteBytes);
     }
 
+    public NoteStringArrayReadOnly(byte[] bytes){
+        super(bytes);
+    }
+
     public NoteStringArrayReadOnly(String... str){
         super(stringArrayToNoteBytes(str));
     }

@@ -25,7 +25,7 @@ public class NoteBytesArray extends NoteBytes{
         super(bytes, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
-    public NoteBytesArray(NoteBytes[] noteBytes){
+    public NoteBytesArray(NoteBytes... noteBytes){
         this(getBytesFromArray(noteBytes));
     }
 

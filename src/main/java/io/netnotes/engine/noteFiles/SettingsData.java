@@ -11,8 +11,6 @@ import java.security.spec.InvalidKeySpecException;
 
 import javax.crypto.SecretKey;
 
-import org.bouncycastle.crypto.RuntimeCryptoException;
-
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -190,7 +188,7 @@ public class SettingsData {
         return settingsData;
     }
 
-    public static SettingsData readSettings(NoteBytesEphemeral password)throws InvalidPasswordException, FileNotFoundException, IOException{
+    public static SettingsData readSettings(NoteBytesEphemeral password)throws InvalidPasswordException, FileNotFoundException, IOException, InvalidKeySpecException, NoSuchAlgorithmException{
         File settingsFile = getSettingsFile();
      
 
@@ -201,25 +199,16 @@ public class SettingsData {
             ){
                 NoteBytes nextNoteBytes = null;
                 NoteBytes bcryptKey = null;
-    
                 while((nextNoteBytes = reader.nextNoteBytes()) != null){
-
                     switch(nextNoteBytes.getAsString()){
                         case "appKey":
                             bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
                         break;
-                     
-                     
                     }
                 }
-               
                 verifyPassword(password, bcryptKey);
-
                 return new SettingsData(CryptoService.createKey(password), bcryptKey);
-            } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
-                throw new RuntimeCryptoException("Specification error");
-            } 
-            
+            }
         }else{
             throw new FileNotFoundException("Settings file not found.");
         }

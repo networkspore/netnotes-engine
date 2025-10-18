@@ -274,7 +274,7 @@ public class NoteBytes {
     }
 
 
-    public String getAsUTF8(){
+    public String getAsStringUTF8(){
         byte[] bytes = get();
         return new String(bytes);
     }

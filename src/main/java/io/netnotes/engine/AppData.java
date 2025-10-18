@@ -1,24 +1,28 @@
 package io.netnotes.engine;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
+import io.netnotes.engine.messaging.task.ProgressMessage;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.SettingsData;
-import io.netnotes.engine.noteFiles.notePath.NoteFileRegistry;
+import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 
 public class AppData {
 
-    private final NoteFileRegistry m_noteFileRegistry;
+    private final NoteFileService m_noteFileRegistry;
     private final Map<NoteBytesReadOnly, INode> m_nodeRegistry = new ConcurrentHashMap<>();
 
     private final SettingsData m_settingsData;
 
-    public AppData(SettingsData settingsData) throws Exception{
-        m_noteFileRegistry = new NoteFileRegistry(settingsData);
+    public AppData(SettingsData settingsData){
+        m_noteFileRegistry = new NoteFileService(settingsData);
         m_settingsData = settingsData;
     }
 
@@ -35,7 +39,7 @@ public class AppData {
         return m_nodeRegistry;
     }
 
-    public NoteFileRegistry getNoteFileRegistry(){
+    public NoteFileService getNoteFileService(){
         return m_noteFileRegistry;
     }
 
@@ -445,7 +449,22 @@ public class AppData {
 
 
 
-    public void shutdown(){
+    public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter){
+        if(progressWriter != null){
+            ProgressMessage.writeAsync("AppData", 0, -1, "Closing any open files", progressWriter);
+        }
         m_settingsData.shutdown();
+        return getNoteFileService().prepareAllFoShutdown().exceptionally((ex)->{
+                if(ex != null){
+                    Throwable cause = ex.getCause();
+                    String msg = "Error shutting down note file service: " + cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString();
+                    System.err.println(msg);
+                    ex.printStackTrace();
+                    if(progressWriter != null){
+                        TaskMessages.writeErrorAsync("AppData",msg, ex, progressWriter);
+                    }
+                }
+                return null;
+            }).thenApply((v)->null);
     }
 }

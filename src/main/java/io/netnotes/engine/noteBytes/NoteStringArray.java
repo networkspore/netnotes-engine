@@ -16,6 +16,10 @@ public class NoteStringArray extends NoteBytesArray {
         super();
     }
 
+    public NoteStringArray(byte[] bytes){
+        super(bytes);
+    }
+
     public NoteStringArray(String... str){
         super(stringArrayToNoteBytes(str));
     }

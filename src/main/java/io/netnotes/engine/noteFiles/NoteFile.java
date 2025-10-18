@@ -307,7 +307,7 @@ public class NoteFile implements AutoCloseable  {
         void releaseLock();
         boolean isLocked();
         boolean isClosed();
-        CompletableFuture<Void> perpareForDeletion();
+        CompletableFuture<Void> perpareForShutdown();
         CompletableFuture<Void> prepareForKeyUpdate();
         void completeKeyUpdate();
     }

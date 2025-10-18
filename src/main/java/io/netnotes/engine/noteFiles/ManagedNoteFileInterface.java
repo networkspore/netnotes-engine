@@ -6,6 +6,7 @@ import java.io.PipedOutputStream;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
@@ -16,7 +17,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteFiles.notePath.NoteFileRegistry;
+import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File file;
@@ -24,11 +25,11 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final AtomicBoolean locked = new AtomicBoolean(false);
 
     private final Map<NoteBytesReadOnly, NoteFile> activeReferences = new ConcurrentHashMap<>();
-    private final NoteFileRegistry registry;
+    private final NoteFileService registry;
     private final NoteStringArrayReadOnly pathKey;
     private AtomicBoolean m_isClosed = new AtomicBoolean(false);
     
-   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileRegistry registry ) {
+   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileService registry ) {
         this.file = new File(noteFilePath.getAsString());
         this.registry = registry;
         this.pathKey = pathKey;   
@@ -168,10 +169,10 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                     locked.set(true);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException(e);
+                    throw new CompletionException("aquire lock interrupted", e);
                 }
             }else{
-                 throw new IllegalStateException("Inteface has been closed");
+                 throw new CompletionException("Inteface has been closed", new IllegalStateException(""));
             }
         }, getExecService());
     }
@@ -192,9 +193,14 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     }
 
     @Override
-    public CompletableFuture<Void> perpareForDeletion(){
+    public CompletableFuture<Void> perpareForShutdown(){
       
-        return acquireLock().thenApply((v)->{
+        return acquireLock()
+            .exceptionally(ex -> {
+                System.err.println("Aquiring a lock failed for " + getId().getAsString()  + ": " + ex.getMessage());
+                ex.printStackTrace();
+                return null;
+            }).thenApply((v)->{
             m_isClosed.set(true);
             Iterator<Map.Entry<NoteBytesReadOnly,NoteFile>> iterator = activeReferences.entrySet().iterator();
             while(iterator.hasNext()) {

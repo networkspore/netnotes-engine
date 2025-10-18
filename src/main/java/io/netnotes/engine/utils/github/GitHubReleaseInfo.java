@@ -10,7 +10,7 @@ import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
 
 
-public class GitHubJarRelease {
+public class GitHubReleaseInfo {
     private String m_jarUrl = null;
     private String m_tagName = null;
     private String m_jarName = null;
@@ -19,10 +19,10 @@ public class GitHubJarRelease {
     private JsonObject m_releaseInfoJson = null;
     private GitHubAsset[] m_assets = new GitHubAsset[0];
 
-    public GitHubJarRelease() {
+    public GitHubReleaseInfo() {
     }
 
-    public GitHubJarRelease(String appUrl, String tagName, String appName, HashData hashData, String releaseUrl) {
+    public GitHubReleaseInfo(String appUrl, String tagName, String appName, HashData hashData, String releaseUrl) {
         m_jarUrl = appUrl;
         m_tagName = tagName;
         m_jarName = appName;
@@ -136,12 +136,12 @@ public class GitHubJarRelease {
            
     }*/
 
-    public CompletableFuture<GitHubJarRelease> checkForReleaseInfo(String gitHubUser, String githubProject, ExecutorService execService) {
+    public CompletableFuture<GitHubReleaseInfo> checkForReleaseInfo(String gitHubUser, String githubProject, ExecutorService execService) {
         GitHubAPI gitHubAPI = new GitHubAPI(gitHubUser, githubProject);
         
         return gitHubAPI.getAssetsLatestRelease(execService)
             .thenCompose(assets -> {
-                GitHubJarRelease tmpInfo = new GitHubJarRelease();
+                GitHubReleaseInfo tmpInfo = new GitHubReleaseInfo();
                 
                 for (GitHubAsset asset : assets) {
                     if (asset.getName().equals("releaseInfo.json")) {
