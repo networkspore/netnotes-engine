@@ -32,6 +32,7 @@ public class ByteDecoding{
     public static final byte[] SHORT_MAX_BYTES = { (byte) 0xFF, (byte) 0xFF };
     public static final int MAX_SHORT_ITEMS = (int) Math.floor(Integer.MAX_VALUE / MAX_SHORT_BYTES_SIZE);
 
+    public static final int CODE_POINT_BYTE_SIZE = Integer.BYTES;
 
     public static byte[] detectContentType(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
@@ -303,6 +304,8 @@ public class ByteDecoding{
                 return bytesToLongBigEndian(bytes) + "";
             case NoteBytesMetaData.LONG_LE_TYPE:
                 return bytesToLongLittleEndian(bytes) + "";
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                return codePointBytesToString(bytes);
             default:
                 return new NoteBase64(bytes).getAsJsonObject().toString();
         }
@@ -448,8 +451,69 @@ public class ByteDecoding{
         return -1;
     }
 
+    /**
+     * Converts a string to code point bytes
+     */
+    public static byte[] stringToCodePointBytes(String str) {
+        if (str == null || str.isEmpty()) {
+            return new byte[0];
+        }
 
-    
+        int[] codePoints = str.codePoints().toArray();
+        return codePointsToBytes(codePoints);
+    }
+
+     /**
+     * Converts code points array to bytes
+     */
+    public static byte[] codePointsToBytes(int[] codePoints) {
+        if (codePoints == null || codePoints.length == 0) {
+            return new byte[0];
+        }
+
+        byte[] bytes = new byte[codePoints.length * CODE_POINT_BYTE_SIZE];
+        int offset = 0;
+
+        for (int codePoint : codePoints) {
+            byte[] cpBytes = ByteDecoding.intToBytesBigEndian(codePoint);
+            System.arraycopy(cpBytes, 0, bytes, offset, CODE_POINT_BYTE_SIZE);
+            offset += CODE_POINT_BYTE_SIZE;
+        }
+
+        return bytes;
+    }
+
+     /**
+     * Converts code point bytes to String
+     */
+    public static String codePointBytesToString(byte[] bytes){
+         int[] codePoints = bytesToCodePoints(bytes);
+        if (codePoints.length == 0) {
+            return "";
+        }
+        return new String(codePoints, 0, codePoints.length);
+    }
+
+     /**
+     * Converts bytes to code points array
+     */
+    public static int[] bytesToCodePoints(byte[] bytes) {
+
+        if (bytes == null || bytes.length == 0) {
+            return new int[0];
+        }
+
+        int length = bytes.length / CODE_POINT_BYTE_SIZE;
+        int[] codePoints = new int[length];
+        int offset = 0;
+
+        for (int i = 0; i < length; i++) {
+            codePoints[i] = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += CODE_POINT_BYTE_SIZE;
+        }
+
+        return codePoints;
+    }
 
     public static byte[] parseBuffer(ByteBuffer buffer){
         if(buffer.remaining() > 0){

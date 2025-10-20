@@ -208,6 +208,76 @@ public class NoteBytesArray extends NoteBytes{
         }
        
     }
+
+    public NoteBytes set(int noteBytesIndex, NoteBytes noteBytes) {
+      
+        byte[] bytes = get();
+        int byteLength = bytes.length;
+        if (bytes == null || byteLength == 0) {
+            return null;
+        }
+        byte[] dst = noteBytes.get();
+        int dstLength = dst.length;
+        byte dstType = noteBytes.getType();
+        
+        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream(bytes.length + dstLength)) {
+            int offset = 0;
+            int currentIndex = 0;
+            NoteBytes removedBytes = null;
+
+            
+            while (offset < byteLength) {
+                // Read metadata (1 byte type + 4 bytes length)
+                 if(offset + 5 > byteLength){
+                    throw new IllegalStateException("Corrupt data detected");
+                }
+                byte type = bytes[offset];
+                offset++;
+               
+                int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+                offset += 4;
+
+                if (offset + size > byteLength) {
+                    break;
+                }
+                if (currentIndex == noteBytesIndex) {
+                    // Store the bytes being removed
+                    byte[] contentBytes = new byte[size];
+                    System.arraycopy(bytes, offset, contentBytes, 0, size);
+                    removedBytes = new NoteBytes(contentBytes, type);
+
+                    outputStream.write(dstType);
+                    outputStream.write(ByteDecoding.intToBytesBigEndian(dstLength));
+                    outputStream.write(dst, offset, dstLength);
+                } else {
+                    // Write metadata
+                    outputStream.write(type);
+                    outputStream.write(ByteDecoding.intToBytesBigEndian(size));
+                    // Write content
+                    outputStream.write(bytes, offset, size);
+                }
+                
+                offset += 5 + size; // Move to next entry (5 bytes metadata + content)
+                currentIndex++;
+            }
+
+            if(noteBytesIndex == currentIndex){
+                outputStream.write(dstType);
+                outputStream.write(ByteDecoding.intToBytesBigEndian(dstLength));
+                outputStream.write(dst, offset, dstLength);
+
+                set(outputStream.toByteArray());
+            }else if(removedBytes != null){
+                set(outputStream.toByteArray());
+            }
+            return removedBytes;
+            
+        } catch (IOException e) {
+            return null;
+        }
+            
+       
+    }
     
     public NoteBytes remove(NoteBytes noteBytes) {
         byte[] bytes = get();
@@ -262,7 +332,7 @@ public class NoteBytesArray extends NoteBytes{
             return null;
         }
         
-        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream()) {
+        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream(byteLength)) {
             int offset = 0;
             int currentIndex = 0;
             NoteBytes removedBytes = null;

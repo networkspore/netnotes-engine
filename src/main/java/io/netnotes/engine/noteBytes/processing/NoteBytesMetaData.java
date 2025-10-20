@@ -15,7 +15,7 @@ public class NoteBytesMetaData {
     public final static byte FLOAT_TYPE = (byte) 9;
     public final static byte NOTE_BYTES_ARRAY_TYPE = (byte) 10;
     public final static byte NOTE_BYTES_OBJECT_TYPE = (byte) 11;
-    public final static byte NOTE_BYTES_TREE_TYPE = (byte) 12;
+    public final static byte NOTE_INTEGER_ARRAY_TYPE = (byte) 12;
     public final static byte BIG_INTEGER_TYPE = (byte) 13;
     public final static byte BIG_DECIMAL_TYPE = (byte) 14;
     public final static byte BASE_16_TYPE = (byte) 15;
@@ -33,6 +33,8 @@ public class NoteBytesMetaData {
     public final static byte VIDEO_TYPE = (byte) 30;
     public final static byte IMAGE_TYPE = (byte) 31;
     public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 32;
+    public final static byte NOTE_BYTES_TREE_TYPE = (byte) 33;
+    
 
     private byte m_type;
     private int m_len;

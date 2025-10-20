@@ -51,10 +51,6 @@ public class NoteBytes {
         this(ByteDecoding.unboxBytes(value), type);
     }
 
-    public NoteBytes( Object value){
-         this(of(value));
-    }
-
     public NoteBytes( NoteBytes value){
          this(value.get(), value.getType());
     }
@@ -65,7 +61,17 @@ public class NoteBytes {
     public NoteBytes( String value){
         this(value, NoteBytesMetaData.STRING_TYPE);
     }
+    public NoteBytes(char[] chars){
+        this( chars, NoteBytesMetaData.STRING_TYPE);
+    }
 
+    public NoteBytes(int integer){
+        this(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
+    }
+
+    public NoteBytes(long l){
+        this(ByteDecoding.longToBytesBigEndian(l), NoteBytesMetaData.LONG_TYPE);
+    }
 
     public NoteBytes( char[] value, byte type){
         this( ByteDecoding.charsToByteArray(value, type), type);
@@ -521,6 +527,8 @@ public class NoteBytes {
                 return new JsonPrimitive(getAsDouble());
             case NoteBytesMetaData.BOOLEAN_TYPE:
                 return new JsonPrimitive(getAsBoolean());
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                return new JsonPrimitive(getAsString());
             case NoteBytesMetaData.STRING_TYPE:
             case NoteBytesMetaData.STRING_UTF16_TYPE:
             default:
@@ -668,6 +676,8 @@ public class NoteBytes {
                 return new NoteBigDecimal(bytes);
             case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE:
                 return new NoteSerializable(bytes);
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                return new NoteIntegerArray(bytes);
             case NoteBytesMetaData.RAW_BYTES_TYPE:
             default:
                 return new NoteBytes(bytes, type);
@@ -691,7 +701,7 @@ public class NoteBytes {
             return new NoteBigDecimal((BigDecimal) obj);
         } else if (obj instanceof String) {
             return new NoteString((String) obj);
-        } else if (obj instanceof byte[]) {
+        }  else if (obj instanceof byte[]) {
             return new NoteBytes((byte[]) obj);
         }else if(obj instanceof Byte[]){
             return new NoteBytes(ByteDecoding.unboxBytes((Byte[]) obj));
