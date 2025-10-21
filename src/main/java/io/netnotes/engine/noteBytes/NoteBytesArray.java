@@ -73,7 +73,7 @@ public class NoteBytesArray extends NoteBytes{
     public NoteBytes[] getAsArray(){
         int size = size();
         NoteBytes[] arr = new NoteBytes[size];
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         int offset = 0;
         int i = 0;
@@ -94,7 +94,7 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytes getAt(int index){
      
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         int offset = 0;
         int counter = 0;
@@ -122,7 +122,7 @@ public class NoteBytesArray extends NoteBytes{
     }
 
     public boolean arrayStartsWith(NoteBytes noteBytes){        
-        byte[] src = get();
+        byte[] src = internalGet();
         byte[] dst = noteBytes.get();
         int srcLength = src.length;
         int dstLength = dst.length;
@@ -138,7 +138,7 @@ public class NoteBytesArray extends NoteBytes{
     }
     
     public int indexOf(NoteBytes noteBytes){
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         int offset = 0;
         int counter = 0;
@@ -160,7 +160,7 @@ public class NoteBytesArray extends NoteBytes{
 
     public void add(NoteBytes noteBytes){
        
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         byte[] dst = Arrays.copyOf(bytes, length + 5 + noteBytes.byteLength());
         writeNote(noteBytes, dst, length);
@@ -175,7 +175,7 @@ public class NoteBytesArray extends NoteBytes{
             return false;
         }
       
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         
         if (index < 0 || (length > 0 && index >= size())) {
@@ -211,7 +211,7 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytes set(int noteBytesIndex, NoteBytes noteBytes) {
       
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int byteLength = bytes.length;
         if (bytes == null || byteLength == 0) {
             return null;
@@ -280,7 +280,7 @@ public class NoteBytesArray extends NoteBytes{
     }
     
     public NoteBytes remove(NoteBytes noteBytes) {
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int length = bytes.length;
         byte[] removeBytes = noteBytes.get(); 
         int noteBytesLength = removeBytes.length;
@@ -326,7 +326,7 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytes remove(int noteBytesIndex) {
       
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         int byteLength = bytes.length;
         if (bytes == null || byteLength == 0) {
             return null;
@@ -380,8 +380,12 @@ public class NoteBytesArray extends NoteBytes{
        
     }
 
+    public NoteBytes get(int index){
+        return getAt(index);
+    }
+
     public int size(){
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         if(bytes == null){
             return -1;
         }else if(bytes.length == 0){
@@ -408,7 +412,7 @@ public class NoteBytesArray extends NoteBytes{
     
     @Override
     public JsonArray getAsJsonArray(){
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         if(bytes != null){
             if(bytes.length == 0){
                 return new JsonArray();
@@ -439,7 +443,7 @@ public class NoteBytesArray extends NoteBytes{
 
     @Override
     public JsonObject getAsJsonObject() {
-        byte[] bytes = get();
+        byte[] bytes = internalGet();
         if(bytes != null){
             if(bytes.length == 0){
                 return new JsonObject();

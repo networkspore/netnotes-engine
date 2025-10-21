@@ -15,7 +15,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     }
 
     public NoteStringArrayReadOnly(byte[] bytes){
-        super(bytes);
+        super(Arrays.copyOf(bytes, bytes.length));
     }
 
     public NoteStringArrayReadOnly(String... str){
@@ -35,28 +35,13 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         for(int i = 0; i < array.length ; i++){
             str[i] = array[i].toString();
         }
-
+        
         return String.join(delim, str);
     }
 
    
 
-    @Override
-    public NoteBytesReadOnly[] getAsArray(){
-        int size = size();
-        NoteBytesReadOnly[] arr = new NoteBytesReadOnly[size];
-        byte[] bytes = get();
-        int length = bytes.length;
-        int offset = 0;
-        int i = 0;
-        while(offset < length){
-            NoteBytesReadOnly noteBytes = readNoteString(bytes, offset);
-            arr[i] = noteBytes;
-            i++;
-            offset += (NoteBytesMetaData.STANDARD_META_DATA_SIZE + noteBytes.byteLength());
-        }
-        return arr;
-    }
+   
 
     public static NoteBytesReadOnly readNoteString(byte[] src, int srcOffset){
         final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
@@ -124,7 +109,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
    public String[] getAsStringArray(){
         int size = size();
         String[] arr = new String[size];
-        byte[] bytes = get();
+        byte[] bytes = super.internalGet();
         int length = bytes.length;
         int offset = 0;
         int i = 0;
@@ -144,7 +129,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     public Stream<String> getAsStringStream(){
         Stream.Builder<String> noteBytesBuilder = Stream.builder();
 
-        byte[] bytes = get();
+        byte[] bytes = super.internalGet();
         int length = bytes.length;
         int offset = 0;
         while(offset < length){

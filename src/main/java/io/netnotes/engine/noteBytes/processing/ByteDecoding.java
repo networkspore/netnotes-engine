@@ -957,9 +957,11 @@ public class ByteDecoding{
             case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
             case NoteBytesMetaData.STRING_US_ASCII_TYPE:
             case NoteBytesMetaData.STRING_TYPE:
+                //Avoid String conversion
                 CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), type);
                 return parseBuffer(charBuffer);
             default:
+                //compatibility for non-String types: convert to string then to char
                 return bytesToString(bytes, type).toCharArray();
         }
      
