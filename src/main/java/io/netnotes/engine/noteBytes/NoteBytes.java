@@ -8,7 +8,6 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
@@ -143,16 +142,24 @@ public class NoteBytes {
         return get();
     }
 
-    public char[] getAsUTF8Chars(){
-        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.UTF_8_TYPE);
+    public char[] getFromUTF8AsChars(){
+        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.STRING_TYPE);
     }
 
-    public char[] getAsISO_8859_1Chars(){
-        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
+    public char[] getFromISO_8859_1AsChars(){
+        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
     }
 
-    public char[] getAsASCIIChars(){
-        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.STRING_US_ASCII_TYPE);
+    public char[] getFromASCIIAsChars(){
+        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.STRING_US_ASCII_TYPE);
+    }
+
+    public char[] getFromUTF16AsChars(){
+        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.STRING_UTF16_TYPE);
+    }
+
+    public char[] getFromCodePointAsChars(){
+        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE);
     }
 
     public String getAsString(){
@@ -165,34 +172,12 @@ public class NoteBytes {
         return getAsString();
     }
 
-    public char[] readValueAsChars(){
-        return ByteDecoding.readValueAsChars(m_value, m_type);
-    }
-
-
-    public CharBuffer getAsCharBuffer(){
-        byte[] bytes = getBytes();
-        if(bytes != null && bytes.length > 0){
-            ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
-            return ByteDecoding.bytesToChars(byteBuffer, m_type);
-            
-        }
-        return CharBuffer.wrap( new char[0]);
-    }
-
     public char[] getAsChars(){
-        byte[] bytes = getBytes();
-        if(bytes != null && bytes.length > 0){
-            ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
-            CharBuffer buffer = ByteDecoding.bytesToChars(byteBuffer, m_type);
-            char[] chars = new char[buffer.remaining()];
-            buffer.get(chars);
-            return chars;
-        }
-        return new char[0];
+        return ByteDecoding.bytesToCharArray(m_value, m_type);
     }
 
-    public void setValueInteger(int value){
+
+    public void setInteger(int value){
 
         set(ByteDecoding.isLittleEndian(m_type) ? ByteDecoding.intToBytesLittleEndian(value) : ByteDecoding.intToBytesBigEndian(value));
     }

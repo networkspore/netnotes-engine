@@ -84,7 +84,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
  
 
     @Override
-    public void setValueInteger(int value){
+    public void setInteger(int value){
         byte type = getType();
         boolean isLittleEndian = ByteDecoding.isLittleEndian(type);
         byte[] bytes = isLittleEndian ? ByteDecodingSecure.intToBytesLittleEndian(value) : ByteDecodingSecure.intToBytesBigEndian(value);

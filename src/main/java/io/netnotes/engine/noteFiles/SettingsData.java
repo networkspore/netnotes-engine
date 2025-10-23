@@ -25,8 +25,8 @@ import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.Version;
 
 public class SettingsData {
-    public static final NoteBytesReadOnly BCRYPT_KEY = new NoteBytesReadOnly("bcrypt");
-    public static final NoteBytesReadOnly SALT_KEY = new NoteBytesReadOnly("salt"); 
+    public static final String BCRYPT = "bcrypt";
+    public static final String SALT = "salt"; 
     public static class InvalidPasswordException extends RuntimeException {
         public InvalidPasswordException(String msg) { super(msg); }
     }
@@ -176,8 +176,8 @@ public class SettingsData {
         File file = getSettingsFile();
 
         NoteBytesObject obj = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(BCRYPT_KEY, bcryptKey),
-            new NoteBytesPair(SALT_KEY, salt)
+            new NoteBytesPair(BCRYPT, bcryptKey),
+            new NoteBytesPair(SALT, salt)
         });
 
         FileStreamUtils.writeFileBytes(file, obj.get());
@@ -219,10 +219,10 @@ public class SettingsData {
                 NoteBytes salt = null;
                 while((nextNoteBytes = reader.nextNoteBytes()) != null){
                     switch(nextNoteBytes.getAsString()){
-                        case "appKey":
+                        case BCRYPT:
                             bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
                         break;
-                        case "salt":
+                        case SALT:
                             salt = salt == null ? reader.nextNoteBytes() : salt;
                         break;
                     }

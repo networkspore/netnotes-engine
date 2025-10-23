@@ -1,6 +1,7 @@
 package io.netnotes.engine.noteBytes.processing;
 
 import java.io.ByteArrayOutputStream;
+import java.io.CharArrayWriter;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.math.BigDecimal;
@@ -296,7 +297,7 @@ public class ByteDecoding{
  
     }
 
-    public static CharBuffer bytesToChars(ByteBuffer byteBuffer, byte type) {
+    public static CharBuffer decodeByteBufferToChars(ByteBuffer byteBuffer, byte type) {
         switch (type) {
             case NoteBytesMetaData.STRING_UTF16_TYPE:
                 return StandardCharsets.UTF_16.decode(byteBuffer);
@@ -620,7 +621,7 @@ public class ByteDecoding{
     public static IntStream getBytestoIntStream( ByteBuffer byteBuffer, int length, byte type){
         byte[] bytes = new byte[length];
         byteBuffer.get(bytes);
-        CharBuffer charBuffer = ByteDecoding.bytesToChars(ByteBuffer.wrap(bytes), type);
+        CharBuffer charBuffer = ByteDecoding.decodeByteBufferToChars(ByteBuffer.wrap(bytes), type);
         
         return charBuffer.codePoints();
     }
@@ -1026,7 +1027,7 @@ public class ByteDecoding{
         return parseBuffer(byteBuffer);
     }
 
-    public static char[] readValueAsChars(byte[] bytes, byte type) {
+    public static char[] bytesToCharArray(byte[] bytes, byte type) {
         switch(type){
             case NoteBytesMetaData.STRING_UTF16_TYPE:
             case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
@@ -1034,8 +1035,10 @@ public class ByteDecoding{
             case NoteBytesMetaData.STRING_US_ASCII_TYPE:
             case NoteBytesMetaData.STRING_TYPE:
                 //Avoid String conversion
-                CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), type);
+                CharBuffer charBuffer = decodeByteBufferToChars(ByteBuffer.wrap(bytes), type);
                 return parseBuffer(charBuffer);
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                return intsToCharArray(ByteDecoding.bytesToCodePoints(bytes));
             default:
                 //compatibility for non-String types: convert to string then to char
                 return bytesToString(bytes, type).toCharArray();
@@ -1043,8 +1046,17 @@ public class ByteDecoding{
      
     }
 
+    public static char[] intsToCharArray(int[] ints){
+        CharArrayWriter writer = new CharArrayWriter();
+        for(int cp : ints){
+            writer.write(cp);
+        }
+        return writer.toCharArray();
+    }
+
+
     public static char[] bytesToCharArray(byte[] bytes) {
-        CharBuffer charBuffer = bytesToChars(ByteBuffer.wrap(bytes), NoteBytesMetaData.STRING_TYPE);
+        CharBuffer charBuffer = decodeByteBufferToChars(ByteBuffer.wrap(bytes), NoteBytesMetaData.STRING_TYPE);
         return parseBuffer(charBuffer);
     }
 
@@ -1058,7 +1070,7 @@ public class ByteDecoding{
                 return StandardCharsets.ISO_8859_1.encode(charBuffer);
             case NoteBytesMetaData.STRING_US_ASCII_TYPE:
                 return StandardCharsets.US_ASCII.encode(charBuffer);
-            case NoteBytesMetaData.UTF_8_TYPE:
+            case NoteBytesMetaData.STRING_TYPE:
             default:
                 return StandardCharsets.UTF_8.encode(charBuffer);
         }
