@@ -19,21 +19,17 @@ public class NoteBytesMetaData {
     public final static byte BIG_INTEGER_TYPE = (byte) 13;
     public final static byte BIG_DECIMAL_TYPE = (byte) 14;
     public final static byte STRING_ISO_8859_1_TYPE = (byte) 15;
-    public final static byte STRING_US_ASCII_TYPE = (byte) 16;
-    public final static byte BASE_16_TYPE = (byte) 17;
-    public final static byte BASE_32_TYPE = (byte) 18;
-    public final static byte BASE_64_TYPE = (byte) 19;
-    public final static byte URL_SAFE_TYPE = (byte) 20;      
-    public final static byte LONG_LE_TYPE = (byte) 21;
-    public final static byte DOUBLE_LE_TYPE = (byte) 22;
-    public final static byte INTEGER_LE_TYPE = (byte) 23;
-    public final static byte STRING_UTF16_LE_TYPE = (byte) 24;
-    public final static byte SHORT_LE_TYPE = (byte) 25;
-    public final static byte FLOAT_LE_TYPE = (byte) 26;
-    public final static byte IMAGE_TYPE = (byte) 27;
-    public final static byte VIDEO_TYPE = (byte) 28;
-    public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 34;
-    public final static byte NOTE_BYTES_TREE_TYPE = (byte) 35;
+    public final static byte STRING_US_ASCII_TYPE = (byte) 16;  
+    public final static byte LONG_LE_TYPE = (byte) 17;
+    public final static byte DOUBLE_LE_TYPE = (byte) 18;
+    public final static byte INTEGER_LE_TYPE = (byte) 19;
+    public final static byte STRING_UTF16_LE_TYPE = (byte) 20;
+    public final static byte SHORT_LE_TYPE = (byte) 21;
+    public final static byte FLOAT_LE_TYPE = (byte) 22;
+    public final static byte IMAGE_TYPE = (byte) 23;
+    public final static byte VIDEO_TYPE = (byte) 24;
+    public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 25;
+    public final static byte NOTE_BYTES_TREE_TYPE = (byte) 26;
     
 
     private byte m_type;

@@ -7,6 +7,7 @@ import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
@@ -146,4 +147,7 @@ public class NoteBytesPair {
         return getValue() != null ? getValue().getAsString() : null;
     }
 
+    public NoteUUID getAsNoteUUID(){
+        return  getValue() != null ? getValue().getAsNoteUUID() : null;
+    }
 }

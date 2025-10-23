@@ -11,11 +11,11 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Map;
 
 import com.google.gson.JsonPrimitive;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.collections.NoteBytesArrayList;
 import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
@@ -24,7 +24,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 import com.google.gson.JsonArray;
@@ -55,11 +54,9 @@ public class NoteBytes {
          this(value.get(), value.getType());
     }
 
-    public NoteBytes( String value, byte type){
-        this(ByteDecoding.stringToBytes(value, type), type);
-    }
+
     public NoteBytes( String value){
-        this(value, NoteBytesMetaData.STRING_TYPE);
+        this( ByteDecoding.stringToBytes(value,  NoteBytesMetaData.STRING_TYPE), NoteBytesMetaData.STRING_TYPE);
     }
     public NoteBytes(char[] chars){
         this( chars, NoteBytesMetaData.STRING_TYPE);
@@ -126,37 +123,7 @@ public class NoteBytes {
         return b & 0xff;
     }
    
-    public byte[] getAsBase64Decoded(){
-        return Base64.getDecoder().decode(m_value);
-    }
-
-    public byte[] getAsBase64Encoded(){
-        return Base64.getEncoder().encode(m_value);
-    }
-    public byte[] getAsUrlSafeBase64Encoded(){
-        return Base64.getUrlEncoder().encode(m_value);
-    }
-
-
-    public String getAsBase64String(){
-        return ByteDecoding.bytesToString(m_value, NoteBytesMetaData.BASE_64_TYPE);
-    }
-
-     public char[] getAsUrlSafeChars(){ 
-        return ByteDecoding.bytesToCharArray(getAsUrlSafeBase64Encoded(), NoteBytesMetaData.STRING_US_ASCII_TYPE);
-    }
-
-    public String getAsUrlSafeString(){ 
-        return ByteDecoding.bytesToString(m_value,  NoteBytesMetaData.URL_SAFE_TYPE);
-    }
-
-    public String getAsHexString(){
-       return ByteDecoding.bytesToString(m_value,  NoteBytesMetaData.BASE_16_TYPE);
-    }
-
-    public String getAsBase32String(){
-       return ByteDecoding.bytesToString(m_value,  NoteBytesMetaData.BASE_32_TYPE);
-    }
+  
 
     protected byte[] internalGet(){
         if(isRuined()){
@@ -176,8 +143,16 @@ public class NoteBytes {
         return get();
     }
 
-    public char[] getAsCharsUTF8(){
-        return ByteDecoding.bytesToCharArray(m_value, NoteBytesMetaData.UTF_8_TYPE);
+    public char[] getAsUTF8Chars(){
+        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.UTF_8_TYPE);
+    }
+
+    public char[] getAsISO_8859_1Chars(){
+        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
+    }
+
+    public char[] getAsASCIIChars(){
+        return ByteDecoding.readValueAsChars(m_value, NoteBytesMetaData.STRING_US_ASCII_TYPE);
     }
 
     public String getAsString(){
@@ -190,12 +165,8 @@ public class NoteBytes {
         return getAsString();
     }
 
-    public char[] decodeCharArray(){
-        return m_value.length > 0 ? ByteDecoding.bytesToCharArray(m_value, m_type) : new char[0];
-    }
-
-    public char[] getChars(){
-        return decodeCharArray();
+    public char[] readValueAsChars(){
+        return ByteDecoding.readValueAsChars(m_value, m_type);
     }
 
 
@@ -207,6 +178,18 @@ public class NoteBytes {
             
         }
         return CharBuffer.wrap( new char[0]);
+    }
+
+    public char[] getAsChars(){
+        byte[] bytes = getBytes();
+        if(bytes != null && bytes.length > 0){
+            ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
+            CharBuffer buffer = ByteDecoding.bytesToChars(byteBuffer, m_type);
+            char[] chars = new char[buffer.remaining()];
+            buffer.get(chars);
+            return chars;
+        }
+        return new char[0];
     }
 
     public void setValueInteger(int value){
@@ -281,13 +264,8 @@ public class NoteBytes {
         return new String(bytes);
     }
 
-    public String getAsISO(){
+    public String getAsStringISO_8859_1(){
         return new String(m_value, StandardCharsets.ISO_8859_1);
-    }
-
-    public char[] getAsISOChars(){
-        byte[] bytes = m_value;
-        return ByteDecoding.isoBytesToChars(bytes);
     }
 
 
@@ -378,7 +356,7 @@ public class NoteBytes {
     @Override
     public int hashCode(){
         byte[] bytes = m_value;
-        return bytes.length == 0 ? 0 : ByteHashing.getHashCode(bytes, m_type);
+        return bytes.length == 0 ? 0 : HashServices.getHashCode(bytes, m_type);
     }
 
     @Override
@@ -668,6 +646,10 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
+    public NoteUUID getAsNoteUUID(){ 
+        return NoteUUID.fromNoteUUIDBytes(internalGet());
+    }
+
     public static NoteBytes of(byte[] bytes, byte type){
         switch(type){
             case NoteBytesMetaData.LONG_TYPE:
@@ -755,4 +737,5 @@ public class NoteBytes {
         
         throw new IllegalArgumentException("Unsuported type");
     }
+
 }

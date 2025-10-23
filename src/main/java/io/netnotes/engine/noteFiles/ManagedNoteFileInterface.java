@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
@@ -24,7 +24,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final Semaphore semaphore = new Semaphore(1, true);
     private final AtomicBoolean locked = new AtomicBoolean(false);
 
-    private final Map<NoteBytesReadOnly, NoteFile> activeReferences = new ConcurrentHashMap<>();
+    private final Map<NoteUUID, NoteFile> activeReferences = new ConcurrentHashMap<>();
     private final NoteFileService registry;
     private final NoteStringArrayReadOnly pathKey;
     private AtomicBoolean m_isClosed = new AtomicBoolean(false);
@@ -50,7 +50,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     
 
 
-    public void removeReference(NoteBytesReadOnly uuid) {
+    public void removeReference(NoteUUID uuid) {
         activeReferences.remove(uuid);
         
         // If no more references and not locked, schedule cleanup
@@ -202,9 +202,9 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                 return null;
             }).thenApply((v)->{
             m_isClosed.set(true);
-            Iterator<Map.Entry<NoteBytesReadOnly,NoteFile>> iterator = activeReferences.entrySet().iterator();
+            Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = activeReferences.entrySet().iterator();
             while(iterator.hasNext()) {
-                Map.Entry<NoteBytesReadOnly,NoteFile> entry = iterator.next();
+                Map.Entry<NoteUUID, NoteFile> entry = iterator.next();
                 entry.getValue().forceClose();
                 iterator.remove(); 
             }

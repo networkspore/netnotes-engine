@@ -1,7 +1,6 @@
 package io.netnotes.engine.plugins;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
@@ -15,10 +14,10 @@ public class PluginMetaData {
     private NoteStringArrayReadOnly m_notePath;
     private String m_version;
     private boolean m_enabled;
-    private final NoteBytesReadOnly m_id;
+    private final NoteBytes m_id;
 
 
-    public PluginMetaData( NoteBytesReadOnly id, String version, boolean enabled, NoteStringArrayReadOnly path){
+    public PluginMetaData( NoteBytes id, String version, boolean enabled, NoteStringArrayReadOnly path){
         m_id = id;
         m_notePath = path;
         m_version = version;
@@ -26,7 +25,7 @@ public class PluginMetaData {
     }
 
 
-    public NoteBytesReadOnly getPluginId() {
+    public NoteBytes getPluginId() {
         return m_id;
     }
 

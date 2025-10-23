@@ -22,7 +22,7 @@ public class NodeKeyPairs{
     public static final NoteBytesReadOnly EXCHANGE_PRIVATE_KEY = new NoteBytesReadOnly("x25519PK");
     public static final NoteBytesReadOnly SIGNATURE_PRIVATE_KEY = new NoteBytesReadOnly("ed25519PK");
   
-    private final NoteBytesReadOnly m_uuid;
+    private final NoteUUID m_uuid;
     private final boolean m_isInternal;
 
     private final X25519PublicKeyParameters m_exchangePublicKey;
@@ -32,7 +32,7 @@ public class NodeKeyPairs{
     private final Ed25519PrivateKeyParameters m_signPrivateKey;
     private final Ed25519PublicKeyParameters m_signPublicKey;
 
-    public NoteBytesReadOnly getUUID(){
+    public NoteUUID getUUID(){
         return m_uuid;
     }
 
@@ -51,7 +51,7 @@ public class NodeKeyPairs{
         AsymmetricCipherKeyPair signingPair = signingGen.generateKeyPair();
         AsymmetricCipherKeyPair exchangePair = exchangeGen.generateKeyPair();
         
-        m_uuid = NoteUUID.createLocalUUID128ReadOnly();
+        m_uuid = NoteUUID.createLocalUUID128();
         m_isInternal = true;
         this.m_signPrivateKey = (Ed25519PrivateKeyParameters) signingPair.getPrivate();
         this.m_signPublicKey = (Ed25519PublicKeyParameters) signingPair.getPublic();
@@ -82,7 +82,7 @@ public class NodeKeyPairs{
         m_signPrivateKey = sPriv;
         m_signPublicKey = sPriv.generatePublicKey();
 
-        m_uuid = new NoteBytesReadOnly(uuidBytes.get());
+        m_uuid = NoteUUID.fromNoteUUIDBytes(uuidBytes.get());
 
         uuidBytes.ruin();
         xPrivBytes.ruin();

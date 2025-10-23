@@ -11,44 +11,33 @@ import com.google.gson.stream.JsonWriter;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteHex;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
 
 public class HashData {
 
     public static String DEFAULT_HASH = "Blake2b-256";
 
-    private NoteBytes m_id;
+    private NoteUUID m_id;
     private String m_name = DEFAULT_HASH;
-    private NoteBytes m_hashBytes = null;
+    private byte[] m_hashBytes = null;
 
     public HashData(File file) throws  IOException{
         m_id = NoteUUID.createLocalUUID128();
-        m_hashBytes = new NoteBytes(HashServices.digestFile(file));
+        m_hashBytes = HashServices.digestFile(file);
     }
 
-    public HashData(byte[] bytes) {
+    public HashData(byte[] hashBytes) {
         m_id = NoteUUID.createLocalUUID128();
-        m_hashBytes =  new NoteBytes(bytes);
+        m_hashBytes =  hashBytes;
     }
 
     public HashData(NoteBytesObject nbo)  {
         init(nbo);
     }
 
-    public HashData(NoteBytes id, NoteBytes hash){
-        m_id = id;
-        m_hashBytes =  hash;
-    }
-
-    public HashData(NoteBytes hashId, String name, NoteBytes hash) {
-
-        m_id = hashId;
-        m_name = name;
-        m_hashBytes = hash;
-
-    }
 
     public HashData(JsonObject json){
         openJson(json);
@@ -61,14 +50,14 @@ public class HashData {
         NoteBytesPair nameElement = nbo.get("name");
         NoteBytesPair hashStringElement = nbo.get("hash");
 
-        m_id = idElement != null ? idElement.getValue() : NoteUUID.createLocalUUID128();         
+        m_id = idElement != null ? idElement.getAsNoteUUID()  : NoteUUID.createLocalUUID128();         
         
         if (nameElement != null) {
             m_name = nameElement.getAsString();
           
         }
         if (hashStringElement != null) {
-           m_hashBytes = hashStringElement.getValue();
+           m_hashBytes = hashStringElement.getValue().get();
         }
 
     }
@@ -79,24 +68,25 @@ public class HashData {
         JsonElement nameElement = json.get("name");
         JsonElement hashStringElement = json.get("hash");
 
-        m_id = idElement != null ? NoteUUID.fromURLSafeString(idElement.getAsString()) : NoteUUID.createLocalUUID128();         
+        m_id = idElement != null ? NoteUUID.fromNoteUUIDString(idElement.getAsString()) : NoteUUID.createLocalUUID128();         
         
         if (nameElement != null) {
             m_name = nameElement.getAsString();
           
         }
         if (hashStringElement != null) {
-           m_hashBytes = new NoteHex(idElement.getAsString());
+
+           m_hashBytes = EncodingHelpers.decodeHex(idElement.getAsString());
         }
 
     }
 
     public void setHashHex(String hex){
-        m_hashBytes = new NoteHex(hex);
+        m_hashBytes = EncodingHelpers.decodeEncodedString(hex, Encoding.BASE_16);
     }
 
     public String getHashStringHex(){
-        return m_hashBytes.getAsHexString();
+        return EncodingHelpers.encodeHexString(m_hashBytes);
     }
     
     public HashData(JsonReader reader) throws IOException{
@@ -104,7 +94,7 @@ public class HashData {
         while(reader.hasNext()){
             switch(reader.nextName()){
                 case "id":
-                    m_id = NoteUUID.fromURLSafeString(reader.nextString());
+                    m_id = NoteUUID.fromNoteUUIDString(reader.nextString());
                 break;
                 case "name":
                     m_name = reader.nextString();
@@ -132,7 +122,7 @@ public class HashData {
 
 
     public String getId() {
-        return m_id.getAsUrlSafeString();
+        return m_id.getAsString();
     }
 
     public NoteBytes getUUID(){
@@ -144,14 +134,14 @@ public class HashData {
     }
 
  
-    public NoteBytes getHashBytes() {
+    public byte[] getHashBytes() {
         return m_hashBytes;
     }
 
 
 
 
-    public void setHash(NoteBytes hashBytes) {
+    public void setHash(byte[] hashBytes) {
         m_hashBytes = hashBytes;
     }
 

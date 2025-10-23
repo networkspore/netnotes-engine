@@ -5,7 +5,7 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 public class NoteBytesReadOnly extends NoteBytes {
     
 
-    public NoteBytesReadOnly( Object value){
+    public NoteBytesReadOnly(Object value){
         this(NoteBytes.of(value));
     }
 

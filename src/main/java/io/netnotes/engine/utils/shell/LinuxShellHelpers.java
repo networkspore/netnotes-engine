@@ -228,7 +228,7 @@ public class LinuxShellHelpers{
 
     public static FreeMemory getFreeMemory() {
         try{ 
-            String[] cmd = new String[]{ "bash", "-c",  "cat /proc/meminfo | awk '{print $1,$2}'"};
+            String[] cmd = new String[]{ "sh", "-c",  "cat /proc/meminfo | awk '{print $1,$2}'"};
 
             Process proc = Runtime.getRuntime().exec(cmd);
 

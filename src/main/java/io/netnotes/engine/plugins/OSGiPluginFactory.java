@@ -129,7 +129,7 @@ public class OSGiPluginFactory {
     }
 
     
-    public CompletableFuture<Map<NoteBytesReadOnly, Bundle>> loadEnabledPluginBundles(NoteFile noteFile) {
+    public CompletableFuture<Map<NoteBytes, Bundle>> loadEnabledPluginBundles(NoteFile noteFile) {
         return getSavedPlugins(noteFile)
             .thenCompose(pluginsStream -> filterEnabledLoadToHashMap(pluginsStream));
           
@@ -149,7 +149,7 @@ public class OSGiPluginFactory {
                         NoteBytes versionValue = map.get(PluginMetaData.VERSION_KEY);
 
                         PluginMetaData pluginMetaData = new PluginMetaData(
-                            new NoteBytesReadOnly(pluginIdBytes),
+                            pluginIdBytes,
                             versionValue != null ? versionValue.getAsString() : Version.UKNOWN_VERSION,
                             true,
                             new NoteStringArrayReadOnly(pathValue)
@@ -165,9 +165,9 @@ public class OSGiPluginFactory {
         return builder.build();
     }
  
-    private CompletableFuture<Map<NoteBytesReadOnly, Bundle>> filterEnabledLoadToHashMap(Stream<PluginMetaData> plugins) { 
+    private CompletableFuture<Map<NoteBytes, Bundle>> filterEnabledLoadToHashMap(Stream<PluginMetaData> plugins) { 
         
-        ConcurrentHashMap<NoteBytesReadOnly, Bundle> hashMap = new ConcurrentHashMap<>();
+        ConcurrentHashMap<NoteBytes, Bundle> hashMap = new ConcurrentHashMap<>();
         BundleContext ctx = m_framework.getBundleContext();
         return CompletableFuture.allOf( plugins.filter(metaData->metaData.isEnabled()).map(map ->
             loadPlugin(ctx, map.getPluginId(), map) .thenAccept(bundle -> hashMap.put(map.getPluginId(), bundle))
@@ -177,12 +177,12 @@ public class OSGiPluginFactory {
             })).toArray(CompletableFuture[]::new)).thenCompose(v ->CompletableFuture.completedFuture(hashMap));
     }
     
-    private CompletableFuture<Bundle> loadPlugin(BundleContext ctx, NoteBytesReadOnly pluginId, PluginMetaData metadata) {
+    private CompletableFuture<Bundle> loadPlugin(BundleContext ctx, NoteBytes pluginId, PluginMetaData metadata) {
         return m_appData.getNoteFile(metadata.geNotePath())
             .thenCompose(pluginFile -> loadPluginFromNoteFile(ctx, pluginId, pluginFile));
     }
     
-    private CompletableFuture<Bundle> loadPluginFromNoteFile(BundleContext ctx, NoteBytesReadOnly pluginId,
+    private CompletableFuture<Bundle> loadPluginFromNoteFile(BundleContext ctx, NoteBytes pluginId,
         NoteFile pluginFile
     ) {
         
@@ -193,7 +193,7 @@ public class OSGiPluginFactory {
         return CompletableFuture.supplyAsync(()->{
             try (PipedInputStream bundleStream = new PipedInputStream(pluginStream)) {
                 // Install bundle directly from stream
-                String bundleLocation = "plugin://" + pluginId.getAsUrlSafeString();
+                String bundleLocation = "plugin://" + pluginId.getAsString();
                 
                 return ctx.installBundle(bundleLocation, bundleStream);
                 

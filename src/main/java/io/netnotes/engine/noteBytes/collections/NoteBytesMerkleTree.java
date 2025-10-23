@@ -9,12 +9,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesNode;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 public class NoteBytesMerkleTree extends NoteBytes {
     
@@ -54,7 +54,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         if (node == null || m_size == 0) {
             return new byte[HASH_SIZE];
         }
-        byte[] nodeHash = ByteHashing.digestBytesToBytes(node.getData().get(), HASH_SIZE);
+        byte[] nodeHash = HashServices.digestBytesToBytes(node.getData().get(), HASH_SIZE);
         
         if (node.getLeft() == null && node.getRight() == null) {
             return nodeHash;
@@ -66,7 +66,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         System.arraycopy(leftHash, 0, combined, 0, leftHash.length);
         System.arraycopy(rightHash, 0, combined, leftHash.length, rightHash.length);
         
-        return ByteHashing.digestBytesToBytes(combined, HASH_SIZE);
+        return HashServices.digestBytesToBytes(combined, HASH_SIZE);
     }
 
     public byte[] getMerkleRoot() {

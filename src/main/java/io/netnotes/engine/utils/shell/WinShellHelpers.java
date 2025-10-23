@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 
+import io.netnotes.engine.utils.FreeMemory;
+
 public class WinShellHelpers {
    
   
@@ -158,4 +160,38 @@ public class WinShellHelpers {
     public static boolean sendKillSig(String jarName) {
         return wmicTerminate(jarName);
     }
+
+    public static FreeMemory getFreeMemory() {
+        try {
+            String[] cmd = {
+                "powershell", "-Command",
+                "Get-CimInstance Win32_OperatingSystem | " +
+                "Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory,TotalSwapSpaceSize | ConvertTo-Json"
+            };
+
+            Process proc = Runtime.getRuntime().exec(cmd);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+            StringBuilder json = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) json.append(line);
+            proc.waitFor();
+
+            String j = json.toString().trim();
+            if (j.isEmpty()) return null;
+
+            // Parse JSON manually (avoid adding dependencies)
+            long memTotal = ShellHelpers.parseJsonLong(j, "TotalVisibleMemorySize");
+            long memFree = ShellHelpers.parseJsonLong(j, "FreePhysicalMemory");
+            long swapTotal = ShellHelpers.parseJsonLong(j, "TotalSwapSpaceSize");
+            long swapFree = ShellHelpers.parseJsonLong(j, "FreeVirtualMemory");
+
+            if (memTotal > 0) {
+                return new FreeMemory(swapTotal, swapFree, memFree, memFree, memTotal);
+            }
+
+        } catch (Exception ignore) {}
+        return null;
+    }
+
+    
 }

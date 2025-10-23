@@ -3,6 +3,7 @@ package io.netnotes.engine.crypto;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
 
@@ -78,14 +79,16 @@ public class CryptoService {
     }
 
     
-    public static SecretKeySpec createKey(NoteBytes password) throws InvalidKeySpecException, NoSuchAlgorithmException {
-        try(NoteBytesEphemeral encoded = createPBKDF2Key(password, null)){
+    public static SecretKeySpec createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException {
+         SecureRandom.getInstanceStrong().generateSeed(16);
+         RandomService.getRandomBytes(16);
+        try(NoteBytesEphemeral encoded = createPBKDF2Key(password, salt)){
             return new SecretKeySpec(encoded.get(), "AES");
         }
     }
 
-    public static NoteBytesEphemeral createPBKDF2Key(NoteBytes password, byte[] salt) throws InvalidKeySpecException, NoSuchAlgorithmException  {
-        return new NoteBytesEphemeral(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(new PBEKeySpec(password.getChars(), salt, 65536, 256)).getEncoded());
+    public static NoteBytesEphemeral createPBKDF2Key(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException  {
+        return new NoteBytesEphemeral(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(new PBEKeySpec(password.getAsChars(), salt.get(), 65536, 256)).getEncoded());
     }
 
 

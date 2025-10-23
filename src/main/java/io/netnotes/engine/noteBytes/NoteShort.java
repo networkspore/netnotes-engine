@@ -1,7 +1,6 @@
 package io.netnotes.engine.noteBytes;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteShort extends NoteBytes{
@@ -75,7 +74,7 @@ public class NoteShort extends NoteBytes{
 
 
     public char getAsUTF16Char(){
-        return ByteHashing.getCharUTF16(getBytes(), 0,(isLittleEndian()));
+        return ByteDecoding.getCharUTF16(getBytes(), 0,(isLittleEndian()));
     }
 
     public char[] getAsCodePoint(){

@@ -3,42 +3,37 @@ package io.netnotes.engine.noteBytes;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteHashing;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
 import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytes {
 
     private static volatile AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
 
-    private boolean m_isInit = false;
-
-    public NoteUUID(byte[] bytes){
-        super(bytes, NoteBytesMetaData.URL_SAFE_TYPE);
-        m_isInit = true;
+    private NoteUUID(byte[] bytes){
+        super(bytes, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
     }
 
 
     @Override
     public void set(byte[] bytes, byte type){
-        if(!m_isInit){
-            super.set(bytes, type);
-            m_isInit = true;
-        }
+   
     }
 
     @Override
     public byte[] get(){
-        byte[] bytes = super.get();
+        byte[] bytes = super.internalGet();
         return Arrays.copyOf(bytes, byteLength());
     }
 
@@ -57,16 +52,14 @@ public class NoteUUID extends NoteBytes {
     }
 
     public static NoteUUID createLocalUUID128(){
-        return new NoteUUID(createTimeRndBytes());
-    }
-
-    public static NoteBytesReadOnly createLocalUUID128ReadOnly(){
-        return new NoteBytesReadOnly(createTimeRndBytes());
+        return fromUnencodedBytes(createTimeRndBytes());
     }
 
     public static String createSafeUUID128(){
-        return createLocalUUID128().getAsUrlSafeString();
+        return createLocalUUID128().getAsString();
     }
+
+
 
     public static byte[] createTimeRndBytes(){
 		byte[] nanoTime = littleEndianNanoTimeHash();
@@ -93,22 +86,26 @@ public class NoteUUID extends NoteBytes {
                         outputStream.write( sourceItems[RandomService.getRandomInt(0, itemsLength-1)].getValue().get() );
                     }
                 }
-                return new NoteUUID(ByteDecoding.concat(createTimeRndBytes(), ByteHashing.digestBytesToBytes(outputStream.toByteArray(), 16)));
+                byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), HashServices.digestBytesToBytes(outputStream.toByteArray(), 16));
+
+                return fromUnencodedBytes(bytes);
             } catch (IOException e) {
                 throw new CompletionException(e);
             }
         });
     }
 
-    public static NoteUUID fromURLSafeString(String urlSafeString){
-        return new NoteUUID(Base64.getUrlDecoder().decode(urlSafeString));
+    public static NoteUUID fromNoteUUIDString(String urlSafeString){
+        return new NoteUUID(urlSafeString.getBytes());
     }
 
-
-
-
-    @Override
-    public String toString(){
-        return new String(decodeCharArray());
+    public static NoteUUID fromNoteUUIDBytes(byte[] bytes){
+        return new NoteUUID(Arrays.copyOf(bytes, bytes.length));
     }
+
+    public static NoteUUID fromUnencodedBytes(byte[] bytes){
+        return fromNoteUUIDBytes( EncodingHelpers.encodeBytes(bytes, Encoding.URL_SAFE));
+
+    }
+
 }

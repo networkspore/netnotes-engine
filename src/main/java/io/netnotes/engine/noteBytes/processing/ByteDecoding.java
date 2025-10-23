@@ -17,11 +17,7 @@ import java.util.Collections;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import java.util.Base64;
-import org.bouncycastle.util.encoders.Base32;
-import org.bouncycastle.util.encoders.Hex;
-
-import io.netnotes.engine.noteBytes.NoteBase64;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteShort;
 
 import io.netnotes.engine.utils.CollectionHelpers;
@@ -243,20 +239,15 @@ public class ByteDecoding{
                 return string.getBytes(StandardCharsets.ISO_8859_1);
             case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
                 return string.getBytes(StandardCharsets.UTF_16LE);
-            case NoteBytesMetaData.BASE_16_TYPE:
-                return Hex.decode(string);
-            case NoteBytesMetaData.BASE_32_TYPE:
-                return Base32.decode(string);
-            case NoteBytesMetaData.BASE_64_TYPE:
-                return Base64.getDecoder().decode(string);
-            case NoteBytesMetaData.URL_SAFE_TYPE:
-                return Base64.getUrlDecoder().decode(string);
             case NoteBytesMetaData.STRING_TYPE:
+            default:
                 return string.getBytes();
         }
-
-        throw new IllegalArgumentException("Unspported string decoding");
     }
+
+    
+
+  
 
     public static String bytesToString(byte[] bytes, byte type){
         switch(type){
@@ -268,15 +259,7 @@ public class ByteDecoding{
                 return new String(bytes, StandardCharsets.ISO_8859_1);
             case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
                 return new String(bytes, StandardCharsets.UTF_16LE);
-            case NoteBytesMetaData.BASE_16_TYPE:
-                return Hex.toHexString(bytes);
-            case NoteBytesMetaData.BASE_32_TYPE:
-                return Base32.toBase32String(bytes);
-            case NoteBytesMetaData.BASE_64_TYPE:
-                return Base64.getEncoder().encodeToString(bytes);
-            case NoteBytesMetaData.URL_SAFE_TYPE:
-                return Base64.getUrlEncoder().encodeToString(bytes);
-            case NoteBytesMetaData.STRING_TYPE:
+             case NoteBytesMetaData.STRING_TYPE:
                 return new String(bytes);
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
                 return bytesToBigInteger(bytes).toString();
@@ -307,7 +290,7 @@ public class ByteDecoding{
             case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
                 return codePointBytesToString(bytes);
             default:
-                return new NoteBase64(bytes).getAsJsonObject().toString();
+                return new String(bytes);
         }
 
  
@@ -525,6 +508,25 @@ public class ByteDecoding{
         }
     }
 
+    public static char getCharUTF16(byte[] val, int index, boolean isBigEndian) {
+        assert index >= 0 && index < lengthDiv2(val) : "Trusted caller missed bounds check";
+        index <<= 1; // index *= 2
+        return (char)(((val[index++] & 0xff) << getUFT16HiByteShift(isBigEndian)) |
+                      ((val[index]   & 0xff) << getUFT16LoByteShift(isBigEndian)));
+    }
+    public static int getUFT16HiByteShift(boolean isBigEndian){
+        return isBigEndian ?  8 : 0;
+    }
+
+    public static int getUFT16LoByteShift(boolean isBigEndian){
+        return isBigEndian ?  0 : 8;
+    }
+   
+    public static int lengthDiv2(byte[] value) {
+        return value.length >> 1; // length / 2
+    }
+
+
     public static char[] parseBuffer(CharBuffer buffer){
          if(!buffer.isEmpty()){
             char[] chars = new char[buffer.remaining()];
@@ -623,6 +625,80 @@ public class ByteDecoding{
         return charBuffer.codePoints();
     }
 
+    public static BigDecimal readAsBigDecimal(NoteBytes value){
+        try{
+            switch(value.getType()){
+                case NoteBytesMetaData.BIG_INTEGER_TYPE:
+                    return new BigDecimal(value.getAsBigInteger());
+                case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+                    return value.getAsBigDecimal();
+                case NoteBytesMetaData.INTEGER_TYPE:
+                case NoteBytesMetaData.INTEGER_LE_TYPE:
+                    return new BigDecimal(value.getAsInt());
+                case NoteBytesMetaData.LONG_TYPE:
+                case NoteBytesMetaData.LONG_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsLong());
+                case NoteBytesMetaData.SHORT_TYPE:
+                case NoteBytesMetaData.SHORT_LE_TYPE:
+                    return new BigDecimal(value.getAsShort());
+                case NoteBytesMetaData.DOUBLE_TYPE:
+                case NoteBytesMetaData.DOUBLE_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsDouble());
+                case NoteBytesMetaData.FLOAT_TYPE:
+                case NoteBytesMetaData.FLOAT_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsFloat());
+                case NoteBytesMetaData.STRING_UTF16_TYPE:
+                case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                case NoteBytesMetaData.STRING_TYPE:
+                    return new BigDecimal(bytesToString(value.getBytes(), value.getType()));
+            }
+        }catch(Exception e){
+            System.err.println(e.toString());
+            e.printStackTrace();
+        }
+
+        return BigDecimal.ZERO;
+    }
+
+    public static BigDecimal forceAsBigDecimal(NoteBytes value){
+        try{
+            switch(value.getType()){
+                case NoteBytesMetaData.BIG_INTEGER_TYPE:
+                    return new BigDecimal(value.getAsBigInteger());
+                case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+                    return value.getAsBigDecimal();
+                case NoteBytesMetaData.INTEGER_TYPE:
+                case NoteBytesMetaData.INTEGER_LE_TYPE:
+                    return new BigDecimal(value.getAsInt());
+                case NoteBytesMetaData.LONG_TYPE:
+                case NoteBytesMetaData.LONG_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsLong());
+                case NoteBytesMetaData.SHORT_TYPE:
+                case NoteBytesMetaData.SHORT_LE_TYPE:
+                    return new BigDecimal(value.getAsShort());
+                case NoteBytesMetaData.DOUBLE_TYPE:
+                case NoteBytesMetaData.DOUBLE_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsDouble());
+                case NoteBytesMetaData.FLOAT_TYPE:
+                case NoteBytesMetaData.FLOAT_LE_TYPE:
+                    return BigDecimal.valueOf(value.getAsFloat());
+                case NoteBytesMetaData.STRING_UTF16_TYPE:
+                case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                case NoteBytesMetaData.STRING_TYPE:
+                    return new BigDecimal(bytesToString(value.getBytes(), value.getType()));
+                case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                    return new BigDecimal(codePointBytesToString(value.get()));
+            }
+           
+            return new BigDecimal(bytesToString(value.getBytes(), value.getType()));
+        }catch(Exception e){
+            return new BigDecimal(new BigInteger(value.get()));
+        }
+    }
 
   
     public static BigDecimal bigDecimalToScaleAndBigInteger(byte[] scaleAndBigIntegerBytes){
@@ -950,7 +1026,7 @@ public class ByteDecoding{
         return parseBuffer(byteBuffer);
     }
 
-    public static char[] bytesToCharArray(byte[] bytes, byte type) {
+    public static char[] readValueAsChars(byte[] bytes, byte type) {
         switch(type){
             case NoteBytesMetaData.STRING_UTF16_TYPE:
             case NoteBytesMetaData.STRING_UTF16_LE_TYPE:

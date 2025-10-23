@@ -88,8 +88,7 @@ public class NotePathFactory {
 
 
     public static File generateNewDataFile(File dataDir) {     
-        NoteUUID noteUUID = NoteUUID.createLocalUUID128();
-        String encodedUUID = noteUUID.getAsUrlSafeString();
+        String encodedUUID = NoteUUID.createSafeUUID128();
         File dataFile = new File(dataDir.getAbsolutePath() + "/" + encodedUUID + ".dat");
         return dataFile;
     }
