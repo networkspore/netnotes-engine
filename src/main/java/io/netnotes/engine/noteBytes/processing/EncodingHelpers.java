@@ -8,25 +8,31 @@ import org.bouncycastle.util.encoders.Hex;
 public class EncodingHelpers {
     
     public enum Encoding{ 
-        BASE_16(255),
-        BASE_32(254),
-        BASE_64(253),
-        URL_SAFE(252),
-        UNENCODED(0);
+        BASE_16("BASE_16"),
+        BASE_32("BASE_32"),
+        BASE_64("BASE_64"),
+        URL_SAFE("URL_SAFE"),
+        UNENCODED("UNENCODED");
 
-        private final int val;
+        private final String val;
 
-        Encoding(int val){
+        Encoding(String val){
             this.val = val;
         }
 
-        public static Encoding fromValue(int value){
-            for(Encoding encoding : values()){
-                if(encoding.val == value){
-                    return encoding;
+        public static Encoding fromValue(String value){
+            if(value != null){
+                for(Encoding encoding : values()){
+                    if(encoding.val.equals(value)){
+                        return encoding;
+                    }
                 }
             }
             return UNENCODED;
+        }
+
+        public String getValue(){
+            return val;
         }
     }
 
