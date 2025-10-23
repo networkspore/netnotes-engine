@@ -18,6 +18,7 @@ import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.ove.crypto.digest.Blake2b;
@@ -182,6 +183,9 @@ public class HashServices {
     }
 
 
+    public static String digestToUrlSafeString(byte[] bytes, int length){
+        return EncodingHelpers.encodeUrlSafeString(digestBytesToBytes(bytes, length));
+    }
 
     public static byte[] digestBytesToBytes(byte[] bytes){
         return digestBytesToBytes(bytes, 32);

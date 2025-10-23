@@ -45,14 +45,15 @@ public class FileStreamUtils {
 
     public static void writeFileBytes(File file, byte[] bytes) throws IOException{
         try(
-            OutputStream fileOutputStream = Files.newOutputStream(file.toPath());
-            ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes);
+            OutputStream outputStream = Files.newOutputStream(file.toPath());
         ){
-            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE > bytes.length ? bytes.length : StreamUtils.BUFFER_SIZE];
-            int length = 0;
-            
-            while((length = inputStream.read(buffer)) != 1){
-                fileOutputStream.write(buffer, 0, length);
+            int offset = 0;
+            int remaining = bytes.length;
+            while(remaining > 0){
+                int length = Math.min(remaining, StreamUtils.BUFFER_SIZE);
+                outputStream.write(bytes, offset, length);
+                offset += length;
+                remaining -= length;
             }
         }
     }
@@ -76,7 +77,7 @@ public class FileStreamUtils {
             ){
                 byte[] buffer = new byte[StreamUtils.BUFFER_SIZE > bytes.length ? bytes.length : StreamUtils.BUFFER_SIZE];
                 int length = 0;
-                while((length = inputStream.read(buffer)) != 1){
+                while((length = inputStream.read(buffer)) != -1){
                     outputStream.write(buffer, 0, length);
                 }
             }
@@ -125,7 +126,7 @@ public class FileStreamUtils {
                     byte[] buffer = new byte[StreamUtils.BUFFER_SIZE >  (fileSize -12)? (int) (fileSize-12) : StreamUtils.BUFFER_SIZE];
                     int length = 0;
                     long total = 12;
-                    while((length = inputStream.read(buffer)) != 1){
+                    while((length = inputStream.read(buffer)) != -1){
                         outputStream.write(buffer, 0, length);
                         total += length;
                         if(progressWriter != null){
@@ -170,7 +171,7 @@ public class FileStreamUtils {
                 Cipher cipher = CryptoService.getAESDecryptCipher(iV, appKey);
 
                 long fileSize = encryptedFile.length();
-                int bufferSize = fileSize < (8 * 1024) ? (int) fileSize :(8 * 1024);
+                int bufferSize = fileSize < (8 * 1024) ? (int) fileSize : (8 * 1024);
 
                 byte[] buffer = new byte[bufferSize];
                 byte[] decryptedBuffer;

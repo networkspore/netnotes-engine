@@ -20,10 +20,10 @@ public class EncodingHelpers {
             this.val = val;
         }
 
-        public static Encoding fromValue(String value){
-            if(value != null){
+        public static Encoding fromString(String string){
+            if(string != null){
                 for(Encoding encoding : values()){
-                    if(encoding.val.equals(value)){
+                    if(encoding.val.equals(string)){
                         return encoding;
                     }
                 }
