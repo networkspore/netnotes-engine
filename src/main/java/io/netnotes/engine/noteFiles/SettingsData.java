@@ -8,6 +8,9 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 
 import javax.crypto.SecretKey;
 
@@ -197,44 +200,54 @@ public class SettingsData {
     }
 
 
-    public static SettingsData createSettings(NoteBytesEphemeral password) throws InvalidKeySpecException, NoSuchAlgorithmException, IOException{
-        NoteBytes bcrypt = HashServices.getBcryptHash(password);
-        NoteBytes salt = new NoteRandom(16);
-        SettingsData settingsData = new SettingsData(CryptoService.createKey(password, salt), salt,  bcrypt);
-        settingsData.save();
-        return settingsData;
+    public static CompletableFuture<SettingsData> createSettings(NoteBytesEphemeral password, ExecutorService service){
+        return CompletableFuture.supplyAsync(()->{
+            try{
+                NoteBytes bcrypt = HashServices.getBcryptHash(password);
+                NoteBytes salt = new NoteRandom(16);
+                SettingsData settingsData = new SettingsData(CryptoService.createKey(password, salt), salt,  bcrypt);
+                settingsData.save();
+                return settingsData;
+            }catch(Exception e){
+                throw new CompletionException("Could not create settings", e);
+            }
+        });
     }
 
-    public static SettingsData readSettings(NoteBytesEphemeral password)throws InvalidPasswordException, FileNotFoundException, IOException, InvalidKeySpecException, NoSuchAlgorithmException{
-        File settingsFile = getSettingsFile();
-     
-
-        if(settingsFile != null && settingsFile.isFile()){
-          
-            try(
-                NoteBytesReader reader = new NoteBytesReader(new FileInputStream(settingsFile));    
-            ){
-                NoteBytes nextNoteBytes = null;
-                NoteBytes bcryptKey = null;
-                NoteBytes salt = null;
-                while((nextNoteBytes = reader.nextNoteBytes()) != null){
-                    switch(nextNoteBytes.getAsString()){
-                        case BCRYPT:
-                            bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
-                        break;
-                        case SALT:
-                            salt = salt == null ? reader.nextNoteBytes() : salt;
-                        break;
+    public static CompletableFuture<SettingsData> readSettings(NoteBytesEphemeral password, ExecutorService service){
+        return CompletableFuture.supplyAsync(()->{
+            try{
+                File settingsFile = getSettingsFile();
+            
+                if(settingsFile != null && settingsFile.isFile()){
+                
+                    try(
+                        NoteBytesReader reader = new NoteBytesReader(new FileInputStream(settingsFile));    
+                    ){
+                        NoteBytes nextNoteBytes = null;
+                        NoteBytes bcryptKey = null;
+                        NoteBytes salt = null;
+                        while((nextNoteBytes = reader.nextNoteBytes()) != null){
+                            switch(nextNoteBytes.getAsString()){
+                                case BCRYPT:
+                                    bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
+                                break;
+                                case SALT:
+                                    salt = salt == null ? reader.nextNoteBytes() : salt;
+                                break;
+                            }
+                        }
+                        verifyPassword(password, bcryptKey);
+                        return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey);
                     }
+                }else{
+                    throw new FileNotFoundException("Settings file not found.");
                 }
-                verifyPassword(password, bcryptKey);
-                return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey);
+            }catch(Exception e){
+                throw new CompletionException("Settings could not be read", e);
             }
-        }else{
-            throw new FileNotFoundException("Settings file not found.");
-        }
 
-    
+        }, service);
     }
 
     
