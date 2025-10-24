@@ -1,7 +1,6 @@
 package io.netnotes.engine.noteFiles;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URL;
@@ -22,14 +21,14 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteRandom;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.Version;
 
 public class SettingsData {
-    public static final String BCRYPT = "bcrypt";
-    public static final String SALT = "salt"; 
+    public static final NoteBytes BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 1});
+    public static final NoteBytes SALT_KEY = new NoteBytes(new byte[]{(byte) 2}); 
     public static class InvalidPasswordException extends RuntimeException {
         public InvalidPasswordException(String msg) { super(msg); }
     }
@@ -101,21 +100,24 @@ public class SettingsData {
     }
 
     public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws InvalidPasswordException, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
-        verifyPassword(oldPassword, m_bcryptKey);
+        if(HashServices.verifyBCryptPassword(oldPassword, m_bcryptKey)){
 
-        m_oldKey = m_secretKey;
-        m_oldSalt = m_salt;
+            m_oldKey = m_secretKey;
+            m_oldSalt = m_salt;
 
-        NoteBytes salt = new NoteBytes(RandomService.getRandomBytes(16));
+            NoteBytes salt = new NoteBytes(RandomService.getRandomBytes(16));
 
-        NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
-        SecretKey secretKey = CryptoService.createKey(newPassword, salt);
+            NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
+            SecretKey secretKey = CryptoService.createKey(newPassword, salt);
 
-        m_salt = salt;
-        m_bcryptKey = bcrypt;
-        m_secretKey = secretKey;
+            m_salt = salt;
+            m_bcryptKey = bcrypt;
+            m_secretKey = secretKey;
 
-        save();
+            save();
+        }else{
+            throw new InvalidPasswordException("Invalid password");
+        }
     }
 
     public NoteBytes getAppHash(){
@@ -164,12 +166,7 @@ public class SettingsData {
         
     }
 
-    public static void verifyPassword(NoteBytesEphemeral password, NoteBytes bcrypt) throws InvalidPasswordException{
-        
-        if(!HashServices.verifyBCryptPassword(password, bcrypt)){
-            throw new InvalidPasswordException("Password not verified");
-        }
-    }
+
 
     public void save() throws IOException {
         save(m_bcryptKey, m_salt);
@@ -179,8 +176,8 @@ public class SettingsData {
         File file = getSettingsFile();
 
         NoteBytesObject obj = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(BCRYPT, bcryptKey),
-            new NoteBytesPair(SALT, salt)
+            new NoteBytesPair(BCRYPT_KEY, bcryptKey),
+            new NoteBytesPair(SALT_KEY, salt)
         });
 
         FileStreamUtils.writeFileBytes(file, obj.get());
@@ -201,50 +198,54 @@ public class SettingsData {
 
 
     public static CompletableFuture<SettingsData> createSettings(NoteBytesEphemeral password, ExecutorService service){
+        NoteBytesEphemeral pass = password.copy();
+
         return CompletableFuture.supplyAsync(()->{
             try{
-                NoteBytes bcrypt = HashServices.getBcryptHash(password);
+                if(pass.byteLength() < 6){
+                    throw new InvalidPasswordException("Password must be at least 6 characters long");
+                }
+                NoteBytes bcrypt = HashServices.getBcryptHash(pass);
                 NoteBytes salt = new NoteRandom(16);
-                SettingsData settingsData = new SettingsData(CryptoService.createKey(password, salt), salt,  bcrypt);
+                SettingsData settingsData = new SettingsData(CryptoService.createKey(pass, salt), salt,  bcrypt);
                 settingsData.save();
                 return settingsData;
             }catch(Exception e){
                 throw new CompletionException("Could not create settings", e);
+            }finally{
+                pass.close();
             }
         });
     }
 
-    public static CompletableFuture<SettingsData> readSettings(NoteBytesEphemeral password, ExecutorService service){
+    public static CompletableFuture<SettingsData> readSettings(NoteBytesEphemeral ephemeralPassword, ExecutorService service){
+        NoteBytesEphemeral password = ephemeralPassword.copy();
+
         return CompletableFuture.supplyAsync(()->{
             try{
                 File settingsFile = getSettingsFile();
             
                 if(settingsFile != null && settingsFile.isFile()){
-                
-                    try(
-                        NoteBytesReader reader = new NoteBytesReader(new FileInputStream(settingsFile));    
-                    ){
-                        NoteBytes nextNoteBytes = null;
-                        NoteBytes bcryptKey = null;
-                        NoteBytes salt = null;
-                        while((nextNoteBytes = reader.nextNoteBytes()) != null){
-                            switch(nextNoteBytes.getAsString()){
-                                case BCRYPT:
-                                    bcryptKey = bcryptKey == null ? reader.nextNoteBytes() : bcryptKey;
-                                break;
-                                case SALT:
-                                    salt = salt == null ? reader.nextNoteBytes() : salt;
-                                break;
-                            }
-                        }
-                        verifyPassword(password, bcryptKey);
+                    NoteBytesMap map = FileStreamUtils.readFileToMap(settingsFile);
+                    
+                    NoteBytes bcryptKey = map.get(BCRYPT_KEY);
+                    NoteBytes salt = map.get(SALT_KEY);
+                    if(salt == null || bcryptKey == null){
+                            String saltString = salt == null ? "Salt unavailable file is corrupt" : "";
+                            String bcryptString = bcryptKey == null ? "Key is unavailable file is corrupt" : "";
+                            throw new IllegalStateException(bcryptString + ", " + saltString);
+                    }else if(HashServices.verifyBCryptPassword(password, bcryptKey)){
                         return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey);
+                    }else{
+                        throw new InvalidPasswordException("Invalid password");
                     }
                 }else{
                     throw new FileNotFoundException("Settings file not found.");
                 }
             }catch(Exception e){
                 throw new CompletionException("Settings could not be read", e);
+            }finally{
+                password.close();
             }
 
         }, service);

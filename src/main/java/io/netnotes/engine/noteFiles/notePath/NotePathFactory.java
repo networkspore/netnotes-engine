@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -179,7 +180,7 @@ public class NotePathFactory {
 
     public CompletableFuture<Void> verifyPassword(NoteBytesEphemeral password){
         return CompletableFuture.runAsync(() -> {
-            SettingsData.verifyPassword(password, getSettingsData().getBCryptKey());
+            HashServices.verifyBCryptPassword(password, getSettingsData().getBCryptKey());
         });
     }
     

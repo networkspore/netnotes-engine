@@ -20,23 +20,23 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
-    private final File file;
-    private final Semaphore semaphore = new Semaphore(1, true);
-    private final AtomicBoolean locked = new AtomicBoolean(false);
+    private final File m_file;
+    private final Semaphore m_semaphore = new Semaphore(1, true);
+    private final AtomicBoolean m_locked = new AtomicBoolean(false);
 
-    private final Map<NoteUUID, NoteFile> activeReferences = new ConcurrentHashMap<>();
-    private final NoteFileService registry;
-    private final NoteStringArrayReadOnly pathKey;
+    private final Map<NoteUUID, NoteFile> m_activeReferences = new ConcurrentHashMap<>();
+    private final NoteFileService m_noteFileService;
+    private final NoteStringArrayReadOnly m_pathKey;
     private AtomicBoolean m_isClosed = new AtomicBoolean(false);
     
-   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileService registry ) {
-        this.file = new File(noteFilePath.getAsString());
-        this.registry = registry;
-        this.pathKey = pathKey;   
+   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileService noteFileService ) {
+        this.m_file = new File(noteFilePath.getAsString());
+        this.m_noteFileService = noteFileService;
+        this.m_pathKey = pathKey;   
     }
 
     public NoteStringArrayReadOnly getId(){
-        return pathKey;
+        return m_pathKey;
     }
 
     public void addReference(NoteFile noteFile) throws IllegalStateException {
@@ -44,23 +44,23 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         if(m_isClosed.get()){
             throw  new IllegalStateException("Interface is cloased");
         }
-        activeReferences.putIfAbsent(noteFile.getId(), noteFile);    
+        m_activeReferences.putIfAbsent(noteFile.getId(), noteFile);    
 
     }
     
 
 
     public void removeReference(NoteUUID uuid) {
-        activeReferences.remove(uuid);
+        m_activeReferences.remove(uuid);
         
         // If no more references and not locked, schedule cleanup
-        if (activeReferences.isEmpty() && !isLocked()) {
+        if (m_activeReferences.isEmpty() && !isLocked()) {
             scheduleCleanup();
         }
     }
     
     public int getReferenceCount() {
-        return activeReferences.size();
+        return m_activeReferences.size();
     }
 
 
@@ -70,8 +70,8 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
             CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS, getExecService())
             .execute(() -> {
                 // Double-check cleanup conditions
-                if (activeReferences.isEmpty() && !isLocked()) {
-                    registry.cleanupInterface(pathKey, this);
+                if (m_activeReferences.isEmpty() && !isLocked()) {
+                    m_noteFileService.cleanupInterface(m_pathKey, this);
                 }
             });
         }
@@ -80,11 +80,11 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
 
     @Override
     public void releaseLock() {
-        if (locked.getAndSet(false)) {
-            semaphore.release();
+        if (m_locked.getAndSet(false)) {
+            m_semaphore.release();
             
             // ADD: Check for cleanup after releasing lock
-            if (activeReferences.isEmpty() && !m_isClosed.get()) {
+            if (m_activeReferences.isEmpty() && !m_isClosed.get()) {
                 scheduleCleanup();
             }
         }
@@ -106,7 +106,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         //CompletableFuture<NoteBytesObject> readFuture = 
         decryptFile(inParseStream);
         // Write operation: encrypt from modifiedInParseStream to temp file, then swap
-        CompletableFuture<NoteBytesObject> writeFuture =  this.registry.saveEncryptedFileSwap(file, modifiedInParseStream);
+        CompletableFuture<NoteBytesObject> writeFuture =  this.m_noteFileService.saveEncryptedFileSwap(m_file, modifiedInParseStream);
         
         // Both operations run concurrently through the piped streams
         // The write will naturally wait for read data to be available through the pipes
@@ -116,7 +116,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     
     @Override
     public ExecutorService getExecService() {
-        return  this.registry.getExecService();
+        return  this.m_noteFileService.getExecService();
     }
     
     @Override
@@ -132,7 +132,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         
        
         
-        return  this.registry.performDecryption(file, pipedOutput);
+        return  this.m_noteFileService.performDecryption(m_file, pipedOutput);
     }
     
 
@@ -147,17 +147,17 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                 new IllegalStateException("readWriteEncryptedFile called while interface is cloased"));
         }
         
-        return this.registry.saveEncryptedFileSwap(file, pipedOutputStream);
+        return this.m_noteFileService.saveEncryptedFileSwap(m_file, pipedOutputStream);
     }
     
     @Override
     public boolean isFile() {
-        return file.isFile();
+        return m_file.isFile();
     }
     
     @Override
     public long fileSize() {
-        return file.length();
+        return m_file.length();
     }
     
     @Override
@@ -165,8 +165,8 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         return CompletableFuture.runAsync(() -> {
             if(!m_isClosed.get()){
                 try {
-                    semaphore.acquire();
-                    locked.set(true);
+                    m_semaphore.acquire();
+                    m_locked.set(true);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new CompletionException("aquire lock interrupted", e);
@@ -184,7 +184,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     
     @Override
     public boolean isLocked() {
-        return locked.get();
+        return m_locked.get();
     }
     
     @Override
@@ -202,7 +202,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                 return null;
             }).thenApply((v)->{
             m_isClosed.set(true);
-            Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = activeReferences.entrySet().iterator();
+            Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = m_activeReferences.entrySet().iterator();
             while(iterator.hasNext()) {
                 Map.Entry<NoteUUID, NoteFile> entry = iterator.next();
                 entry.getValue().forceClose();

@@ -55,7 +55,7 @@ public class NodeController {
    
         @Override
         public NoteBytesReadOnly getControllerId() {
-            return controllerId;
+            return NodeController.this.controllerId;
         }
         
    
@@ -64,7 +64,7 @@ public class NodeController {
         public CompletableFuture<Void> sendMessage(NoteBytesReadOnly toId, PipedOutputStream messageStream, 
             PipedOutputStream replyStream
         ) {
-            return routeToNode(this.nodeId, toId, messageStream, replyStream);
+            return NodeController.this.routeToNode(this.nodeId, toId, messageStream, replyStream);
         }
         
 
@@ -74,7 +74,7 @@ public class NodeController {
             PipedOutputStream replyStream
         ) {
             
-            return m_nodeBroadcaster.sendMessage(nodeId, toIds, messageStream, replyStream);
+            return NodeController.this.m_nodeBroadcaster.sendMessage(nodeId, toIds, messageStream, replyStream);
         }
 
 
@@ -82,8 +82,8 @@ public class NodeController {
         @Override
         public CompletableFuture<Void> unregisterNode() {
             return CompletableFuture.runAsync(() -> {
-                appData.nodeRegistry().remove(this.nodeId);
-            }, appData.getExecService());
+                NodeController.this.appData.nodeRegistry().remove(this.nodeId);
+            }, NodeController.this.appData.getExecService());
         }
         
     }

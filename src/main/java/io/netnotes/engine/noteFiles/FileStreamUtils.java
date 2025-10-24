@@ -3,6 +3,8 @@ package io.netnotes.engine.noteFiles;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -19,8 +21,10 @@ import javax.crypto.CipherInputStream;
 import javax.crypto.CipherOutputStream;
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
@@ -400,6 +404,26 @@ public class FileStreamUtils {
         
     }
 
+    public static NoteBytesMap readFileToMap(File file) throws FileNotFoundException, IOException{
+        NoteBytesMap map = new NoteBytesMap();
+        try(
+            NoteBytesReader reader = new NoteBytesReader(new FileInputStream(file));    
+        ){
+            NoteBytes nextNoteBytes = null;
+            nextNoteBytes = reader.nextNoteBytes();
+            while(nextNoteBytes != null){
+                NoteBytes value = reader.nextNoteBytes();
+                if(value != null){
+                    map.put( nextNoteBytes, value);
+                    nextNoteBytes = reader.nextNoteBytes();
+                }else{
+                    throw new IllegalStateException("File is corrupted: Key has no value");
+                }
+            }
 
+        }
+        return map;
+       
+    }
 
 }

@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -52,14 +53,18 @@ public class HashServices {
         }
     }
 
-    public static boolean verifyBCryptPassword(NoteBytes password, NoteBytes hash) {
-        BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.get(), hash.getBytes());
-        return result.verified;
+    public static boolean verifyBCryptPassword(NoteBytesEphemeral ephemeralPassword, NoteBytes hash) {
+        try(NoteBytesEphemeral password = ephemeralPassword.copy()){
+            BCrypt.Result result = BCrypt.verifyer(BCrypt.Version.VERSION_2A, LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).verify(password.get(), hash.getBytes());
+            return result.verified;
+        }
     }
 
    
-    public static NoteBytes getBcryptHash(NoteBytes password) {
-        return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, RandomService.getSecureRandom(), LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.get()));
+    public static NoteBytes getBcryptHash(NoteBytesEphemeral ephemeralPassword) {
+        try(NoteBytesEphemeral password = ephemeralPassword.copy()){
+            return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, RandomService.getSecureRandom(), LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.get()));
+        }
     }
 
 

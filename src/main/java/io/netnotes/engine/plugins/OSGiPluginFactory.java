@@ -6,6 +6,7 @@ import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Stream;
 import java.util.HashMap;
 import java.util.List;
@@ -125,7 +126,11 @@ public class OSGiPluginFactory {
             } catch (IOException e) {
                 throw new RuntimeException("Failed to load plugin registry", e);
             }
-        }, m_appData.getExecService());
+        }, getExecService());
+    }
+
+    protected ExecutorService getExecService(){
+        return m_appData.getExecService();
     }
 
     
