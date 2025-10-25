@@ -5,7 +5,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PipedOutputStream;
-
+import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -27,9 +27,18 @@ public class UrlStreamHelpers {
     public static URLConnection getUrlConnection(String urlString)throws IOException, URISyntaxException{
         URI uri = new URI(urlString);
         URL url = uri.toURL();
-        URLConnection con = url.openConnection();
-        con.setRequestProperty("User-Agent", USER_AGENT);
-        return con;
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestProperty("User-Agent", USER_AGENT);
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Accept", "application/octet-stream");
+        connection.setConnectTimeout(30000);
+        connection.setReadTimeout(30000);
+        int responseCode = connection.getResponseCode();
+        if (responseCode != HttpURLConnection.HTTP_OK) {
+            throw new IOException("HTTP error code: " + responseCode);
+        }
+            
+        return connection;
     }
 
 
@@ -83,9 +92,9 @@ public class UrlStreamHelpers {
             try(OutputStream outputStream = pipedOutputStream){
 
                 try(
-                    InputStream inputStream = getUrlConnection(urlString).getInputStream();
+                    InputStream inputStream = getUrlConnection(urlString).getInputStream()
                 ){
-                    StreamUtils.streamCopy(inputStream, pipedOutputStream, progressTracker);
+                    StreamUtils.streamCopy(inputStream, outputStream, progressTracker);
                 }
             }catch(IOException e){
                 throw new CompletionException("Stream did not finish", e);
