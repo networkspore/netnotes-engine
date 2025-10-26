@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils.github;
+package io.netnotes.engine.plugins;
 
 import java.io.IOException;
 
@@ -6,12 +6,14 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-public class GitHubFileInfo {
+import io.netnotes.engine.utils.github.GitHubInfo;
+
+public class OSGiPluginFileInfo {
     private final GitHubInfo m_githubInfo;
     private final String m_fileName;
     private final String m_fileExt;
 
-    public GitHubFileInfo(GitHubInfo gitHubInfo, String fileName, String fileExt){
+    public OSGiPluginFileInfo(GitHubInfo gitHubInfo, String fileName, String fileExt){
         m_githubInfo = gitHubInfo;
         m_fileName = fileName;
         m_fileExt = fileExt;
@@ -41,7 +43,7 @@ public class GitHubFileInfo {
         return json;
     }
     
-    public static GitHubFileInfo of(JsonObject json) {
+    public static OSGiPluginFileInfo of(JsonObject json) {
         if (json == null) return null;
 
         GitHubInfo githubInfo = json.has("githubInfo") && json.get("githubInfo").isJsonObject() ?
@@ -53,10 +55,10 @@ public class GitHubFileInfo {
 
 
         return githubInfo != null && fileName != null && fileExt != null ?
-             new GitHubFileInfo(githubInfo, fileName, fileExt) : null;
+             new OSGiPluginFileInfo(githubInfo, fileName, fileExt) : null;
     }
 
-     public static GitHubFileInfo read(JsonReader reader) throws IOException {
+     public static OSGiPluginFileInfo read(JsonReader reader) throws IOException {
         GitHubInfo githubInfo = null;
         String fileName = null;
         String fileExt = null;
@@ -81,8 +83,8 @@ public class GitHubFileInfo {
         }
         reader.endObject();
 
-        GitHubFileInfo fileInfo = githubInfo != null && fileName != null && fileExt != null ?
-             new GitHubFileInfo(githubInfo, fileName, fileExt) : null;
+        OSGiPluginFileInfo fileInfo = githubInfo != null && fileName != null && fileExt != null ?
+             new OSGiPluginFileInfo(githubInfo, fileName, fileExt) : null;
 
         if(fileInfo == null){
             throw new IOException("File info corrupt");

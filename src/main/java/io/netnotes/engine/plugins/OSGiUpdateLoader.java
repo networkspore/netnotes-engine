@@ -5,15 +5,19 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.utils.github.GitHubInfo;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.github.GitHubAPI;
+import io.netnotes.engine.utils.github.GitHubFileUploader;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PipedOutputStream;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -22,12 +26,11 @@ import java.util.concurrent.ExecutorService;
 
 public class OSGiUpdateLoader {
     public final static String DEFAULT_BRANCH = "main";
-    
+
     private final GitHubInfo m_gitHubInfo;
     private final ExecutorService m_execService;
-
-    private String m_branch;
-    private String m_filePath;//available_apps.json
+    private final String m_branch;
+    private final String m_filePath;
 
     public OSGiUpdateLoader(GitHubInfo gitHubInfo, String filePath, ExecutorService execService) {
         this(gitHubInfo, DEFAULT_BRANCH, filePath, execService);
@@ -40,15 +43,15 @@ public class OSGiUpdateLoader {
         m_filePath = filePath;
     }
     
+    public CompletableFuture<List<OSGiPluginInformation>> loadAvailableApps(){
+        return loadAvailableApps(m_gitHubInfo, m_branch, m_filePath, m_execService);
+    }
 
-
-    public CompletableFuture<List<OSGiPluginInformation>> loadAvailableApps() {
-        String userString = m_gitHubInfo.getUser();
-        String projectString = m_gitHubInfo.getProject();
-        String availableAppsUrl = GitHubAPI.GITHUB_USER_CONTENT + "/" +
-                                 userString + "/" + projectString + "/"+ m_branch+ "/" + m_filePath;
-
+    public static CompletableFuture<List<OSGiPluginInformation>> loadAvailableApps(GitHubInfo gitHubInfo, String branch, 
+        String filePath, ExecutorService execService
+    ) {
         return CompletableFuture.supplyAsync(()->{
+            String availableAppsUrl = GitHubAPI.getUrlUserContentPath(gitHubInfo, branch, filePath);
             try(
                 InputStream inputStream = UrlStreamHelpers.getHttpUrlConnection(availableAppsUrl).getInputStream();
                 JsonReader reader = new JsonReader(new InputStreamReader(inputStream));
@@ -60,10 +63,25 @@ public class OSGiUpdateLoader {
             } catch (URISyntaxException e) {
                 throw new CompletionException("Invalid URL syntax", e);
             }
-        }, m_execService);
+        }, execService);
+    }
+
+    public static CompletableFuture< List<OSGiPluginInformation>> readAvailableAppsFromFile(File file){
+        return CompletableFuture.supplyAsync(()->{
+            try(
+                InputStream inputStream = Files.newInputStream(file.toPath());
+                JsonReader reader = new JsonReader(new InputStreamReader(inputStream));
+
+            ){
+                return readAvailableApps(reader);
+
+            }catch(IOException e){
+                throw new CompletionException("File could not be read", e);
+            }
+        });
     }
     
-    private List<OSGiPluginInformation> readAvailableApps(JsonReader reader) throws IOException {
+    public static List<OSGiPluginInformation> readAvailableApps(JsonReader reader) throws IOException {
         List<OSGiPluginInformation> apps = new ArrayList<>();
 
         reader.beginObject();
@@ -91,43 +109,64 @@ public class OSGiUpdateLoader {
     }
 
 
-    public boolean saveAvailableApps(File saveFile, List<OSGiPluginInformation> apps) {
+
+    public CompletableFuture<Boolean> uploadAvailableApps(String token, String commitMsg, 
+        List<OSGiPluginInformation> apps
+    ) {
         if (apps == null || apps.isEmpty()) {
             System.err.println("No apps to save.");
-            return false;
+            return CompletableFuture.completedFuture(false);
         }
 
+        PipedOutputStream pipedOutputStream = new PipedOutputStream();
+        CompletableFuture<Void> writerFuture = 
+            pluginInformationToPipe(pipedOutputStream, apps);
+        CompletableFuture<Boolean> uploadFuture = 
+            GitHubFileUploader.uploadFile(m_gitHubInfo, token, m_filePath, commitMsg, pipedOutputStream, m_execService);
+    
+        return CompletableFuture.allOf(writerFuture, uploadFuture).thenCompose(v->uploadFuture);
+    }
 
-        if (saveFile == null) {
-            System.out.println("Save canceled by user.");
-            return false;
-        }
-
-        // Write JSON
-        try (JsonWriter writer = new JsonWriter(new FileWriter(saveFile))) {
-            writer.setIndent("  "); // pretty-print
-
-            writer.beginObject();
-            writer.name("apps");
-            writer.beginArray();
-
-            for (OSGiPluginInformation appInfo : apps) {
-                if (appInfo != null) {
-                    appInfo.write(writer); // use your class’s streaming writer
+    public CompletableFuture<Void> pluginInformationToPipe(PipedOutputStream pipedOutputStream, 
+        List<OSGiPluginInformation> apps
+    ) {
+        return CompletableFuture.runAsync(()->{
+            try (
+                PipedOutputStream outputStream = pipedOutputStream;
+                JsonWriter writer = new JsonWriter(new OutputStreamWriter(outputStream));
+            ) {
+                writer.beginObject();
+                writer.name("apps");
+                writer.beginArray();
+                for (OSGiPluginInformation appInfo : apps) {
+                    if (appInfo != null) {
+                        appInfo.write(writer);
+                    }
                 }
+                writer.endArray();
+                writer.endObject();
+            } catch (IOException e) {
+                System.err.println("Failed to save apps: " + e.getMessage());
+                e.printStackTrace();
             }
+        });
+    }
 
-            writer.endArray();
-            writer.endObject();
-            
-        } catch (IOException e) {
-            System.err.println("Failed to save apps: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+
+    public CompletableFuture<Boolean> saveAvailableAppsToFile(File saveFile, List<OSGiPluginInformation> apps) {
+        if (apps == null || apps.isEmpty()) {
+            System.err.println("No apps to save.");
+            return CompletableFuture.completedFuture(false);
         }
 
-        System.out.println("Saved " + apps.size() + " apps to: " + saveFile.getAbsolutePath());
-        return true;
+        PipedOutputStream pipedOutputStream = new PipedOutputStream();
+        CompletableFuture<Void> writerFuture = 
+            pluginInformationToPipe(pipedOutputStream, apps);
+        
+        CompletableFuture<Boolean> saveFuture = FileStreamUtils.pipeToFile(pipedOutputStream, saveFile, m_execService);
+    
+        return CompletableFuture.allOf(writerFuture, saveFuture).thenCompose(v->saveFuture);
+   
     }
     
 }

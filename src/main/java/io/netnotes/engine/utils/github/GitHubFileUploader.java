@@ -17,28 +17,38 @@ import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
-public class GitHubUploader {
+public class GitHubFileUploader {
 
     private final String token; // Personal Access Token (PAT)
     private final GitHubInfo gitHubInfo;
+    private final ExecutorService execService;
 
-    public GitHubUploader(String token, GitHubInfo gitHubInfo) {
+    public GitHubFileUploader(GitHubInfo gitHubInfo, String token, ExecutorService executorService) {
         this.token = token;
         this.gitHubInfo = gitHubInfo;
+        this.execService = executorService;
+    }
+    
+    public CompletableFuture<Boolean> uploadFile(String path, File file, String commitMessage) {
+        return uploadFile(gitHubInfo, token, path, commitMessage, file, execService);
     }
 
-    public CompletableFuture<Boolean> uploadFile(String path, File file, String commitMessage, ExecutorService execService) {
+    public static CompletableFuture<Boolean> uploadFile(GitHubInfo gitHubInfo, String token, String path,String commitMessage, File file,  ExecutorService execService) {
         PipedOutputStream outputStream = new PipedOutputStream();
-        CompletableFuture<Void> transferFuture = FileStreamUtils.transferFileToPipe(file, outputStream, execService);
+        CompletableFuture<Void> transferFuture = FileStreamUtils.fileToPipe(file, outputStream, execService);
 
-        CompletableFuture<Boolean> writeFuture = uploadFile(path, outputStream, commitMessage, execService);
+        CompletableFuture<Boolean> writeFuture = uploadFile(gitHubInfo, token, path, commitMessage, outputStream,  execService);
 
         return CompletableFuture.allOf(transferFuture, writeFuture).thenCompose(v -> writeFuture);
     }
 
-    public CompletableFuture<Boolean> uploadFile(String path, PipedOutputStream pipedOutput, String commitMessage, ExecutorService execService)  {
+    public CompletableFuture<Boolean> uploadFile(String path, String commitMessage, PipedOutputStream pipedOutputStream) {
+        return uploadFile(gitHubInfo, token, path,commitMessage, pipedOutputStream,  execService);
+    }
+
+    public static CompletableFuture<Boolean> uploadFile(GitHubInfo gitHubInfo, String token, String path, String commitMessage, PipedOutputStream pipedOutput,  ExecutorService execService)  {
         return CompletableFuture.supplyAsync(()->{
-             String apiUrl = GitHubAPI.getUrlContentsPath(gitHubInfo, path);
+             String apiUrl = GitHubAPI.getUrlRepoContentsPath(gitHubInfo, path);
 
             try( PipedInputStream inputStream = new PipedInputStream(pipedOutput, StreamUtils.PIPE_BUFFER_SIZE)) {
         

@@ -8,7 +8,6 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.utils.github.GitHubFileInfo;
 
 public class OSGiPluginInformation {
 
@@ -17,9 +16,9 @@ public class OSGiPluginInformation {
     private String m_iconUrl;
     private String m_smallIconUrl;
     private String m_description;
-    private GitHubFileInfo[] m_gitHubFiles;
+    private OSGiPluginFileInfo[] m_gitHubFiles;
 
-    public OSGiPluginInformation(NoteBytes appId, String pluginName, String iconUrl, String smallIconUrl, String description, GitHubFileInfo... gitHubFiles){
+    public OSGiPluginInformation(NoteBytes appId, String pluginName, String iconUrl, String smallIconUrl, String description, OSGiPluginFileInfo... gitHubFiles){
         m_appId = appId;
         m_pluginName = pluginName;
         m_iconUrl = iconUrl;
@@ -48,7 +47,7 @@ public class OSGiPluginInformation {
         return m_smallIconUrl;
     }
 
-    public GitHubFileInfo[] getGitHubFiles(){
+    public OSGiPluginFileInfo[] getGitHubFiles(){
         return m_gitHubFiles;
     }
 
@@ -63,7 +62,7 @@ public class OSGiPluginInformation {
 
         if (m_gitHubFiles != null) {
             JsonArray array = new JsonArray();
-            for (GitHubFileInfo fileInfo : m_gitHubFiles) {
+            for (OSGiPluginFileInfo fileInfo : m_gitHubFiles) {
                 if (fileInfo != null) array.add(fileInfo.getJsonObject());
             }
             json.add("gitHubFiles", array);
@@ -81,13 +80,13 @@ public class OSGiPluginInformation {
         String iconUrl = json.has("iconUrl") ? json.get("iconUrl").getAsString() : null;
         String smallIconUrl = json.has("smallIconUrl") ? json.get("smallIconUrl").getAsString() : iconUrl;
         String description = json.has("description") ? description = json.get("description").getAsString() : null;
-        GitHubFileInfo[] gitHubFiles = null;
+        OSGiPluginFileInfo[] gitHubFiles = null;
 
         if (json.has("gitHubFiles") && json.get("gitHubFiles").isJsonArray()) {
             var array = json.getAsJsonArray("gitHubFiles");
-            gitHubFiles = new GitHubFileInfo[array.size()];
+            gitHubFiles = new OSGiPluginFileInfo[array.size()];
             for (int i = 0; i < array.size(); i++) {
-                gitHubFiles[i] = GitHubFileInfo.of(array.get(i).getAsJsonObject());
+                gitHubFiles[i] = OSGiPluginFileInfo.of(array.get(i).getAsJsonObject());
             }
         }
 
@@ -106,7 +105,7 @@ public class OSGiPluginInformation {
         String iconUrl = null;
         String smallIconUrl = null;
         String description = null;
-        GitHubFileInfo[] gitHubFiles = null;
+        OSGiPluginFileInfo[] gitHubFiles = null;
 
         reader.beginObject();
         while (reader.hasNext()) {
@@ -129,12 +128,12 @@ public class OSGiPluginInformation {
                     break;
                 case "gitHubFiles":
                     reader.beginArray();
-                    var files = new java.util.ArrayList<GitHubFileInfo>();
+                    var files = new java.util.ArrayList<OSGiPluginFileInfo>();
                     while (reader.hasNext()) {
-                        files.add(GitHubFileInfo.read(reader));
+                        files.add(OSGiPluginFileInfo.read(reader));
                     }
                     reader.endArray();
-                    gitHubFiles = files.toArray(new GitHubFileInfo[0]);
+                    gitHubFiles = files.toArray(new OSGiPluginFileInfo[0]);
                     break;
                 default:
                     reader.skipValue();
@@ -166,7 +165,7 @@ public class OSGiPluginInformation {
         writer.name("gitHubFiles");
         if (m_gitHubFiles != null) {
             writer.beginArray();
-            for (GitHubFileInfo fileInfo : m_gitHubFiles) {
+            for (OSGiPluginFileInfo fileInfo : m_gitHubFiles) {
                 if (fileInfo != null) fileInfo.write(writer);
             }
             writer.endArray();

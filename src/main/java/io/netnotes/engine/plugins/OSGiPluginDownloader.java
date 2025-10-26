@@ -39,15 +39,15 @@ public class OSGiPluginDownloader {
      */
     public CompletableFuture<PluginInstallResult> downloadAndInstall(OSGiPluginRelease release, StreamProgressTracker progressTracker) {
         String pluginId = release.getPluginInfo().getName();
-        String version = release.getVersion();
+        String tagName = release.getTagName();
         
         // Create path: plugins/jars/{pluginId}-{version}
-        NoteStringArrayReadOnly jarPath = createPluginJarPath(pluginId, version);
+        NoteStringArrayReadOnly jarPath = createPluginJarPath(pluginId, tagName);
         
         return downloadToNoteFile(release.getDownloadUrl(), jarPath, progressTracker)
             .thenApply(noteFile -> new PluginInstallResult(
                 new NoteBytes(pluginId),
-                version,
+                tagName,
                 jarPath,
                 noteFile,
                 release
@@ -98,7 +98,6 @@ public class OSGiPluginDownloader {
      */
     public static class PluginInstallResult {
         private final NoteBytes pluginId;
-        private final String version;
         private final NoteFile jarFile;
         private final OSGiPluginRelease release;
         
@@ -110,13 +109,11 @@ public class OSGiPluginDownloader {
             OSGiPluginRelease release
         ) {
             this.pluginId = pluginId;
-            this.version = version;
             this.jarFile = jarFile;
             this.release = release;
         }
         
         public NoteBytes getPluginId() { return pluginId; }
-        public String getVersion() { return version; }
         public NoteStringArrayReadOnly getJarPath() { return jarFile.getPath(); }
         public NoteFile getJarNoteFile() { return jarFile; }
         public OSGiPluginRelease getRelease() { return release; }

@@ -1,12 +1,11 @@
 package io.netnotes.engine.utils.github;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
 
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
-import com.google.gson.JsonArray;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -14,7 +13,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -52,116 +54,73 @@ public class GitHubAPI {
     }
     
     public  String getUrlContentsPath( String path){
-        return getUrlContentsPath(gitHubInfo, path);
+        return getUrlRepoContentsPath(gitHubInfo, path);
     }
 
-    public static String getUrlContentsPath(GitHubInfo gitHubInfo, String path){
+    public static String encodePathString(String path){
+        return URLEncoder.encode(path, StandardCharsets.UTF_8)
+                                  .replace("+", "%20");
+    }
+
+    public static String getUrlRepoContentsPath(GitHubInfo gitHubInfo, String path){
         return GitHubAPI.GITHUB_API_URL + "/"+REPOS +"/" + gitHubInfo.getUser() + "/" + gitHubInfo.getProject() + 
-            "/"+CONTENTS+"/" + path;
+            "/"+CONTENTS+"/" + encodePathString(path);
     }
 
+    public static String getUrlUserContentPath(GitHubInfo gitHubInfo, String branch, String path){
+        return  GitHubAPI.GITHUB_USER_CONTENT + "/" + gitHubInfo.getUser() + "/" + gitHubInfo.getProject() + 
+            "/"+ branch+ "/" + encodePathString(path);
+    }
 
     public CompletableFuture<GitHubAsset[]> getAssetsAllLatestRelease(ExecutorService execService){
-        return UrlStreamHelpers.getUrlJsonArray(getUrlAllReleases(),execService).thenApply(allReleases -> {
-        
-            JsonElement elementObject = allReleases.get(0);
-
-            if (elementObject != null && elementObject.isJsonObject()) {
-                    JsonObject gitHubApiJson = elementObject.getAsJsonObject();
-                String tagName = gitHubApiJson.get("tag_name").getAsString();
-                JsonElement assetsElement = gitHubApiJson.get("assets");
-                if (assetsElement != null && assetsElement.isJsonArray()) {
-                    
-                    JsonArray assetsArray = assetsElement.getAsJsonArray();
-                    if (assetsArray.size() > 0) {
-                        int assetArraySize = assetsArray.size();
-                        GitHubAsset[] assetArray = new GitHubAsset[assetArraySize]; 
-
-                        for(int i = 0; i < assetArraySize ; i++){
-                            JsonElement assetElement = assetsArray.get(i);
-
-                            if (assetElement != null && assetElement.isJsonObject()) {
-                                JsonObject assetObject = assetElement.getAsJsonObject();
-
-                                JsonElement downloadUrlElement = assetObject.get("browser_download_url");
-                                JsonElement nameElement = assetObject.get("name");
-                                JsonElement contentTypeElement = assetObject.get("content_type");
-                                JsonElement sizeElement = assetObject.get("size");
-
-                                if (downloadUrlElement != null && downloadUrlElement.isJsonPrimitive()) {
-                                    
-                                    String url = downloadUrlElement.getAsString();
-                                    String name = nameElement.getAsString();
-                                    long contentSize = sizeElement.getAsLong();
-                                    String contentTypeString = contentTypeElement.getAsString();
-
-                                    assetArray[i] = new GitHubAsset(name, url, contentTypeString, contentSize, tagName);
-
-                                }
-                            }
-                        }
-                        return assetArray; 
-                    }else{
-                       return null;
-                    }
-                }else{
-                    throw new IllegalStateException("Expected Json Object");
-                }
-            }else{
-                throw new IllegalStateException("Expected Json Object");
-            }
-           
-        });
+        return getAssets(true, execService);
     }
-
 
     public CompletableFuture<GitHubAsset[]> getAssetsLatestRelease(ExecutorService execService){
-        return UrlStreamHelpers.getUrlJson(getUrlLatestRelease(),execService).thenApply(gitHubApiJson->{
-            
-            String tagName = gitHubApiJson.get("tag_name").getAsString();
-            JsonElement assetsElement = gitHubApiJson.get("assets");
-            if (assetsElement != null && assetsElement.isJsonArray()) {
-                
-                JsonArray assetsArray = assetsElement.getAsJsonArray();
-                if (assetsArray.size() > 0) {
-                    int assetArraySize = assetsArray.size();
-                    GitHubAsset[] assetArray = new GitHubAsset[assetArraySize]; 
-
-                    for(int i = 0; i < assetArraySize ; i++){
-                        JsonElement assetElement = assetsArray.get(i);
-
-                        if (assetElement != null && assetElement.isJsonObject()) {
-                            JsonObject assetObject = assetElement.getAsJsonObject();
-
-                            JsonElement downloadUrlElement = assetObject.get("browser_download_url");
-                            JsonElement nameElement = assetObject.get("name");
-                            JsonElement contentTypeElement = assetObject.get("content_type");
-                            JsonElement sizeElement = assetObject.get("size");
-
-                            if (downloadUrlElement != null && downloadUrlElement.isJsonPrimitive()) {
-                                
-                                String url = downloadUrlElement.getAsString();
-                                String name = nameElement.getAsString();
-                                long contentSize = sizeElement.getAsLong();
-                                String contentTypeString = contentTypeElement.getAsString();
-
-                                assetArray[i] = new GitHubAsset(name, url, contentTypeString, contentSize, tagName);
-
-                            }
-                        }
-                    }
-                    return assetArray;
-                }else{
-                    return null;
-                }
-            }else{
-                throw new IllegalStateException("Assets are not in JsonArray format");
-            }
-        });
-
-
+         return getAssets(false, execService);
     }
 
+    public CompletableFuture<GitHubAsset[]> getAssets(boolean isAllReleases, ExecutorService execService) {
+        String urlString = isAllReleases ? getUrlAllReleases() : getUrlLatestRelease();
+
+        return CompletableFuture.supplyAsync(() -> {
+            List<GitHubAsset> assets = new ArrayList<>();
+
+            try {
+                HttpURLConnection conn = UrlStreamHelpers.getHttpUrlConnection(urlString);
+
+                try (JsonReader reader = new JsonReader(new InputStreamReader(conn.getInputStream()))) {
+                    reader.beginObject();
+                    while (reader.hasNext()) {
+                        String name = reader.nextName();
+                        switch (name) {
+                            case "assets":
+                                reader.beginArray();
+                                while (reader.hasNext()) {
+                                    GitHubAsset asset = GitHubAsset.read(reader);
+                                    if (asset != null) {
+                                        assets.add(asset);
+                                    }
+                                }
+                                reader.endArray();
+                            break;
+                            default:
+                            reader.skipValue();
+                        }
+                    }
+                    reader.endObject();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to fetch assets from latest release", e);
+            }
+
+            return assets.toArray(new GitHubAsset[0]);
+        }, execService);
+    }
+
+
+   
+ 
 
     public static String getFileSha(String apiUrl, String token) {
         try {

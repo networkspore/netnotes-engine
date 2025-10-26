@@ -1,44 +1,159 @@
 package io.netnotes.engine.utils.github;
 
-public class GitHubAsset{
+import com.google.gson.JsonObject;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+
+public class GitHubAsset {
     private String m_name;
+    private String m_label;
     private String m_url;
+    private String m_browserDownloadUrl;
     private String m_contentType;
     private long m_size;
+    private long m_downloadCount;
+    private String m_state;
     private String m_tagName;
+    private String m_nodeId;
+    private long m_id;
+    private Instant m_createdAt;
+    private Instant m_updatedAt;
+    private GitHubUser m_uploader;
+    private String m_digest;
 
-    public GitHubAsset(String name, String url, String contentType, long size){
+    public GitHubAsset(String name, String label, String url, String browserDownloadUrl, String contentType,
+                       long size, long downloadCount, String state, String tagName, String nodeId, long id,
+                       Instant createdAt, Instant updatedAt, GitHubUser uploader, String digest) {
         m_name = name;
+        m_label = label;
         m_url = url;
+        m_browserDownloadUrl = browserDownloadUrl;
         m_contentType = contentType;
         m_size = size;
-    }
-    
-    public GitHubAsset(String name, String url, String contentType, long size, String tagName){
-        m_name = name;
-        m_url = url;
-        m_contentType = contentType;
-        m_size = size;
+        m_downloadCount = downloadCount;
+        m_state = state;
         m_tagName = tagName;
+        m_nodeId = nodeId;
+        m_id = id;
+        m_createdAt = createdAt;
+        m_updatedAt = updatedAt;
+        m_uploader = uploader;
+        m_digest = digest;
     }
 
-    public String getTagName(){
-        return m_tagName;
+    // --------------------
+    // Getters
+    // --------------------
+    public String getName() { return m_name; }
+    public String getLabel() { return m_label; }
+    public String getUrl() { return m_url; }
+    public String getBrowserDownloadUrl() { return m_browserDownloadUrl; }
+    public String getContentType() { return m_contentType; }
+    public long getSize() { return m_size; }
+    public long getDownloadCount() { return m_downloadCount; }
+    public String getState() { return m_state; }
+    public String getTagName() { return m_tagName; }
+    public String getNodeId() { return m_nodeId; }
+    public long getId() { return m_id; }
+    public Instant getCreatedAt() { return m_createdAt; }
+    public Instant getUpdatedAt() { return m_updatedAt; }
+    public GitHubUser getUploader() { return m_uploader; }
+    public String getDigest() { return m_digest; }
+
+    // --------------------
+    // JSON Serialization
+    // --------------------
+    public JsonObject getJsonObject() {
+        JsonObject json = new JsonObject();
+        json.addProperty("name", m_name);
+        json.addProperty("label", m_label);
+        json.addProperty("url", m_url);
+        json.addProperty("browser_download_url", m_browserDownloadUrl);
+        json.addProperty("content_type", m_contentType);
+        json.addProperty("size", m_size);
+        json.addProperty("download_count", m_downloadCount);
+        json.addProperty("state", m_state);
+        json.addProperty("tag_name", m_tagName);
+        json.addProperty("node_id", m_nodeId);
+        json.addProperty("id", m_id);
+        json.addProperty("created_at", m_createdAt != null ? m_createdAt.toString() : null);
+        json.addProperty("updated_at", m_updatedAt != null ? m_updatedAt.toString() : null);
+        if (m_uploader != null) {
+            json.add("uploader", m_uploader.getJsonObject());
+        }
+        json.addProperty("digest", m_digest);
+        return json;
     }
 
-    public String getName(){
-        return m_name;
+    public void write(JsonWriter writer) throws IOException {
+        writer.beginObject();
+        writer.name("name").value(m_name);
+        writer.name("label").value(m_label);
+        writer.name("url").value(m_url);
+        writer.name("browser_download_url").value(m_browserDownloadUrl);
+        writer.name("content_type").value(m_contentType);
+        writer.name("size").value(m_size);
+        writer.name("download_count").value(m_downloadCount);
+        writer.name("state").value(m_state);
+        writer.name("tag_name").value(m_tagName);
+        writer.name("node_id").value(m_nodeId);
+        writer.name("id").value(m_id);
+        writer.name("created_at").value(m_createdAt != null ? m_createdAt.toString() : null);
+        writer.name("updated_at").value(m_updatedAt != null ? m_updatedAt.toString() : null);
+        if (m_uploader != null) {
+            writer.name("uploader");
+            m_uploader.write(writer);
+        }
+        writer.name("digest").value(m_digest);
+        writer.endObject();
     }
 
-    public String getUrl(){
-        return m_url;
+    // --------------------
+    // JSON Deserialization
+    // --------------------
+    public static GitHubAsset read(JsonReader reader) throws IOException {
+        String name = null, label = null, url = null, browserDownloadUrl = null, contentType = null,
+               state = null, tagName = null, nodeId = null, digest = null;
+        long size = 0, downloadCount = 0, id = 0;
+        Instant createdAt = null, updatedAt = null;
+        GitHubUser uploader = null;
+
+        reader.beginObject();
+        while (reader.hasNext()) {
+            String fieldName = reader.nextName();
+            switch (fieldName) {
+                case "name" -> name = reader.nextString();
+                case "label" -> label = reader.nextString();
+                case "url" -> url = reader.nextString();
+                case "browser_download_url" -> browserDownloadUrl = reader.nextString();
+                case "content_type" -> contentType = reader.nextString();
+                case "size" -> size = reader.nextLong();
+                case "download_count" -> downloadCount = reader.nextLong();
+                case "state" -> state = reader.nextString();
+                case "tag_name" -> tagName = reader.nextString();
+                case "node_id" -> nodeId = reader.nextString();
+                case "id" -> id = reader.nextLong();
+                case "created_at" -> createdAt = parseInstantSafe(reader.nextString());
+                case "updated_at" -> updatedAt = parseInstantSafe(reader.nextString());
+                case "uploader" -> uploader = GitHubUser.read(reader);
+                case "digest" -> digest = reader.nextString();
+                default -> reader.skipValue();
+            }
+        }
+        reader.endObject();
+
+        return new GitHubAsset(name, label, url, browserDownloadUrl, contentType,
+                               size, downloadCount, state, tagName, nodeId, id,
+                               createdAt, updatedAt, uploader, digest);
     }
 
-    public String getContentType(){
-        return m_contentType;
-    }
-
-    public long getSize(){
-        return m_size;
+    private static Instant parseInstantSafe(String iso) {
+        if (iso == null) return null;
+        try { return Instant.parse(iso); }
+        catch (DateTimeParseException e) { return null; }
     }
 }

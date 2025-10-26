@@ -45,12 +45,29 @@ public class FileStreamUtils {
         return dataDir.getAbsolutePath() + "/" + NoteUUID.createSafeUUID128();
     }
 
-    public static CompletableFuture<Void> transferFileToPipe(File file, PipedOutputStream outputStream, ExecutorService execService){
+    public static CompletableFuture<Void> fileToPipe(File file, PipedOutputStream pipedOutputStream, ExecutorService execService){
         return CompletableFuture.runAsync(()->{
-            try(InputStream inputStream = Files.newInputStream(file.toPath())){
+            try(
+                PipedOutputStream outputStream = pipedOutputStream;
+                InputStream inputStream = Files.newInputStream(file.toPath());
+            ){
                 inputStream.transferTo(outputStream);
             }catch(IOException e){
                 throw new CompletionException("Failed to read file", e);
+            }
+        },execService);
+    }
+
+    public static CompletableFuture<Boolean> pipeToFile( PipedOutputStream pipedOutputStream, File file, ExecutorService execService){
+        return CompletableFuture.supplyAsync(()->{
+            try(
+                PipedInputStream inputStream = new PipedInputStream(pipedOutputStream, StreamUtils.PIPE_BUFFER_SIZE);
+                OutputStream outputStream = Files.newOutputStream(file.toPath())
+            ){
+                inputStream.transferTo(outputStream);
+                return true;
+            }catch(IOException e){
+                throw new CompletionException("Failed to write file", e);
             }
         },execService);
     }

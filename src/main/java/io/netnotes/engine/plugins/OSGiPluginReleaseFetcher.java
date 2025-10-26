@@ -3,7 +3,6 @@ package io.netnotes.engine.plugins;
 
 import io.netnotes.engine.utils.github.GitHubAPI;
 import io.netnotes.engine.utils.github.GitHubAsset;
-import io.netnotes.engine.utils.github.GitHubFileInfo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,34 +16,30 @@ public class OSGiPluginReleaseFetcher {
         m_execService = execService;
     }
     
-    public CompletableFuture<List<OSGiPluginRelease>> fetchReleasesForApp(OSGiPluginInformation appInfo) {
-        GitHubFileInfo[] gitHubFiles = appInfo.getGitHubFiles();
+    public CompletableFuture<List<OSGiPluginRelease>> fetchReleasesForApp(boolean includeBetas, OSGiPluginInformation appInfo) {
+        OSGiPluginFileInfo[] gitHubFiles = appInfo.getGitHubFiles();
         
         if (gitHubFiles == null || gitHubFiles.length == 0) {
             return CompletableFuture.completedFuture(new ArrayList<>());
         }
         
         // Use the first GitHub file info to get releases
-        GitHubFileInfo fileInfo = gitHubFiles[0];
+        OSGiPluginFileInfo fileInfo = gitHubFiles[0];
 
         
         GitHubAPI api = new GitHubAPI(fileInfo.getGitHubInfo());
         
-        return api.getAssetsAllLatestRelease(m_execService)
+        return api.getAssets(includeBetas, m_execService)
             .thenApply(assets -> {
                 List<OSGiPluginRelease> releases = new ArrayList<>();
                 
                 if (assets != null) {
                     for (GitHubAsset asset : assets) {
                         // Check if this asset matches any of the app's GitHub files
-                        for (GitHubFileInfo ghFile : gitHubFiles) {
+                        for (OSGiPluginFileInfo ghFile : gitHubFiles) {
                             if (assetMatchesFileInfo(asset, ghFile)) {
-                                String version = extractVersion(asset.getName(), 
-                                                               ghFile.getFileName(), 
-                                                               ghFile.getFileExt());
-                                OSGiPluginRelease release = new OSGiPluginRelease(appInfo, asset, version, 
-                                                                    asset.getTagName(), 
-                                                                    System.currentTimeMillis());
+             
+                                OSGiPluginRelease release = new OSGiPluginRelease(appInfo, asset);
                                 releases.add(release);
                                 break;
                             }
@@ -56,7 +51,7 @@ public class OSGiPluginReleaseFetcher {
             });
     }
     
-    private boolean assetMatchesFileInfo(GitHubAsset asset, GitHubFileInfo fileInfo) {
+    private boolean assetMatchesFileInfo(GitHubAsset asset, OSGiPluginFileInfo fileInfo) {
         String assetName = asset.getName();
         String fileName = fileInfo.getFileName();
         String fileExt = fileInfo.getFileExt();
@@ -64,21 +59,4 @@ public class OSGiPluginReleaseFetcher {
         return assetName.startsWith(fileName) && assetName.endsWith(fileExt);
     }
     
-    private String extractVersion(String assetName, String fileName, String fileExt) {
-        // Remove the fileName prefix and fileExt suffix to get the version
-        String version = assetName;
-        
-        if (version.startsWith(fileName)) {
-            version = version.substring(fileName.length());
-        }
-        
-        if (version.endsWith(fileExt)) {
-            version = version.substring(0, version.length() - fileExt.length());
-        }
-        
-        // Clean up common separators
-        version = version.replaceAll("^[-_]", "").replaceAll("[-_]$", "");
-        
-        return version.isEmpty() ? "latest" : version;
-    }
 }
