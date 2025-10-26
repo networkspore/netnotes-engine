@@ -1,102 +1,133 @@
 package io.netnotes.engine.plugins;
 
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.utils.github.GitHubInfo;
-import io.netnotes.engine.utils.github.GitHubFileInfo;
+import io.netnotes.engine.utils.github.GitHubAPI;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 
 public class OSGiUpdateLoader {
+    public final static String DEFAULT_BRANCH = "main";
+    
     private final GitHubInfo m_gitHubInfo;
     private final ExecutorService m_execService;
-    
-    public OSGiUpdateLoader(GitHubInfo gitHubInfo, ExecutorService execService) {
+
+    private String m_branch;
+    private String m_filePath;//available_apps.json
+
+    public OSGiUpdateLoader(GitHubInfo gitHubInfo, String filePath, ExecutorService execService) {
+        this(gitHubInfo, DEFAULT_BRANCH, filePath, execService);
+    }
+
+    public OSGiUpdateLoader(GitHubInfo gitHubInfo, String branch, String filePath, ExecutorService execService) {
         m_gitHubInfo = gitHubInfo;
         m_execService = execService;
+        m_branch = branch;
+        m_filePath = filePath;
     }
     
+
+
     public CompletableFuture<List<OSGiPluginInformation>> loadAvailableApps() {
         String userString = m_gitHubInfo.getUser();
         String projectString = m_gitHubInfo.getProject();
-        String availableAppsUrl = "https://raw.githubusercontent.com/" + 
-                                 userString + "/" + projectString + "/main/available_apps.json";
-        
-        return UrlStreamHelpers.getUrlJson(availableAppsUrl, m_execService)
-            .thenApply(this::parseAvailableApps);
+        String availableAppsUrl = GitHubAPI.GITHUB_USER_CONTENT + "/" +
+                                 userString + "/" + projectString + "/"+ m_branch+ "/" + m_filePath;
+
+        return CompletableFuture.supplyAsync(()->{
+            try(
+                InputStream inputStream = UrlStreamHelpers.getHttpUrlConnection(availableAppsUrl).getInputStream();
+                JsonReader reader = new JsonReader(new InputStreamReader(inputStream));
+            ) {
+                return readAvailableApps(reader);
+
+            }catch(IOException e){
+                throw new CompletionException("Stream failed to complete", e);
+            } catch (URISyntaxException e) {
+                throw new CompletionException("Invalid URL syntax", e);
+            }
+        }, m_execService);
     }
     
-    private List<OSGiPluginInformation> parseAvailableApps(JsonObject availableAppsJson) {
+    private List<OSGiPluginInformation> readAvailableApps(JsonReader reader) throws IOException {
         List<OSGiPluginInformation> apps = new ArrayList<>();
-        
-        JsonElement appsElement = availableAppsJson.get("apps");
-        if (appsElement != null && appsElement.isJsonArray()) {
-            JsonArray appsArray = appsElement.getAsJsonArray();
-            
-            for (JsonElement appElement : appsArray) {
-                if (appElement.isJsonObject()) {
-                    JsonObject appObj = appElement.getAsJsonObject();
-                    
+
+        reader.beginObject();
+        while (reader.hasNext()) {
+            String name = reader.nextName();
+            if ("apps".equals(name)) {
+                reader.beginArray();
+                while (reader.hasNext()) {
                     try {
-                        OSGiPluginInformation appInfo = parseAppInfo(appObj);
-                        if (appInfo != null) {
-                            apps.add(appInfo);
-                        }
+                        OSGiPluginInformation appInfo = OSGiPluginInformation.read(reader);
+                        if (appInfo != null) apps.add(appInfo);
                     } catch (Exception e) {
-                        System.err.println("Error parsing app: " + e.getMessage());
+                        System.err.println("Error parsing app entry: " + e.getMessage());
+                        reader.skipValue(); // skip malformed entry
                     }
                 }
+                reader.endArray();
+            } else {
+                reader.skipValue(); // skip unknown fields
             }
         }
-        
+        reader.endObject();
+
         return apps;
     }
-    
-    private OSGiPluginInformation parseAppInfo(JsonObject appObj) {
-        // Parse basic info
-        String appIdStr = appObj.get("appId").getAsString();
-        String appName = appObj.get("name").getAsString();
-        String description = appObj.get("description").getAsString();
-        
-        NoteBytes appId = new NoteBytes(appIdStr);
-        
-        // Parse icon URLs
-        String iconUrl = appObj.has("icon") ? appObj.get("icon").getAsString() : null;
-        String smallIconUrl = appObj.has("smallIcon") ? appObj.get("smallIcon").getAsString() : null;
-        
 
-        
-        // Parse GitHub files
-        List<GitHubFileInfo> gitHubFiles = new ArrayList<>();
-        JsonElement filesElement = appObj.get("gitHubFiles");
-        if (filesElement != null && filesElement.isJsonArray()) {
-            JsonArray filesArray = filesElement.getAsJsonArray();
-            
-            for (JsonElement fileElement : filesArray) {
-                if (fileElement.isJsonObject()) {
-                    JsonObject fileObj = fileElement.getAsJsonObject();
-                    
-                    String user = fileObj.get("user").getAsString();
-                    String project = fileObj.get("project").getAsString();
-                    String fileName = fileObj.get("fileName").getAsString();
-                    String fileExt = fileObj.get("fileExt").getAsString();
-                    
-                    GitHubInfo githubInfo = new GitHubInfo(user, project);
-                    GitHubFileInfo fileInfo = new GitHubFileInfo(githubInfo, fileName, fileExt);
-                    gitHubFiles.add(fileInfo);
+
+    public boolean saveAvailableApps(File saveFile, List<OSGiPluginInformation> apps) {
+        if (apps == null || apps.isEmpty()) {
+            System.err.println("No apps to save.");
+            return false;
+        }
+
+
+        if (saveFile == null) {
+            System.out.println("Save canceled by user.");
+            return false;
+        }
+
+        // Write JSON
+        try (JsonWriter writer = new JsonWriter(new FileWriter(saveFile))) {
+            writer.setIndent("  "); // pretty-print
+
+            writer.beginObject();
+            writer.name("apps");
+            writer.beginArray();
+
+            for (OSGiPluginInformation appInfo : apps) {
+                if (appInfo != null) {
+                    appInfo.write(writer); // use your class’s streaming writer
                 }
             }
+
+            writer.endArray();
+            writer.endObject();
+            
+        } catch (IOException e) {
+            System.err.println("Failed to save apps: " + e.getMessage());
+            e.printStackTrace();
+            return false;
         }
-        
-        return new OSGiPluginInformation(appId, appName, iconUrl, smallIconUrl, description, 
-                                 gitHubFiles.toArray(new GitHubFileInfo[0]));
+
+        System.out.println("Saved " + apps.size() + " apps to: " + saveFile.getAbsolutePath());
+        return true;
     }
+    
 }

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 
 import javax.crypto.Cipher;
@@ -44,7 +45,15 @@ public class FileStreamUtils {
         return dataDir.getAbsolutePath() + "/" + NoteUUID.createSafeUUID128();
     }
 
-
+    public static CompletableFuture<Void> transferFileToPipe(File file, PipedOutputStream outputStream, ExecutorService execService){
+        return CompletableFuture.runAsync(()->{
+            try(InputStream inputStream = Files.newInputStream(file.toPath())){
+                inputStream.transferTo(outputStream);
+            }catch(IOException e){
+                throw new CompletionException("Failed to read file", e);
+            }
+        },execService);
+    }
 
 
     public static void writeFileBytes(File file, byte[] bytes) throws IOException{
@@ -401,8 +410,8 @@ public class FileStreamUtils {
                 }
             }
         }
-        
     }
+
 
     public static NoteBytesMap readFileToMap(File file) throws FileNotFoundException, IOException{
         NoteBytesMap map = new NoteBytesMap();

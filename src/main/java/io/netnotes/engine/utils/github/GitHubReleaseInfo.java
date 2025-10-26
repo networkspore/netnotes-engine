@@ -136,8 +136,8 @@ public class GitHubReleaseInfo {
            
     }*/
 
-    public CompletableFuture<GitHubReleaseInfo> checkForReleaseInfo(String gitHubUser, String githubProject, ExecutorService execService) {
-        GitHubAPI gitHubAPI = new GitHubAPI(gitHubUser, githubProject);
+    public CompletableFuture<GitHubReleaseInfo> checkForReleaseInfo(GitHubInfo gitHubInfo, ExecutorService execService) {
+        GitHubAPI gitHubAPI = new GitHubAPI(gitHubInfo);
         
         return gitHubAPI.getAssetsLatestRelease(execService)
             .thenCompose(assets -> {

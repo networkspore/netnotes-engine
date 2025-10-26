@@ -2,11 +2,19 @@ package io.netnotes.engine.utils.github;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
 import com.google.gson.JsonArray;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -14,23 +22,42 @@ import java.util.concurrent.ExecutorService;
 public class GitHubAPI {
 
     public final static String GITHUB_API_URL = "https://api.github.com";
+    public final static String GITHUB_USER_CONTENT = "https://raw.githubusercontent.com";
 
-    private String m_username;
-    private String m_project;
+    public final static String REPOS = "repos";
+    public final static String RELEASES = "releases";
+    public final static String LATEST = "latest";
+    public final static String CONTENTS = "contents";
+
+    private final GitHubInfo gitHubInfo;
 
 
-    public GitHubAPI(String username, String project){
-        m_username = username;
-        m_project = project;
-        
+    public GitHubAPI(GitHubInfo info){
+        gitHubInfo = info;
+    }
+
+    public static String getUrlLatestRelease(GitHubInfo gitHubInfo){
+        return GITHUB_API_URL + "/" +REPOS+"/" + gitHubInfo.getUser() + "/" + gitHubInfo.getProject() + "/" +RELEASES + "/" + LATEST;
     }
 
     public String getUrlLatestRelease(){
-        return GITHUB_API_URL + "/repos/" + m_username + "/" + m_project + "/releases/latest";
+        return getUrlLatestRelease(gitHubInfo);
     }
     
     public String getUrlAllReleases(){
-        return GITHUB_API_URL + "/repos/" + m_username + "/" + m_project + "/releases";
+        return getUrlAllReleases(gitHubInfo);
+    }
+    public static String getUrlAllReleases(GitHubInfo gitHubInfo){
+        return GITHUB_API_URL + "/" + REPOS + "/" + gitHubInfo.getUser() + "/" + gitHubInfo.getProject() + "/" + RELEASES;
+    }
+    
+    public  String getUrlContentsPath( String path){
+        return getUrlContentsPath(gitHubInfo, path);
+    }
+
+    public static String getUrlContentsPath(GitHubInfo gitHubInfo, String path){
+        return GitHubAPI.GITHUB_API_URL + "/"+REPOS +"/" + gitHubInfo.getUser() + "/" + gitHubInfo.getProject() + 
+            "/"+CONTENTS+"/" + path;
     }
 
 
@@ -136,4 +163,30 @@ public class GitHubAPI {
     }
 
 
+    public static String getFileSha(String apiUrl, String token) {
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URI(apiUrl).toURL().openConnection();
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+
+            if (conn.getResponseCode() == 200) {
+                String response = readResponse(conn);
+                JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+                return json.get("sha").getAsString();
+            }
+        } catch (Exception e) {
+            // File not found or unauthorized
+        }
+        return null;
+    }
+
+    public static String readResponse(HttpURLConnection conn) throws IOException {
+        try (InputStream is = conn.getResponseCode() < 400 ? conn.getInputStream() : conn.getErrorStream();
+             BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
+        }
+    }
 }

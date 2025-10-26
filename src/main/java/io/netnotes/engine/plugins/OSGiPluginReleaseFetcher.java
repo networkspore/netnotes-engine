@@ -26,10 +26,9 @@ public class OSGiPluginReleaseFetcher {
         
         // Use the first GitHub file info to get releases
         GitHubFileInfo fileInfo = gitHubFiles[0];
-        String user = fileInfo.getGitHubInfo().getUser();
-        String project = fileInfo.getGitHubInfo().getProject();
+
         
-        GitHubAPI api = new GitHubAPI(user, project);
+        GitHubAPI api = new GitHubAPI(fileInfo.getGitHubInfo());
         
         return api.getAssetsAllLatestRelease(m_execService)
             .thenApply(assets -> {

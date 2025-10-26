@@ -8,8 +8,6 @@ import java.io.PipedOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
-import java.net.URLConnection;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -22,29 +20,40 @@ import io.netnotes.engine.utils.streams.StreamUtils.StreamProgressTracker;
 
 public class UrlStreamHelpers {
     public final static String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36";
+    public final static String HTTP_GET = "GET";
+    public final static String HTTP_PUT = "PUT";
+    public final static String HTTP_ACCEPT = "Accept";
+    
     public final static int URL_BUFFER_SIZE = 1024;
    
-    public static URLConnection getUrlConnection(String urlString)throws IOException, URISyntaxException{
-        URI uri = new URI(urlString);
-        URL url = uri.toURL();
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestProperty("User-Agent", USER_AGENT);
-        connection.setRequestMethod("GET");
-        connection.setRequestProperty("Accept", "application/octet-stream");
+    public static HttpURLConnection getHttpUrlConnection(String urlString)throws IOException, URISyntaxException{
+        HttpURLConnection connection = getHttpUrlConnection(urlString, USER_AGENT, HTTP_GET);
         connection.setConnectTimeout(30000);
         connection.setReadTimeout(30000);
         int responseCode = connection.getResponseCode();
         if (responseCode != HttpURLConnection.HTTP_OK) {
             throw new IOException("HTTP error code: " + responseCode);
         }
-            
+        return connection;
+    }
+
+    public static HttpURLConnection getHttpUrlConnection(String urlString, String userAgent, String method)throws IOException, URISyntaxException{
+        HttpURLConnection connection = (HttpURLConnection) new URI(urlString)
+            .toURL()
+            .openConnection();
+        if(userAgent != null){
+            connection.setRequestProperty("User-Agent", userAgent);
+        }
+        if(method != null){
+            connection.setRequestMethod(method);
+        }
         return connection;
     }
 
 
     public static byte[] getUrlToBytesSync(String urlString) throws IOException, URISyntaxException{
         try(
-            InputStream inputStream = getUrlConnection(urlString).getInputStream();
+            InputStream inputStream = getHttpUrlConnection(urlString).getInputStream();
         ){
             return StreamUtils.readInputStreamAsBytes(inputStream);
         }
@@ -54,7 +63,7 @@ public class UrlStreamHelpers {
     public static CompletableFuture<JsonObject> getUrlJson(String urlString, ExecutorService execService) {
         return CompletableFuture.supplyAsync(()->{
             try(
-                InputStream inputStream = getUrlConnection(urlString).getInputStream();
+                InputStream inputStream = getHttpUrlConnection(urlString).getInputStream();
                 InputStreamReader reader = new InputStreamReader(inputStream);
             ) {
                 return StreamUtils.readJson(reader);
@@ -72,7 +81,7 @@ public class UrlStreamHelpers {
 
         return CompletableFuture.supplyAsync(()->{
             try(
-                InputStream inputStream = getUrlConnection(urlString).getInputStream();
+                InputStream inputStream = getHttpUrlConnection(urlString).getInputStream();
                 InputStreamReader reader = new InputStreamReader(inputStream);
             ) {
                 return StreamUtils.readJsonArray(reader);
@@ -92,7 +101,7 @@ public class UrlStreamHelpers {
             try(OutputStream outputStream = pipedOutputStream){
 
                 try(
-                    InputStream inputStream = getUrlConnection(urlString).getInputStream()
+                    InputStream inputStream = getHttpUrlConnection(urlString).getInputStream()
                 ){
                     StreamUtils.streamCopy(inputStream, outputStream, progressTracker);
                 }
