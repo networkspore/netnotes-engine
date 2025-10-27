@@ -6,7 +6,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 public class NoteString extends NoteBytes {
 
     public NoteString(String key){
-        this(key.toCharArray());
+        this(key.getBytes());
     }
 
     public NoteString(char[] key){

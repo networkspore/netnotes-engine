@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-
+import java.util.Base64;
 import java.util.Collections;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -293,8 +293,17 @@ public class ByteDecoding{
             default:
                 return new String(bytes);
         }
+    }
 
- 
+    public static String bytesToUrlSafeString(byte[] bytes, byte type){
+
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+            type == NoteBytesMetaData.STRING_TYPE || 
+            type == NoteBytesMetaData.STRING_ISO_8859_1_TYPE ||
+            type == NoteBytesMetaData.STRING_US_ASCII_TYPE
+            ? bytes : bytesToString(bytes, type).getBytes());
+        
+
     }
 
     public static CharBuffer decodeByteBufferToChars(ByteBuffer byteBuffer, byte type) {

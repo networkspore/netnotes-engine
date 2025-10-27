@@ -44,7 +44,7 @@ public class OSGiPluginRegistry {
     
 
     // In-memory cache of installed plugins
-    private final ConcurrentHashMap<NoteBytes, PluginMetaData> m_installedPlugins;
+    private final ConcurrentHashMap<String, OSGiPluginMetaData> m_installedPlugins;
     
     public OSGiPluginRegistry(AppDataInterface appData, ExecutorService execService) {
         m_appData = appData;
@@ -61,7 +61,7 @@ public class OSGiPluginRegistry {
             .exceptionally(error -> {
                 // If registry doesn't exist or fails to load, create empty one
                 System.out.println("No existing registry found or error loading, creating new: " + error.getMessage());
-                return new ArrayList<PluginMetaData>();
+                return new ArrayList<OSGiPluginMetaData>();
             })
             .thenAccept(plugins -> {
                 m_installedPlugins.clear();
@@ -73,7 +73,7 @@ public class OSGiPluginRegistry {
             });
     }
 
-    public ConcurrentHashMap<NoteBytes, PluginMetaData> getInstalledPlugins(){
+    public ConcurrentHashMap<String, OSGiPluginMetaData> getInstalledPlugins(){
         return m_installedPlugins;
     }
 
@@ -81,10 +81,9 @@ public class OSGiPluginRegistry {
     /**
      * Register a newly installed plugin.
      */
-    public CompletableFuture<Void> registerPlugin(PluginMetaData metadata) {
+    public CompletableFuture<Void> registerPlugin(OSGiPluginMetaData metadata) {
         m_installedPlugins.put(metadata.getPluginId(), metadata);
-        System.out.println("Registered plugin: " + metadata.getPluginId().getAsString() + 
-                          " version " + metadata.getVersion());
+        System.out.println("Registered plugin: " + metadata.getName() + " " + metadata.getRelease().getTagName());
       
         return saveRegistry();
     }
@@ -94,10 +93,10 @@ public class OSGiPluginRegistry {
     /**
      * Unregister a plugin (remove from registry).
      */
-    public CompletableFuture<Void> unregisterPlugin(NoteBytes pluginId) {
-        PluginMetaData removed = m_installedPlugins.remove(pluginId);
+    public CompletableFuture<Void> unregisterPlugin(String pluginId) {
+        OSGiPluginMetaData removed = m_installedPlugins.remove(pluginId);
         if (removed != null) {
-            System.out.println("Unregistered plugin: " + pluginId.getAsString());
+            System.out.println("Unregistered plugin: " + removed);
             return saveRegistry();
         }
         return CompletableFuture.completedFuture(null);
@@ -106,61 +105,60 @@ public class OSGiPluginRegistry {
     /**
      * Update plugin metadata (e.g., enable/disable, version change).
      */
-    public CompletableFuture<Void> updatePlugin(NoteBytes pluginId, PluginMetaData metadata) {
+    public CompletableFuture<Void> updatePlugin(String pluginId, OSGiPluginMetaData metadata) {
         if (m_installedPlugins.containsKey(pluginId)) {
             m_installedPlugins.put(pluginId, metadata);
-            System.out.println("Updated plugin: " + pluginId.getAsString());
+            System.out.println("Updated plugin: " + metadata);
             return saveRegistry();
         }
         return CompletableFuture.failedFuture(
-            new IllegalArgumentException("Plugin not found: " + pluginId.getAsString())
+            new IllegalArgumentException("Plugin not found: " + metadata)
         );
     }
     
     /**
      * Get all installed plugins.
      */
-    public List<PluginMetaData> getAllPlugins() {
+    public List<OSGiPluginMetaData> getAllPlugins() {
         return new ArrayList<>(m_installedPlugins.values());
     }
     
     /**
      * Get only enabled plugins.
      */
-    public List<PluginMetaData> getEnabledPlugins() {
+    public List<OSGiPluginMetaData> getEnabledPlugins() {
         return m_installedPlugins.values().stream()
-            .filter(PluginMetaData::isEnabled)
+            .filter(OSGiPluginMetaData::isEnabled)
             .collect(Collectors.toList());
     }
     
     /**
      * Get a specific plugin by ID.
      */
-    public PluginMetaData getPlugin(NoteBytes pluginId) {
+    public OSGiPluginMetaData getPlugin(String pluginId) {
         return m_installedPlugins.get(pluginId);
     }
     
     /**
      * Check if a plugin is installed.
      */
-    public boolean isPluginInstalled(NoteBytes pluginId) {
+    public boolean isPluginInstalled(String pluginId) {
         return m_installedPlugins.containsKey(pluginId);
     }
     
     /**
      * Enable or disable a plugin.
      */
-    public CompletableFuture<Void> setPluginEnabled(NoteBytes pluginId, boolean enabled) {
-        PluginMetaData metadata = m_installedPlugins.get(pluginId);
+    public CompletableFuture<Void> setPluginEnabled(String pluginId, boolean enabled) {
+        OSGiPluginMetaData metadata = m_installedPlugins.get(pluginId);
         if (metadata != null) {
             metadata.setEnabled(enabled);
-            System.out.println("Plugin " + pluginId.getAsString() + " " + 
+            System.out.println("Plugin " + metadata + " " + 
                              (enabled ? "enabled" : "disabled"));
             return saveRegistry();
         }
         return CompletableFuture.failedFuture(
-            new IllegalArgumentException("Plugin not found: " + pluginId.getAsString())
-        );
+            new IllegalArgumentException("Plugin not found: " + pluginId));
     }
     
     /**
@@ -194,7 +192,7 @@ public class OSGiPluginRegistry {
                 }));
                 
                 // Write each plugin
-                for (PluginMetaData plugin : m_installedPlugins.values()) {
+                for (OSGiPluginMetaData plugin : m_installedPlugins.values()) {
                     writer.write(plugin.getSaveData());
                 }
             } catch (IOException e) {
@@ -207,7 +205,7 @@ public class OSGiPluginRegistry {
     /**
      * Load the registry from the NoteFile.
      */
-    private CompletableFuture<List<PluginMetaData>> loadRegistry() {
+    private CompletableFuture<List<OSGiPluginMetaData>> loadRegistry() {
         return m_appData.getNoteFile(PLUGINS_REGISTRY_PATH)
             .thenCompose(noteFile -> {
                 return CompletableFuture.supplyAsync(() -> {
@@ -259,33 +257,15 @@ public class OSGiPluginRegistry {
     /**
      * Load plugins from registry version 1.0.0.
      */
-    private List<PluginMetaData> loadPluginsV1(NoteBytesReader reader) throws IOException {
-        List<PluginMetaData> plugins = new ArrayList<>();
+    private List<OSGiPluginMetaData> loadPluginsV1(NoteBytesReader reader) throws IOException {
+        List<OSGiPluginMetaData> plugins = new ArrayList<>();
         
         NoteBytes pluginId = reader.nextNoteBytes();
-        while (pluginId != null && pluginId.byteLength() > 0) {
+        while (pluginId != null) {
             NoteBytes value = reader.nextNoteBytes();
             
             if (value != null && value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                NoteBytesMap map = new NoteBytesMap(value.get());
-                
-                NoteBytes enabledBytes = map.get(PluginMetaData.ENABLED_KEY);
-                boolean enabled = enabledBytes != null && enabledBytes.getAsBoolean();
-                
-                NoteBytes pathBytes = map.get(PluginMetaData.NOTE_PATH_KEY);
-                if (pathBytes != null && pathBytes.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-                    NoteBytes versionBytes = map.get(PluginMetaData.VERSION_KEY);
-                    String version = versionBytes != null ? versionBytes.getAsString() : "unknown";
-                    
-                    PluginMetaData metadata = new PluginMetaData(
-                        pluginId,
-                        version,
-                        enabled,
-                        new NoteStringArrayReadOnly(pathBytes)
-                    );
-                    
-                    plugins.add(metadata);
-                }
+                plugins.add(OSGiPluginMetaData.of(value.getAsNoteBytesMap()));
             }
             
             pluginId = reader.nextNoteBytes();

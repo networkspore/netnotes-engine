@@ -4,6 +4,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+
 import java.io.IOException;
 
 public class GitHubUser {
@@ -43,6 +47,35 @@ public class GitHubUser {
         json.addProperty("html_url", m_htmlUrl);
         json.addProperty("type", m_type);
         return json;
+    }
+
+    public NoteBytesObject getNoteBytesObject() {
+        NoteBytesObject nbo = new NoteBytesObject();
+        nbo.add("login", m_login);
+        nbo.add("id", m_id);
+        nbo.add("node_id", m_nodeId);
+        nbo.add("url", m_url);
+        nbo.add("html_url", m_htmlUrl);
+        nbo.add("type", m_type);
+        return nbo;
+    }
+
+    public static GitHubUser of(NoteBytesMap map){
+        NoteBytes loginBytes = map.getByString("login");
+        NoteBytes idBytes = map.getByString("id");
+        NoteBytes nodeIdBytes = map.getByString("node_id");
+        NoteBytes urlBytes = map.getByString("url");
+        NoteBytes htmlUrlBytes = map.getByString("html_url");
+        NoteBytes typeBytes = map.getByString("type");
+
+        return new GitHubUser(
+            loginBytes != null ? loginBytes.getAsString() : "", 
+            idBytes != null ? idBytes.getAsLong() : -1, 
+            nodeIdBytes != null ? nodeIdBytes.getAsString() : "", 
+            urlBytes != null ? urlBytes.getAsString() : "", 
+            htmlUrlBytes != null ? htmlUrlBytes.getAsString() : "", 
+            typeBytes != null ? typeBytes.getAsString() : ""
+        );
     }
 
     public void write(JsonWriter writer) throws IOException {

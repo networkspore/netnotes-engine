@@ -6,6 +6,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+
 public class GitHubInfo {
 
     private final String m_user;
@@ -33,13 +37,40 @@ public class GitHubInfo {
         return json;
     }
 
+
+     public NoteBytesObject getNoteBytesObject(){
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair("user", m_user),
+            new NoteBytesPair("project", m_project)
+        });
+    }
+
+    public static GitHubInfo of(NoteBytesMap json) {
+        if (json == null) return null;
+
+        String user = json.has("user") ? json.getByString("user").getAsString() : null;
+        String info = json.has("project") ? json.getByString("project").getAsString() : null;
+        
+        if(user != null && info != null){
+            return new GitHubInfo(user, info);
+        }
+        throw new IllegalStateException("Github info values corrupt");
+    }
+
+
+
     public static GitHubInfo of(JsonObject json) {
         if (json == null) return null;
 
-        String user = json.has("user") && !json.get("user").isJsonNull() ? json.get("user").getAsString() : null;
-        String info = json.has("project") && !json.get("project").isJsonNull() ? json.get("project").getAsString() : null;
+        String user = json.has("user") && !json.get("user").isJsonNull() ? json.get("user").getAsString() : "null";
+        String project = json.has("project") && !json.get("project").isJsonNull() ? json.get("project").getAsString() : "null";
         
-        return user != null && info != null ? new GitHubInfo(user, info) : null;
+        if(user != null && project != null){
+            new GitHubInfo(user, project); 
+        }
+            
+        throw new IllegalStateException("Values cannot be null");
+        
     }
 
     public static GitHubInfo read(JsonReader reader) throws IOException {

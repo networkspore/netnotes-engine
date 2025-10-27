@@ -5,7 +5,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import io.netnotes.engine.AppDataInterface;
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
@@ -22,9 +21,6 @@ public class OSGiPluginDownloader {
     private final AppDataInterface m_appData;
     private final ExecutorService m_execService;
     
-    // Base path for plugin storage
-    private static final String PLUGINS_BASE_PATH = "plugins";
-    private static final String JARS_SUBFOLDER = "jars";
     
     public OSGiPluginDownloader(AppDataInterface appData, ExecutorService execService) {
         m_appData = appData;
@@ -37,21 +33,10 @@ public class OSGiPluginDownloader {
      * @param release The AppRelease containing download URL
      * @return CompletableFuture with the installed plugin's NoteFile path
      */
-    public CompletableFuture<PluginInstallResult> downloadAndInstall(OSGiPluginRelease release, StreamProgressTracker progressTracker) {
-        String pluginId = release.getPluginInfo().getName();
-        String tagName = release.getTagName();
-        
-        // Create path: plugins/jars/{pluginId}-{version}
-        NoteStringArrayReadOnly jarPath = createPluginJarPath(pluginId, tagName);
-        
-        return downloadToNoteFile(release.getDownloadUrl(), jarPath, progressTracker)
-            .thenApply(noteFile -> new PluginInstallResult(
-                new NoteBytes(pluginId),
-                tagName,
-                jarPath,
-                noteFile,
-                release
-            ));
+    public CompletableFuture<OSGiPluginMetaData> downloadAndInstall(OSGiPluginRelease release, boolean enabled, StreamProgressTracker progressTracker) {
+
+        return downloadToNoteFile(release.getDownloadUrl(), release.createAssetPath(), progressTracker)
+            .thenApply(noteFile ->  new OSGiPluginMetaData(release, enabled));
     }
     
     /**
@@ -74,17 +59,6 @@ public class OSGiPluginDownloader {
     }
 
     
-    /**
-     * Create a NoteFile path for a plugin JAR.
-     */
-    private NoteStringArrayReadOnly createPluginJarPath(String pluginId, String version) {
-        String[] pathElements = {
-            PLUGINS_BASE_PATH,
-            JARS_SUBFOLDER,
-            pluginId + "-" + version
-        };
-        return new NoteStringArrayReadOnly(pathElements);
-    }
 
     /**
      * Delete a plugin's JAR file.
@@ -92,30 +66,5 @@ public class OSGiPluginDownloader {
     public CompletableFuture<NotePath> deletePluginJar(NoteStringArrayReadOnly jarPath, AsyncNoteBytesWriter progressWriter) {
         return m_appData.deleteNoteFilePath(jarPath, false, progressWriter);
     }
-    
-    /**
-     * Result of a plugin installation.
-     */
-    public static class PluginInstallResult {
-        private final NoteBytes pluginId;
-        private final NoteFile jarFile;
-        private final OSGiPluginRelease release;
-        
-        public PluginInstallResult(
-            NoteBytes pluginId,
-            String version,
-            NoteStringArrayReadOnly jarPath,
-            NoteFile jarFile,
-            OSGiPluginRelease release
-        ) {
-            this.pluginId = pluginId;
-            this.jarFile = jarFile;
-            this.release = release;
-        }
-        
-        public NoteBytes getPluginId() { return pluginId; }
-        public NoteStringArrayReadOnly getJarPath() { return jarFile.getPath(); }
-        public NoteFile getJarNoteFile() { return jarFile; }
-        public OSGiPluginRelease getRelease() { return release; }
-    }
+ 
 }

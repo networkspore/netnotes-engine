@@ -17,17 +17,13 @@ public class OSGiPluginReleaseFetcher {
     }
     
     public CompletableFuture<List<OSGiPluginRelease>> fetchReleasesForApp(boolean includeBetas, OSGiPluginInformation appInfo) {
-        OSGiPluginFileInfo[] gitHubFiles = appInfo.getGitHubFiles();
+        OSGiAvailablePluginFileInfo gitHubJar = appInfo.getGitHubJar();
         
-        if (gitHubFiles == null || gitHubFiles.length == 0) {
+        if (gitHubJar == null) {
             return CompletableFuture.completedFuture(new ArrayList<>());
         }
-        
-        // Use the first GitHub file info to get releases
-        OSGiPluginFileInfo fileInfo = gitHubFiles[0];
-
-        
-        GitHubAPI api = new GitHubAPI(fileInfo.getGitHubInfo());
+    
+        GitHubAPI api = new GitHubAPI(gitHubJar.getGitHubInfo());
         
         return api.getAssets(includeBetas, m_execService)
             .thenApply(assets -> {
@@ -36,14 +32,14 @@ public class OSGiPluginReleaseFetcher {
                 if (assets != null) {
                     for (GitHubAsset asset : assets) {
                         // Check if this asset matches any of the app's GitHub files
-                        for (OSGiPluginFileInfo ghFile : gitHubFiles) {
-                            if (assetMatchesFileInfo(asset, ghFile)) {
-             
-                                OSGiPluginRelease release = new OSGiPluginRelease(appInfo, asset);
-                                releases.add(release);
-                                break;
-                            }
+                    
+                        if (assetMatchesFileInfo(asset, gitHubJar)) {
+            
+                            OSGiPluginRelease release = new OSGiPluginRelease(appInfo, asset);
+                            releases.add(release);
+                            break;
                         }
+                        
                     }
                 }
                 
@@ -51,7 +47,7 @@ public class OSGiPluginReleaseFetcher {
             });
     }
     
-    private boolean assetMatchesFileInfo(GitHubAsset asset, OSGiPluginFileInfo fileInfo) {
+    private boolean assetMatchesFileInfo(GitHubAsset asset, OSGiAvailablePluginFileInfo fileInfo) {
         String assetName = asset.getName();
         String fileName = fileInfo.getFileName();
         String fileExt = fileInfo.getFileExt();

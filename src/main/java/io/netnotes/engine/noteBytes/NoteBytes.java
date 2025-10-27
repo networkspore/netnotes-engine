@@ -10,6 +10,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 
 import com.google.gson.JsonPrimitive;
@@ -166,6 +167,9 @@ public class NoteBytes {
         return ByteDecoding.bytesToString(m_value, m_type);
     }
 
+    public String getAsUrlSafeString(){
+        return ByteDecoding.bytesToUrlSafeString(m_value, m_type);
+    }
 
     @Override
     public String toString(){
@@ -473,6 +477,10 @@ public class NoteBytes {
         return new NoteBytesObject(m_value);
     }
 
+    public NoteBytesMap getAsNoteBytesMap(){
+        return new NoteBytesMap(m_value);
+    }
+
     public NoteBytesArray getAsNoteBytesArray(){
         return new NoteBytesArray(m_value);
     }
@@ -631,7 +639,14 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
-    public NoteUUID getAsNoteUUID(){ 
+    public String getHash32(){
+        byte[] bytes = internalGet();
+
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(HashServices.digestBytesToBytes(bytes, 32));
+    }
+
+
+    public NoteUUID getNoteUUIDfromBytes(){ 
         return NoteUUID.fromNoteUUIDBytes(internalGet());
     }
 

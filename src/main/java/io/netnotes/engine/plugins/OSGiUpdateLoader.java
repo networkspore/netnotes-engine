@@ -53,7 +53,7 @@ public class OSGiUpdateLoader {
         return CompletableFuture.supplyAsync(()->{
             String availableAppsUrl = GitHubAPI.getUrlUserContentPath(gitHubInfo, branch, filePath);
             try(
-                InputStream inputStream = UrlStreamHelpers.getHttpUrlConnection(availableAppsUrl).getInputStream();
+                InputStream inputStream = UrlStreamHelpers.newUrlStream(availableAppsUrl);
                 JsonReader reader = new JsonReader(new InputStreamReader(inputStream));
             ) {
                 return readAvailableApps(reader);

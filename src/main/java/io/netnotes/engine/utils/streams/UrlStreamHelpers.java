@@ -25,6 +25,10 @@ public class UrlStreamHelpers {
     public final static String HTTP_ACCEPT = "Accept";
     
     public final static int URL_BUFFER_SIZE = 1024;
+
+    public static InputStream newUrlStream(String urlString) throws IOException, URISyntaxException{
+        return getHttpUrlConnection(urlString).getInputStream();
+    }
    
     public static HttpURLConnection getHttpUrlConnection(String urlString)throws IOException, URISyntaxException{
         HttpURLConnection connection = getHttpUrlConnection(urlString, USER_AGENT, HTTP_GET);

@@ -11,7 +11,6 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleException;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteFiles.NoteFile;
 
 /**
@@ -30,18 +29,17 @@ public class OSGiBundleLoader {
     /**
      * Load a plugin bundle from a NoteFile.
      * 
-     * @param pluginId Unique identifier for the plugin
      * @param noteFile NoteFile containing the JAR
      * @return CompletableFuture with the installed Bundle
      */
-    public CompletableFuture<Bundle> loadBundleFromNoteFile(NoteBytes pluginId, NoteFile noteFile) {
+    public CompletableFuture<Bundle> loadBundleFromNoteFile(NoteFile noteFile) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // Read JAR bytes from NoteFile
                 byte[] jarBytes = readJarFromNoteFile(noteFile);
                 
                 // Install bundle in OSGi framework
-                String bundleLocation = "plugin://" + pluginId.getAsString();
+                String bundleLocation = "plugin://" + noteFile.getPathId();
                 Bundle bundle = m_bundleContext.installBundle(
                     bundleLocation, 
                     new ByteArrayInputStream(jarBytes)

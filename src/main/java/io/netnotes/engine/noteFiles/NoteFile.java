@@ -38,15 +38,19 @@ public class NoteFile implements AutoCloseable  {
     private final NoteStringArrayReadOnly m_notePath;
     private final NoteFileInterface m_noteFileInterface;
     private final NoteUUID noteUUID;
+    private final String pathId;
     private AtomicBoolean closed = new AtomicBoolean(false);
     
     public NoteFile(NoteStringArrayReadOnly notePath, ManagedNoteFileInterface noteFileInterface) throws IllegalStateException {
         this.m_notePath = notePath;
         this.m_noteFileInterface = noteFileInterface;
         this.noteUUID = NoteUUID.createLocalUUID128();
-        
-        // ADD: Register this NoteFile with the interface
+        this.pathId = m_notePath.getHash32();
         noteFileInterface.addReference(this);
+    }
+
+    public String getPathId(){
+        return pathId;
     }
 
     public NoteUUID getId(){

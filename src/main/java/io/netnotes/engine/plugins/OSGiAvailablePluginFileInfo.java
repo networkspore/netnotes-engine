@@ -6,14 +6,17 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.utils.github.GitHubInfo;
 
-public class OSGiPluginFileInfo {
+public class OSGiAvailablePluginFileInfo {
     private final GitHubInfo m_githubInfo;
     private final String m_fileName;
     private final String m_fileExt;
 
-    public OSGiPluginFileInfo(GitHubInfo gitHubInfo, String fileName, String fileExt){
+    public OSGiAvailablePluginFileInfo(GitHubInfo gitHubInfo, String fileName, String fileExt){
         m_githubInfo = gitHubInfo;
         m_fileName = fileName;
         m_fileExt = fileExt;
@@ -33,7 +36,7 @@ public class OSGiPluginFileInfo {
     }
 
 
-     public JsonObject getJsonObject() {
+    public JsonObject getJsonObject() {
         JsonObject json = new JsonObject();
         if (m_githubInfo != null) {
             json.add("githubInfo", m_githubInfo.getJsonObject());
@@ -42,8 +45,34 @@ public class OSGiPluginFileInfo {
         json.addProperty("fileExt", m_fileExt);
         return json;
     }
+
+
+
+    public NoteBytesObject getNoteBytesObject() {
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair("githubInfo",m_githubInfo.getNoteBytesObject()),
+            new NoteBytesPair("fileName", m_fileName),
+            new NoteBytesPair("fileExt", m_fileExt)
+        });
+    }
+
+    public static OSGiAvailablePluginFileInfo of(NoteBytesMap map) {
+        if (map == null) return null;
+
+        GitHubInfo githubInfo = map.has("githubInfo") ? 
+            GitHubInfo.of(map.getByString("githubInfo").getAsNoteBytesMap()) : null;
+        String fileName = map.has("fileName")  ?
+            fileName = map.getByString("fileName").getAsString() : null;
+        String fileExt = map.has("fileExt") ?
+            fileExt = map.getByString("fileExt").getAsString() : null;
+
+
+        return githubInfo != null && fileName != null && fileExt != null ?
+             new OSGiAvailablePluginFileInfo(githubInfo, fileName, fileExt) : null;
+    }
+
     
-    public static OSGiPluginFileInfo of(JsonObject json) {
+    public static OSGiAvailablePluginFileInfo of(JsonObject json) {
         if (json == null) return null;
 
         GitHubInfo githubInfo = json.has("githubInfo") && json.get("githubInfo").isJsonObject() ?
@@ -55,10 +84,10 @@ public class OSGiPluginFileInfo {
 
 
         return githubInfo != null && fileName != null && fileExt != null ?
-             new OSGiPluginFileInfo(githubInfo, fileName, fileExt) : null;
+             new OSGiAvailablePluginFileInfo(githubInfo, fileName, fileExt) : null;
     }
 
-     public static OSGiPluginFileInfo read(JsonReader reader) throws IOException {
+     public static OSGiAvailablePluginFileInfo read(JsonReader reader) throws IOException {
         GitHubInfo githubInfo = null;
         String fileName = null;
         String fileExt = null;
@@ -83,8 +112,8 @@ public class OSGiPluginFileInfo {
         }
         reader.endObject();
 
-        OSGiPluginFileInfo fileInfo = githubInfo != null && fileName != null && fileExt != null ?
-             new OSGiPluginFileInfo(githubInfo, fileName, fileExt) : null;
+        OSGiAvailablePluginFileInfo fileInfo = githubInfo != null && fileName != null && fileExt != null ?
+             new OSGiAvailablePluginFileInfo(githubInfo, fileName, fileExt) : null;
 
         if(fileInfo == null){
             throw new IOException("File info corrupt");

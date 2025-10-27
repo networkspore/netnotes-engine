@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 
@@ -239,6 +240,10 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
         return m_pairs.containsKey(key);
     }
 
+    public boolean has(String key) {
+        return m_pairs.containsKey(new NoteString(key));
+    }
+
     @Override
     public boolean containsValue(Object value) {
         return m_pairs.containsValue(value);
@@ -252,6 +257,10 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
     @Override
     public NoteBytes get(Object key) {
         return m_pairs.get(NoteBytes.of(key));
+    }
+
+    public NoteBytes getByString(String key) {
+        return m_pairs.get(new NoteString(key));
     }
 
     @Override

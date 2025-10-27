@@ -148,6 +148,6 @@ public class NoteBytesPair {
     }
 
     public NoteUUID getAsNoteUUID(){
-        return  getValue() != null ? getValue().getAsNoteUUID() : null;
+        return  getValue() != null ? getValue().getNoteUUIDfromBytes() : null;
     }
 }

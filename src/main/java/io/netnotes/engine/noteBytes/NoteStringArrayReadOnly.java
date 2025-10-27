@@ -39,9 +39,8 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return String.join(delim, str);
     }
 
-   
-
-   
+  
+    
 
     public static NoteBytesReadOnly readNoteString(byte[] src, int srcOffset){
         final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;

@@ -4,6 +4,11 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -110,6 +115,64 @@ public class GitHubAsset {
         }
         writer.name("digest").value(m_digest);
         writer.endObject();
+    }
+
+    public static GitHubAsset of(NoteBytesMap map){
+        NoteBytes nameBytes = map.getByString("name");
+        NoteBytes labelBytes = map.getByString("label");
+        NoteBytes urlBytes = map.getByString("url");
+        NoteBytes browserDlBytes = map.getByString("browser_download_url");
+        NoteBytes contentTypeBytes = map.getByString("content_type");
+        NoteBytes sizeBytes = map.getByString("size");
+        NoteBytes dlCountBytes = map.getByString("download_count");
+        NoteBytes stateBytes = map.getByString("state");
+        NoteBytes tagNameBytes = map.getByString("tag_name");
+        NoteBytes nodeIDBytes = map.getByString("node_id");
+        NoteBytes idBytes = map.getByString("id");
+        NoteBytes createdAtBytes = map.getByString("created_at");
+        NoteBytes updatedAtBytes = map.getByString("updated_at");
+        NoteBytes uploaderBytes = map.getByString("uploader");
+        NoteBytes digestBytes = map.getByString("digest");
+
+        return new GitHubAsset(
+            nameBytes != null ? nameBytes.getAsString() : "",
+            labelBytes != null ? labelBytes.getAsString() : "",
+            urlBytes != null ? urlBytes.getAsString() : "",
+            browserDlBytes != null ? browserDlBytes.getAsString() : "",
+            contentTypeBytes != null ? contentTypeBytes.getAsString() : "",
+            sizeBytes != null ? sizeBytes.getAsLong() : -1,
+            dlCountBytes != null ? dlCountBytes.getAsLong() : -1,
+            stateBytes != null ? stateBytes.getAsString() : "",
+            tagNameBytes != null ? tagNameBytes.getAsString() : "",
+            nodeIDBytes != null ? nodeIDBytes.getAsString() : "",
+            idBytes != null ? idBytes.getAsLong() : -1,
+            createdAtBytes != null ? parseInstantSafe(createdAtBytes.getAsString()) : Instant.MIN,
+            updatedAtBytes != null ? parseInstantSafe(updatedAtBytes.getAsString()) :  Instant.MIN,
+            uploaderBytes != null ? GitHubUser.of(uploaderBytes.getAsNoteBytesMap()) : 
+                new GitHubUser("", -1, "","", "", ""),
+            digestBytes != null ? digestBytes.getAsString() : ""
+        );
+
+    }
+
+    public NoteBytesObject getNoteBytesObject(){
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair("name", m_name),
+            new NoteBytesPair("label",m_label),
+            new NoteBytesPair("url",m_url),
+            new NoteBytesPair("browser_download_url",m_browserDownloadUrl),
+            new NoteBytesPair("content_type",m_contentType),
+            new NoteBytesPair("size",m_size),
+            new NoteBytesPair("download_count",m_downloadCount),
+            new NoteBytesPair("state",m_state),
+            new NoteBytesPair("tag_name",m_tagName),
+            new NoteBytesPair("node_id",m_nodeId),
+            new NoteBytesPair("id",m_id),
+            new NoteBytesPair("created_at",m_createdAt != null ? m_createdAt.toString() : null),
+            new NoteBytesPair("updated_at",m_updatedAt != null ? m_updatedAt.toString() : null),
+            new NoteBytesPair("uploader", m_uploader != null ? m_uploader : "" ),
+            new NoteBytesPair("digest",m_digest)
+        });
     }
 
     // --------------------
