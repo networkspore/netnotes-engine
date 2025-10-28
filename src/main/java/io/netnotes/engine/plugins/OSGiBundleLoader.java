@@ -1,10 +1,9 @@
 package io.netnotes.engine.plugins;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 
 import org.osgi.framework.Bundle;
@@ -12,9 +11,10 @@ import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleException;
 
 import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 /**
- * Loads OSGi bundles from NoteFiles.
+ * Loads/Unloads OSGi bundles from NoteFiles.
  */
 public class OSGiBundleLoader {
     
@@ -33,61 +33,59 @@ public class OSGiBundleLoader {
      * @return CompletableFuture with the installed Bundle
      */
     public CompletableFuture<Bundle> loadBundleFromNoteFile(NoteFile noteFile) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Read JAR bytes from NoteFile
-                byte[] jarBytes = readJarFromNoteFile(noteFile);
-                
-                // Install bundle in OSGi framework
-                String bundleLocation = "plugin://" + noteFile.getPathId();
-                Bundle bundle = m_bundleContext.installBundle(
-                    bundleLocation, 
-                    new ByteArrayInputStream(jarBytes)
-                );
-                
-                // Start the bundle
-                bundle.start();
-                
-                System.out.println("Successfully loaded bundle: " + bundleLocation);
-                return bundle;
-                
-            } catch (BundleException | IOException e) {
-                throw new RuntimeException("Failed to load bundle from NoteFile", e);
-            }
-        }, m_execService);
-    }
-    
-    /**
-     * Read JAR bytes from a NoteFile.
-     */
-    private byte[] readJarFromNoteFile(NoteFile noteFile) throws IOException {
+      
         PipedOutputStream readOutput = new PipedOutputStream();
-        
         // Start read operation
         noteFile.readOnly(readOutput);
         
-        try (PipedInputStream inputStream = new PipedInputStream(readOutput)) {
-            return inputStream.readAllBytes();
-        }
+        return CompletableFuture.supplyAsync(()->{
+            try(PipedInputStream inputStream = new PipedInputStream(readOutput, StreamUtils.PIPE_BUFFER_SIZE)){
+                String bundleLocation = getBundleLocation(noteFile);
+
+                Bundle bundle = m_bundleContext.installBundle(
+                    bundleLocation, 
+                    inputStream
+                );
+                bundle.start();
+                System.out.println("Successfully loaded bundle: " + bundleLocation);
+                return bundle;
+            }catch(Exception e){
+                throw new CompletionException("Failed loading bundle", e);
+            }
+        }, m_execService);
+     
     }
     
+    public String getBundleLocation(NoteFile noteFile){
+        return "plugin://" + noteFile.getUrlPathString();
+    }
+
     /**
      * Unload a bundle.
      */
-    public CompletableFuture<Void> unloadBundle(Bundle bundle) {
+    public CompletableFuture<Void> unloadBundle(NoteFile noteFile) {
         return CompletableFuture.runAsync(() -> {
             try {
+                Bundle bundle = getInstalledBundle(noteFile);
+                if(bundle == null){
+                    return;
+                }
                 if (bundle.getState() == Bundle.ACTIVE) {
                     bundle.stop();
                 }
                 bundle.uninstall();
-                System.out.println("Unloaded bundle: " + bundle.getSymbolicName());
+                System.out.println("Unloaded bundle: " + getBundleLocation(noteFile));
             } catch (BundleException e) {
-                throw new RuntimeException("Failed to unload bundle", e);
+                throw new CompletionException("Failed to unload bundle", e);
             }
         }, m_execService);
     }
     
+    public Bundle getInstalledBundle(NoteFile noteFile){
+        String bundleLocation = getBundleLocation(noteFile);
+        return m_bundleContext.getBundle(bundleLocation);
+    }
+
     /**
      * Get the state of a bundle as a string.
      */

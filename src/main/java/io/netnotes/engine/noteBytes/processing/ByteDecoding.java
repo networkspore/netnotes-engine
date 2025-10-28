@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;
@@ -262,6 +263,23 @@ public class ByteDecoding{
                 return new String(bytes, StandardCharsets.UTF_16LE);
              case NoteBytesMetaData.STRING_TYPE:
                 return new String(bytes);
+            default:
+                return new String(bytes);
+        }
+    }
+
+    public static String displayByteValueAsString(byte[] bytes, byte type){
+         switch(type){
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return new String(bytes, StandardCharsets.UTF_16);
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                return new String(bytes, StandardCharsets.US_ASCII);
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                return new String(bytes, StandardCharsets.ISO_8859_1);
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                return new String(bytes, StandardCharsets.UTF_16LE);
+             case NoteBytesMetaData.STRING_TYPE:
+                return new String(bytes);
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
                 return bytesToBigInteger(bytes).toString();
             case NoteBytesMetaData.BIG_DECIMAL_TYPE:
@@ -292,18 +310,11 @@ public class ByteDecoding{
                 return codePointBytesToString(bytes);
             default:
                 return new String(bytes);
-        }
+         }
     }
 
     public static String bytesToUrlSafeString(byte[] bytes, byte type){
-
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(
-            type == NoteBytesMetaData.STRING_TYPE || 
-            type == NoteBytesMetaData.STRING_ISO_8859_1_TYPE ||
-            type == NoteBytesMetaData.STRING_US_ASCII_TYPE
-            ? bytes : bytesToString(bytes, type).getBytes());
-        
-
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytesToString(bytes, type).getBytes());
     }
 
     public static CharBuffer decodeByteBufferToChars(ByteBuffer byteBuffer, byte type) {
@@ -322,6 +333,53 @@ public class ByteDecoding{
             
         }
     }
+
+
+    public static String UrlEncode(String segment) {
+        StringBuilder sb = new StringBuilder();
+        byte[] bytes = segment.getBytes(StandardCharsets.UTF_8);
+        
+        for (byte b : bytes) {
+            char c = (char) (b & 0xFF);
+            
+            if (isSafeChar(c)) {
+                sb.append(c);
+            } else {
+                sb.append(String.format("%%%02X", b & 0xFF));
+            }
+        }
+        
+        return sb.toString();
+    }
+
+    public static String UrlDecode(String segment, byte type) {
+        try {
+            switch(type){
+                case NoteBytesMetaData.STRING_UTF16_TYPE:
+                    return URLDecoder.decode(segment, StandardCharsets.UTF_16);
+                case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+                    return URLDecoder.decode(segment, StandardCharsets.US_ASCII);
+                case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+                    return URLDecoder.decode(segment, StandardCharsets.ISO_8859_1);
+                case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+                    return URLDecoder.decode(segment, StandardCharsets.UTF_16LE);
+                default:
+                case NoteBytesMetaData.STRING_TYPE:
+                    return URLDecoder.decode(segment, StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            return segment; // Fallback
+        }
+    }
+
+    public static boolean isSafeChar(char c) {
+        // RFC 3986 unreserved characters
+        return (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '.' || c == '_' || c == '~';
+    }
+
 
     public static boolean isStringNumber(String number){
         String replaced = number.replaceAll("[^0-9.]", "");

@@ -208,71 +208,67 @@ public class OSGiPluginRegistry {
     private CompletableFuture<List<OSGiPluginMetaData>> loadRegistry() {
         return m_appData.getNoteFile(PLUGINS_REGISTRY_PATH)
             .thenCompose(noteFile -> {
+                PipedOutputStream readOutput = new PipedOutputStream();
+                noteFile.readOnly(readOutput); // async read start
+
+                // supplyAsync returns a CompletableFuture<List<CompletableFuture<OSGiPluginMetaData>>>
                 return CompletableFuture.supplyAsync(() -> {
-                    try {
-                        PipedOutputStream readOutput = new PipedOutputStream();
-                        
-                        // Start read operation
-                        noteFile.readOnly(readOutput);
-                        
-                        try (NoteBytesReader reader = new NoteBytesReader(
-                            new PipedInputStream(readOutput)
-                        )) {
-                            // Read header
-                            NoteBytes header = reader.nextNoteBytes();
-                            if (header == null || !header.equals(REGISTRY_HEADER)) {
-                                throw new IllegalStateException("Invalid registry header");
-                            }
-                            
-                            NoteBytesMetaData headerMetaData = reader.nextMetaData();
-                            if (headerMetaData.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                                throw new IllegalStateException("Invalid registry format");
-                            }
-                            
-                            // Read version
-                            NoteBytesMap headerMap = new NoteBytesMap(
-                                reader.readNextBytes(headerMetaData.getLength())
-                            );
-                            NoteBytes versionBytes = headerMap.get(NoteMessaging.Headings.VERSION_KEY);
-                            String version = versionBytes != null ? 
-                                versionBytes.getAsString() : REGISTRY_VERSION;
-                            
-                            // Load plugins based on version
-                            if (REGISTRY_VERSION.equals(version)) {
-                                return loadPluginsV1(reader);
-                            } else {
-                                throw new IllegalStateException("Unsupported registry version: " + version);
-                            }
+                    List<CompletableFuture<OSGiPluginMetaData>> futures = new ArrayList<>();
+
+                    try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(readOutput))) {
+                        // --- header parsing ---
+                        NoteBytes header = reader.nextNoteBytes();
+                        if (header == null || !header.equals(REGISTRY_HEADER)) {
+                            throw new IllegalStateException("Invalid registry header");
                         }
-                        
+
+                        NoteBytesMetaData headerMetaData = reader.nextMetaData();
+                        if (headerMetaData.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                            throw new IllegalStateException("Invalid registry format");
+                        }
+
+                        NoteBytesMap headerMap = new NoteBytesMap(
+                            reader.readNextBytes(headerMetaData.getLength())
+                        );
+                        NoteBytes versionBytes = headerMap.get(NoteMessaging.Headings.VERSION_KEY);
+                        String version = (versionBytes != null)
+                            ? versionBytes.getAsString()
+                            : REGISTRY_VERSION;
+
+                        if (REGISTRY_VERSION.equals(version)) {
+                            loadPluginsV1(futures, reader);
+                        } else {
+                            throw new IllegalStateException("Unsupported registry version: " + version);
+                        }
                     } catch (IOException e) {
-                        throw new RuntimeException("Failed to load plugin registry", e);
-                    } finally {
-                        noteFile.close();
+                        throw new CompletionException(e);
                     }
+
+                    return futures;
                 }, m_execService);
-            });
+            }).thenCompose(futures -> CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v ->
+                    futures.stream()
+                        .map(CompletableFuture::join)
+                        .toList()
+                )
+            );
     }
+
     
-    /**
-     * Load plugins from registry version 1.0.0.
-     */
-    private List<OSGiPluginMetaData> loadPluginsV1(NoteBytesReader reader) throws IOException {
-        List<OSGiPluginMetaData> plugins = new ArrayList<>();
+    public void loadPluginsV1(List<CompletableFuture<OSGiPluginMetaData>> futures, NoteBytesReader reader) throws IOException {
         
         NoteBytes pluginId = reader.nextNoteBytes();
         while (pluginId != null) {
             NoteBytes value = reader.nextNoteBytes();
             
             if (value != null && value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                plugins.add(OSGiPluginMetaData.of(value.getAsNoteBytesMap()));
+                futures.add(OSGiPluginMetaData.of(value.getAsNoteBytesMap(), m_appData));
             }
             
             pluginId = reader.nextNoteBytes();
         }
-        
-        return plugins;
-    }
 
+    }
     
 }

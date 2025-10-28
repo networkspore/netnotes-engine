@@ -10,7 +10,6 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Map;
 
 import com.google.gson.JsonPrimitive;
@@ -639,10 +638,10 @@ public class NoteBytes {
         return new NoteBytes(new byte[0]);
     }
 
-    public String getHash32(){
+    public byte[] getHash(int digestLength){
         byte[] bytes = internalGet();
 
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(HashServices.digestBytesToBytes(bytes, 32));
+        return HashServices.digestBytesToBytes(bytes, digestLength);
     }
 
 

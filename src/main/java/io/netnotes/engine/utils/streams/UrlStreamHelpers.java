@@ -98,7 +98,7 @@ public class UrlStreamHelpers {
     }
 
 
-    public static CompletableFuture<Void> copyUrlStream(String urlString, PipedOutputStream pipedOutputStream,
+    public static CompletableFuture<Void> transferUrlStream(String urlString, PipedOutputStream pipedOutputStream,
         StreamProgressTracker progressTracker, ExecutorService execService
     ){
         return CompletableFuture.runAsync(()->{

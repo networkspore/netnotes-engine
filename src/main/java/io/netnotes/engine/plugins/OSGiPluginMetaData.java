@@ -1,29 +1,35 @@
 package io.netnotes.engine.plugins;
 
+import java.util.concurrent.CompletableFuture;
+
+import io.netnotes.engine.AppDataInterface;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteFiles.NoteFile;
 
 public class OSGiPluginMetaData {
 
     public static final NoteBytes ENABLED_KEY = new NoteBytes("enabled");
     public static final NoteBytes DATA_KEY = new NoteBytes("data");
 
-    private final NoteStringArrayReadOnly m_notePath;
+    private final NoteFile m_noteFile;
     private final String m_pluginId;
     private final OSGiPluginRelease m_release;
     private boolean m_enabled;
 
 
-    public OSGiPluginMetaData(OSGiPluginRelease release, boolean enabled){
-        m_notePath = release.createAssetPath();
-        m_pluginId = m_notePath.getHash32();
+    public OSGiPluginMetaData(OSGiPluginRelease release, NoteFile noteFile, boolean enabled){
+        m_noteFile = noteFile;
+        m_pluginId = noteFile.getUrlPathString();
         m_release = release;
         m_enabled = enabled;
     }
 
+    public NoteFile getNoteFile(){
+        return m_noteFile;
+    }
 
     public String getPluginId() {
         return m_pluginId;
@@ -33,9 +39,6 @@ public class OSGiPluginMetaData {
         return m_release.getAppName();
     }
 
-    public NoteStringArrayReadOnly geNotePath() {
-        return m_notePath;
-    }
 
     public boolean isEnabled() {
         return m_enabled;
@@ -54,11 +57,14 @@ public class OSGiPluginMetaData {
         return m_release.getAssetName();
     }
 
-    public static OSGiPluginMetaData of(NoteBytesMap map){
+    public static CompletableFuture<OSGiPluginMetaData> of(NoteBytesMap map, AppDataInterface appData){
         NoteBytes enabled = map.get(ENABLED_KEY);
         NoteBytes data = map.get(DATA_KEY);
+        
+        OSGiPluginRelease release = OSGiPluginRelease.of(data.getAsNoteBytesMap());
+        
+        return appData.getNoteFile(release.createNotePath()).thenCompose(noteFile->CompletableFuture.completedFuture(new OSGiPluginMetaData(release,noteFile, enabled.getAsBoolean())));
 
-        return new OSGiPluginMetaData(OSGiPluginRelease.of(data.getAsNoteBytesMap()), enabled.getAsBoolean());
     }
 
 

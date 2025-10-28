@@ -19,7 +19,7 @@ public class OSGiPluginRelease {
         m_asset = asset;
     }
 
-    public NoteStringArrayReadOnly createAssetPath(){
+    public NoteStringArrayReadOnly createNotePath(){
         return new NoteStringArrayReadOnly(
             OSGiPluginRegistry.PLUGINS,
             m_appInfo.getName(),

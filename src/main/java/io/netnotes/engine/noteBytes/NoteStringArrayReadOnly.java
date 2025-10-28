@@ -2,8 +2,10 @@ package io.netnotes.engine.noteBytes;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
@@ -30,48 +32,36 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return noteBytes;
     }
 
-    public static String noteBytesArrayToString(NoteBytes[] array, String delim){
+    public static NoteStringArrayReadOnly fromUrlString(String path){
+        return new NoteStringArrayReadOnly(urlStringToArray(path));
+    }
+
+    public static String noteBytesArrayToString(NoteBytes[] array, String delim) {
         String[] str = new String[array.length];
-        for(int i = 0; i < array.length ; i++){
-            str[i] = array[i].toString();
+        for (int i = 0; i < array.length; i++) {
+            str[i] = ByteDecoding.UrlEncode(array[i].getAsString());
         }
-        
         return String.join(delim, str);
     }
 
-  
     
 
-    public static NoteBytesReadOnly readNoteString(byte[] src, int srcOffset){
-        final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
-        final byte stringType = NoteBytesMetaData.STRING_TYPE;
+    public static NoteBytes[] urlStringToArray(String path) {
+        return urlStringToArray(path, NoteBytesMetaData.STRING_TYPE, NoteStringArray.DELIMITER);
+    }
 
-        if (src.length < srcOffset + metaDataSize) {
-            throw new IndexOutOfBoundsException("insufficient source length for metadata");
+    public static NoteBytes[] urlStringToArray(String path, String delim) {
+        return urlStringToArray(path, NoteBytesMetaData.STRING_TYPE, delim);
+    }
+
+    public static NoteBytes[] urlStringToArray(String path, byte type, String delim) {
+        String[] parts = path.split(Pattern.quote(delim), -1);
+        NoteBytes[] result = new NoteBytes[parts.length];
+        
+        for (int i = 0; i < parts.length; i++) {
+            result[i] = new NoteBytes(ByteDecoding.UrlDecode(parts[i], type));
         }
-
-        // 1. Read type
-        byte type = src[srcOffset];
-
-        if(type != stringType){
-            throw new IllegalArgumentException("String type required");
-        }
-
-        // 2. Read length (4 bytes big-endian)
-        int length = ((src[srcOffset + 1] & 0xFF) << 24) |
-                    ((src[srcOffset + 2] & 0xFF) << 16) |
-                    ((src[srcOffset + 3] & 0xFF) << 8)  |
-                    (src[srcOffset + 4] & 0xFF);
-
-        if (src.length < srcOffset + metaDataSize + length) {
-            throw new IndexOutOfBoundsException("insufficient source length for data");
-        }
-
-        // 3. Copy payload
-        byte[] data = new byte[length];
-        System.arraycopy(src, srcOffset + metaDataSize, data, 0, length);
-
-        return new NoteBytesReadOnly(data, type);
+        return result;
     }
 
     public void setDelimiter(String delim){
@@ -81,6 +71,8 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     public String getDelimiter(){
         return m_delimiter;
     }
+
+
 
     public String getAsString(){
         NoteBytes[] array = getAsArray();
@@ -139,4 +131,5 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return noteBytesBuilder.build();
     }
 
+   
 }

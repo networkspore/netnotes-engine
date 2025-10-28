@@ -2,8 +2,10 @@ package io.netnotes.engine.noteBytes;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteStringArray extends NoteBytesArray {
@@ -29,7 +31,7 @@ public class NoteStringArray extends NoteBytesArray {
     }
 
 
-    public static NoteBytes[] stringArrayToNoteBytes(String[] array){
+   public static NoteBytes[] stringArrayToNoteBytes(String[] array){
         NoteBytes[] noteBytes = new NoteBytes[array.length];
         for(int i = 0; i < array.length ; i++){
             noteBytes[i] = new NoteBytes(array[i]);
@@ -37,13 +39,30 @@ public class NoteStringArray extends NoteBytesArray {
         return noteBytes;
     }
 
-    public static String noteBytesArrayToString(NoteBytes[] array, String delim){
+    public static String noteBytesArrayToString(NoteBytes[] array, String delim) {
         String[] str = new String[array.length];
-        for(int i = 0; i < array.length ; i++){
-            str[i] = array[i].toString();
+        for (int i = 0; i < array.length; i++) {
+            str[i] = ByteDecoding.UrlEncode(array[i].getAsString());
         }
-
         return String.join(delim, str);
+    }
+
+    public static NoteBytes[] stringToArray(String path) {
+        return stringToArray(path, NoteBytesMetaData.STRING_TYPE, DELIMITER);
+    }
+
+    public static NoteBytes[] stringToArray(String path, String delim) {
+        return stringToArray(path, NoteBytesMetaData.STRING_TYPE, delim);
+    }
+
+    public static NoteBytes[] stringToArray(String path, byte type, String delim) {
+        String[] parts = path.split(Pattern.quote(delim), -1);
+        NoteBytes[] result = new NoteBytes[parts.length];
+        
+        for (int i = 0; i < parts.length; i++) {
+            result[i] = new NoteBytes(ByteDecoding.UrlDecode(parts[i], type));
+        }
+        return result;
     }
 
     public void setDelimiter(String delim){
