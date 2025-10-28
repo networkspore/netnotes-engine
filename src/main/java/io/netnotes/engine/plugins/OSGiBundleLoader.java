@@ -34,25 +34,29 @@ public class OSGiBundleLoader {
      */
     public CompletableFuture<Bundle> loadBundleFromNoteFile(NoteFile noteFile) {
       
-        PipedOutputStream readOutput = new PipedOutputStream();
-        // Start read operation
-        noteFile.readOnly(readOutput);
-        
-        return CompletableFuture.supplyAsync(()->{
-            try(PipedInputStream inputStream = new PipedInputStream(readOutput, StreamUtils.PIPE_BUFFER_SIZE)){
-                String bundleLocation = getBundleLocation(noteFile);
+        Bundle existingBundle = getInstalledBundle(noteFile);
+        if(existingBundle == null){
+            PipedOutputStream readOutput = new PipedOutputStream();
+            noteFile.readOnly(readOutput);
+            
+            return CompletableFuture.supplyAsync(()->{
+                try(PipedInputStream inputStream = new PipedInputStream(readOutput, StreamUtils.PIPE_BUFFER_SIZE)){
+                    String bundleLocation = getBundleLocation(noteFile);
 
-                Bundle bundle = m_bundleContext.installBundle(
-                    bundleLocation, 
-                    inputStream
-                );
-                bundle.start();
-                System.out.println("Successfully loaded bundle: " + bundleLocation);
-                return bundle;
-            }catch(Exception e){
-                throw new CompletionException("Failed loading bundle", e);
-            }
-        }, m_execService);
+                    Bundle bundle = m_bundleContext.installBundle(
+                        bundleLocation, 
+                        inputStream
+                    );
+                    bundle.start();
+                    System.out.println("Successfully loaded bundle: " + bundleLocation);
+                    return bundle;
+                }catch(Exception e){
+                    throw new CompletionException("Failed loading bundle", e);
+                }
+            }, m_execService);
+        }else{
+            return CompletableFuture.completedFuture(existingBundle);
+        }
      
     }
     
@@ -91,12 +95,12 @@ public class OSGiBundleLoader {
      */
     public static String getBundleState(Bundle bundle) {
         return switch (bundle.getState()) {
-            case Bundle.UNINSTALLED -> "UNINSTALLED";
-            case Bundle.INSTALLED -> "INSTALLED";
-            case Bundle.RESOLVED -> "RESOLVED";
-            case Bundle.STARTING -> "STARTING";
-            case Bundle.STOPPING -> "STOPPING";
-            case Bundle.ACTIVE -> "ACTIVE";
+            case Bundle.UNINSTALLED -> "Uninstalled";
+            case Bundle.INSTALLED -> "Installed";
+            case Bundle.RESOLVED -> "Resolved";
+            case Bundle.STARTING -> "Starting";
+            case Bundle.STOPPING -> "Stopping";
+            case Bundle.ACTIVE -> "Active";
             default -> "UNKNOWN";
         };
     }

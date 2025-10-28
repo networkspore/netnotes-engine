@@ -13,9 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
-import io.netnotes.engine.AppDataInterface;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
@@ -38,39 +38,46 @@ public class OSGiPluginRegistry {
    
     private static final NoteBytes REGISTRY_HEADER = new NoteBytes(REGISTRY_NAME);
     
-    
-    private final AppDataInterface m_appData;
+    private NoteFile m_noteFile = null;
     private final ExecutorService m_execService;
     
 
     // In-memory cache of installed plugins
     private final ConcurrentHashMap<String, OSGiPluginMetaData> m_installedPlugins;
     
-    public OSGiPluginRegistry(AppDataInterface appData, ExecutorService execService) {
-        m_appData = appData;
+    public OSGiPluginRegistry(ExecutorService execService) {
+      
         m_execService = execService;
         m_installedPlugins = new ConcurrentHashMap<>();
     
     }
-    
+
+
+
     /**
      * Initialize the registry - load existing plugins or create new registry.
      */
-    public CompletableFuture<Void> initialize() {
-        return loadRegistry()
-            .exceptionally(error -> {
-                // If registry doesn't exist or fails to load, create empty one
-                System.out.println("No existing registry found or error loading, creating new: " + error.getMessage());
-                return new ArrayList<OSGiPluginMetaData>();
-            })
-            .thenAccept(plugins -> {
-                m_installedPlugins.clear();
-                plugins.forEach(plugin -> 
-                    m_installedPlugins.put(plugin.getPluginId(), plugin)
-                );
-                System.out.println("Loaded " + plugins.size() + " plugins from registry");
-               
-            });
+    public CompletableFuture<Void> initialize(NoteFile noteFile) {
+        if(m_noteFile == null){
+            m_noteFile = noteFile;
+
+            return loadRegistry(m_noteFile)
+                .exceptionally(error -> {
+                    // If registry doesn't exist or fails to load, create empty one
+                    System.out.println("No existing registry found or error loading, creating new: " + error.getMessage());
+                    return new ArrayList<OSGiPluginMetaData>();
+                })
+                .thenAccept(plugins -> {
+                    m_installedPlugins.clear();
+                    plugins.forEach(plugin -> 
+                        m_installedPlugins.put(plugin.getPluginId(), plugin)
+                    );
+                    System.out.println("Loaded " + plugins.size() + " plugins from registry");
+                
+                });
+        }else{
+            return CompletableFuture.completedFuture(null);
+        }
     }
 
     public ConcurrentHashMap<String, OSGiPluginMetaData> getInstalledPlugins(){
@@ -165,9 +172,10 @@ public class OSGiPluginRegistry {
      * Save the current registry state to the NoteFile.
      */
     private CompletableFuture<Void> saveRegistry() {
-        return m_appData.getNoteFile(PLUGINS_REGISTRY_PATH)
-            .thenCompose(noteFile -> saveRegistry(noteFile));
-   
+        if(m_noteFile == null){
+            return CompletableFuture.failedFuture(new IllegalStateException("Registry is not initialized"));
+        }
+        return saveRegistry(m_noteFile);
     }
 
     private CompletableFuture<Void> saveRegistry(NoteFile noteFile){
@@ -175,7 +183,7 @@ public class OSGiPluginRegistry {
         
         CompletableFuture<Void> saveOutputStreamFuture = saveRegistry(outputStream);
         // Start write operation
-        CompletableFuture<io.netnotes.engine.noteBytes.NoteBytesObject> writeFuture = 
+        CompletableFuture<NoteBytesObject> writeFuture = 
             noteFile.writeOnly(outputStream);
      
 
@@ -205,70 +213,85 @@ public class OSGiPluginRegistry {
     /**
      * Load the registry from the NoteFile.
      */
-    private CompletableFuture<List<OSGiPluginMetaData>> loadRegistry() {
-        return m_appData.getNoteFile(PLUGINS_REGISTRY_PATH)
-            .thenCompose(noteFile -> {
-                PipedOutputStream readOutput = new PipedOutputStream();
-                noteFile.readOnly(readOutput); // async read start
+    private CompletableFuture<List<OSGiPluginMetaData>> loadRegistry(NoteFile noteFile) {
+    
+        PipedOutputStream readOutput = new PipedOutputStream();
+        CompletableFuture<NoteBytesObject> readFuture = noteFile.readOnly(readOutput);
 
-                // supplyAsync returns a CompletableFuture<List<CompletableFuture<OSGiPluginMetaData>>>
-                return CompletableFuture.supplyAsync(() -> {
-                    List<CompletableFuture<OSGiPluginMetaData>> futures = new ArrayList<>();
+        CompletableFuture<List<OSGiPluginMetaData>> loadFuture = 
+            loadRegistry(readOutput);
 
-                    try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(readOutput))) {
-                        // --- header parsing ---
-                        NoteBytes header = reader.nextNoteBytes();
-                        if (header == null || !header.equals(REGISTRY_HEADER)) {
-                            throw new IllegalStateException("Invalid registry header");
-                        }
 
-                        NoteBytesMetaData headerMetaData = reader.nextMetaData();
-                        if (headerMetaData.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            throw new IllegalStateException("Invalid registry format");
-                        }
-
-                        NoteBytesMap headerMap = new NoteBytesMap(
-                            reader.readNextBytes(headerMetaData.getLength())
-                        );
-                        NoteBytes versionBytes = headerMap.get(NoteMessaging.Headings.VERSION_KEY);
-                        String version = (versionBytes != null)
-                            ? versionBytes.getAsString()
-                            : REGISTRY_VERSION;
-
-                        if (REGISTRY_VERSION.equals(version)) {
-                            loadPluginsV1(futures, reader);
-                        } else {
-                            throw new IllegalStateException("Unsupported registry version: " + version);
-                        }
-                    } catch (IOException e) {
-                        throw new CompletionException(e);
-                    }
-
-                    return futures;
-                }, m_execService);
-            }).thenCompose(futures -> CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(v ->
-                    futures.stream()
-                        .map(CompletableFuture::join)
-                        .toList()
-                )
-            );
+        return CompletableFuture.allOf(readFuture, loadFuture).thenCompose(v->loadFuture);
+       
     }
 
+    private CompletableFuture<List<OSGiPluginMetaData>> loadRegistry(PipedOutputStream outputStream){
+        return CompletableFuture.supplyAsync(() -> {
+                                
+            try ( 
+                PipedInputStream inputStream = new PipedInputStream(outputStream);
+                NoteBytesReader reader = new NoteBytesReader(inputStream);
+            ) {
+                // Read header
+                NoteBytes header = reader.nextNoteBytes();
+                if (header == null || !header.equals(REGISTRY_HEADER)) {
+                    throw new IllegalStateException("Invalid registry header");
+                }
+                
+                NoteBytesMetaData headerMetaData = reader.nextMetaData();
+                if (headerMetaData.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    throw new IllegalStateException("Invalid registry format");
+                }
+                
+                // Read version
+                NoteBytesMap headerMap = new NoteBytesMap(
+                    reader.readNextBytes(headerMetaData.getLength())
+                );
+                NoteBytes versionBytes = headerMap.get(NoteMessaging.Headings.VERSION_KEY);
+                String version = versionBytes != null ? 
+                    versionBytes.getAsString() : REGISTRY_VERSION;
+                
+                // Load plugins based on version
+                if (REGISTRY_VERSION.equals(version)) {
+                    return loadPluginsV1(reader);
+                } else {
+                    throw new IllegalStateException("Unsupported registry version: " + version);
+                }
+            }catch(Exception e){
+                throw new CompletionException("Failed to read registry", e);
+            }
+            
+        }, m_execService);
+    }
     
-    public void loadPluginsV1(List<CompletableFuture<OSGiPluginMetaData>> futures, NoteBytesReader reader) throws IOException {
+    /**
+     * Load plugins from registry version 1.0.0.
+     */
+    private List<OSGiPluginMetaData> loadPluginsV1(NoteBytesReader reader) throws IOException {
+        List<OSGiPluginMetaData> plugins = new ArrayList<>();
         
         NoteBytes pluginId = reader.nextNoteBytes();
         while (pluginId != null) {
             NoteBytes value = reader.nextNoteBytes();
             
             if (value != null && value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                futures.add(OSGiPluginMetaData.of(value.getAsNoteBytesMap(), m_appData));
+                plugins.add(OSGiPluginMetaData.of(value.getAsNoteBytesMap()));
             }
             
             pluginId = reader.nextNoteBytes();
         }
+        
+        return plugins;
+    }
 
+
+    public void shutdown(){
+        if(m_noteFile != null){
+           
+    
+            m_noteFile.close();
+        }
     }
     
 }
