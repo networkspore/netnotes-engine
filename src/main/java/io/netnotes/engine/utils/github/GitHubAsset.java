@@ -14,21 +14,21 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 
 public class GitHubAsset {
-    private String m_name;
-    private String m_label;
-    private String m_url;
-    private String m_browserDownloadUrl;
-    private String m_contentType;
-    private long m_size;
-    private long m_downloadCount;
-    private String m_state;
-    private String m_tagName;
-    private String m_nodeId;
-    private long m_id;
-    private Instant m_createdAt;
-    private Instant m_updatedAt;
-    private GitHubUser m_uploader;
-    private String m_digest;
+    private final String m_name;
+    private final String m_label;
+    private final String m_url;
+    private final String m_browserDownloadUrl;
+    private final String m_contentType;
+    private final long m_size;
+    private final long m_downloadCount;
+    private final String m_state;
+    private final String m_tagName;
+    private final String m_nodeId;
+    private final long m_id;
+    private final Instant m_createdAt;
+    private final Instant m_updatedAt;
+    private final GitHubUser m_uploader;
+    private final String m_digest;
 
     public GitHubAsset(String name, String label, String url, String browserDownloadUrl, String contentType,
                        long size, long downloadCount, String state, String tagName, String nodeId, long id,

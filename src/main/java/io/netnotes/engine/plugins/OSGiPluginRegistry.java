@@ -103,8 +103,9 @@ public class OSGiPluginRegistry {
     public CompletableFuture<Void> unregisterPlugin(String pluginId) {
         OSGiPluginMetaData removed = m_installedPlugins.remove(pluginId);
         if (removed != null) {
+            
             System.out.println("Unregistered plugin: " + removed);
-            return saveRegistry();
+            return removed.shutdown().thenAccept(v-> saveRegistry());
         }
         return CompletableFuture.completedFuture(null);
     }

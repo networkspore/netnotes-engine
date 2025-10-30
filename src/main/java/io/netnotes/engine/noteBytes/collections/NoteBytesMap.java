@@ -5,6 +5,8 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.Map.Entry;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -14,7 +16,7 @@ import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 
-public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
+public class NoteBytesMap{
     private HashMap<NoteBytes, NoteBytes> m_pairs = null;
 
 
@@ -230,12 +232,12 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
 
  
 
-    @Override
+    
     public void clear() {
         m_pairs.clear();
     }
 
-    @Override
+    
     public boolean containsKey(Object key) {
         return m_pairs.containsKey(key);
     }
@@ -244,52 +246,86 @@ public class NoteBytesMap implements Map<NoteBytes, NoteBytes>{
         return m_pairs.containsKey(new NoteString(key));
     }
 
-    @Override
+    
     public boolean containsValue(Object value) {
         return m_pairs.containsValue(value);
     }
 
-    @Override
+    
     public Set<Entry<NoteBytes, NoteBytes>> entrySet() {
         return m_pairs.entrySet();
     }
 
-    @Override
+    
     public NoteBytes get(Object key) {
-        return m_pairs.get(NoteBytes.of(key));
+        return m_pairs.get(key);
     }
 
     public NoteBytes getByString(String key) {
         return m_pairs.get(new NoteString(key));
     }
 
-    @Override
+    
     public Set<NoteBytes> keySet() {
         return m_pairs.keySet();
     }
 
-
-    @Override
-    public NoteBytes put(NoteBytes key, NoteBytes value) {
-        return m_pairs.put(key, value);
-    }
-
-    public NoteBytes putAny(Object key, Object value){
+    
+    public NoteBytes put(Object key, Object value) {
         return m_pairs.put(NoteBytes.of(key), NoteBytes.of(value));
     }
 
-    @Override
+    public void put(NoteBytes key, NoteBytes value) {
+        m_pairs.put(key, value);
+    }
+
+    public void put(String key, String value) {
+        m_pairs.put(new NoteString(key), new NoteString(value));
+    }
+
+     public void put(String key, NoteBytes value) {
+        m_pairs.put(new NoteString(key), value);
+    }
+
+    public NoteBytes putIfAbsent(Object key, Object value) {
+        return m_pairs.putIfAbsent(NoteBytes.of(key), NoteBytes.of(value));
+    }
+
+    public NoteBytes computeIfPresent(NoteBytes key,
+            BiFunction<? super NoteBytes, ? super NoteBytes, ? extends NoteBytes> remappingFunction) {
+        return m_pairs.computeIfPresent(key, remappingFunction);
+    }
+
+    public NoteBytes computeIfAbsent(NoteBytes key,
+            java.util.function.Function<? super NoteBytes, ? extends NoteBytes> mappingFunction) {
+        return m_pairs.computeIfAbsent(key, mappingFunction);
+    }
+
+    public NoteBytes compute(NoteBytes key,
+            BiFunction<? super NoteBytes, ? super NoteBytes, ? extends NoteBytes> remappingFunction) {
+        return m_pairs.compute(key, remappingFunction);
+    }
+
+    public NoteBytes merge(NoteBytes key, NoteBytes value,
+            BiFunction<? super NoteBytes, ? super NoteBytes, ? extends NoteBytes> remappingFunction) {
+        return m_pairs.merge(key, value, remappingFunction);
+    }
+
     public void putAll(Map<? extends NoteBytes, ? extends NoteBytes> m) {
         m_pairs.putAll(m);
     }
 
-    @Override
+    
     public NoteBytes remove(Object key) {
         return m_pairs.remove(key);
     }
 
-    @Override
+    
     public Collection<NoteBytes> values() {
         return m_pairs.values();
+    }
+
+    public Map<NoteBytes, NoteBytes> getAsMap(){
+        return m_pairs;
     }
 }

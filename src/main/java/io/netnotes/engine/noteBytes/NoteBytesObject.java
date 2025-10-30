@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -86,6 +87,10 @@ public class NoteBytesObject extends NoteBytes{
         }
 
         return pairs;
+    }
+
+    public List<NoteBytesPair> getKeyValuePairs(){
+        return getAsList();
     }
 
 

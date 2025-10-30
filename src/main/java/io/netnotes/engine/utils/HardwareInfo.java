@@ -99,16 +99,16 @@ public class HardwareInfo {
            
             List<NoteBytes> list = requestList.getAsList();
             if(list.contains(new NoteBytes("nic"))){
-                hardwareInfo.putAny("nic", nicBytes(systemInfo));
+                hardwareInfo.put("nic", nicBytes(systemInfo));
             }
             if(list.contains(new NoteBytes("cpu"))){
-                hardwareInfo.putAny("cpu", processorBytes(systemInfo));
+                hardwareInfo.put("cpu", processorBytes(systemInfo));
             }
             if(list.contains(new NoteBytes("memory"))){
-                hardwareInfo.putAny("memory", memorySerialNumberBytes(systemInfo));
+                hardwareInfo.put("memory", memorySerialNumberBytes(systemInfo));
             }
             if(list.contains(new NoteBytes("hdd"))){
-                hardwareInfo.putAny("hdd",  hdUuidBytes(systemInfo));
+                hardwareInfo.put("hdd",  hdUuidBytes(systemInfo));
             }
             return hardwareInfo.getNoteBytesObject();
         }, execService);

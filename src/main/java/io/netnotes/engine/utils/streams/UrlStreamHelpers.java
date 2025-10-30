@@ -5,10 +5,11 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PipedOutputStream;
+import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
-
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -63,6 +64,18 @@ public class UrlStreamHelpers {
         }
     }
     
+    public static CompletableFuture<byte[]> getUrlBytes(String urlString, ExecutorService execService) {
+        return CompletableFuture.supplyAsync(()->{
+            try{
+                return getUrlToBytesSync(urlString);
+            }catch(IOException e){
+                throw new CompletionException("Stream failed to complete", e);
+            } catch (URISyntaxException e) {
+                throw new CompletionException("Invalid URL syntax", e);
+            }
+        }, execService);
+    }
+    
 
     public static CompletableFuture<JsonObject> getUrlJson(String urlString, ExecutorService execService) {
         return CompletableFuture.supplyAsync(()->{
@@ -97,15 +110,41 @@ public class UrlStreamHelpers {
         }, execService);
     }
 
+    public static CompletableFuture<Void> transferUrlStream(String urlString, PipedOutputStream pipedOutputStream,
+        ExecutorService execService
+    ){
+        return CompletableFuture.runAsync(()->{
+            try(
+                OutputStream outputStream = pipedOutputStream;
+            ){
+                try(
+                    InputStream inputStream = newUrlStream(urlString);
+                ){
+                    inputStream.transferTo(pipedOutputStream);
+                }
+            }catch(IOException e){
+                throw new CompletionException("Stream did not finish", e);
+            } catch (URISyntaxException e) {
+                throw new CompletionException("Malformed url", e);
+            }
+        }, execService);
+    }
 
     public static CompletableFuture<Void> transferUrlStream(String urlString, PipedOutputStream pipedOutputStream,
         StreamProgressTracker progressTracker, ExecutorService execService
     ){
         return CompletableFuture.runAsync(()->{
-            try(OutputStream outputStream = pipedOutputStream){
-
+             HttpURLConnection con = null;
+            try(
+                OutputStream outputStream = pipedOutputStream;
+            ){
+                con = getHttpUrlConnection(urlString);
+                if(progressTracker != null){
+                    long contentLength = con.getContentLengthLong();
+                    progressTracker.setTotalBytes(contentLength);
+                }
                 try(
-                    InputStream inputStream = getHttpUrlConnection(urlString).getInputStream()
+                    InputStream inputStream = con.getInputStream();
                 ){
                     StreamUtils.streamCopy(inputStream, outputStream, progressTracker);
                 }
@@ -116,4 +155,66 @@ public class UrlStreamHelpers {
             }
         }, execService);
     }
+
+    public static CompletableFuture<Void> duplicateUrlStream(String urlString, PipedOutputStream outputStream1,
+        PipedOutputStream outputStream2, StreamProgressTracker progressTracker, ExecutorService execService
+    ){
+        return CompletableFuture.runAsync(()->{
+             HttpURLConnection con = null;
+            try(
+                OutputStream output1 = outputStream1;
+                OutputStream output2 = outputStream2;
+            ){
+                con = getHttpUrlConnection(urlString);
+                if(progressTracker != null){
+                    long contentLength = con.getContentLengthLong();
+                    progressTracker.setTotalBytes(contentLength);
+                }
+                try(
+                    InputStream inputStream = con.getInputStream();
+                ){
+                   
+                    byte[] buffer = new byte[StreamUtils.PIPE_BUFFER_SIZE];
+                    int length = 0;
+
+                   
+                    while ((length = inputStream.read(buffer)) != -1) {
+                        if (progressTracker != null && progressTracker.isCancelled()) {
+                            throw new IOException("Operation cancelled");
+                        }
+                        output1.write(buffer, 0, length);
+                        output2.write(buffer, 0, length);
+                        if (progressTracker != null) {
+                            progressTracker.addBytesProcessed(length);
+                        }
+                    }
+                
+                }
+            }catch(IOException e){
+                throw new CompletionException("Stream did not finish", e);
+            } catch (URISyntaxException e) {
+                throw new CompletionException("Malformed url", e);
+            }
+        }, execService);
+    }
+
+ 
+    public static CompletableFuture<String> getUrlContentAsString(String urlString, ExecutorService execService){
+        return CompletableFuture.supplyAsync(() -> {
+            try (Reader reader = new InputStreamReader(newUrlStream(urlString), StandardCharsets.UTF_8)) {
+                StringBuilder builder = new StringBuilder();
+                char[] buffer = new char[8192];
+                int len;
+                while ((len = reader.read(buffer)) != -1) {
+                    builder.append(buffer, 0, len);
+                }
+                return builder.toString();
+            } catch (IOException e) {
+                throw new CompletionException("Stream failed to complete", e);
+            } catch (URISyntaxException e) {
+                throw new CompletionException("Malformed url", e);
+            }
+        }, execService);
+    }
+
 }

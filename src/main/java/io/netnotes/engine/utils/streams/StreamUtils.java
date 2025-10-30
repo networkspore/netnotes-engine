@@ -10,6 +10,7 @@ import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
@@ -31,6 +32,7 @@ public class StreamUtils {
         private final AtomicLong bytesProcessed = new AtomicLong(0);
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private volatile long totalBytes = -1; // -1 means unknown
+        private  Consumer<Double> m_onProgress = null;
 
         public long getBytesProcessed() {
             return bytesProcessed.get();
@@ -48,16 +50,24 @@ public class StreamUtils {
             cancelled.set(true);
         }
 
-        public void setTotalBytes(long total) {
-            this.totalBytes = total;
-        }
-
         public long getTotalBytes() {
             return totalBytes;
         }
 
+        public void setTotalBytes(long total) {
+            if(m_onProgress != null){
+                m_onProgress.accept(getProgress());
+            }
+            this.totalBytes = total;
+        }
+
         public double getProgress() {
-            return totalBytes > 0 ? (double) bytesProcessed.get() / totalBytes : -1;
+            long bytesProcessed = this.bytesProcessed.get();
+            return totalBytes > 0 ? (bytesProcessed > 0  ? bytesProcessed / totalBytes : 0) : -1;
+        }
+
+        public void setOnProgress(Consumer<Double> onProgress){
+            m_onProgress = onProgress;
         }
     }
 

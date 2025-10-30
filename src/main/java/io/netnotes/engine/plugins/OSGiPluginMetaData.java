@@ -16,40 +16,26 @@ public class OSGiPluginMetaData {
     public static final NoteBytes ENABLED_KEY = new NoteBytes("enabled");
     public static final NoteBytes DATA_KEY = new NoteBytes("data");
 
-    private final NoteStringArrayReadOnly m_notePath;
-    private final String m_pluginId;
+
     private final OSGiPluginRelease m_release;
     private boolean m_enabled;
 
-    private CompletableFuture<NoteFile> m_noteFileFuture = null;
-
-
+   
     public OSGiPluginMetaData(OSGiPluginRelease release,boolean enabled){
-        m_notePath = release.createNotePath();
-        m_pluginId = m_notePath.getAsString();
         m_release = release;
         m_enabled = enabled;
     }
 
-    public NoteStringArrayReadOnly getNotePath(){
-        return m_notePath;
+    public NoteStringArrayReadOnly getPluginNotePath(){
+        return m_release.getPluginNotePath();
     }
 
-    
-
-    public CompletableFuture<NoteFile> getNoteFile(AppDataInterface appData){
-        if(m_noteFileFuture == null){
-            m_noteFileFuture = appData.getNoteFile(m_notePath);
-            return m_noteFileFuture;
-        }else{
-            return m_noteFileFuture;
-        }
+    public CompletableFuture<NoteFile> getPluginNoteFile(AppDataInterface appData){
+        return m_release.getPluginNoteFile(appData);
     }
-
-
 
     public String getPluginId() {
-        return m_pluginId;
+        return m_release.getPluginId();
     }
 
     public String getName(){
@@ -93,26 +79,14 @@ public class OSGiPluginMetaData {
         }));
     }
 
+
+  
+
+ 
+
+
+
     public CompletableFuture<Void> shutdown(){
-        if(m_noteFileFuture != null){
-            if(m_noteFileFuture.isDone()){
-                m_noteFileFuture.join().close();
-                m_noteFileFuture = null;
-                return CompletableFuture.completedFuture(null);
-            }else{
-                return m_noteFileFuture .handle((result, ex) -> {
-                    
-                    if (ex != null) {
-                        System.err.println("Shutdown failed: " + ex.getMessage());
-                    }else{
-                        result.close();
-                    }
-                    return null;
-                });
-            }
-            
-        }else{
-            return CompletableFuture.completedFuture(null);
-        }
+       return m_release.shutdown();
     }
 }
