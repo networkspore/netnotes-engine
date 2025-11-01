@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,6 +19,9 @@ public class ShellHelpers {
 
     private static final String OS = System.getProperty("os.name").toLowerCase();
 
+    private static final AtomicReference<CompletableFuture<FreeMemory>> cachedFreeMemory = new AtomicReference<>(null);
+    private static final AtomicLong cachedFreeMemoryTime = new AtomicLong(0);
+    private static final long FREE_MEMORY_CACHE_DURATION_MS = 5000;
 
     public static CompletableFuture<Void> open(File file, ExecutorService execService) throws IOException {
         return CompletableFuture.runAsync(()->{
@@ -74,6 +79,23 @@ public class ShellHelpers {
     }
 
     public static CompletableFuture<FreeMemory> getFreeMemory(ExecutorService execService){
+      
+        long currentTime = System.currentTimeMillis();
+        CompletableFuture<FreeMemory> cached = cachedFreeMemory.get();
+        if(cached != null && 
+            (currentTime - cachedFreeMemoryTime.get()) < FREE_MEMORY_CACHE_DURATION_MS
+        ){
+            return cached;
+        }else{
+            CompletableFuture<FreeMemory> newCache = fetchFreeMemory(execService);
+            cachedFreeMemory.set(newCache);
+            cachedFreeMemoryTime.set(currentTime);
+            return newCache;
+        }
+   
+    }
+
+    private static CompletableFuture<FreeMemory> fetchFreeMemory(ExecutorService execService){
         return CompletableFuture.supplyAsync(()->{
             try{
                 switch (OS) {
@@ -85,9 +107,9 @@ public class ShellHelpers {
                         return LinuxShellHelpers.getFreeMemory();
                 }
             }catch(Exception e){
-                throw new CompletionException("Could not get free memory", e);
+                 throw new CompletionException("Could not get free memory", e);
             }
-        },execService);
+          },execService);
     }
 
     public static long parseValueLong(String line) {
