@@ -4,6 +4,8 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteInteger extends NoteBytes  {
+    public static final NoteInteger ZERO = new NoteInteger(0);
+    public static final NoteInteger ONE = new NoteInteger(1);
 
     public NoteInteger(int integer){
         super(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);

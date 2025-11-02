@@ -4,20 +4,20 @@ public class NoteBytesMetaData {
     public final static int STANDARD_META_DATA_SIZE = 5;
 
     public final static byte RAW_BYTES_TYPE = NoteBytesMetaData.NO_FLAG;
-    public final static byte BOOLEAN_TYPE = (byte) 1;
+    public final static byte BYTE_TYPE = (byte) 1;
     public final static byte SHORT_TYPE = (byte) 2;
     public final static byte INTEGER_TYPE = (byte) 3;
     public final static byte FLOAT_TYPE = (byte) 4;
     public final static byte DOUBLE_TYPE = (byte) 5;
     public final static byte LONG_TYPE = (byte) 6;
-    public final static byte STRING_TYPE = (byte) 7;
+    public final static byte BOOLEAN_TYPE = (byte) 7;
     public final static byte STRING_UTF16_TYPE = (byte) 8;
     public final static byte STRING_ISO_8859_1_TYPE = (byte) 9;
     public final static byte STRING_US_ASCII_TYPE = (byte) 10; 
-    public final static byte NOTE_BYTES_ARRAY_TYPE = (byte) 11;
+    public final static byte STRING_TYPE = (byte) 11;
     public final static byte NOTE_BYTES_OBJECT_TYPE = (byte) 12;
-    public final static byte NOTE_INTEGER_ARRAY_TYPE = (byte) 13;
-    public final static byte NOTE_BYTES_TREE_TYPE = (byte) 14;
+    public final static byte NOTE_BYTES_ARRAY_TYPE = (byte) 13;
+    public final static byte NOTE_INTEGER_ARRAY_TYPE = (byte) 14;
     public final static byte BIG_INTEGER_TYPE = (byte) 15;
     public final static byte BIG_DECIMAL_TYPE = (byte) 16;
     public final static byte SHORT_LE_TYPE = (byte) 17;

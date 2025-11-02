@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.gson.JsonArray;
@@ -91,11 +90,6 @@ public class NoteBytesObject extends NoteBytes{
 
     public List<NoteBytesPair> getKeyValuePairs(){
         return getAsList();
-    }
-
-
-    public Map<NoteBytes, NoteBytes> getAsMap(){
-        return getAsStream().collect(Collectors.toMap(NoteBytesPair::getKey, NoteBytesPair::getValue));
     }
 
 

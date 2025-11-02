@@ -5,18 +5,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesNode;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteInteger;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-public class NoteBytesMerkleTree extends NoteBytes {
+public class NoteBytesMerkleTree {
     
     private NoteBytesNode m_root = null;
     private int m_size = 0;
@@ -24,7 +20,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
     private byte[] m_merkleRoot = new byte[HASH_SIZE];
     
     public NoteBytesMerkleTree() {
-        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_TREE_TYPE);
+        
     }
     
     public NoteBytesMerkleTree(byte[] bytes) {
@@ -33,16 +29,10 @@ public class NoteBytesMerkleTree extends NoteBytes {
     }
 
 
-    @Override
+   
     public void set(byte[] bytes){
-        set(bytes, NoteBytesMetaData.NOTE_BYTES_TREE_TYPE);
-    }
-
-    @Override
-    public void set(byte[] bytes, byte type) {
         deserialize(bytes);
         updateMerkleRoot();
-        super.set(new byte[0], type);
     }
 
 
@@ -167,7 +157,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         }
         return minv;
     }
-    public List<NoteBytes> inOrderTraversal() throws InterruptedException {
+    public List<NoteBytes> inOrderTraversal() {
         List<NoteBytes> result = new ArrayList<>();
         
         inOrderRec(m_root, result);
@@ -181,86 +171,23 @@ public class NoteBytesMerkleTree extends NoteBytes {
             inOrderRec(root.getRight(), result);
         }
     }
-    @Override
+
     public NoteBytesObject getAsNoteBytesObject() {
-        NoteBytesObject obj = new NoteBytesObject();
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            NoteBytesArray array = new NoteBytesArray();
-            for (NoteBytes element : elements) {
-                array.add(element);
-            }
-            obj.add("elements", array);
-        } catch (InterruptedException e) {
-            // Handle interruption
+        List<NoteBytes> elements = inOrderTraversal();
+        int size = elements.size();
+        NoteBytesPair[] pairs = new NoteBytesPair[size];
+
+        for (int i = 0; i < size ; i++) {
+            NoteBytes element = elements.get(i);
+            pairs[i] = new NoteBytesPair(new NoteInteger(i), element);
         }
-        return obj;
+        return new NoteBytesObject(pairs);
     }
 
-    @Override
-    public JsonElement getAsJsonElement() {
-        return getAsJsonObject();
-    }
 
-    @Override
-    public JsonObject getAsJsonObject() {
-        if (m_root == null) {
-            return new JsonObject();
-        }
-        
-        JsonObject jsonObject = new JsonObject();
-        JsonArray elementsArray = new JsonArray();
-        
-        // Perform in-order traversal to get elements in sorted order
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            for (NoteBytes element : elements) {
-                byte type = element.getType();
-                
-                if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-                    elementsArray.add(element.getAsJsonArray());
-                } else if (type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    elementsArray.add(element.getAsJsonObject());
-                } else {
-                    elementsArray.add(element.getAsJsonElement());
-                }
-            }
-        } catch (InterruptedException e) {
-            // Return empty object on interruption
-            return new JsonObject();
-        }
-        
-        jsonObject.add("elements", elementsArray);
-        return jsonObject;
-    }
-
-    @Override
-    public JsonArray getAsJsonArray() {
-        if (m_root == null) {
-            return new JsonArray();
-        }
-        
-        JsonArray elementsArray = new JsonArray();
-        
-        try {
-            List<NoteBytes> elements = inOrderTraversal();
-            for (NoteBytes element : elements) {
-                byte type = element.getType();
-                
-                if (type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-                    elementsArray.add(element.getAsJsonArray());
-                } else if (type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    elementsArray.add(element.getAsJsonObject());
-                } else {
-                    elementsArray.add(element.getAsJsonElement());
-                }
-            }
-        } catch (InterruptedException e) {
-            // Return empty array on interruption
-            return new JsonArray();
-        }
-        
-        return elementsArray;
+    public NoteBytesArray getAsNoteBytesArray() {
+        List<NoteBytes> elements = inOrderTraversal();
+        return new NoteBytesArray(elements.toArray(new NoteBytes[0]));
     }
     
 
@@ -272,7 +199,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         return m_root;
     }
 
-    @Override
+
     public byte[] get() {
         if (m_root == null) {
             return new byte[0];
@@ -285,7 +212,7 @@ public class NoteBytesMerkleTree extends NoteBytes {
         }
     }
 
-    @Override
+
     public byte[] getBytes() {
         return get();
     }
@@ -368,18 +295,14 @@ public class NoteBytesMerkleTree extends NoteBytes {
         return m_size;
     }
 
-    @Override
+
     public boolean isEmpty() {
         return m_size == 0;
     }
 
-    @Override
     public void clear() {
-     
         m_root = null;
         m_size = 0;
-        m_merkleRoot = new byte[HASH_SIZE]; // Reset merkle root
-        super.clear();
-       
+        m_merkleRoot = new byte[HASH_SIZE];
     }
 }

@@ -257,11 +257,15 @@ public class HashServices {
     }
   
     public static int getHashCode(byte[] bytes, byte type){
-
-
+        if(bytes.length == 0){
+            return Integer.MIN_VALUE;
+        }
+        
         int code = -1;
     
         switch(type){
+            case NoteBytesMetaData.BYTE_TYPE:
+                code = bytes[0];
             case NoteBytesMetaData.SHORT_TYPE:
                 code =  ByteDecoding.bytesToShortBigEndian(bytes) << 32;
                 break;

@@ -261,6 +261,13 @@ public class NoteBytesMap{
         return m_pairs.get(key);
     }
 
+    public NoteBytes getOrDefault(NoteBytes key, NoteBytes defaultValue){
+        NoteBytes keyBytes = m_pairs.get(key);
+        return keyBytes != null ? keyBytes : defaultValue;
+    }
+
+
+
     public NoteBytes getByString(String key) {
         return m_pairs.get(new NoteString(key));
     }
@@ -328,4 +335,6 @@ public class NoteBytesMap{
     public Map<NoteBytes, NoteBytes> getAsMap(){
         return m_pairs;
     }
+
+  
 }

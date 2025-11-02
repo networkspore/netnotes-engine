@@ -477,6 +477,10 @@ public class NoteBytes {
     }
 
     public NoteBytesMap getAsNoteBytesMap(){
+        return getAsMap();
+    }
+
+    public NoteBytesMap getAsMap(){
         return new NoteBytesMap(m_value);
     }
 
