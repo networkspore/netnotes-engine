@@ -10,6 +10,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 
 import com.google.gson.JsonPrimitive;
@@ -484,6 +485,30 @@ public class NoteBytes {
         return new NoteBytesMap(m_value);
     }
 
+    @SuppressWarnings("unchecked")
+    public <K, V> Map<K, V> getAsHashMap() {
+        byte[] bytes = get();
+        int length = bytes.length;
+        Map<Object, Object> rawMap = new HashMap<>();
+
+        int offset = 0;
+        while (offset < length) {
+            NoteBytes keyBytes = NoteBytes.readNote(bytes, offset);
+            offset += NoteBytesMetaData.STANDARD_META_DATA_SIZE + keyBytes.byteLength();
+
+            NoteBytes valueBytes = NoteBytes.readNote(bytes, offset);
+            offset += NoteBytesMetaData.STANDARD_META_DATA_SIZE + valueBytes.byteLength();
+
+            Object key = from(keyBytes);
+            Object value = from(valueBytes);
+
+            rawMap.put(key, value);
+        }
+
+        // Safe unchecked cast since contents are strongly typed by NoteBytes
+        return (Map<K, V>) rawMap;
+    }
+
     public NoteBytesArray getAsNoteBytesArray(){
         return new NoteBytesArray(m_value);
     }
@@ -491,6 +516,11 @@ public class NoteBytes {
     public NoteBytesArrayReadOnly getAsNoteBytesArrayReadOnly(){
         return new NoteBytesArrayReadOnly(m_value);
     }
+
+    public NoteIntegerArray getAsNoteIntegerArray(){
+        return new NoteIntegerArray(m_value);
+    }
+
 
     public boolean isEmpty(){
         return m_value.length == 0;
@@ -649,6 +679,7 @@ public class NoteBytes {
     }
 
 
+
     public NoteUUID getNoteUUIDfromBytes(){ 
         return NoteUUID.fromNoteUUIDBytes(internalGet());
     }
@@ -739,6 +770,31 @@ public class NoteBytes {
         }
         
         throw new IllegalArgumentException("Unsuported type");
+    }
+
+    private static Object from(NoteBytes noteBytes) {
+        byte[] data = noteBytes.get();
+
+        switch (noteBytes.getType()) {
+            case NoteBytesMetaData.LONG_TYPE:
+                return new NoteLong(data).getAsLong();
+            case NoteBytesMetaData.STRING_TYPE:
+                return new NoteString(data).getAsString();
+            case NoteBytesMetaData.INTEGER_TYPE:
+                return new NoteInteger(data).getAsInt();
+            case NoteBytesMetaData.BOOLEAN_TYPE:
+                return new NoteBoolean(data).getAsBoolean();
+            case NoteBytesMetaData.DOUBLE_TYPE:
+                return new NoteDouble(data).getAsDouble();
+            case NoteBytesMetaData.FLOAT_TYPE:
+                return new NoteFloat(data).getAsFloat();
+            case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+                return new NoteBigDecimal(data).getAsBigDecimal();
+            case NoteBytesMetaData.BIG_INTEGER_TYPE:
+                return new NoteBigInteger(data).getAsBigInteger();
+            default:
+                return noteBytes;
+        }
     }
 
 }

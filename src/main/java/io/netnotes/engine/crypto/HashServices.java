@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -318,7 +319,7 @@ public class HashServices {
                 code = new String(bytes, StandardCharsets.UTF_16LE).hashCode();
                 break;
             default:
-                code = ByteDecoding.bytesToIntBigEndian(digestBytesToBytes(bytes,4));
+                code = Arrays.hashCode(bytes);
               
         }
         

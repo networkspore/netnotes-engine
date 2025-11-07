@@ -19,7 +19,7 @@ import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytes {
 
-    private static volatile AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
+    private static final AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
 
     private NoteUUID(byte[] bytes){
         super(bytes, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
@@ -107,5 +107,7 @@ public class NoteUUID extends NoteBytes {
         return fromNoteUUIDBytes( EncodingHelpers.encodeBytes(bytes, Encoding.URL_SAFE));
 
     }
+
+    
 
 }

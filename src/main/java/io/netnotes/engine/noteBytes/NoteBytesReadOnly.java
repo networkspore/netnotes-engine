@@ -1,9 +1,34 @@
 package io.netnotes.engine.noteBytes;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesReadOnly extends NoteBytes {
     
+
+    public NoteBytesReadOnly( String value){
+        this( ByteDecoding.stringToBytes(value,  NoteBytesMetaData.STRING_TYPE), NoteBytesMetaData.STRING_TYPE);
+    }
+    public NoteBytesReadOnly(char[] chars){
+        this( chars, NoteBytesMetaData.STRING_TYPE);
+    }
+
+    public NoteBytesReadOnly(int integer){
+        this(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
+    }
+
+    public NoteBytesReadOnly(long l){
+        this(ByteDecoding.longToBytesBigEndian(l), NoteBytesMetaData.LONG_TYPE);
+    }
+
+    public NoteBytesReadOnly( char[] value, byte type){
+        this( ByteDecoding.charsToByteArray(value, type), type);
+    }
+
+    public NoteBytesReadOnly(float l){
+        this(ByteDecoding.floatToBytesBigEndian(l), NoteBytesMetaData.FLOAT_TYPE);
+    }
+
 
     public NoteBytesReadOnly(Object value){
         this(NoteBytes.of(value));

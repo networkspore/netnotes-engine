@@ -4,64 +4,124 @@ import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
+import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 
 /**
- * Generic statechart system using bitflags for orthogonal states.
- * States are represented as long values where each bit represents an independent state.
+ * Generic statechart system using BigInteger for unlimited orthogonal states.
+ * States are represented as BigInteger values where each bit represents an independent state.
  *
  * Features:
- * - 64 independent state bits
+ * - Unlimited independent state bits (not limited to 64)
  * - Transition guards and actions
  * - State change callbacks
  * - Full NoteBytes serialization
  * - Thread-safe
+ * - Backward compatible with long-based bit positions
  */
 public class BitFlagStateMachine {
 
     private final String m_id;
-    private long m_state;
-    private final Map<Long, List<StateTransition>> m_transitions;
-    private final Map<Long, List<BiConsumer<Long, Long>>> m_stateListeners;
-    private final List<BiConsumer<Long, Long>> m_globalListeners;
-    private BiConsumer<Exception, BiConsumer<Long, Long>> m_errorHandler;
+    private BigInteger m_state;
+    private final Map<BigInteger, List<StateTransition>> m_transitions;
+    private final Map<BigInteger, List<BiConsumer<BigInteger, BigInteger>>> m_stateListeners;
+    private final List<BiConsumer<BigInteger, BigInteger>> m_globalListeners;
+    private final List<StateConstraint> m_constraints;
+    private BiConsumer<Exception, BiConsumer<BigInteger, BigInteger>> m_errorHandler;
 
     public BitFlagStateMachine(String id) {
-        this(id, 0L);
+        this(id, BigInteger.ZERO);
     }
 
-    public BitFlagStateMachine(String id, long initialState) {
+    public BitFlagStateMachine(String id, BigInteger initialState) {
         this.m_id = id;
         this.m_state = initialState;
         this.m_transitions = new ConcurrentHashMap<>();
         this.m_stateListeners = new ConcurrentHashMap<>();
         this.m_globalListeners = new CopyOnWriteArrayList<>();
+        this.m_constraints = new CopyOnWriteArrayList<>();
+    }
+
+    // Convenience constructor for long-based initial states
+    public BitFlagStateMachine(String id, long initialState) {
+        this(id, BigInteger.valueOf(initialState));
     }
 
     // ========== State Queries ==========
 
-    public boolean hasState(long stateBit) {
-        return (m_state & stateBit) == stateBit;
+    public boolean hasState(BigInteger stateBit) {
+        return m_state.and(stateBit).equals(stateBit);
     }
 
-    public boolean hasAnyState(long... stateBits) {
-        for (long bit : stateBits) {
+    public boolean hasState(int bitPosition) {
+        return m_state.testBit(bitPosition);
+    }
+
+    public boolean hasState(long stateBit) {
+        return hasState(BigInteger.valueOf(stateBit));
+    }
+
+    public boolean hasAnyState(BigInteger... stateBits) {
+        for (BigInteger bit : stateBits) {
             if (hasState(bit)) return true;
         }
         return false;
     }
 
-    public boolean hasAllStates(long... stateBits) {
-        for (long bit : stateBits) {
+    public boolean hasAnyState(int... bitPositions) {
+        for (int pos : bitPositions) {
+            if (hasState(pos)) return true;
+        }
+        return false;
+    }
+
+    public boolean hasAllStates(BigInteger... stateBits) {
+        for (BigInteger bit : stateBits) {
             if (!hasState(bit)) return false;
         }
         return true;
     }
 
-    public long getState() {
+    public boolean hasAllStates(int... bitPositions) {
+        for (int pos : bitPositions) {
+            if (!hasState(pos)) return false;
+        }
+        return true;
+    }
+
+    // Convenience aliases
+    public boolean hasAllFlags(BigInteger flags) {
+        return m_state.and(flags).equals(flags);
+    }
+
+    public boolean hasAllFlags(long flags) {
+        return hasAllFlags(BigInteger.valueOf(flags));
+    }
+
+    public boolean hasAnyFlags(BigInteger flags) {
+        return !m_state.and(flags).equals(BigInteger.ZERO);
+    }
+
+    public boolean hasAnyFlags(long flags) {
+        return hasAnyFlags(BigInteger.valueOf(flags));
+    }
+
+    public boolean hasFlag(BigInteger flag) {
+        return hasState(flag);
+    }
+
+    public boolean hasFlag(int bitPosition) {
+        return hasState(bitPosition);
+    }
+
+    public boolean hasFlag(long flag) {
+        return hasState(flag);
+    }
+
+    public BigInteger getState() {
         return m_state;
     }
 
@@ -71,13 +131,16 @@ public class BitFlagStateMachine {
 
     // ========== State Mutations ==========
 
-    public boolean addState(long stateBit) {
+    public boolean addState(BigInteger stateBit) {
         if (hasState(stateBit)) {
             return false; // Already has state
         }
 
-        long oldState = m_state;
-        m_state |= stateBit;
+        BigInteger oldState = m_state;
+        BigInteger newState = m_state.or(stateBit);
+        
+        validateStateConstraints(newState);
+        m_state = newState;
 
         notifyStateChange(oldState, m_state, stateBit, true);
         checkTransitions(stateBit, true, oldState);
@@ -85,13 +148,21 @@ public class BitFlagStateMachine {
         return true;
     }
 
-    public boolean removeState(long stateBit) {
+    public boolean addState(int bitPosition) {
+        return addState(bit(bitPosition));
+    }
+
+    public boolean addState(long stateBit) {
+        return addState(BigInteger.valueOf(stateBit));
+    }
+
+    public boolean removeState(BigInteger stateBit) {
         if (!hasState(stateBit)) {
             return false; // Doesn't have state
         }
 
-        long oldState = m_state;
-        m_state &= ~stateBit;
+        BigInteger oldState = m_state;
+        m_state = m_state.andNot(stateBit);
 
         notifyStateChange(oldState, m_state, stateBit, false);
         checkTransitions(stateBit, false, oldState);
@@ -99,7 +170,15 @@ public class BitFlagStateMachine {
         return true;
     }
 
-    public boolean toggleState(long stateBit) {
+    public boolean removeState(int bitPosition) {
+        return removeState(bit(bitPosition));
+    }
+
+    public boolean removeState(long stateBit) {
+        return removeState(BigInteger.valueOf(stateBit));
+    }
+
+    public boolean toggleState(BigInteger stateBit) {
         if (hasState(stateBit)) {
             return removeState(stateBit);
         } else {
@@ -107,37 +186,105 @@ public class BitFlagStateMachine {
         }
     }
 
-    public void setState(long newState) {
-        long oldState = m_state;
-        if (oldState == newState) return;
+    public boolean toggleState(int bitPosition) {
+        return toggleState(bit(bitPosition));
+    }
 
+    public boolean toggleState(long stateBit) {
+        return toggleState(BigInteger.valueOf(stateBit));
+    }
+
+    public void setState(BigInteger newState) {
+        BigInteger oldState = m_state;
+        if (oldState.equals(newState)) return;
+
+        validateStateConstraints(newState);
         m_state = newState;
-        notifyStateChange(oldState, newState, 0L, false);
+        notifyStateChange(oldState, newState, BigInteger.ZERO, false);
 
         // Check transitions for all changed bits
-        long changed = oldState ^ newState;
-        for (int i = 0; i < 64; i++) {
-            long bit = 1L << i;
-            if ((changed & bit) != 0) {
-                boolean added = (newState & bit) != 0;
-                checkTransitions(bit, added, oldState);
+        BigInteger changed = oldState.xor(newState);
+        int bitLength = Math.max(oldState.bitLength(), newState.bitLength());
+        
+        for (int i = 0; i < bitLength; i++) {
+            if (changed.testBit(i)) {
+                BigInteger bitValue = bit(i);
+                boolean added = newState.testBit(i);
+                checkTransitions(bitValue, added, oldState);
             }
         }
     }
 
+    public void setState(long newState) {
+        setState(BigInteger.valueOf(newState));
+    }
+
+    public void setFlag(BigInteger flag) {
+        addState(flag);
+    }
+
+    public void setFlag(int bitPosition) {
+        addState(bitPosition);
+    }
+
+    public void setFlag(long flag) {
+        addState(flag);
+    }
+
+    public void clearFlag(BigInteger flag) {
+        removeState(flag);
+    }
+
+    public void clearFlag(int bitPosition) {
+        removeState(bitPosition);
+    }
+
+    public void clearFlag(long flag) {
+        removeState(flag);
+    }
+
     public void clearAllStates() {
-        setState(0L);
+        setState(BigInteger.ZERO);
+    }
+
+    // ========== State Constraints ==========
+
+    public static class StateConstraint {
+        public final BigInteger mutuallyExclusiveStates;
+        public final String errorMessage;
+
+        public StateConstraint(BigInteger mutuallyExclusiveStates, String errorMessage) {
+            this.mutuallyExclusiveStates = mutuallyExclusiveStates;
+            this.errorMessage = errorMessage;
+        }
+    }
+
+    public void addStateConstraint(BigInteger mutuallyExclusiveStates, String errorMessage) {
+        m_constraints.add(new StateConstraint(mutuallyExclusiveStates, errorMessage));
+    }
+
+    public void addStateConstraint(long mutuallyExclusiveStates, String errorMessage) {
+        addStateConstraint(BigInteger.valueOf(mutuallyExclusiveStates), errorMessage);
+    }
+
+    private void validateStateConstraints(BigInteger newState) {
+        for (StateConstraint constraint : m_constraints) {
+            BigInteger masked = newState.and(constraint.mutuallyExclusiveStates);
+            if (masked.bitCount() > 1) {
+                throw new IllegalStateException(constraint.errorMessage);
+            }
+        }
     }
 
     // ========== Transitions ==========
 
     public static class StateTransition {
-        public final long triggerBit;
+        public final BigInteger triggerBit;
         public final boolean onAdd;
         public final TransitionGuard guard;
         public final TransitionAction action;
 
-        public StateTransition(long triggerBit, boolean onAdd,
+        public StateTransition(BigInteger triggerBit, boolean onAdd,
                                TransitionGuard guard, TransitionAction action) {
             this.triggerBit = triggerBit;
             this.onAdd = onAdd;
@@ -146,40 +293,68 @@ public class BitFlagStateMachine {
         }
     }
 
-   
     @FunctionalInterface
     public interface TransitionGuard {
-        boolean canTransition(long oldState, long newState, long triggerBit);
+        boolean canTransition(BigInteger oldState, BigInteger newState, BigInteger triggerBit);
     }
 
     @FunctionalInterface
     public interface TransitionAction {
-        void onTransition(long oldState, long newState, long triggerBit);
+        void onTransition(BigInteger oldState, BigInteger newState, BigInteger triggerBit);
     }
 
-    public void addTransition(long triggerBit, boolean onAdd,
+    public void addTransition(BigInteger triggerBit, boolean onAdd,
                               TransitionGuard guard, TransitionAction action) {
         StateTransition transition = new StateTransition(triggerBit, onAdd, guard, action);
         m_transitions.computeIfAbsent(triggerBit, k -> new CopyOnWriteArrayList<>()).add(transition);
     }
 
-    public void onStateAdded(long stateBit, TransitionAction action) {
+    public void onStateAdded(BigInteger stateBit, TransitionAction action) {
         addTransition(stateBit, true, (oldState, newState, bit) -> true, action);
     }
 
-    public void onStateRemoved(long stateBit, TransitionAction action) {
+    public void onStateAdded(int bitPosition, TransitionAction action) {
+        onStateAdded(bit(bitPosition), action);
+    }
+
+    public void onStateAdded(long stateBit, TransitionAction action) {
+        onStateAdded(BigInteger.valueOf(stateBit), action);
+    }
+
+    public void onStateRemoved(BigInteger stateBit, TransitionAction action) {
         addTransition(stateBit, false, (oldState, newState, bit) -> true, action);
     }
 
-    public void onStateAddedIf(long stateBit, TransitionGuard guard, TransitionAction action) {
+    public void onStateRemoved(int bitPosition, TransitionAction action) {
+        onStateRemoved(bit(bitPosition), action);
+    }
+
+    public void onStateRemoved(long stateBit, TransitionAction action) {
+        onStateRemoved(BigInteger.valueOf(stateBit), action);
+    }
+
+    public void onStateAddedIf(BigInteger stateBit, TransitionGuard guard, TransitionAction action) {
         addTransition(stateBit, true, guard, action);
     }
 
-    private void checkTransitions(long triggerBit, boolean isAdd, long oldState) {
+    // Convenient transition for exact state matches
+    public void addTransition(BigInteger fromState, BigInteger toState, BiConsumer<BigInteger, BigInteger> action) {
+        addGlobalListener((oldState, newState) -> {
+            if (oldState.equals(fromState) && newState.equals(toState)) {
+                action.accept(oldState, newState);
+            }
+        });
+    }
+
+    public void addTransition(long fromState, long toState, BiConsumer<BigInteger, BigInteger> action) {
+        addTransition(BigInteger.valueOf(fromState), BigInteger.valueOf(toState), action);
+    }
+
+    private void checkTransitions(BigInteger triggerBit, boolean isAdd, BigInteger oldState) {
         List<StateTransition> transitions = m_transitions.get(triggerBit);
         if (transitions == null) return;
 
-        long newState = m_state;
+        BigInteger newState = m_state;
         for (StateTransition transition : transitions) {
             if (transition.onAdd == isAdd) {
                 if (transition.guard == null || transition.guard.canTransition(oldState, newState, triggerBit)) {
@@ -193,34 +368,54 @@ public class BitFlagStateMachine {
 
     // ========== Listeners ==========
 
-    public void addStateListener(long stateBit, BiConsumer<Long, Long> listener) {
+    public void addStateListener(BigInteger stateBit, BiConsumer<BigInteger, BigInteger> listener) {
         m_stateListeners.computeIfAbsent(stateBit, k -> new CopyOnWriteArrayList<>()).add(listener);
     }
 
+    public void addStateListener(int bitPosition, BiConsumer<BigInteger, BigInteger> listener) {
+        addStateListener(bit(bitPosition), listener);
+    }
+
+    public void addStateListener(long stateBit, BiConsumer<BigInteger, BigInteger> listener) {
+        addStateListener(BigInteger.valueOf(stateBit), listener);
+    }
+
     /** add one listener for multiple bits */
-    public void addStateListener(long[] bits, BiConsumer<Long, Long> listener) {
-        for (long bit : bits) {
+    public void addStateListener(BigInteger[] bits, BiConsumer<BigInteger, BigInteger> listener) {
+        for (BigInteger bit : bits) {
             addStateListener(bit, listener);
         }
     }
 
-    public void addGlobalListener(BiConsumer<Long, Long> listener) {
+    public void addStateListener(int[] bitPositions, BiConsumer<BigInteger, BigInteger> listener) {
+        for (int pos : bitPositions) {
+            addStateListener(pos, listener);
+        }
+    }
+
+    public void addStateListener(long[] stateBits, BiConsumer<BigInteger, BigInteger> listener) {
+        for (long bit : stateBits) {
+            addStateListener(bit, listener);
+        }
+    }
+
+    public void addGlobalListener(BiConsumer<BigInteger, BigInteger> listener) {
         m_globalListeners.add(listener);
     }
 
     /** on any state change (alias of addGlobalListener) */
-    public void onStateChanged(BiConsumer<Long, Long> listener) {
+    public void onStateChanged(BiConsumer<BigInteger, BigInteger> listener) {
         addGlobalListener(listener);
     }
 
-    public void removeStateListener(long stateBit, BiConsumer<Long, Long> listener) {
-        List<BiConsumer<Long, Long>> listeners = m_stateListeners.get(stateBit);
+    public void removeStateListener(BigInteger stateBit, BiConsumer<BigInteger, BigInteger> listener) {
+        List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(stateBit);
         if (listeners != null) {
             listeners.remove(listener);
         }
     }
 
-    public void removeGlobalListener(BiConsumer<Long, Long> listener) {
+    public void removeGlobalListener(BiConsumer<BigInteger, BigInteger> listener) {
         m_globalListeners.remove(listener);
     }
 
@@ -234,11 +429,11 @@ public class BitFlagStateMachine {
         m_transitions.clear();
     }
 
-    public void setErrorHandler(BiConsumer<Exception, BiConsumer<Long, Long>> handler) {
+    public void setErrorHandler(BiConsumer<Exception, BiConsumer<BigInteger, BigInteger>> handler) {
         this.m_errorHandler = handler;
     }
 
-    private void handleListenerError(Exception e, BiConsumer<Long, Long> listener) {
+    private void handleListenerError(Exception e, BiConsumer<BigInteger, BigInteger> listener) {
         if (m_errorHandler != null) {
             m_errorHandler.accept(e, listener);
         } else {
@@ -246,8 +441,8 @@ public class BitFlagStateMachine {
         }
     }
 
-    private void notifyStateChange(long oldState, long newState, long changedBit, boolean targetedChange) {
-        for (BiConsumer<Long, Long> listener : m_globalListeners) {
+    private void notifyStateChange(BigInteger oldState, BigInteger newState, BigInteger changedBit, boolean targetedChange) {
+        for (BiConsumer<BigInteger, BigInteger> listener : m_globalListeners) {
             try {
                 listener.accept(oldState, newState);
             } catch (Exception e) {
@@ -255,10 +450,10 @@ public class BitFlagStateMachine {
             }
         }
 
-        if (targetedChange && changedBit != 0) {
-            List<BiConsumer<Long, Long>> listeners = m_stateListeners.get(changedBit);
+        if (targetedChange && !changedBit.equals(BigInteger.ZERO)) {
+            List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(changedBit);
             if (listeners != null) {
-                for (BiConsumer<Long, Long> listener : listeners) {
+                for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
                     try {
                         listener.accept(oldState, newState);
                     } catch (Exception e) {
@@ -267,13 +462,15 @@ public class BitFlagStateMachine {
                 }
             }
         } else {
-            long changed = oldState ^ newState;
-            for (int i = 0; i < 64; i++) {
-                long bit = 1L << i;
-                if ((changed & bit) != 0) {
-                    List<BiConsumer<Long, Long>> listeners = m_stateListeners.get(bit);
+            BigInteger changed = oldState.xor(newState);
+            int bitLength = Math.max(oldState.bitLength(), newState.bitLength());
+            
+            for (int i = 0; i < bitLength; i++) {
+                if (changed.testBit(i)) {
+                    BigInteger bitValue = bit(i);
+                    List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(bitValue);
                     if (listeners != null) {
-                        for (BiConsumer<Long, Long> listener : listeners) {
+                        for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
                             try {
                                 listener.accept(oldState, newState);
                             } catch (Exception e) {
@@ -291,47 +488,93 @@ public class BitFlagStateMachine {
     public NoteBytesObject toNoteBytes() {
         return new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair("id", new NoteString(m_id)),
-            new NoteBytesPair("state", new NoteLong(m_state))
+            new NoteBytesPair("state", new NoteString(m_state.toString()))
         });
     }
 
     public static BitFlagStateMachine fromNoteBytes(NoteBytesObject obj) {
         NoteBytesMap map = obj.getAsNoteBytesMap();
         String id = map.get("id").getAsString();
-        long state = map.get("state").getAsLong();
+        BigInteger state = new BigInteger(map.get("state").getAsString());
         return new BitFlagStateMachine(id, state);
     }
 
     // ========== Utility Methods ==========
 
-    public List<Long> getActiveStates() {
-        List<Long> active = new ArrayList<>();
-        for (int i = 0; i < 64; i++) {
-            long bit = 1L << i;
-            if (hasState(bit)) {
-                active.add(bit);
+    public List<BigInteger> getActiveStates() {
+        List<BigInteger> active = new ArrayList<>();
+        int bitLength = m_state.bitLength();
+        for (int i = 0; i < bitLength; i++) {
+            if (m_state.testBit(i)) {
+                active.add(bit(i));
             }
         }
         return active;
     }
 
+   /*public List<Integer> getActiveBitPositions() {
+        List<Integer> positions = new ArrayList<>();
+        int bitLength = m_state.bitLength();
+        for (int i = 0; i < bitLength; i++) {
+            if (m_state.testBit(i)) {
+                positions.add(i);
+            }
+        }
+        return positions;
+    }*/
+
+     public NoteIntegerArray getActiveBitPositions() {
+        NoteIntegerArray positions = new NoteIntegerArray();
+        int bitLength = m_state.bitLength();
+        for (int i = 0; i < bitLength; i++) {
+            if (m_state.testBit(i)) {
+                positions.add(i);
+            }
+        }
+        return positions;
+    }
+
     public int getHighestStateBit() {
-        return 63 - Long.numberOfLeadingZeros(m_state);
+        return m_state.bitLength() - 1;
     }
 
     public int getActiveStateCount() {
-        return Long.bitCount(m_state);
+        return m_state.bitCount();
     }
 
     public String getStateString(Map<Long, String> stateNames) {
+        Map<BigInteger, String> bigIntNames = new HashMap<>();
+        if (stateNames != null) {
+            for (Map.Entry<Long, String> entry : stateNames.entrySet()) {
+                bigIntNames.put(BigInteger.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return getStateString(bigIntNames, null);
+    }
+
+    public String getStateString(Map<BigInteger, String> stateNames, Map<Integer, String> positionNames) {
         StringBuilder sb = new StringBuilder();
         sb.append("[");
         boolean first = true;
-        for (int i = 0; i < 64; i++) {
-            long bit = 1L << i;
-            if (hasState(bit)) {
+        int bitLength = m_state.bitLength();
+        
+        for (int i = 0; i < bitLength; i++) {
+            if (m_state.testBit(i)) {
                 if (!first) sb.append(", ");
-                String name = stateNames.getOrDefault(bit, "BIT_" + i);
+                
+                BigInteger bitValue = bit(i);
+                String name = null;
+                
+                if (stateNames != null) {
+                    name = stateNames.get(bitValue);
+                }
+                if (name == null && positionNames != null) {
+                    name = positionNames.get(i);
+                }
+                if (name == null) {
+                    name = "BIT_" + i;
+                }
+                
                 sb.append(name);
                 first = false;
             }
@@ -342,57 +585,122 @@ public class BitFlagStateMachine {
 
     @Override
     public String toString() {
-        return String.format("StateMachine[id=%s, state=0x%016X, active=%d]",
-                m_id, m_state, getActiveStateCount());
+        return String.format("StateMachine[id=%s, state=%s, active=%d, bits=%d]",
+                m_id, m_state.toString(16), getActiveStateCount(), m_state.bitLength());
     }
 
     // ========== Static Helpers ==========
 
-    public static long bit(int position) {
-        if (position < 0 || position >= 64) {
-            throw new IllegalArgumentException("Bit position must be 0-63");
+    public static BigInteger bit(int position) {
+        if (position < 0) {
+            throw new IllegalArgumentException("Bit position must be non-negative");
         }
-        return 1L << position;
+        return BigInteger.ONE.shiftLeft(position);
     }
 
-    public static long combine(long... bits) {
-        long result = 0L;
-        for (long bit : bits) {
-            result |= bit;
+    public static BigInteger combine(BigInteger... bits) {
+        BigInteger result = BigInteger.ZERO;
+        for (BigInteger bit : bits) {
+            result = result.or(bit);
         }
         return result;
     }
 
-    public static boolean anySet(long state, long mask) {
-        return (state & mask) != 0;
+    public static BigInteger combine(long... bits) {
+        BigInteger result = BigInteger.ZERO;
+        for (long bit : bits) {
+            result = result.or(BigInteger.valueOf(bit));
+        }
+        return result;
     }
 
-    public static boolean allSet(long state, long mask) {
-        return (state & mask) == mask;
+    public static BigInteger combine(int... positions) {
+        BigInteger result = BigInteger.ZERO;
+        for (int pos : positions) {
+            result = result.or(bit(pos));
+        }
+        return result;
+    }
+
+    public static boolean anySet(BigInteger state, BigInteger mask) {
+        return !state.and(mask).equals(BigInteger.ZERO);
+    }
+
+    public static boolean anySet(BigInteger state, long mask) {
+        return anySet(state, BigInteger.valueOf(mask));
+    }
+
+    public static boolean allSet(BigInteger state, BigInteger mask) {
+        return state.and(mask).equals(mask);
+    }
+
+    public static boolean allSet(BigInteger state, long mask) {
+        return allSet(state, BigInteger.valueOf(mask));
     }
 
     /** bits that differ between a and b */
-    public static long difference(long a, long b) {
-        return a ^ b;
+    public static BigInteger difference(BigInteger a, BigInteger b) {
+        return a.xor(b);
     }
 
     /** indices of set bits */
-    public static List<Integer> bitIndices(long mask) {
+    public static List<Integer> bitIndices(BigInteger mask) {
         List<Integer> indices = new ArrayList<>();
-        for (int i = 0; i < 64; i++) {
-            if (((mask >> i) & 1L) != 0) {
+        int bitLength = mask.bitLength();
+        for (int i = 0; i < bitLength; i++) {
+            if (mask.testBit(i)) {
                 indices.add(i);
             }
         }
         return indices;
     }
 
-    /** formatted 64-bit binary string */
-    public static String bitString(long mask) {
-        StringBuilder sb = new StringBuilder(64);
-        for (int i = 63; i >= 0; i--) {
-            sb.append(((mask >> i) & 1L) == 1L ? '1' : '0');
+    /** formatted binary string (truncated if too long) */
+    public static String bitString(BigInteger mask) {
+        return bitString(mask, -1);
+    }
+
+    /** formatted binary string with optional max length */
+    public static String bitString(BigInteger mask, int maxLength) {
+        String binary = mask.toString(2);
+        if (maxLength > 0 && binary.length() > maxLength) {
+            return "..." + binary.substring(binary.length() - maxLength);
         }
-        return sb.toString();
+        return binary;
+    }
+
+    // For backward compatibility with 64-bit longs
+    public static String bitString(long mask) {
+        return Long.toBinaryString(mask);
+    }
+
+    // ========== Migration Helpers ==========
+
+    /**
+     * Convert from long-based state to BigInteger state machine
+     */
+    public static BitFlagStateMachine fromLongState(String id, long state) {
+        return new BitFlagStateMachine(id, BigInteger.valueOf(state));
+    }
+
+    /**
+     * Get state as long (only safe if state fits in 64 bits)
+     */
+    public long getStateAsLong() {
+        if (m_state.bitLength() > 63) {
+            throw new ArithmeticException("State does not fit in long (bitLength=" + m_state.bitLength() + ")");
+        }
+        return m_state.longValue();
+    }
+
+    /**
+     * Safely get state as long, with fallback
+     */
+    public long getStateAsLongOrDefault(long defaultValue) {
+        try {
+            return getStateAsLong();
+        } catch (ArithmeticException e) {
+            return defaultValue;
+        }
     }
 }

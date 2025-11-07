@@ -566,6 +566,24 @@ public class ByteDecoding{
         return codePoints;
     }
 
+    public static Integer[] bytesToBoxedIntegers(byte[] bytes){
+        
+         if (bytes == null || bytes.length == 0) {
+            return new Integer[0];
+        }
+
+        int length = bytes.length / ByteDecoding.CODE_POINT_BYTE_SIZE;
+        Integer[] codePoints = new Integer[length];
+        int offset = 0;
+
+        for (int i = 0; i < length; i++) {
+            codePoints[i] = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += ByteDecoding.CODE_POINT_BYTE_SIZE;
+        }
+
+        return codePoints;
+    }
+
     public static byte[] parseBuffer(ByteBuffer buffer){
         if(buffer.remaining() > 0){
             byte[] bytes = new byte[buffer.remaining()];
@@ -865,6 +883,26 @@ public class ByteDecoding{
     }
 
 
+    public static int doubleToFloat32Int(double value){
+        return Float.floatToRawIntBits((float) value);
+    }
+
+    /**
+     * Reads 4 bytes at given offset as a float32 and returns as double.
+     */
+    public static float intBitsToFloat(byte[] payload, int offset) {
+        int bits =
+            ((payload[offset]     & 0xFF) << 24) |
+            ((payload[offset + 1] & 0xFF) << 16) |
+            ((payload[offset + 2] & 0xFF) << 8)  |
+            ((payload[offset + 3] & 0xFF));
+
+        return Float.intBitsToFloat(bits);
+    }
+
+
+
+     
 
     // ===== FAST BIT-SHIFTING CONVERSION METHODS =====
 
@@ -877,6 +915,14 @@ public class ByteDecoding{
             (byte) value
         };
     }
+
+    public static void intToBytes(int value, byte[] bytes, int offset) {
+        bytes[offset] = (byte) (value >>> 24);
+        bytes[offset + 1] = (byte) (value >>> 16);
+        bytes[offset + 2] = (byte) (value >>> 8);
+        bytes[offset + 3] = (byte) value;
+    }
+
 
     public static byte[] intToBytesLittleEndian(int value) {
         return new byte[]{
@@ -894,6 +940,8 @@ public class ByteDecoding{
                (bytes[3] & 0xFF);
     }
 
+    public static int bytesToInt(byte[] bytes, int offset) { return bytesToIntBigEndian(bytes, offset); }
+    
     public static int bytesToIntBigEndian(byte[] bytes, int offset) {
         return ((bytes[offset] & 0xFF) << 24) |
                ((bytes[offset + 1] & 0xFF) << 16) |
@@ -929,6 +977,17 @@ public class ByteDecoding{
         };
     }
 
+    public static void longToBytes(long value, byte[] bytes, int offset) {
+        bytes[offset] = (byte) (value >>> 56);
+        bytes[offset + 1] = (byte) (value >>> 48);
+        bytes[offset + 2] = (byte) (value >>> 40);
+        bytes[offset + 3] = (byte) (value >>> 32);
+        bytes[offset + 4] = (byte) (value >>> 24);
+        bytes[offset + 5] = (byte) (value >>> 16);
+        bytes[offset + 6] = (byte) (value >>> 8);
+        bytes[offset + 7] = (byte) value;
+    }
+
     public static byte[] longToBytesLittleEndian(long value) {
         return new byte[]{
             (byte) value,
@@ -952,6 +1011,8 @@ public class ByteDecoding{
                ((long) (bytes[6] & 0xFF) << 8) |
                (long) (bytes[7] & 0xFF);
     }
+
+    public static long bytesToLong(byte[] bytes, int offset) { return bytesToLongBigEndian(bytes, offset); }
 
     public static long bytesToLongBigEndian(byte[] bytes, int offset) {
         return ((long) (bytes[offset] & 0xFF) << 56) |
@@ -1003,6 +1064,10 @@ public class ByteDecoding{
 
     public static short bytesToShortBigEndian(byte[] bytes) {
         return (short) (((bytes[0] & 0xFF) << 8) | (bytes[1] & 0xFF));
+    }
+
+    public static short bytesToShort(byte[] bytes, int offset) {
+        return (short) (((bytes[offset] & 0xFF) << 8) | (bytes[offset + 1] & 0xFF));
     }
 
     public static short bytesToShortBigEndian(byte[] bytes, int offset) {
