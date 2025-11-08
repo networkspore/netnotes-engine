@@ -5,9 +5,11 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArray;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
@@ -30,10 +32,8 @@ public class HardwareInfo {
         List<PhysicalProcessor> physicalProcessorList = systemInfo.getHardware().getProcessor().getPhysicalProcessors();
         
         NoteBytesMap map = new NoteBytesMap();
-        int i = 0;
         for(PhysicalProcessor physicalProcessor : physicalProcessorList){
-            map.put(new NoteBytes(i + ": " + physicalProcessor.getPhysicalPackageNumber()), new NoteString( getStringOrRandom(physicalProcessor.getIdString())));
-            i++;
+            map.put(new NoteBytes(physicalProcessor.getPhysicalPackageNumber()), new NoteString( physicalProcessor.getIdString()));
         }
         return map.getNoteBytesObject();
     }
@@ -52,13 +52,11 @@ public class HardwareInfo {
     private static NoteBytesObject nicBytes(SystemInfo systemInfo){
         List<NetworkIF> networkIfList = systemInfo.getHardware().getNetworkIFs();
         NoteBytesMap map = new NoteBytesMap();
-        int i = 0;
         
         for(NetworkIF networkIf : networkIfList){
             
             String mac = networkIf.getMacaddr();
-            map.put(new NoteBytes(i + ": " + networkIf.getName()), new NoteBytes(mac));
-            i++;
+            map.put(new NoteString(networkIf.getName()), new NoteString(mac));
         }
         return map.getNoteBytesObject();
     }
@@ -68,10 +66,8 @@ public class HardwareInfo {
         List<PhysicalMemory> pysicalMemoryList = systemInfo.getHardware().getMemory().getPhysicalMemory();
         
         NoteBytesMap map = new NoteBytesMap();
-        int i = 0;
         for(PhysicalMemory physicalMemory : pysicalMemoryList){
-            map.put(new NoteBytes(i + ": " + physicalMemory.getBankLabel()), new NoteString( getStringOrRandom(physicalMemory.getSerialNumber())));
-            i++;
+            map.put(new NoteString(physicalMemory.getBankLabel()), new NoteString( physicalMemory.getSerialNumber()));
         }
         return map.getNoteBytesObject();
     }
@@ -82,8 +78,7 @@ public class HardwareInfo {
         NoteBytesMap map = new NoteBytesMap();
         for(int i = 0; i < fileStores.size() ; i++){
             OSFileStore store = fileStores.get(i);
-            map.put(new NoteBytes(i + ": " + store.getName()), new NoteString( getStringOrRandom(store.getUUID())));
-            i++;
+            map.put(new NoteBytes(store.getName()), new NoteString((store.getUUID())));
         }
         return map.getNoteBytesObject();
     }
@@ -114,6 +109,12 @@ public class HardwareInfo {
         }, execService);
     }
 
-   
-
+    public static CompletableFuture<NoteBytesReadOnly> getCPUFingerPrint(ExecutorService execService){
+        return getHardwareInfo(
+                new NoteStringArray("cpu"),
+                execService
+            ).thenApply(hardwareInfo -> {
+                return new NoteBytesReadOnly( HashServices.digestToUrlSafeString(hardwareInfo.getBytes(),16));
+            });
+        }
 }

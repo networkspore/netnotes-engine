@@ -289,6 +289,17 @@ public class NoteBytes {
         }
     }
 
+    public NoteBytesReadOnly getAsReadOnly(){
+        if(byteLength() > 0){
+            byte[] bytes = m_value;
+            byte[] newbytes = new byte[bytes.length];
+            System.arraycopy(bytes,0, newbytes, 0, bytes.length);
+            return new NoteBytesReadOnly(newbytes, m_type);
+        }else{
+            return new NoteBytesReadOnly(new byte[0], m_type);
+        }
+    }
+
     public NoteBytes copyOf(int length){
         return new NoteBytes(Arrays.copyOf(m_value, length), m_type);
     }

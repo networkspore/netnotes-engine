@@ -3,7 +3,7 @@ package io.netnotes.engine.plugins;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.AppDataInterface;
+import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;

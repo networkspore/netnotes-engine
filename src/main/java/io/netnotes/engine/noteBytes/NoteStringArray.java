@@ -135,4 +135,303 @@ public class NoteStringArray extends NoteBytesArray {
         return noteBytesBuilder.build();
     }
 
+    /**
+     * Add a string with automatic trimming
+     */
+    public void addTrimmed(String str) {
+        if (str != null) {
+            String trimmed = str.trim();
+            if (!trimmed.isEmpty()) {
+                add(trimmed);
+            }
+        }
+    }
+
+    /**
+     * Add multiple strings with automatic trimming
+     */
+    public void addTrimmed(String... strings) {
+        for (String str : strings) {
+            addTrimmed(str);
+        }
+    }
+
+    /**
+     * Create a NoteStringArray from a path string, splitting on delimiter
+     * Automatically trims each segment and skips empty ones
+     */
+    public static NoteStringArray fromPath(String pathString) {
+        return fromPath(pathString, DELIMITER);
+    }
+
+    /**
+     * Create a NoteStringArray from a path string with custom delimiter
+     */
+    public static NoteStringArray fromPath(String pathString, String delimiter) {
+        if (pathString == null || pathString.isEmpty()) {
+            return new NoteStringArray();
+        }
+        
+        String[] parts = pathString.split(Pattern.quote(delimiter));
+        List<String> validSegments = new java.util.ArrayList<>();
+        
+        for (String part : parts) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                validSegments.add(trimmed);
+            }
+        }
+        
+        return new NoteStringArray(validSegments.toArray(new String[0]));
+    }
+
+    /**
+     * Get a specific segment by index
+     */
+    public String getString(int index) {
+        if (index < 0 || index >= size()) {
+            throw new IndexOutOfBoundsException("Index " + index + " out of bounds for size " + size());
+        }
+        return super.get(index).getAsString();
+    }
+
+    /**
+     * Get the first segment (root)
+     */
+    public String getRootString() {
+        return size() > 0 ? getString(0) : null;
+    }
+
+    /**
+     * Get the last segment (leaf)
+     */
+    public String getLeafString() {
+        return size() > 0 ? getString(size() - 1) : null;
+    }
+
+    /**
+     * Check if this path starts with the given prefix
+     */
+    public boolean startsWith(NoteStringArray prefix) {
+        if (prefix.size() > this.size()) {
+            return false;
+        }
+        
+        for (int i = 0; i < prefix.size(); i++) {
+            if (!this.get(i).equals(prefix.get(i))) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    /**
+     * Check if this path starts with the given prefix string
+     */
+    public boolean startsWith(String prefixPath) {
+        return startsWith(fromPath(prefixPath, m_delimiter));
+    }
+
+    /**
+     * Create a new path with an additional segment appended
+     */
+    public NoteStringArray append(String segment) {
+        if (segment == null || segment.trim().isEmpty()) {
+            return this;
+        }
+        
+        String[] current = getAsStringArray();
+        String[] newArray = new String[current.length + 1];
+        System.arraycopy(current, 0, newArray, 0, current.length);
+        newArray[current.length] = segment.trim();
+        
+        NoteStringArray result = new NoteStringArray(newArray);
+        result.setDelimiter(m_delimiter);
+        return result;
+    }
+
+    /**
+     * Create a new path with multiple segments appended
+     */
+    public NoteStringArray append(String... segments) {
+        if (segments == null || segments.length == 0) {
+            return this;
+        }
+        
+        String[] current = getAsStringArray();
+        List<String> valid = new java.util.ArrayList<>();
+        for (String seg : segments) {
+            if (seg != null) {
+                String trimmed = seg.trim();
+                if (!trimmed.isEmpty()) {
+                    valid.add(trimmed);
+                }
+            }
+        }
+        
+        if (valid.isEmpty()) {
+            return this;
+        }
+        
+        String[] newArray = new String[current.length + valid.size()];
+        System.arraycopy(current, 0, newArray, 0, current.length);
+        for (int i = 0; i < valid.size(); i++) {
+            newArray[current.length + i] = valid.get(i);
+        }
+        
+        NoteStringArray result = new NoteStringArray(newArray);
+        result.setDelimiter(m_delimiter);
+        return result;
+    }
+
+    /**
+     * Get the parent path (all segments except the last)
+     * Returns null if this is a root path (single segment)
+     */
+    public NoteStringArray getParent() {
+        if (size() <= 1) {
+            return null;
+        }
+        
+        String[] current = getAsStringArray();
+        String[] parentArray = new String[current.length - 1];
+        System.arraycopy(current, 0, parentArray, 0, parentArray.length);
+        
+        NoteStringArray result = new NoteStringArray(parentArray);
+        result.setDelimiter(m_delimiter);
+        return result;
+    }
+
+    /**
+     * Get a sub-path starting from the given index
+     */
+    public NoteStringArray subPath(int fromIndex) {
+        if (fromIndex < 0 || fromIndex >= size()) {
+            return new NoteStringArray();
+        }
+        
+        String[] current = getAsStringArray();
+        String[] subArray = new String[current.length - fromIndex];
+        System.arraycopy(current, fromIndex, subArray, 0, subArray.length);
+        
+        NoteStringArray result = new NoteStringArray(subArray);
+        result.setDelimiter(m_delimiter);
+        return result;
+    }
+
+    /**
+     * Get a sub-path from start (inclusive) to end (exclusive)
+     */
+    public NoteStringArray subPath(int fromIndex, int toIndex) {
+        if (fromIndex < 0 || toIndex > size() || fromIndex >= toIndex) {
+            return new NoteStringArray();
+        }
+        
+        String[] current = getAsStringArray();
+        String[] subArray = new String[toIndex - fromIndex];
+        System.arraycopy(current, fromIndex, subArray, 0, subArray.length);
+        
+        NoteStringArray result = new NoteStringArray(subArray);
+        result.setDelimiter(m_delimiter);
+        return result;
+    }
+
+    /**
+     * Get the depth of this path (number of segments)
+     */
+    public int depth() {
+        return size();
+    }
+
+    /**
+     * Check if path matches a pattern with wildcards
+     * * matches any single segment
+     * ** matches any number of segments
+     */
+    public boolean matches(String pattern) {
+        String[] patternSegments = pattern.split(Pattern.quote(m_delimiter));
+        
+        int pathIdx = 0;
+        int patternIdx = 0;
+        
+        while (pathIdx < size() && patternIdx < patternSegments.length) {
+            String patternSeg = patternSegments[patternIdx].trim();
+            
+            if (patternSeg.equals("**")) {
+                // Greedy match - try to match rest of pattern with rest of path
+                if (patternIdx == patternSegments.length - 1) {
+                    return true; // ** at end matches everything
+                }
+                
+                // Try to match remaining pattern at each position
+                for (int i = pathIdx; i < size(); i++) {
+                    String[] remainingPattern = java.util.Arrays.copyOfRange(
+                        patternSegments, patternIdx + 1, patternSegments.length);
+                    String remainingPatternStr = String.join(m_delimiter, remainingPattern);
+                    
+                    NoteStringArray remainingPath = subPath(i);
+                    if (remainingPath.matches(remainingPatternStr)) {
+                        return true;
+                    }
+                }
+                return false;
+            } else if (patternSeg.equals("*") || patternSeg.equals(getString(pathIdx))) {
+                pathIdx++;
+                patternIdx++;
+            } else {
+                return false;
+            }
+        }
+        
+        return pathIdx == size() && patternIdx == patternSegments.length;
+    }
+
+    /**
+     * Join segments with a specific delimiter (overriding the default)
+     */
+    public String toPathString(String delimiter) {
+        return getAsString(delimiter);
+    }
+
+    /**
+     * Join segments with the default delimiter as a path string
+     */
+    public String toPathString() {
+        return getAsString();
+    }
+
+    /**
+     * Trim all segments in place
+     */
+    public void trimAll() {
+        String[] current = getAsStringArray();
+        boolean needsUpdate = false;
+        
+        for (int i = 0; i < current.length; i++) {
+            String trimmed = current[i].trim();
+            if (!trimmed.equals(current[i])) {
+                current[i] = trimmed;
+                needsUpdate = true;
+            }
+        }
+        
+        if (needsUpdate) {
+            // Rebuild from trimmed strings
+            clear();
+            for (String segment : current) {
+                if (!segment.isEmpty()) {
+                    add(segment);
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if the path is empty (no segments)
+     */
+    public boolean isEmpty() {
+        return size() == 0;
+    }
+
 }

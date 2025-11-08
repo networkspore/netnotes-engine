@@ -19,6 +19,7 @@ import at.favre.lib.crypto.bcrypt.BCrypt;
 import at.favre.lib.crypto.bcrypt.LongPasswordStrategies;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -62,9 +63,9 @@ public class HashServices {
     }
 
    
-    public static NoteBytes getBcryptHash(NoteBytesEphemeral ephemeralPassword) {
+    public static NoteBytesReadOnly getBcryptHash(NoteBytesEphemeral ephemeralPassword) {
         try(NoteBytesEphemeral password = ephemeralPassword.copy()){
-            return new NoteBytes( BCrypt.with(BCrypt.Version.VERSION_2A, RandomService.getSecureRandom(), LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.get()));
+            return new NoteBytesReadOnly( BCrypt.with(BCrypt.Version.VERSION_2A, RandomService.getSecureRandom(), LongPasswordStrategies.hashSha512(BCrypt.Version.VERSION_2A)).hash(15, password.get()));
         }
     }
 

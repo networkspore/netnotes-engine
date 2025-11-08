@@ -1,5 +1,6 @@
 package io.netnotes.engine.noteFiles.notePath;
 
+import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -10,7 +11,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.ManagedNoteFileInterface;
 import io.netnotes.engine.noteFiles.NoteFile;
-import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.File;

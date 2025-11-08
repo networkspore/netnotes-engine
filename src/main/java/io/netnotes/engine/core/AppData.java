@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.core;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -10,7 +10,6 @@ import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
-import io.netnotes.engine.noteFiles.SettingsData;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 

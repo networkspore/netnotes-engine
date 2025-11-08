@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.core;
 
 import java.io.IOException;
 import java.io.PipedOutputStream;

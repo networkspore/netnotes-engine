@@ -1,4 +1,4 @@
-package io.netnotes.engine;
+package io.netnotes.engine.core;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
