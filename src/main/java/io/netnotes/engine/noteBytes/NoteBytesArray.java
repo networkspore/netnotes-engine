@@ -1,12 +1,8 @@
 package io.netnotes.engine.noteBytes;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
-
-import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -17,12 +13,17 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteBytesArray extends NoteBytes{
 
+    private int m_length = 0;
+    private static final int INITAL_SIZE = 32;
+
     public NoteBytesArray(){
-        super(new byte[0], NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
+        super(new byte[INITAL_SIZE], NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
     }
 
     public NoteBytesArray(byte[] bytes){
-        super(bytes, NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
+        super(bytes == null ||  bytes.length == 0 ? new byte[INITAL_SIZE] : bytes  , NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
+        m_length = bytes.length;
+        ensureCapacity(INITAL_SIZE);
     }
 
     public NoteBytesArray(NoteBytes... noteBytes){
@@ -39,19 +40,21 @@ public class NoteBytesArray extends NoteBytes{
         return getBytesFromArray(noteBytesArray);
     }
     
-    public static byte[] getBytesFromArray(NoteBytes[] noteBytesArray){
-        int length = noteBytesArray != null && noteBytesArray.length > 0 ? noteBytesArray.length : 0;
-        if(length > 0){
-
-            int size = getByteLength(noteBytesArray);
-            byte[] bytes = new byte[size];
-            int offset = 0;
-            for(NoteBytes value : noteBytesArray) {
-                offset = NoteBytes.writeNote(value, bytes, offset);
-            }
+    public static byte[] getBytesFromArray(NoteBytes[] noteBytesArray) {
+        if (noteBytesArray == null || noteBytesArray.length == 0) {
+            return new byte[0];
         }
-        return new byte[0];
+
+        int totalLength = getByteLength(noteBytesArray);
+        byte[] bytes = new byte[totalLength];
+        int offset = 0;
+        for (NoteBytes nb : noteBytesArray) {
+            offset = NoteBytes.writeNote(nb, bytes, offset);
+        }
+        return bytes;
     }
+
+
 
     public static int getByteLength(NoteBytes[] noteBytesArray){
         int size = 0;
@@ -73,8 +76,8 @@ public class NoteBytesArray extends NoteBytes{
     public NoteBytes[] getAsArray(){
         int size = size();
         NoteBytes[] arr = new NoteBytes[size];
-        byte[] bytes = internalGet();
-        int length = bytes.length;
+        byte[] bytes = getBytesInternal();
+        int length = m_length;
         int offset = 0;
         int i = 0;
         while(offset < length){
@@ -86,6 +89,31 @@ public class NoteBytesArray extends NoteBytes{
         return arr;
     }
 
+    public void set(NoteBytes[] array){
+     
+        int byteLength = 0;
+        int arrayLength = array.length;
+        for(int i = 0; i < arrayLength ; i++){
+            byteLength +=(5 + array[i].byteLength());
+        }
+   
+        ensureCapacity(byteLength);
+
+        byte[] bytes = getBytesInternal();
+        int offset = 0;
+        for(int i = 0; i < arrayLength ; i++){
+            NoteBytes src = array[i];
+            offset += NoteBytes.writeNote(src, bytes, offset);
+        }
+        m_length = byteLength;
+    }
+
+    protected void setInternalLength(int length){
+        m_length = length;
+    }
+
+
+
     
 
     public List<NoteBytes> getAsList(){
@@ -94,8 +122,8 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytes getAt(int index){
      
-        byte[] bytes = internalGet();
-        int length = bytes.length;
+        byte[] bytes = getBytesInternal();
+        int length = m_length;
         int offset = 0;
         int counter = 0;
 
@@ -116,39 +144,56 @@ public class NoteBytesArray extends NoteBytes{
         
     }
 
+    @Override
+    public boolean compareBytes(byte[] bytes){
+        if(isRuined()){
+            return false;
+        }
+        byte[] value = getBytesInternal();
+        if(m_length != bytes.length){
+            return false;
+        }
+        if(m_length == 0 && bytes.length == 0){
+            return true;
+        }
+        return Arrays.equals(value, 0, m_length, bytes, 0, bytes.length);
+    }
+
+
 
     public boolean contains(NoteBytes noteBytes){
         return indexOf(noteBytes) != -1;
     }
 
     public boolean arrayStartsWith(NoteBytes noteBytes){        
-        byte[] src = internalGet();
+        byte[] src = getBytesInternal();
         byte[] dst = noteBytes.get();
-        int srcLength = src.length;
+
         int dstLength = dst.length;
 
-        if(srcLength > dstLength){
+        if(m_length > dstLength){
             return false;
         }
-        if(srcLength == dstLength){
+        if(m_length == dstLength){
             return noteBytes.equals(this);
         }
         
-        return Arrays.equals(src, 0, srcLength, dst, 0, dstLength);
+        return Arrays.equals(src, 0, m_length, dst, 0, dstLength);
     }
     
     public int indexOf(NoteBytes noteBytes){
-        byte[] bytes = internalGet();
-        int length = bytes.length;
+        byte[] a = getBytesInternal();
+        byte[] b = noteBytes.get(); 
+        byte bType = noteBytes.getType();
         int offset = 0;
         int counter = 0;
-        while(offset < length){
+        while(offset < m_length){
+            byte aType = a[offset];
             offset++;
-            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            int size = ByteDecoding.bytesToIntBigEndian(a, offset);
             offset += 4;
-            byte[] buffer = new byte[size];
-            System.arraycopy(bytes, offset, buffer, 0, size);
-            if(Arrays.equals(noteBytes.get(), buffer)){
+
+            if(aType == bType &&  Arrays.equals(a, offset, size, b, 0, b.length)){
                 return counter;
             }
             offset += size;
@@ -158,226 +203,226 @@ public class NoteBytesArray extends NoteBytes{
     }
    
 
-    public void add(NoteBytes noteBytes){
-       
-        byte[] bytes = internalGet();
-        int length = bytes.length;
-        byte[] dst = Arrays.copyOf(bytes, length + 5 + noteBytes.byteLength());
-        writeNote(noteBytes, dst, length);
-        set(dst);
-        
+    public void add(NoteBytes noteBytes) {
+        if (noteBytes == null) return;
+        int needed = 5 + noteBytes.byteLength();
+        ensureCapacity(m_length + needed);
+        m_length = NoteBytes.writeNote(noteBytes, getBytesInternal(), m_length);
     }
 
+    protected void ensureCapacity(int minCapacity) {
+        byte[] buffer = getBytesInternal();
+        if (buffer.length >= minCapacity) return;
+
+        int newCapacity = Math.max(buffer.length * 2, minCapacity);
+        byte[] expanded = Arrays.copyOf(buffer, newCapacity);
+        super.set(expanded);
+    }
  
 
     public boolean add(int index, NoteBytes noteBytes) {
-        if (noteBytes == null) {
+        byte[] bytes = getBytesInternal();
+        byte[] src = noteBytes.get();
+        int srcLen = src.length;
+        int noteTotalLen = 5 + srcLen; // 1-byte type + 4-byte length prefix
+        int type = noteBytes.getType();
+
+        // Validate index position
+        if (index < 0 || index > size()) {
             return false;
         }
-      
-        byte[] bytes = internalGet();
-        int length = bytes.length;
-        
-        if (index < 0 || (length > 0 && index >= size())) {
-            return false;
+
+        // Find byte offset where to insert
+        int insertOffset = findOffsetForIndex(index);
+        int newLength = m_length + noteTotalLen;
+
+        ensureCapacity(newLength);
+
+        // shift right existing bytes to make space
+        int tailLen = m_length - insertOffset;
+        if (tailLen > 0) {
+            System.arraycopy(bytes, insertOffset, bytes, insertOffset + noteTotalLen, tailLen);
         }
-        // Pre-calculate required size to avoid buffer resizing
-        int newSize = length + 5 + noteBytes.byteLength();
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream(newSize)) {
-            int offset = 0;
-            int currentIndex = 0;
-            // Copy elements before index
-            while (offset < length && currentIndex < index) {
-                NoteBytes currentNote = NoteBytes.readNote(bytes, offset);
-                writeNote(currentNote, outputStream);
-                offset += 5 + currentNote.byteLength();
-                currentIndex++;
-            }
-            // Insert new element at index
-            writeNote(noteBytes, outputStream);
-            // Copy remaining elements
-            while (offset < length) {
-                NoteBytes currentNote = NoteBytes.readNote(bytes, offset);
-                writeNote(currentNote, outputStream);
-                offset += 5 + currentNote.byteLength();
-            }
-            set(outputStream.toByteArray());
-            return true;
-        } catch (IOException e) {
-            return false;
+
+        // write metadata
+        int offset = insertOffset;
+        bytes[offset++] = (byte) type;
+        bytes[offset++] = (byte) (srcLen >>> 24);
+        bytes[offset++] = (byte) (srcLen >>> 16);
+        bytes[offset++] = (byte) (srcLen >>> 8);
+        bytes[offset++] = (byte) (srcLen);
+
+        // copy payload
+        System.arraycopy(src, 0, bytes, offset, srcLen);
+
+        // update logical length
+        m_length = newLength;
+
+        return true;
+    }
+
+    public int findOffsetForIndex(int index) {
+        int offset = 0;
+        int count = 0;
+        byte[] bytes = getBytesInternal();
+
+        while (offset < m_length && count < index) {
+            if (offset + 5 > m_length) break; // invalid/truncated note
+            int srcLen = ByteDecoding.bytesToIntBigEndian(bytes, offset + 1);
+            offset += 5 + srcLen;
+            count++;
         }
-       
+
+        return offset; // if index == count, this is insert position
     }
 
     public NoteBytes set(int noteBytesIndex, NoteBytes noteBytes) {
-      
-        byte[] bytes = internalGet();
-        int byteLength = bytes.length;
-        if (bytes == null || byteLength == 0) {
-            return null;
+        byte[] buffer = getBytesInternal();
+        int offset = 0;
+        int count = 0;
+
+        // locate the target note
+        while (offset + 5 <= m_length && count < noteBytesIndex) {
+            int len = ByteDecoding.bytesToIntBigEndian(buffer, offset + 1);
+            offset += 5 + len;
+            count++;
         }
-        byte[] dst = noteBytes.get();
-        int dstLength = dst.length;
-        byte dstType = noteBytes.getType();
-        
-        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream(bytes.length + dstLength)) {
-            int offset = 0;
-            int currentIndex = 0;
-            NoteBytes removedBytes = null;
 
-            
-            while (offset < byteLength) {
-                // Read metadata (1 byte type + 4 bytes length)
-                 if(offset + 5 > byteLength){
-                    throw new IllegalStateException("Corrupt data detected");
-                }
-                byte type = bytes[offset];
-                offset++;
-               
-                int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
-                offset += 4;
-
-                if (offset + size > byteLength) {
-                    break;
-                }
-                if (currentIndex == noteBytesIndex) {
-                    // Store the bytes being removed
-                    byte[] contentBytes = new byte[size];
-                    System.arraycopy(bytes, offset, contentBytes, 0, size);
-                    removedBytes = new NoteBytes(contentBytes, type);
-
-                    outputStream.write(dstType);
-                    outputStream.write(ByteDecoding.intToBytesBigEndian(dstLength));
-                    outputStream.write(dst, offset, dstLength);
-                } else {
-                    // Write metadata
-                    outputStream.write(type);
-                    outputStream.write(ByteDecoding.intToBytesBigEndian(size));
-                    // Write content
-                    outputStream.write(bytes, offset, size);
-                }
-                
-                offset += 5 + size; // Move to next entry (5 bytes metadata + content)
-                currentIndex++;
-            }
-
-            if(noteBytesIndex == currentIndex){
-                outputStream.write(dstType);
-                outputStream.write(ByteDecoding.intToBytesBigEndian(dstLength));
-                outputStream.write(dst, offset, dstLength);
-
-                set(outputStream.toByteArray());
-            }else if(removedBytes != null){
-                set(outputStream.toByteArray());
-            }
-            return removedBytes;
-            
-        } catch (IOException e) {
-            return null;
+        if (count != noteBytesIndex || offset + 5 > m_length) {
+            throw new IndexOutOfBoundsException("Invalid index: " + noteBytesIndex);
         }
-            
-       
+
+        // read existing note
+        byte oldType = buffer[offset];
+        int oldLen = ByteDecoding.bytesToIntBigEndian(buffer, offset + 1);
+        NoteBytes oldNote = new NoteBytes(Arrays.copyOfRange(buffer, offset + 5, offset + 5 + oldLen), oldType);
+
+        byte[] newData = noteBytes.get();
+        int newLen = newData.length;
+        int delta = newLen - oldLen;
+        int newTotalLength = m_length + delta;
+
+        // expand buffer if necessary
+        ensureCapacity(newTotalLength);
+
+        // shift tail if new note length differs
+        int tailOffset = offset + 5 + oldLen;
+        int tailLength = m_length - tailOffset;
+        if (delta != 0 && tailLength > 0) {
+            System.arraycopy(buffer, tailOffset, buffer, tailOffset + delta, tailLength);
+        }
+
+        // write new note metadata
+        buffer[offset] = noteBytes.getType();
+        buffer[offset + 1] = (byte) (newLen >>> 24);
+        buffer[offset + 2] = (byte) (newLen >>> 16);
+        buffer[offset + 3] = (byte) (newLen >>> 8);
+        buffer[offset + 4] = (byte) (newLen);
+
+        // write new note data
+        System.arraycopy(newData, 0, buffer, offset + 5, newLen);
+
+        // update logical length
+        m_length = newTotalLength;
+
+        return oldNote;
     }
     
     public NoteBytes remove(NoteBytes noteBytes) {
-        byte[] bytes = internalGet();
-        int length = bytes.length;
+        byte[] bytes = getBytesInternal();
+        
         byte[] removeBytes = noteBytes.get(); 
         int noteBytesLength = removeBytes.length;
 
+        int length = m_length;
         if (bytes == null || length == 0) {
             return null;
         }
         if(length < noteBytesLength){
             return null;
         }
-        int dstLength =length - noteBytesLength;
-        byte[] dst = new byte[dstLength];
-      
-        NoteBytes removedBytes = null;
+        int searchType = noteBytes.getType();
         int offset = 0;
-        int dstOffset = 0;
+
         while (offset < length) {
-            byte type = bytes[offset];
+             if (offset + 5 > length) break;
+
+            int offsetStart = offset;
+            byte type = bytes[offsetStart];
             offset ++;
 
             int srcLength = ByteDecoding.bytesToIntBigEndian(bytes, offset);
             offset += 4;
+             if (offset + srcLength > length) break;
+            //equals(byte[] a, int aFromIndex, int aToIndex, byte[] b, int bFromIndex, int bToIndex) {
 
-            byte[] src = new byte[srcLength];
-            System.arraycopy(bytes, offset, src, 0, srcLength);
+            if (searchType == type && Arrays.equals(bytes, offset,  offset + srcLength, removeBytes, 0, noteBytesLength)) {
+                int removedAmount = 5 + srcLength;
+                int remainingLength = length - (offsetStart + removedAmount);
+                
+                if (remainingLength > 0) {
+                    System.arraycopy(bytes, offset + srcLength, bytes, offsetStart, remainingLength);
+                }
+
+                m_length = Math.max(0, length - removedAmount);
+            
+                return noteBytes;
+            } 
+
             offset += srcLength;
+        }
 
-            if (removedBytes == null && Arrays.equals(src, noteBytes.get())) {
-                removedBytes = new NoteBytes(src, type);
-            } else if(dstLength >= dstOffset + 5 + srcLength) {
-                dstOffset = NoteBytesMetaData.write(type, srcLength, dst, dstOffset);
-                System.arraycopy(src, 0, dst, dstOffset, srcLength);
-                dstOffset += srcLength;
-            }else{
-                return null;
-            }
-        }
-        if(removedBytes != null){
-            set(dst);
-        }
-        return removedBytes;
+        return null;
     }
 
-    public NoteBytes remove(int noteBytesIndex) {
-      
-        byte[] bytes = internalGet();
-        int byteLength = bytes.length;
-        if (bytes == null || byteLength == 0) {
-            return null;
-        }
+    public NoteBytes remove(int index) {
+        byte[] bytes = getBytesInternal();
         
-        try (UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream(byteLength)) {
-            int offset = 0;
-            int currentIndex = 0;
-            NoteBytes removedBytes = null;
-            
-            while (offset < byteLength) {
-                // Read metadata (1 byte type + 4 bytes length)
-                 if(offset + 5 > byteLength){
-                    throw new IllegalStateException("Corrupt data detected");
-                }
-                byte type = bytes[offset];
-                offset++;
-               
-                int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
-                offset += 4;
-
-                if (offset + size > byteLength) {
-                    break;
-                }
-                if (currentIndex == noteBytesIndex) {
-                    // Store the bytes being removed
-                    byte[] contentBytes = new byte[size];
-                    System.arraycopy(bytes, offset, contentBytes, 0, size);
-                    removedBytes = new NoteBytes(contentBytes, type);
-                } else {
-                    // Write metadata
-                    outputStream.write(type);
-                    outputStream.write(ByteDecoding.intToBytesBigEndian(size));
-                    // Write content
-                    outputStream.write(bytes, offset, size);
-                }
-                
-                offset += 5 + size; // Move to next entry (5 bytes metadata + content)
-                currentIndex++;
-            }
-
-            if(removedBytes != null){
-                set(outputStream.toByteArray());
-            }
-            return removedBytes;
-            
-        } catch (IOException e) {
+        int length = m_length;
+        if (bytes == null || length == 0) {
             return null;
         }
+        int offset = 0;
+        int i = 0;
+        while (offset < length) {
+             if (offset + 5 > length) break;
+
+            int offsetStart = offset;
+            byte type = bytes[offsetStart];
+            offset ++;
+
+            int srcLength = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += 4;
+            if (offset + srcLength > length) break;
+            //equals(byte[] a, int aFromIndex, int aToIndex, byte[] b, int bFromIndex, int bToIndex) {
+
+            if (i == index) {
+                byte[] removedBytes = new byte[srcLength];
+                System.arraycopy(bytes, offset, removedBytes, 0, srcLength);
+
+                NoteBytes noteBytes = new NoteBytes(removedBytes, type);
+
+                int removedAmount = 5 + srcLength;
+                int remainingLength = length - (offsetStart + removedAmount);
+                
+                if (remainingLength > 0) {
+                    System.arraycopy(bytes, offset + srcLength, bytes, offsetStart, remainingLength);
+                }
+
+                m_length = Math.max(0, length - removedAmount);
             
-       
+                return noteBytes;
+            } 
+
+            offset += srcLength;
+        }
+
+        return null;
+    }
+
+    @Override
+    public int hashCode(){
+        return Arrays.hashCode(get());
     }
 
     public NoteBytes get(int index){
@@ -385,13 +430,13 @@ public class NoteBytesArray extends NoteBytes{
     }
 
     public int size(){
-        byte[] bytes = internalGet();
+        byte[] bytes = getBytesInternal();
         if(bytes == null){
             return -1;
         }else if(bytes.length == 0){
             return 0;
         }else{
-            int length = bytes.length;
+            int length = m_length;
             int offset = 0;
             int counter = 0;
            
@@ -405,6 +450,10 @@ public class NoteBytesArray extends NoteBytes{
         }
     }
 
+    public void clear(){
+        m_length = 0;
+    }
+
       @Override
      public JsonElement getAsJsonElement(){
         return getAsJsonArray();
@@ -412,13 +461,14 @@ public class NoteBytesArray extends NoteBytes{
     
     @Override
     public JsonArray getAsJsonArray(){
-        byte[] bytes = internalGet();
+        byte[] bytes = getBytesInternal();
         if(bytes != null){
-            if(bytes.length == 0){
+            int length = m_length;
+            if(length == 0){
                 return new JsonArray();
             }
             JsonArray jsonArray = new JsonArray();
-            int length = bytes.length;
+            
             int offset = 0;
     
             while(offset < length){
@@ -443,13 +493,14 @@ public class NoteBytesArray extends NoteBytes{
 
     @Override
     public JsonObject getAsJsonObject() {
-        byte[] bytes = internalGet();
+        byte[] bytes = getBytesInternal();
         if(bytes != null){
-            if(bytes.length == 0){
+            int length = m_length;
+            if(length == 0){
                 return new JsonObject();
             }
             JsonObject jsonObject = new JsonObject();
-            int length = bytes.length;
+            
             int offset = 0;
             int i = 0;
             while(offset < length){
@@ -472,10 +523,43 @@ public class NoteBytesArray extends NoteBytes{
         return null;
     }
 
+
+    @Override
+    public NoteBytesArray copy(){
+        return new NoteBytesArray(get());
+    }
+
     @Override 
     public String toString(){
         return getAsJsonArray().toString();
     }
 
+    @Override
+    public byte[] get() {
+        byte[] src = getBytesInternal();
+        return Arrays.copyOf(src, m_length);
+    }
+
+    @Override
+    public byte[] getBytes(){
+        return get();
+    }
+
+
+    @Override
+    public void set(byte[] bytes, byte type) {
+        ensureCapacity(bytes.length);
+        m_length = bytes.length;
+        byte[] internalBytes = getBytesInternal();
+        System.arraycopy(bytes, 0, internalBytes, 0, m_length);
+    }
+
+    @Override
+    public int byteLength() {
+        return m_length;
+    }
+
+
+    
    
 }

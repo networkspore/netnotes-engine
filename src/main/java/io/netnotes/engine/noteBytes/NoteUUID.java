@@ -33,7 +33,7 @@ public class NoteUUID extends NoteBytes {
 
     @Override
     public byte[] get(){
-        byte[] bytes = super.internalGet();
+        byte[] bytes = super.getBytesInternal();
         return Arrays.copyOf(bytes, byteLength());
     }
 

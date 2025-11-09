@@ -44,6 +44,9 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return String.join(delim, str);
     }
 
+    public NoteStringArrayReadOnly copy(){
+        return new NoteStringArrayReadOnly(getBytesInternal());
+    }
     
 
     public static NoteBytes[] urlStringToArray(String path) {
@@ -72,8 +75,6 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return m_delimiter;
     }
 
-
-
     public String getAsString(){
         NoteBytes[] array = getAsArray();
         return noteBytesArrayToString(array, m_delimiter);
@@ -90,17 +91,47 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     }
 
     public boolean contains(String string){
-        return indexOf(string) != -1;
+        return  indexOf(new NoteBytes(string)) != -1;
+    }
+    
+    @Override
+    public int hashCode(){
+        return Arrays.hashCode(get());
     }
 
-    public int indexOf(String item){
-        return super.indexOf(new NoteBytes(item));
+    public NoteBytes get(int index){
+        return getAt(index);
     }
+
+    public NoteBytes getAt(int index){
+     
+        byte[] bytes = getBytesInternal();
+        int length = bytes.length;
+        int offset = 0;
+        int counter = 0;
+
+        while(offset < length){
+            byte type = bytes[offset];
+            offset++;
+            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += 4;
+            if(counter == index){
+                byte[] dst = new byte[size];
+                System.arraycopy(bytes, offset, dst, 0, size);
+                return NoteBytes.of(dst, type);
+            }
+            offset += size;
+            counter++;
+        }
+        return null;
+        
+    }
+
 
    public String[] getAsStringArray(){
         int size = size();
         String[] arr = new String[size];
-        byte[] bytes = super.internalGet();
+        byte[] bytes = super.getBytesInternal();
         int length = bytes.length;
         int offset = 0;
         int i = 0;
@@ -120,7 +151,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     public Stream<String> getAsStringStream(){
         Stream.Builder<String> noteBytesBuilder = Stream.builder();
 
-        byte[] bytes = super.internalGet();
+        byte[] bytes = super.getBytesInternal();
         int length = bytes.length;
         int offset = 0;
         while(offset < length){

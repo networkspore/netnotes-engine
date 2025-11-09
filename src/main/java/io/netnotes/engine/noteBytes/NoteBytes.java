@@ -125,7 +125,7 @@ public class NoteBytes {
    
   
 
-    protected byte[] internalGet(){
+    protected byte[] getBytesInternal(){
         if(isRuined()){
             throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");
         }
@@ -684,7 +684,7 @@ public class NoteBytes {
     }
 
     public byte[] getHash(int digestLength){
-        byte[] bytes = internalGet();
+        byte[] bytes = getBytesInternal();
 
         return HashServices.digestBytesToBytes(bytes, digestLength);
     }
@@ -692,7 +692,7 @@ public class NoteBytes {
 
 
     public NoteUUID getNoteUUIDfromBytes(){ 
-        return NoteUUID.fromNoteUUIDBytes(internalGet());
+        return NoteUUID.fromNoteUUIDBytes(getBytesInternal());
     }
 
     public static NoteBytes of(byte[] bytes, byte type){

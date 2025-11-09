@@ -1,5 +1,6 @@
 package io.netnotes.engine.noteBytes;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -19,17 +20,23 @@ public class NoteStringArray extends NoteBytesArray {
     }
 
     public NoteStringArray(byte[] bytes){
-        super(bytes);
+        super();
+        set(bytes);
     }
 
     public NoteStringArray(String... str){
-        super(stringArrayToNoteBytes(str));
+        this(stringArrayToNoteBytes(str));
+        set(str);
     }
 
     public NoteStringArray(NoteBytes... noteBytes){
-        super(noteBytes);
+        super();
     }
 
+    @Override
+    public NoteStringArray copy(){
+        return new NoteStringArray(get());
+    }
 
    public static NoteBytes[] stringArrayToNoteBytes(String[] array){
         NoteBytes[] noteBytes = new NoteBytes[array.length];
@@ -39,7 +46,28 @@ public class NoteStringArray extends NoteBytesArray {
         return noteBytes;
     }
 
-    public static String noteBytesArrayToString(NoteBytes[] array, String delim) {
+    public void set(String[] array){
+        NoteBytes[] intermediary = new NoteBytes[array.length];
+        int byteLength = 0;
+        int arrayLength = array.length;
+        for(int i = 0; i < arrayLength ; i++){
+            intermediary[i] = new NoteBytes(array[i]);
+            byteLength +=(5 + intermediary[i].byteLength());
+        }
+   
+        ensureCapacity(byteLength);
+
+        byte[] bytes = getBytesInternal();
+        int offset = 0;
+        for(int i = 0; i < arrayLength ; i++){
+            NoteBytes src = intermediary[i];
+            offset += NoteBytes.writeNote(src, bytes, offset);
+        }
+        setInternalLength(byteLength);
+    }
+
+
+    public static String noteBytesArrayToUrl(NoteBytes[] array, String delim) {
         String[] str = new String[array.length];
         for (int i = 0; i < array.length; i++) {
             str[i] = ByteDecoding.UrlEncode(array[i].getAsString());
@@ -76,12 +104,12 @@ public class NoteStringArray extends NoteBytesArray {
     @Override
     public String getAsString(){
         NoteBytes[] array = getAsArray();
-        return noteBytesArrayToString(array, m_delimiter);
+        return noteBytesArrayToUrl(array, m_delimiter);
     }
 
     public String getAsString(String delimiter){
         NoteBytes[] array = getAsArray();
-        return noteBytesArrayToString(array, delimiter);
+        return noteBytesArrayToUrl(array, delimiter);
     }
 
     public NoteBytes remove(String item){
@@ -96,15 +124,15 @@ public class NoteStringArray extends NoteBytesArray {
         return indexOf(string) != -1;
     }
 
-    public int indexOf(String item){
-        return indexOf(new NoteBytes(item));
+    public int indexOf(String str){
+        return indexOf(new NoteBytes(str));
     }
 
     public String[] getAsStringArray(){
         int size = size();
         String[] arr = new String[size];
-        byte[] bytes = get();
-        int length = bytes.length;
+        byte[] bytes = getBytesInternal();
+        int length = byteLength();
         int offset = 0;
         int i = 0;
         while(offset < length){
@@ -124,8 +152,8 @@ public class NoteStringArray extends NoteBytesArray {
     public Stream<String> getAsStringStream(){
         Stream.Builder<String> noteBytesBuilder = Stream.builder();
 
-        byte[] bytes = get();
-        int length = bytes.length;
+        byte[] bytes = getBytesInternal();
+        int length = byteLength();
         int offset = 0;
         while(offset < length){
             NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
@@ -173,7 +201,7 @@ public class NoteStringArray extends NoteBytesArray {
         }
         
         String[] parts = pathString.split(Pattern.quote(delimiter));
-        List<String> validSegments = new java.util.ArrayList<>();
+        List<String> validSegments = new ArrayList<>();
         
         for (String part : parts) {
             String trimmed = part.trim();
