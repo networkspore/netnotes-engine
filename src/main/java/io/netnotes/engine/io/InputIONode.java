@@ -7,8 +7,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
 
-import io.netnotes.engine.io.InputPacketReader.RoutedPacket;
-
 
 /**
  * InputIONode - Bidirectional IO node for content-agnostic packet routing.
