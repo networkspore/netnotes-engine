@@ -37,6 +37,34 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
     
     }
 
+    public NoteBytes getAt(int index){
+     
+        byte[] bytes = getBytesInternal();
+        int length = bytes.length;
+        int offset = 0;
+        int counter = 0;
+
+        while(offset < length){
+            byte type = bytes[offset];
+            offset++;
+            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += 4;
+            if(counter == index){
+                byte[] dst = new byte[size];
+                System.arraycopy(bytes, offset, dst, 0, size);
+                return NoteBytes.of(dst, type);
+            }
+            offset += size;
+            counter++;
+        }
+        return null;
+        
+    }
+
+    public NoteBytes get(int index){
+        return getAt(index);
+    }
+
     public NoteBytesArrayReadOnly copy(){
         return new NoteBytesArrayReadOnly(getBytesInternal());
     }

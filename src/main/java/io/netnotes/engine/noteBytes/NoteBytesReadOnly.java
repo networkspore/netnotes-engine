@@ -13,6 +13,10 @@ public class NoteBytesReadOnly extends NoteBytes {
         this( chars, NoteBytesMetaData.STRING_TYPE);
     }
 
+    public NoteBytesReadOnly(byte b){
+        this(new byte[]{ b }, NoteBytesMetaData.BYTE_TYPE);
+    }
+
     public NoteBytesReadOnly(int integer){
         this(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
     }

@@ -15,14 +15,7 @@ public class NoteMessaging {
 
     public static final long POLLING_TIME = 7000;
 
-    public static class Command{
-        public static final String CMD = "cmd";
-        public static final String CMD_NOT_PRESENT = "cmd_not_present";
-        public static final String HELLO   = "HELLO";   // identity bootstrap
-        public static final String ACCEPT  = "ACCEPT";  // trust ack
-        public static final String PING    = "PING";
-        public static final String PONG    = "PONG";
-    }
+
     /* =========================
      * General constants
      * ========================= */
@@ -74,42 +67,25 @@ public class NoteMessaging {
     }
 
     /* =========================
-     * Event / List update constants
-     * ========================= */
-    public static class Event {
-        public static final String MSG_SEND_NOTE = "Event_Send_note";
-
-        public static final String LIST_CHANGED = "Event_List_changed";
-        public static final String LIST_CHECKED = "Event_List_checked";
-        public static final String LIST_UPDATED = "Event_List_updated";
-        public static final String LIST_ITEM_ADDED = "Event_List_item_added";
-        public static final String LIST_ITEM_REMOVED = "Event_List_item_removed";
-        public static final String LIST_DEFAULT_CHANGED = "Event_Default_item_changed";
-    }
-
-    /* =========================
      * Error constants
      * ========================= */
     public static class Error {
         // General
-        public static final String UNKNOWN = "Error_Unknown";
-        public static final String TIMEOUT = "Error_Timeout";
-        public static final String INTERRUPTED = "Error_Interrupted";
-        public static final String IO = "Error_IO failed";
-        public static final String CANCELED = "Error_Canceled";
-        public static final String CLOSING = "Error_Closing";
+        public static final String UNKNOWN = "Unknown Error";
+        public static final String TIMEOUT = "Timeout";
+        public static final String INTERRUPTED = "Interrupted";
+        public static final String IO = "IO Error";
+        public static final String CANCELED = "Canceled";
+        public static final String NOT_STARTED = "Not Started";
+        public static final String NOT_READY = "Not Ready";
+        public static final String NOT_AVAILABLE = "Not Available";
+        public static final String NOT_STOPPED = "Not Stopped";
+        public static final String NOT_SHUTDOWN = "Not Shutdown";
+        public static final String NOT_SHUTTING_DOWN = "Not Shutting Down";
+        public static final String NOT_UPDATED = "Not Updated";
 
         //IO
         public static final String IO_DELETION = "Disk_error_onDelete";
-
-        // Availability / lifecycle
-        public static final String NOT_STARTED = "Error_Not_Started";
-        public static final String NOT_READY = "Error_Not_Ready";
-        public static final String NOT_AVAILABLE = "Error_Not_Available";
-        public static final String NOT_STOPPED = "Error_Not_Stopped";
-        public static final String NOT_SHUTDOWN = "Error_Not_Shutdown";
-        public static final String NOT_SHUTTING_DOWN = "Error_Not_Shutting_Down";
-        public static final String NOT_UPDATED = "Error_Not_Updated";
 
         // Validation
         public static final String INVALID = "Error_Invalid";
@@ -240,7 +216,7 @@ public class NoteMessaging {
 
     public static NoteBytesObject getCmdObject(String subject) {
         NoteBytesObject nbo = new NoteBytesObject();
-        nbo.add(Command.CMD, subject);
+        nbo.add(EventBytes.TYPE_CMD, subject);
         nbo.add("timeStamp", System.currentTimeMillis());
         return nbo;
     }

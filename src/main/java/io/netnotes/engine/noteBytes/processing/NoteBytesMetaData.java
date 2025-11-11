@@ -29,6 +29,7 @@ public class NoteBytesMetaData {
     public final static byte IMAGE_TYPE = (byte) 23;
     public final static byte VIDEO_TYPE = (byte) 24;
     public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 25;
+    public final static byte NOTE_BYTES_ENCRYPTED_TYPE = (byte) 26;
     
 
     private byte m_type;
@@ -64,6 +65,12 @@ public class NoteBytesMetaData {
 
     public void setType(byte type) {
         this.m_type = type;
+    }
+
+    public byte[] get(){
+        byte[] metaData = new byte[5];
+        write(m_type, m_len, metaData,0);
+        return metaData;
     }
 
     public static int write(byte type, int len, byte[] dst, int offset){
