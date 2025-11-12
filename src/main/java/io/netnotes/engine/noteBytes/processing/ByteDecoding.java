@@ -7,6 +7,7 @@ import java.io.ObjectOutputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;
@@ -338,20 +339,8 @@ public class ByteDecoding{
 
 
     public static String UrlEncode(String segment) {
-        StringBuilder sb = new StringBuilder();
-        byte[] bytes = segment.getBytes(StandardCharsets.UTF_8);
-        
-        for (byte b : bytes) {
-            char c = (char) (b & 0xFF);
-            
-            if (isSafeChar(c)) {
-                sb.append(c);
-            } else {
-                sb.append(String.format("%%%02X", b & 0xFF));
-            }
-        }
-        
-        return sb.toString();
+        return URLEncoder.encode(segment, StandardCharsets.UTF_8)
+                           .replace("+", "%20");
     }
 
     public static String UrlDecode(String segment, byte type) {

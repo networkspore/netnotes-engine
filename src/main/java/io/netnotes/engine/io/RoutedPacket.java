@@ -1,71 +1,473 @@
 package io.netnotes.engine.io;
 
+
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
 /**
- * RoutedPacket - Combines sourceId + packet for routing.
+ * RoutedPacket - Universal routing packet with hierarchical addressing.
  * 
- * This is the fundamental unit of the routing system:
- * - sourceId: INTEGER NoteBytesReadOnly identifying the source
- * - packet: NoteBytesReadOnly containing the actual data (OBJECT, ENCRYPTED, etc.)
+ * Architecture Evolution:
+ * - OLD: sourceId (INTEGER) + packet data
+ * - NEW: ContextPath + metadata + packet data
+ * - ProcessId is now derived from ContextPath endpoint
  * 
- * The registry routes packets based solely on sourceId, without inspecting content.
+ * Benefits:
+ * - Unified addressing across InputSources and Processes
+ * - Hierarchical routing (can route to /daemon/* or /process/worker/*)
+ * - Supports both point-to-point and multicast patterns
+ * - Metadata for correlation IDs, types, routing hints
+ * 
+ * Examples:
+ * - /daemon/usb/keyboard/0  -> Input source
+ * - /process/database/main  -> Process
+ * - /window/main/canvas     -> UI element
+ * - /network/tcp/connection/42 -> Network connection
  */
 public final class RoutedPacket {
-    private final NoteBytesReadOnly sourceId;
-    private final NoteBytesReadOnly packet;
+    private final ContextPath sourcePath;
+    private final ContextPath destinationPath;  // Optional: explicit destination
+    private final NoteBytesReadOnly payload;
+    private final Map<String, Object> metadata;
+    private final long timestamp;
+    
+    // Routing modes
+    private final RoutingMode routingMode;
     
     /**
-     * Create a routed packet
-     * 
-     * @param sourceId Must be INTEGER type NoteBytesReadOnly
-     * @param packet The packet data (any type)
+     * Create a routed packet with source path only (registry determines destination)
      */
-    public RoutedPacket(NoteBytesReadOnly sourceId, NoteBytesReadOnly packet) {
-        if (sourceId == null || packet == null) {
-            throw new IllegalArgumentException("sourceId and packet cannot be null");
-        }
+    public RoutedPacket(ContextPath sourcePath, NoteBytesReadOnly payload) {
+        this(sourcePath, null, payload, new HashMap<>(), RoutingMode.REGISTRY);
+    }
+    
+    /**
+     * Create a routed packet with explicit destination
+     */
+    public RoutedPacket(
+            ContextPath sourcePath, 
+            ContextPath destinationPath,
+            NoteBytesReadOnly payload) {
+        this(sourcePath, destinationPath, payload, new HashMap<>(), RoutingMode.DIRECT);
+    }
+    
+    /**
+     * Full constructor with metadata
+     */
+    public RoutedPacket(
+            ContextPath sourcePath,
+            ContextPath destinationPath,
+            NoteBytesReadOnly payload,
+            Map<String, Object> metadata,
+            RoutingMode routingMode) {
         
-        // Validate that sourceId is INTEGER type
-        if (sourceId.getType() != io.netnotes.engine.noteBytes.processing.NoteBytesMetaData.INTEGER_TYPE) {
-            throw new IllegalArgumentException("sourceId must be INTEGER type, got: " + sourceId.getType());
-        }
+        Objects.requireNonNull(sourcePath, "sourcePath cannot be null");
+        Objects.requireNonNull(payload, "payload cannot be null");
         
-        this.sourceId = sourceId;
-        this.packet = packet;
+        this.sourcePath = sourcePath;
+        this.destinationPath = destinationPath;
+        this.payload = payload;
+        this.metadata = new HashMap<>(metadata);
+        this.routingMode = routingMode;
+        this.timestamp = System.currentTimeMillis();
     }
     
+    // ===== PATH-BASED ACCESSORS =====
+    
     /**
-     * Get the source identifier
+     * Get source path (full hierarchical address)
      */
-    public NoteBytesReadOnly getSourceId() {
-        return sourceId;
+    public ContextPath getSourcePath() {
+        return sourcePath;
     }
     
     /**
-     * Get the packet data
+     * Get destination path (null if registry routing)
      */
-    public NoteBytesReadOnly getPacket() {
-        return packet;
+    public ContextPath getDestinationPath() {
+        return destinationPath;
     }
     
     /**
-     * Get sourceId as integer (convenience method)
+     * Get source ID as integer (derived from path endpoint)
+     * For compatibility with legacy code
      */
     public int getSourceIdAsInt() {
-        return sourceId.getAsInt();
+        return sourcePath.hashCode();
     }
     
     /**
-     * Get packet type (convenience method)
+     * Get source ID as NoteBytesReadOnly (for legacy compatibility)
+     * @deprecated Use getSourcePath() instead
      */
-    public byte getPacketType() {
-        return packet.getType();
+    @Deprecated
+    public NoteBytesReadOnly getSourceId() {
+        return new NoteBytesReadOnly(getSourceIdAsInt());
     }
+    
+    /**
+     * Get ProcessId from source path
+     * Useful when routing to processes
+     */
+    public ProcessId getSourceProcessId() {
+        return new ProcessId(getSourceIdAsInt());
+    }
+    
+    /**
+     * Get ProcessId from destination path
+     */
+    public ProcessId getDestinationProcessId() {
+        if (destinationPath == null) {
+            throw new IllegalStateException("No destination path set");
+        }
+        return new ProcessId(destinationPath.hashCode());
+    }
+    
+    // ===== PAYLOAD ACCESSORS =====
+    
+    public NoteBytesReadOnly getPayload() {
+        return payload;
+    }
+    
+    /**
+     * @deprecated Use getPayload() instead
+     */
+    @Deprecated
+    public NoteBytesReadOnly getPacket() {
+        return payload;
+    }
+    
+    public byte getPayloadType() {
+        return payload.getType();
+    }
+    
+    /**
+     * Convenience: Get payload as string (if it's a string type)
+     */
+    public String getPayloadAsString() {
+        // Assuming NoteBytesReadOnly has a string conversion method
+        return payload.toString();
+    }
+    
+    // ===== METADATA MANAGEMENT =====
+    
+    /**
+     * Check if metadata key exists
+     */
+    public boolean hasMetadata(String key) {
+        return metadata.containsKey(key);
+    }
+    
+    /**
+     * Get metadata value
+     */
+    public Object getMetadata(String key) {
+        return metadata.get(key);
+    }
+    
+    /**
+     * Get metadata as string
+     */
+    public String getMetadataString(String key) {
+        Object value = metadata.get(key);
+        return value != null ? value.toString() : null;
+    }
+    
+    /**
+     * Get metadata as integer
+     */
+    public Integer getMetadataInt(String key) {
+        Object value = metadata.get(key);
+        if (value instanceof Integer) return (Integer) value;
+        if (value instanceof Number) return ((Number) value).intValue();
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt((String) value);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Get all metadata
+     */
+    public Map<String, Object> getAllMetadata() {
+        return new HashMap<>(metadata);
+    }
+    
+    // ===== ROUTING CONTROL =====
+    
+    public RoutingMode getRoutingMode() {
+        return routingMode;
+    }
+    
+    public long getTimestamp() {
+        return timestamp;
+    }
+    
+    /**
+     * Check if this packet should be routed hierarchically
+     * (matches all paths under a prefix)
+     */
+    public boolean isHierarchicalRouting() {
+        return routingMode == RoutingMode.HIERARCHICAL;
+    }
+    
+    /**
+     * Check if this is a multicast packet
+     */
+    public boolean isMulticast() {
+        return routingMode == RoutingMode.MULTICAST;
+    }
+    
+    // ===== IMMUTABLE BUILDERS =====
+    
+    /**
+     * Create a new packet with additional metadata
+     */
+    public RoutedPacket withMetadata(String key, Object value) {
+        Map<String, Object> newMetadata = new HashMap<>(this.metadata);
+        newMetadata.put(key, value);
+        return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
+    }
+    
+    /**
+     * Create a new packet with multiple metadata entries
+     */
+    public RoutedPacket withMetadata(Map<String, Object> additionalMetadata) {
+        Map<String, Object> newMetadata = new HashMap<>(this.metadata);
+        newMetadata.putAll(additionalMetadata);
+        return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
+    }
+    
+    /**
+     * Create a new packet with explicit destination
+     */
+    public RoutedPacket withDestination(ContextPath destination) {
+        return new RoutedPacket(sourcePath, destination, payload, metadata, RoutingMode.DIRECT);
+    }
+    
+    /**
+     * Create a new packet with different routing mode
+     */
+    public RoutedPacket withRoutingMode(RoutingMode mode) {
+        return new RoutedPacket(sourcePath, destinationPath, payload, metadata, mode);
+    }
+    
+    /**
+     * Create a reply packet (swaps source and destination)
+     */
+    public RoutedPacket createReply(NoteBytesReadOnly replyPayload) {
+        if (destinationPath == null) {
+            // Original was registry-routed, reply goes back to source
+            return new RoutedPacket(
+                this.destinationPath != null ? this.destinationPath : ContextPath.ROOT,
+                this.sourcePath,
+                replyPayload,
+                metadata,
+                RoutingMode.DIRECT
+            );
+        }
+        
+        // Swap source and destination
+        return new RoutedPacket(
+            this.destinationPath,
+            this.sourcePath,
+            replyPayload,
+            metadata,
+            RoutingMode.DIRECT
+        );
+    }
+    
+    // ===== STATIC FACTORIES =====
+    
+    /**
+     * Create a simple packet from path and payload
+     */
+    public static RoutedPacket create(ContextPath sourcePath, NoteBytesReadOnly payload) {
+        return new RoutedPacket(sourcePath, payload);
+    }
+    
+    /**
+     * Create packet with explicit destination
+     */
+    public static RoutedPacket createDirect(
+            ContextPath sourcePath,
+            ContextPath destinationPath,
+            NoteBytesReadOnly payload) {
+        return new RoutedPacket(sourcePath, destinationPath, payload);
+    }
+    
+    /**
+     * Create multicast packet (goes to all listeners on a path prefix)
+     */
+    public static RoutedPacket createMulticast(
+            ContextPath sourcePath,
+            ContextPath targetPrefix,
+            NoteBytesReadOnly payload) {
+        return new RoutedPacket(
+            sourcePath,
+            targetPrefix,
+            payload,
+            new HashMap<>(),
+            RoutingMode.MULTICAST
+        );
+    }
+    
+    /**
+     * Create hierarchical packet (routes to all under source path prefix)
+     */
+    public static RoutedPacket createHierarchical(
+            ContextPath sourcePath,
+            NoteBytesReadOnly payload) {
+        return new RoutedPacket(
+            sourcePath,
+            null,
+            payload,
+            new HashMap<>(),
+            RoutingMode.HIERARCHICAL
+        );
+    }
+    
+    /**
+     * Create from legacy sourceId format
+     * @deprecated Use path-based constructor instead
+     */
+    @Deprecated
+    public static RoutedPacket fromLegacySourceId(
+            NoteBytesReadOnly sourceId,
+            NoteBytesReadOnly payload) {
+        // Convert sourceId to a simple numeric path
+        ContextPath path = ContextPath.of("legacy", String.valueOf(sourceId.getAsInt()));
+        return new RoutedPacket(path, payload);
+    }
+    
+    // ===== ROUTING MODES =====
+    
+    public enum RoutingMode {
+        /**
+         * Registry determines destination based on source path.
+         * Classic publish-subscribe pattern.
+         */
+        REGISTRY,
+        
+        /**
+         * Explicit point-to-point routing.
+         * destinationPath must be set.
+         */
+        DIRECT,
+        
+        /**
+         * Multicast to all listeners under destinationPath prefix.
+         * Example: /daemon/* reaches all daemon subsystems
+         */
+        MULTICAST,
+        
+        /**
+         * Hierarchical routing up/down the path tree.
+         * Can route to parent or children based on path relationship.
+         */
+        HIERARCHICAL,
+        
+        /**
+         * Broadcast to all registered destinations.
+         * Ignores paths entirely.
+         */
+        BROADCAST
+    }
+    
+    // ===== PATH MATCHING HELPERS =====
+    
+    /**
+     * Check if this packet should be delivered to a destination path
+     */
+    public boolean matchesDestination(ContextPath targetPath) {
+        return switch (routingMode) {
+            case REGISTRY -> destinationPath == null || targetPath.equals(destinationPath);
+            case DIRECT -> targetPath.equals(destinationPath);
+            case MULTICAST -> targetPath.startsWith(destinationPath);
+            case HIERARCHICAL -> targetPath.startsWith(sourcePath) || sourcePath.startsWith(targetPath);
+            case BROADCAST -> true;
+        };
+    }
+    
+    /**
+     * Check if this packet comes from a specific path prefix
+     */
+    public boolean isFromPath(ContextPath pathPrefix) {
+        return sourcePath.startsWith(pathPrefix);
+    }
+    
+    /**
+     * Get the relative path from source to destination
+     */
+    public ContextPath getRelativePath() {
+        if (destinationPath == null) return null;
+        return destinationPath.relativeTo(sourcePath);
+    }
+    
+    // ===== SERIALIZATION HINTS =====
+    
+    /**
+     * Convert to wire format (for network transmission)
+     * Format: [sourcePath][destPath?][metadata][payload]
+     */
+    public byte[] toWireFormat() {
+        // Implementation would serialize the packet for transmission
+        // This is a placeholder showing the structure
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+    
+    /**
+     * Create from wire format
+     */
+    public static RoutedPacket fromWireFormat(byte[] data) {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+    
+    // ===== UTILITIES =====
     
     @Override
     public String toString() {
-        return String.format("RoutedPacket{sourceId=%d, packetType=%d, size=%d}",
-            getSourceIdAsInt(), getPacketType(), packet.byteLength());
+        StringBuilder sb = new StringBuilder("RoutedPacket{");
+        sb.append("source=").append(sourcePath);
+        
+        if (destinationPath != null) {
+            sb.append(", dest=").append(destinationPath);
+        }
+        
+        sb.append(", mode=").append(routingMode);
+        sb.append(", payloadType=").append(payload.getType());
+        sb.append(", size=").append(payload.byteLength());
+        
+        if (!metadata.isEmpty()) {
+            sb.append(", metadata=").append(metadata.keySet());
+        }
+        
+        sb.append(", age=").append(System.currentTimeMillis() - timestamp).append("ms");
+        sb.append("}");
+        
+        return sb.toString();
+    }
+    
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof RoutedPacket other)) return false;
+        
+        return Objects.equals(sourcePath, other.sourcePath) &&
+               Objects.equals(destinationPath, other.destinationPath) &&
+               Objects.equals(payload, other.payload) &&
+               routingMode == other.routingMode;
+    }
+    
+    @Override
+    public int hashCode() {
+        return Objects.hash(sourcePath, destinationPath, routingMode);
     }
 }

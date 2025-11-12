@@ -144,6 +144,7 @@ public class NoteBytesArray extends NoteBytes{
         
     }
 
+
     @Override
     public boolean compareBytes(byte[] bytes){
         if(isRuined()){

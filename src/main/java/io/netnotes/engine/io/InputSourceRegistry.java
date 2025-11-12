@@ -1,485 +1,566 @@
 package io.netnotes.engine.io;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
-
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.InputStateFlags;
+
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Flow;
 
 /**
- * InputSourceRegistry - Central hub for routing input source packets.
+ * InputSourceRegistry - Manages input sources with ContextPath addressing.
  * 
  * Architecture:
- * - Generates sourceIds as INTEGER NoteBytesReadOnly
- * - Uses ContextPath for hierarchical organization and registry chaining
- * - Supports both unicast (default) and broadcast routing
- * - Provides bidirectional communication channels
- * - Thread-safe for concurrent access
+ * - ContextPath provides hierarchical organization
+ * - SourceId (INTEGER) is the leaf node for daemon protocol compatibility
+ * - Each source is a Flow.Publisher (Reactive Streams)
+ * - BitFlagStateMachine tracks lifecycle and state
+ * - Virtual threads for all async operations
  * 
- * Identity System:
- * - sourceId (NoteBytesReadOnly INTEGER): Unique numeric identifier for efficient routing
- * - ContextPath: Hierarchical path for organization, filtering, and registry chaining
- *   Example: /daemon/usb/keyboard/0 or /window/main/canvas
+ * Path Structure:
+ *   /daemon/main/keyboard/123  <- sourceId 123 is the leaf
+ *   /daemon/main/mouse/456     <- sourceId 456 is the leaf
+ *   /window/main/canvas/789    <- sourceId 789 is the leaf
  * 
- * Registry Chaining:
- * - Parent registries can route to child registries based on ContextPath prefixes
- * - Example: /daemon/* routes to DaemonRegistry, /window/* routes to WindowRegistry
+ * The sourceId is:
+ * 1. Generated sequentially (AtomicInteger)
+ * 2. Encoded as NoteBytesReadOnly(int) for daemon protocol
+ * 3. Used as the final segment in ContextPath
+ * 4. Unique system-wide
  */
 public class InputSourceRegistry {
     private static final InputSourceRegistry INSTANCE = new InputSourceRegistry();
     
+    // ID generation
     private final AtomicInteger nextSourceId = new AtomicInteger(1);
     
     // Primary indexes
-    private final ConcurrentHashMap<NoteBytesReadOnly, SourceInfo> sourceById = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ContextPath, SourceInfo> sourceByPath = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, InputSourceInfo> sourcesById = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ContextPath, InputSourceInfo> sourcesByPath = new ConcurrentHashMap<>();
     
-    // Routing tables
-    private final ConcurrentHashMap<NoteBytesReadOnly, List<PacketDestination>> routingTable = new ConcurrentHashMap<>();
+    // Routing: source path → subscribers
+    private final ConcurrentHashMap<ContextPath, List<Flow.Subscriber<RoutedPacket>>> subscribers = 
+        new ConcurrentHashMap<>();
     
-    // Reply channels (destination → source communication)
-    private final ConcurrentHashMap<NoteBytesReadOnly, Consumer<NoteBytesReadOnly>> sourceReplyChannels = new ConcurrentHashMap<>();
+    // Prefix routing: /daemon/* → subscribers
+    private final ConcurrentHashMap<ContextPath, List<Flow.Subscriber<RoutedPacket>>> prefixSubscribers = 
+        new ConcurrentHashMap<>();
     
-    // Registry chaining support
-    private final ConcurrentHashMap<ContextPath, InputSourceRegistry> childRegistries = new ConcurrentHashMap<>();
-    private InputSourceRegistry parentRegistry = null;
-    private ContextPath registryPath = ContextPath.ROOT;
+    // Publishers for reactive streams
+    private final ConcurrentHashMap<Integer, SubmissionPublisher<RoutedPacket>> publishers = 
+        new ConcurrentHashMap<>();
     
-    // Path-based routing (for hierarchical packet filtering)
-    private final ConcurrentHashMap<ContextPath, List<PacketDestination>> pathBasedRouting = new ConcurrentHashMap<>();
+    // Virtual thread executor
+    private final ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
     
-    private InputSourceRegistry() {
-        // Singleton
-    }
+    private InputSourceRegistry() {}
     
     public static InputSourceRegistry getInstance() {
         return INSTANCE;
     }
     
-    /**
-     * Create a child registry for a specific path prefix.
-     * Useful for isolating different subsystems (daemon, window, overlay, etc.)
-     */
-    public InputSourceRegistry createChildRegistry(ContextPath pathPrefix) {
-        InputSourceRegistry child = new InputSourceRegistry();
-        child.parentRegistry = this;
-        child.registryPath = pathPrefix;
-        childRegistries.put(pathPrefix, child);
-        return child;
-    }
+    // ===== REGISTRATION =====
     
     /**
-     * Register a new source with both sourceId and ContextPath.
+     * Register an input source with automatic sourceId generation
      * 
+     * @param basePath Path without sourceId (e.g., /daemon/main/keyboard)
      * @param name Human-readable name
      * @param capabilities What this source can do
-     * @param contextPath Hierarchical path for organization
-     * @return Generated sourceId (INTEGER NoteBytesReadOnly)
+     * @return Complete path with sourceId as leaf (e.g., /daemon/main/keyboard/123)
      */
-    public NoteBytesReadOnly registerSource(
+    public ContextPath registerSource(
+            ContextPath basePath,
             String name,
-            InputSourceCapabilities capabilities,
-            ContextPath contextPath) {
+            InputSourceCapabilities capabilities) {
         
-        // Generate INTEGER sourceId
-        int id = nextSourceId.getAndIncrement();
-        NoteBytesReadOnly sourceId = new NoteBytesReadOnly(id);
+        // Generate unique sourceId
+        int sourceId = nextSourceId.getAndIncrement();
+        
+        // Create full path with sourceId as leaf
+        ContextPath fullPath = basePath.append(String.valueOf(sourceId));
+        
+        // Create state machine for lifecycle
+        BitFlagStateMachine stateMachine = new BitFlagStateMachine(
+            "source-" + sourceId,
+            InputStateFlags.CONTAINER_ACTIVE
+        );
+        
+        // Setup state transitions
+        setupStateTransitions(stateMachine, sourceId);
         
         // Create source info
-        SourceInfo info = new SourceInfo(sourceId, name, capabilities, contextPath);
+        InputSourceInfo info = new InputSourceInfo(
+            sourceId,
+            fullPath,
+            name,
+            capabilities,
+            stateMachine
+        );
         
-        // Set initial state
-        info.setLocalFlag(SourceState.REGISTERED_BIT, true);
-        info.setLocalFlag(SourceState.INITIALIZING_BIT, true);
+        // Store in indexes
+        sourcesById.put(sourceId, info);
+        sourcesByPath.put(fullPath, info);
         
-        // Index by both sourceId and path
-        sourceById.put(sourceId, info);
-        sourceByPath.put(contextPath, info);
+        // Create publisher for reactive streams
+        SubmissionPublisher<RoutedPacket> publisher = new SubmissionPublisher<>(
+            virtualExecutor,
+            Flow.defaultBufferSize()
+        );
+        publishers.put(sourceId, publisher);
         
-        // Initialize empty routing table entry
-        routingTable.put(sourceId, new ArrayList<>());
+        // Initialize routing lists
+        subscribers.put(fullPath, new CopyOnWriteArrayList<>());
         
-        System.out.println("Registered source: " + name + 
-                         " (id=" + id + ", path=" + contextPath + ")");
+        System.out.println("Registered input source: " + name + 
+                         " (id=" + sourceId + ", path=" + fullPath + ")");
         
-        return sourceId;
+        return fullPath;
     }
     
     /**
-     * Unregister a source by sourceId
+     * Setup state machine transitions for input source lifecycle
      */
-    public void unregisterSource(NoteBytesReadOnly sourceId) {
-        SourceInfo info = sourceById.remove(sourceId);
-        if (info != null) {
-            sourceByPath.remove(info.contextPath);
-            routingTable.remove(sourceId);
-            sourceReplyChannels.remove(sourceId);
-            
-            System.out.println("Unregistered source: " + info.name + 
-                             " (id=" + sourceId.getAsInt() + ")");
-        }
-    }
-    
-    /**
-     * Unregister a source by ContextPath
-     */
-    public void unregisterSource(ContextPath contextPath) {
-        SourceInfo info = sourceByPath.remove(contextPath);
-        if (info != null) {
-            unregisterSource(info.sourceId);
-        }
-    }
-    
-    /**
-     * Add a destination for a specific source (unicast by default)
-     */
-    public void addDestination(NoteBytesReadOnly sourceId, PacketDestination destination) {
-        routingTable.computeIfAbsent(sourceId, k -> new ArrayList<>())
-                    .add(destination);
-    }
-    
-    /**
-     * Add a destination for a source identified by ContextPath
-     */
-    public void addDestination(ContextPath contextPath, PacketDestination destination) {
-        SourceInfo info = sourceByPath.get(contextPath);
-        if (info != null) {
-            addDestination(info.sourceId, destination);
-        } else {
-            throw new IllegalArgumentException("No source found at path: " + contextPath);
-        }
-    }
-    
-    /**
-     * Add a path-based destination that receives packets from all sources 
-     * under a specific path prefix.
-     * 
-     * Example: Listen to all sources under /daemon/usb/*
-     */
-    public void addPathDestination(ContextPath pathPrefix, PacketDestination destination) {
-        pathBasedRouting.computeIfAbsent(pathPrefix, k -> new ArrayList<>())
-                       .add(destination);
-    }
-    
-    /**
-     * Remove a path-based destination
-     */
-    public void removePathDestination(ContextPath pathPrefix, PacketDestination destination) {
-        List<PacketDestination> destinations = pathBasedRouting.get(pathPrefix);
-        if (destinations != null) {
-            destinations.remove(destination);
-            if (destinations.isEmpty()) {
-                pathBasedRouting.remove(pathPrefix);
+    private void setupStateTransitions(BitFlagStateMachine sm, int sourceId) {
+        // Log state changes
+        sm.onStateChanged((oldState, newState) -> {
+            System.out.println("Source " + sourceId + " state: " + 
+                             sm.getStateString(null, null));
+        });
+        
+        // When source becomes active, ensure container is enabled
+        sm.onStateAdded(InputStateFlags.CONTAINER_ACTIVE, (old, now, bit) -> {
+            if (!sm.hasFlag(InputStateFlags.CONTAINER_ENABLED)) {
+                sm.setFlag(InputStateFlags.CONTAINER_ENABLED);
             }
-        }
-    }
-    
-    /**
-     * Enable broadcasting: packets fan out to all registered destinations
-     */
-    public void enableBroadcast(NoteBytesReadOnly sourceId) {
-        SourceInfo info = sourceById.get(sourceId);
-        if (info != null) {
-            info.setLocalFlag(SourceState.BROADCASTING_BIT, true);
-        }
-    }
-    
-    /**
-     * Disable broadcasting: packets go to first destination only (unicast)
-     */
-    public void disableBroadcast(NoteBytesReadOnly sourceId) {
-        SourceInfo info = sourceById.get(sourceId);
-        if (info != null) {
-            info.setLocalFlag(SourceState.BROADCASTING_BIT, false);
-        }
-    }
-    
-    /**
-     * Route a packet to its destination(s).
-     * 
-     * Routing logic:
-     * 1. Check if source is in this registry
-     * 2. If not, try child registries based on ContextPath
-     * 3. Apply unicast vs broadcast logic
-     * 4. Apply path-based routing (hierarchical listeners)
-     */
-    public void routePacket(RoutedPacket packet) {
-        NoteBytesReadOnly sourceId = packet.getSourceId();
-        SourceInfo info = sourceById.get(sourceId);
+        });
         
+        // When killed, mark as inactive
+        sm.onStateAdded(InputStateFlags.PROCESS_KILLED, (old, now, bit) -> {
+            sm.clearFlag(InputStateFlags.CONTAINER_ACTIVE);
+            sm.clearFlag(InputStateFlags.CONTAINER_ENABLED);
+        });
+    }
+    
+    /**
+     * Unregister an input source
+     */
+    public void unregisterSource(ContextPath fullPath) {
+        InputSourceInfo info = sourcesByPath.remove(fullPath);
+        if (info == null) return;
+        
+        // Mark as killed
+        info.stateMachine.setFlag(InputStateFlags.PROCESS_KILLED);
+        
+        // Remove from indexes
+        sourcesById.remove(info.sourceId);
+        
+        // Close publisher
+        SubmissionPublisher<RoutedPacket> publisher = publishers.remove(info.sourceId);
+        if (publisher != null) {
+            publisher.close();
+        }
+        
+        // Remove subscribers
+        subscribers.remove(fullPath);
+        
+        System.out.println("Unregistered source: " + info.name + " at " + fullPath);
+    }
+    
+    /**
+     * Unregister by sourceId
+     */
+    public void unregisterSource(int sourceId) {
+        InputSourceInfo info = sourcesById.get(sourceId);
+        if (info != null) {
+            unregisterSource(info.fullPath);
+        }
+    }
+    
+    // ===== SUBSCRIPTION (REACTIVE STREAMS) =====
+    
+    /**
+     * Subscribe to packets from a specific source
+     */
+    public void subscribe(ContextPath sourcePath, Flow.Subscriber<RoutedPacket> subscriber) {
+        InputSourceInfo info = sourcesByPath.get(sourcePath);
         if (info == null) {
-            // Try to route to child registry
-            routeToChildRegistry(packet);
+            throw new IllegalArgumentException("Source not found: " + sourcePath);
+        }
+        
+        // Add to subscriber list for routing
+        subscribers.computeIfAbsent(sourcePath, k -> new CopyOnWriteArrayList<>())
+                  .add(subscriber);
+        
+        // Subscribe to publisher
+        SubmissionPublisher<RoutedPacket> publisher = publishers.get(info.sourceId);
+        if (publisher != null) {
+            publisher.subscribe(subscriber);
+            System.out.println("Subscribed to " + sourcePath);
+        }
+    }
+    
+    /**
+     * Subscribe to all sources under a path prefix
+     * Example: subscribe to /daemon/main/* catches all devices
+     */
+    public void subscribePrefix(ContextPath prefix, Flow.Subscriber<RoutedPacket> subscriber) {
+        prefixSubscribers.computeIfAbsent(prefix, k -> new CopyOnWriteArrayList<>())
+                        .add(subscriber);
+        
+        // Subscribe to all existing sources under this prefix
+        sourcesByPath.keySet().stream()
+            .filter(path -> path.startsWith(prefix))
+            .forEach(path -> subscribe(path, subscriber));
+        
+        System.out.println("Subscribed to prefix: " + prefix + "/*");
+    }
+    
+    /**
+     * Unsubscribe from a source
+     */
+    public void unsubscribe(ContextPath sourcePath, Flow.Subscriber<RoutedPacket> subscriber) {
+        List<Flow.Subscriber<RoutedPacket>> subs = subscribers.get(sourcePath);
+        if (subs != null) {
+            subs.remove(subscriber);
+        }
+    }
+    
+    // ===== PACKET EMISSION =====
+    
+    /**
+     * Emit a packet from an input source (called by the source itself)
+     * 
+     * @param sourceId The source emitting the packet
+     * @param payload The packet payload
+     */
+    public void emit(int sourceId, NoteBytesReadOnly payload) {
+        InputSourceInfo info = sourcesById.get(sourceId);
+        if (info == null) {
+            System.err.println("Cannot emit: unknown sourceId " + sourceId);
             return;
         }
         
-        // Get direct destinations for this source
-        List<PacketDestination> destinations = routingTable.get(sourceId);
-        
-        if (destinations == null || destinations.isEmpty()) {
-            // No direct destinations, but check path-based routing
-            routeToPathDestinations(info, packet);
+        // Check if source is active
+        if (!info.stateMachine.hasFlag(InputStateFlags.CONTAINER_ACTIVE)) {
+            System.err.println("Cannot emit: source " + sourceId + " not active");
             return;
         }
         
-        boolean broadcasting = info.hasLocalFlag(SourceState.BROADCASTING_BIT);
+        // Create routed packet
+        RoutedPacket packet = RoutedPacket.create(info.fullPath, payload);
         
-        if (broadcasting) {
-            // Fan-out: copy packet to all destinations
-            for (PacketDestination dest : destinations) {
-                try {
-                    dest.handlePacket(sourceId, packet.getPacket());
-                } catch (Exception e) {
-                    System.err.println("Error routing to destination: " + e.getMessage());
-                }
-            }
-        } else {
-            // Unicast: send to first destination only
+        // Publish to all subscribers
+        SubmissionPublisher<RoutedPacket> publisher = publishers.get(sourceId);
+        if (publisher != null) {
             try {
-                destinations.get(0).handlePacket(sourceId, packet.getPacket());
-            } catch (Exception e) {
-                System.err.println("Error routing to destination: " + e.getMessage());
-            }
-        }
-        
-        // Also route to path-based listeners
-        routeToPathDestinations(info, packet);
-        
-        // Update statistics
-        info.statistics.incrementPacketCount();
-    }
-    
-    /**
-     * Route to child registries based on ContextPath prefix matching
-     */
-    private void routeToChildRegistry(RoutedPacket packet) {
-        NoteBytesReadOnly sourceId = packet.getSourceId();
-        
-        // We don't have direct info, but we can ask child registries
-        for (Map.Entry<ContextPath, InputSourceRegistry> entry : childRegistries.entrySet()) {
-            InputSourceRegistry childRegistry = entry.getValue();
-            SourceInfo info = childRegistry.sourceById.get(sourceId);
-            
-            if (info != null) {
-                // Found it in a child registry
-                childRegistry.routePacket(packet);
-                return;
-            }
-        }
-        
-        // Not found anywhere
-        System.err.println("No destination found for sourceId: " + sourceId.getAsInt());
-    }
-    
-    /**
-     * Route to destinations listening on path prefixes
-     */
-    private void routeToPathDestinations(SourceInfo info, RoutedPacket packet) {
-        ContextPath sourcePath = info.contextPath;
-        
-        // Find all path-based listeners that match this source's path
-        for (Map.Entry<ContextPath, List<PacketDestination>> entry : pathBasedRouting.entrySet()) {
-            ContextPath listenerPath = entry.getKey();
-            
-            // Check if source path is under this listener path
-            if (sourcePath.startsWith(listenerPath)) {
-                List<PacketDestination> pathDests = entry.getValue();
-                for (PacketDestination dest : pathDests) {
-                    try {
-                        dest.handlePacket(info.sourceId, packet.getPacket());
-                    } catch (Exception e) {
-                        System.err.println("Error routing to path destination: " + e.getMessage());
-                    }
+                int lag = publisher.submit(packet);
+                if (lag > 100) {
+                    System.out.println("WARNING: Source " + sourceId + " lagging (buffer: " + lag + ")");
                 }
-            }
-        }
-    }
-    
-    /**
-     * Register a reply channel for bidirectional communication
-     */
-    public void registerSourceReplyChannel(
-            NoteBytesReadOnly sourceId,
-            Consumer<NoteBytesReadOnly> commandHandler) {
-        sourceReplyChannels.put(sourceId, commandHandler);
-    }
-    
-    /**
-     * Send a command from destination back to source
-     */
-    public void sendToSource(NoteBytesReadOnly sourceId, NoteBytesReadOnly command) {
-        Consumer<NoteBytesReadOnly> handler = sourceReplyChannels.get(sourceId);
-        if (handler != null) {
-            try {
-                handler.accept(command);
+                
+                // Update statistics
+                info.statistics.incrementPacketCount();
+                
             } catch (Exception e) {
-                System.err.println("Error sending to source: " + e.getMessage());
+                System.err.println("Error emitting packet from " + sourceId + ": " + e.getMessage());
             }
-        } else {
-            System.err.println("No reply channel for sourceId: " + sourceId.getAsInt());
         }
+    }
+    
+    /**
+     * Emit packet from ContextPath (finds sourceId from path leaf)
+     */
+    public void emit(ContextPath sourcePath, NoteBytesReadOnly payload) {
+        InputSourceInfo info = sourcesByPath.get(sourcePath);
+        if (info != null) {
+            emit(info.sourceId, payload);
+        } else {
+            System.err.println("Cannot emit: source not found at " + sourcePath);
+        }
+    }
+    
+    // ===== QUERIES =====
+    
+    /**
+     * Get source info by full path
+     */
+    public InputSourceInfo getSourceInfo(ContextPath fullPath) {
+        return sourcesByPath.get(fullPath);
     }
     
     /**
      * Get source info by sourceId
      */
-    public SourceInfo getSourceInfo(NoteBytesReadOnly sourceId) {
-        return sourceById.get(sourceId);
+    public InputSourceInfo getSourceInfo(int sourceId) {
+        return sourcesById.get(sourceId);
     }
     
     /**
-     * Get source info by ContextPath
+     * Extract sourceId from ContextPath (the leaf node)
      */
-    public SourceInfo getSourceInfo(ContextPath contextPath) {
-        return sourceByPath.get(contextPath);
+    public int getSourceIdFromPath(ContextPath fullPath) {
+        String leafName = fullPath.name();
+        try {
+            return Integer.parseInt(leafName);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Path leaf is not a sourceId: " + leafName);
+        }
+    }
+    
+    /**
+     * Get NoteBytesReadOnly sourceId (for daemon protocol)
+     */
+    public NoteBytesReadOnly getSourceIdAsNoteBytes(ContextPath fullPath) {
+        int sourceId = getSourceIdFromPath(fullPath);
+        return new NoteBytesReadOnly(sourceId);
     }
     
     /**
      * Find all sources under a path prefix
      */
-    public List<SourceInfo> getSourcesUnderPath(ContextPath pathPrefix) {
-        List<SourceInfo> results = new ArrayList<>();
-        
-        for (SourceInfo info : sourceByPath.values()) {
-            if (info.contextPath.startsWith(pathPrefix)) {
-                results.add(info);
-            }
-        }
-        
-        return results;
+    public List<InputSourceInfo> findSourcesUnder(ContextPath prefix) {
+        return sourcesByPath.entrySet().stream()
+            .filter(e -> e.getKey().startsWith(prefix))
+            .map(Map.Entry::getValue)
+            .toList();
     }
     
     /**
-     * Set a state flag for a source
+     * Find sources by capability
      */
-    public void setSourceState(NoteBytesReadOnly sourceId, int bitPosition, boolean value) {
-        SourceInfo info = sourceById.get(sourceId);
-        if (info != null) {
-            info.setLocalFlag(bitPosition, value);
-        }
+    public List<InputSourceInfo> findSourcesByCapability(
+            java.util.function.Predicate<InputSourceCapabilities> predicate) {
+        return sourcesById.values().stream()
+            .filter(info -> predicate.test(info.capabilities))
+            .toList();
     }
     
     /**
-     * Check if broadcasting is enabled for a source
+     * Check if source exists
      */
-    public boolean isBroadcasting(NoteBytesReadOnly sourceId) {
-        SourceInfo info = sourceById.get(sourceId);
-        return info != null && info.hasLocalFlag(SourceState.BROADCASTING_BIT);
+    public boolean exists(ContextPath fullPath) {
+        return sourcesByPath.containsKey(fullPath);
     }
     
-    /**
-     * Get number of destinations for a source
-     */
-    public int getDestinationCount(NoteBytesReadOnly sourceId) {
-        List<PacketDestination> destinations = routingTable.get(sourceId);
-        return destinations != null ? destinations.size() : 0;
+    public boolean exists(int sourceId) {
+        return sourcesById.containsKey(sourceId);
     }
     
     /**
      * Get all registered sources
      */
-    public Collection<SourceInfo> getAllSources() {
-        return Collections.unmodifiableCollection(sourceById.values());
+    public Collection<InputSourceInfo> getAllSources() {
+        return Collections.unmodifiableCollection(sourcesById.values());
     }
     
     /**
-     * Get registry statistics summary
+     * Get source count
      */
-    public String getSummary() {
-        int total = sourceById.size();
-        int active = 0;
-        int paused = 0;
-        int error = 0;
-        int broadcasting = 0;
-        
-        for (SourceInfo info : sourceById.values()) {
-            if (info.hasLocalFlag(SourceState.ACTIVE_BIT)) active++;
-            if (info.hasLocalFlag(SourceState.PAUSED_BIT)) paused++;
-            if (info.hasLocalFlag(SourceState.ERROR_BIT)) error++;
-            if (info.hasLocalFlag(SourceState.BROADCASTING_BIT)) broadcasting++;
+    public int getSourceCount() {
+        return sourcesById.size();
+    }
+    
+    // ===== STATE MANAGEMENT =====
+    
+    /**
+     * Set state flag for a source
+     */
+    public void setSourceState(ContextPath fullPath, long stateFlag) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        if (info != null) {
+            info.stateMachine.setFlag(stateFlag);
         }
+    }
+    
+    public void setSourceState(int sourceId, long stateFlag) {
+        InputSourceInfo info = sourcesById.get(sourceId);
+        if (info != null) {
+            info.stateMachine.setFlag(stateFlag);
+        }
+    }
+    
+    /**
+     * Clear state flag
+     */
+    public void clearSourceState(ContextPath fullPath, long stateFlag) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        if (info != null) {
+            info.stateMachine.clearFlag(stateFlag);
+        }
+    }
+    
+    /**
+     * Check state flag
+     */
+    public boolean hasSourceState(ContextPath fullPath, long stateFlag) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        return info != null && info.stateMachine.hasFlag(stateFlag);
+    }
+    
+    /**
+     * Get state machine for advanced control
+     */
+    public BitFlagStateMachine getStateMachine(ContextPath fullPath) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        return info != null ? info.stateMachine : null;
+    }
+    
+    // ===== LIFECYCLE CONTROL =====
+    
+    /**
+     * Pause a source (stop emitting packets)
+     */
+    public CompletableFuture<Void> pauseSource(ContextPath fullPath) {
+        return CompletableFuture.runAsync(() -> {
+            InputSourceInfo info = sourcesByPath.get(fullPath);
+            if (info != null) {
+                info.stateMachine.clearFlag(InputStateFlags.CONTAINER_ACTIVE);
+                System.out.println("Paused source: " + fullPath);
+            }
+        }, virtualExecutor);
+    }
+    
+    /**
+     * Resume a source
+     */
+    public CompletableFuture<Void> resumeSource(ContextPath fullPath) {
+        return CompletableFuture.runAsync(() -> {
+            InputSourceInfo info = sourcesByPath.get(fullPath);
+            if (info != null) {
+                info.stateMachine.setFlag(InputStateFlags.CONTAINER_ACTIVE);
+                System.out.println("Resumed source: " + fullPath);
+            }
+        }, virtualExecutor);
+    }
+    
+    /**
+     * Kill a source permanently
+     */
+    public CompletableFuture<Void> killSource(ContextPath fullPath) {
+        return CompletableFuture.runAsync(() -> {
+            unregisterSource(fullPath);
+        }, virtualExecutor);
+    }
+    
+    // ===== STATISTICS =====
+    
+    public String getSummary() {
+        int total = sourcesById.size();
+        int active = (int) sourcesById.values().stream()
+            .filter(info -> info.stateMachine.hasFlag(InputStateFlags.CONTAINER_ACTIVE))
+            .count();
+        int paused = total - active;
+        
+        long totalPackets = sourcesById.values().stream()
+            .mapToLong(info -> info.statistics.getPacketCount())
+            .sum();
         
         return String.format(
-            "Sources: %d total, %d active, %d paused, %d error, %d broadcasting | " +
-            "Child registries: %d | Path listeners: %d",
-            total, active, paused, error, broadcasting,
-            childRegistries.size(), pathBasedRouting.size()
+            "InputSources: %d total, %d active, %d paused | Packets: %d total",
+            total, active, paused, totalPackets
         );
     }
     
     /**
-     * Get the registry's context path (for chained registries)
+     * Get publisher stats for monitoring
      */
-    public ContextPath getRegistryPath() {
-        return registryPath;
+    public PublisherStats getPublisherStats(ContextPath fullPath) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        if (info == null) return null;
+        
+        SubmissionPublisher<RoutedPacket> publisher = publishers.get(info.sourceId);
+        if (publisher == null) return null;
+        
+        return new PublisherStats(
+            fullPath,
+            publisher.getNumberOfSubscribers(),
+            publisher.estimateMaximumLag(),
+            publisher.isClosed()
+        );
     }
     
     /**
-     * Get parent registry (null if this is root)
+     * Get detailed stats for a source
      */
-    public InputSourceRegistry getParentRegistry() {
-        return parentRegistry;
+    public Map<String, Object> getSourceStats(ContextPath fullPath) {
+        InputSourceInfo info = sourcesByPath.get(fullPath);
+        if (info == null) return null;
+        
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("sourceId", info.sourceId);
+        stats.put("path", fullPath.toString());
+        stats.put("name", info.name);
+        stats.put("active", info.stateMachine.hasFlag(InputStateFlags.CONTAINER_ACTIVE));
+        stats.put("uptime_ms", info.getUptimeMillis());
+        stats.put("packets", info.statistics.getPacketCount());
+        stats.put("subscribers", publishers.get(info.sourceId).getNumberOfSubscribers());
+        
+        return stats;
     }
     
-    /**
-     * Check if this registry has a child at the given path
-     */
-    public boolean hasChildRegistry(ContextPath pathPrefix) {
-        return childRegistries.containsKey(pathPrefix);
+    // ===== SHUTDOWN =====
+    
+    public void shutdown() {
+        // Close all publishers
+        publishers.values().forEach(SubmissionPublisher::close);
+        
+        // Clear all data
+        publishers.clear();
+        sourcesById.clear();
+        sourcesByPath.clear();
+        subscribers.clear();
+        prefixSubscribers.clear();
+        
+        virtualExecutor.shutdown();
+        
+        System.out.println("InputSourceRegistry shutdown complete");
     }
     
-    /**
-     * Get child registry at path
-     */
-    public InputSourceRegistry getChildRegistry(ContextPath pathPrefix) {
-        return childRegistries.get(pathPrefix);
-    }
+    // ===== DATA STRUCTURES =====
     
     /**
-     * SourceInfo - Metadata about a registered source
+     * InputSourceInfo - Complete information about an input source
      */
-    public static class SourceInfo {
-        public final NoteBytesReadOnly sourceId;
+    public static class InputSourceInfo {
+        public final int sourceId;
+        public final ContextPath fullPath;  // Includes sourceId as leaf
         public final String name;
         public final InputSourceCapabilities capabilities;
-        public final ContextPath contextPath;
+        public final BitFlagStateMachine stateMachine;
         public final SourceStatistics statistics;
+        public final long registrationTime;
         
-        private volatile int localFlags = 0;
-        private final long registrationTime;
-        
-        public SourceInfo(
-                NoteBytesReadOnly sourceId,
+        public InputSourceInfo(
+                int sourceId,
+                ContextPath fullPath,
                 String name,
                 InputSourceCapabilities capabilities,
-                ContextPath contextPath) {
+                BitFlagStateMachine stateMachine) {
+            
             this.sourceId = sourceId;
+            this.fullPath = fullPath;
             this.name = name;
             this.capabilities = capabilities;
-            this.contextPath = contextPath;
+            this.stateMachine = stateMachine;
             this.statistics = new SourceStatistics();
             this.registrationTime = System.currentTimeMillis();
         }
         
-        public void setLocalFlag(int bitPosition, boolean value) {
-            if (value) {
-                localFlags = SourceState.setFlag(localFlags, bitPosition);
-            } else {
-                localFlags = SourceState.clearFlag(localFlags, bitPosition);
-            }
+        /**
+         * Get sourceId as NoteBytesReadOnly (for daemon protocol)
+         */
+        public NoteBytesReadOnly getSourceIdAsNoteBytes() {
+            return new NoteBytesReadOnly(sourceId);
         }
         
-        public boolean hasLocalFlag(int bitPosition) {
-            return SourceState.hasFlag(localFlags, bitPosition);
-        }
-        
-        public int getLocalFlags() {
-            return localFlags;
-        }
-        
-        public long getRegistrationTime() {
-            return registrationTime;
+        /**
+         * Get base path (without sourceId leaf)
+         */
+        public ContextPath getBasePath() {
+            return fullPath.parent();
         }
         
         public long getUptimeMillis() {
@@ -488,10 +569,21 @@ public class InputSourceRegistry {
         
         @Override
         public String toString() {
-            return String.format("SourceInfo{id=%d, name='%s', path=%s, flags=%s}",
-                sourceId.getAsInt(), name, contextPath, 
-                SourceState.describe(localFlags));
+            return String.format(
+                "InputSource{id=%d, name='%s', path=%s, active=%s}",
+                sourceId, name, fullPath,
+                stateMachine.hasFlag(InputStateFlags.CONTAINER_ACTIVE)
+            );
         }
     }
     
+    /**
+     * Publisher statistics
+     */
+    public record PublisherStats(
+        ContextPath path,
+        int subscriberCount,
+        long maxLag,
+        boolean closed
+    ) {}
 }

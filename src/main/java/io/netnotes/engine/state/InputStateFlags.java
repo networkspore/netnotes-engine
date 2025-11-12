@@ -1,6 +1,6 @@
 package io.netnotes.engine.state;
 
-import io.netnotes.engine.messaging.EventBytes;
+import io.netnotes.engine.io.events.EventBytes;
 
 /**
  * InputStateFlags - Bit flag definitions for input state management

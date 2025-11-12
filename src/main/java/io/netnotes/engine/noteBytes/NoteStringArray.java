@@ -10,7 +10,7 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 public class NoteStringArray extends NoteBytesArray {
-
+    public static final NoteStringArray EMPTY = new NoteStringArray();
     public final static String DELIMITER = "/";
 
     private String m_delimiter = new String(DELIMITER);
@@ -66,6 +66,23 @@ public class NoteStringArray extends NoteBytesArray {
         setInternalLength(byteLength);
     }
 
+    public static String noteStringArrayToString(NoteStringArray array, String delimiter){
+        String[] string = array.getAsStringArray();
+        return stringArrayToString(string, delimiter);
+    }
+
+    public static String stringArrayToString(String[] strings, String delim) {
+        return String.join(delim, strings);
+    }
+
+    static String noteBytesArrayToString(NoteBytes[] noteBytes, String delim) { 
+        String[] strings = new String[noteBytes.length];
+        for(int i = 0; i < strings.length; i++){
+            strings[i] = noteBytes[i].getAsString();
+        }
+        return stringArrayToString(strings, delim);
+    }
+
 
     public static String noteBytesArrayToUrl(NoteBytes[] array, String delim) {
         String[] str = new String[array.length];
@@ -103,6 +120,10 @@ public class NoteStringArray extends NoteBytesArray {
 
     @Override
     public String getAsString(){
+        return noteStringArrayToString(this, m_delimiter);
+    }
+
+    public String getAsUrlString(){
         NoteBytes[] array = getAsArray();
         return noteBytesArrayToUrl(array, m_delimiter);
     }
@@ -184,6 +205,7 @@ public class NoteStringArray extends NoteBytesArray {
         }
     }
 
+
     /**
      * Create a NoteStringArray from a path string, splitting on delimiter
      * Automatically trims each segment and skips empty ones
@@ -264,19 +286,70 @@ public class NoteStringArray extends NoteBytesArray {
     /**
      * Create a new path with an additional segment appended
      */
-    public NoteStringArray append(String segment) {
-        if (segment == null || segment.trim().isEmpty()) {
-            return this;
+    public static NoteStringArray append(NoteStringArray base, String segment, String delimiter) {
+    if (segment == null || segment.isEmpty()) {
+        return base;
+    }
+        NoteStringArray parsed = NoteStringArray.parse(segment, delimiter);
+        if (base.byteLength() > 0) {
+            byte[] bytes = new byte[base.byteLength() + parsed.byteLength()];
+            System.arraycopy(base.get(), 0, bytes, 0, base.byteLength());
+            System.arraycopy(parsed.get(), 0, bytes, base.byteLength(), parsed.byteLength());
+            return new NoteStringArray(bytes);
         }
-        
-        String[] current = getAsStringArray();
-        String[] newArray = new String[current.length + 1];
-        System.arraycopy(current, 0, newArray, 0, current.length);
-        newArray[current.length] = segment.trim();
-        
-        NoteStringArray result = new NoteStringArray(newArray);
-        result.setDelimiter(m_delimiter);
-        return result;
+        return parsed;
+    }
+
+    // ADD explicit URL-encoded input:
+    public void addUrlEncoded(String urlEncodedString) {
+        String decoded = ByteDecoding.UrlDecode(urlEncodedString, this.getType());
+        add(decoded);
+    }
+
+    public void addUrlEncoded(String... urlEncodedStrings) {
+        for (String encoded : urlEncodedStrings) {
+            addUrlEncoded(encoded);
+        }
+    }
+
+    public static String noteBytesArrayToUrlEncodedString(NoteBytes[] array, String delim) {
+        String[] str = new String[array.length];
+        for (int i = 0; i < array.length; i++) {
+            str[i] = ByteDecoding.UrlEncode(array[i].getAsString());
+        }
+        return String.join(delim, str);
+    }
+
+    /**
+     * append segment to array
+     */
+    public void append(String segment) {
+        if (segment == null || segment.trim().isEmpty()) {
+            return;
+        }
+        NoteStringArrayReadOnly parsed = NoteStringArrayReadOnly.parse(segment, m_delimiter);
+        if(parsed.byteLength() > 0){
+            int required = byteLength() + parsed.byteLength();
+            ensureCapacity(required);
+            System.arraycopy(parsed.get(), 0, getBytesInternal(), byteLength(), parsed.byteLength());
+        }
+   
+    }
+
+    public static NoteStringArray concat(NoteStringArray base, NoteStringArray append) {
+        if (append.isEmpty()) {
+            return base;
+        }
+      
+        if(append.byteLength() > 0){
+            
+            byte[] bytes = new byte[base.byteLength() + append.byteLength()];
+
+            System.arraycopy(base.get(), 0, bytes, 0, base.byteLength());
+            System.arraycopy(append.get(), 0, bytes, base.byteLength(), append.byteLength());
+            return new NoteStringArray(bytes);
+        }
+        return base;
     }
 
     /**
@@ -415,19 +488,8 @@ public class NoteStringArray extends NoteBytesArray {
         return pathIdx == size() && patternIdx == patternSegments.length;
     }
 
-    /**
-     * Join segments with a specific delimiter (overriding the default)
-     */
-    public String toPathString(String delimiter) {
-        return getAsString(delimiter);
-    }
+  
 
-    /**
-     * Join segments with the default delimiter as a path string
-     */
-    public String toPathString() {
-        return getAsString();
-    }
 
     /**
      * Trim all segments in place
@@ -455,6 +517,11 @@ public class NoteStringArray extends NoteBytesArray {
         }
     }
 
+    @Override
+    public int hashCode(){
+        return Arrays.hashCode(get());
+    }
+
     /**
      * Check if the path is empty (no segments)
      */
@@ -462,4 +529,17 @@ public class NoteStringArray extends NoteBytesArray {
         return size() == 0;
     }
 
+    public static NoteStringArray parse(String path, String delim){
+        String normalized = path.trim();
+        normalized = normalized.startsWith(delim) ? normalized = normalized.substring(1) : normalized;
+        normalized = normalized.endsWith(delim) ? normalized = normalized.substring(0, normalized.length() - 1) : normalized;
+        if (normalized.isEmpty()) return EMPTY;
+
+        String[] parts = normalized.split(delim);
+        NoteStringArray clean = new NoteStringArray();
+        for (String p : parts) {
+            clean.add(p);
+        }
+        return clean;
+    }
 }

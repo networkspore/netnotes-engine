@@ -1,87 +1,123 @@
 package io.netnotes.engine.io;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.StandardProtocolFamily;
-import java.net.UnixDomainSocketAddress;
-import java.nio.channels.Channels;
-import java.nio.channels.SocketChannel;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.io.events.EventBytes;
+import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.InputStateFlags;
+
+import java.io.*;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.*;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.*;
 
 /**
- * IODaemonSource - Connects to NoteDaemon and translates devices into sources.
+ * IODaemonSource - Manages daemon connection and virtual device tunnels.
  * 
  * Architecture:
- * - Thin translation layer between daemon and registry
- * - Registry generates sourceIds
- * - Daemon locks devices to our PID
- * - Routes packets based on INTEGER-prefixed sourceId
- * - Handles OBJECT packets as protocol messages
+ * - Parent: Manages socket connection to daemon
+ * - Children: Virtual device processes registered in InputSourceRegistry
+ * - Each device gets a unique sourceId from registry
+ * - ContextPath structure: /daemon/{connection-name}/{device-type}/{sourceId}
+ * 
+ * Example paths:
+ *   /daemon/main/keyboard/123
+ *   /daemon/main/mouse/456
+ *   /daemon/usb/keyboard/789
+ * 
+ * Packet Flow:
+ *   Daemon Socket → routeToDevice() → registry.emit() → Subscribers
+ * 
+ * Command Flow:
+ *   Subscriber → (via metadata) → sendToDaemon() → Daemon Socket
  */
-public class IODaemonSource implements InputSource, AutoCloseable {
-    public static final String DEFAULT_UNIX_SOCKET_PATH = "/run/netnotes/notedaemon.sock";
+public class IODaemonSource implements AutoCloseable {
+    public static final String DEFAULT_SOCKET_PATH = "/run/netnotes/notedaemon.sock";
     
     private final String socketPath;
-    private final Executor executor;
+    private final String connectionName;
     private final InputSourceRegistry registry;
-    private final String sourceName;
+    private final ContextPath basePath;  // e.g., /daemon/main
     
     private SocketChannel socketChannel;
     private NoteBytesWriter writer;
     private NoteBytesReader reader;
+    
+    // State management
+    private final BitFlagStateMachine connectionState;
     private volatile boolean connected = false;
     private volatile boolean running = false;
-
-    private InputSourceCapabilities m_ioDaemonSourceCapabilities;
     
-    // Track devices: device_name -> DaemonDevice
-    private final Map<String, DaemonDevice> devicesByName = new ConcurrentHashMap<>();
-    private final Map<NoteBytesReadOnly, DaemonDevice> devicesById = new ConcurrentHashMap<>();
+    // Device tracking: sourceId → device info
+    private final Map<Integer, VirtualDevice> devices = new ConcurrentHashMap<>();
     
-    public IODaemonSource(String socketPath, String name, Executor executor) {
+    // Reverse lookup: deviceName → sourceId
+    private final Map<String, Integer> deviceNameToId = new ConcurrentHashMap<>();
+    
+    // Executor for socket I/O
+    private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    
+    public IODaemonSource(String socketPath, String connectionName) {
         this.socketPath = socketPath;
-        this.executor = executor;
+        this.connectionName = connectionName;
         this.registry = InputSourceRegistry.getInstance();
-        this.sourceName = name;
-        m_ioDaemonSourceCapabilities =  new InputSourceCapabilities.Builder("IODaemon")
-            .withMultiDevice()
-            .build();
+        this.basePath = ContextPath.of("daemon", connectionName);
+        this.connectionState = new BitFlagStateMachine(
+            "daemon-" + connectionName,
+            InputStateFlags.CONTAINER_ENABLED
+        );
+        
+        setupStateTransitions();
     }
     
-    public String getName(){
-        return sourceName;
+    private void setupStateTransitions() {
+        connectionState.onStateAdded(InputStateFlags.CONTAINER_ACTIVE, (old, now, bit) -> {
+            System.out.println("Daemon connection active: " + connectionName);
+        });
+        
+        connectionState.onStateAdded(InputStateFlags.PROCESS_KILLED, (old, now, bit) -> {
+            System.out.println("Daemon connection killed: " + connectionName);
+            close();
+        });
     }
-
+    
+    // ===== CONNECTION LIFECYCLE =====
+    
     /**
-     * Connect to daemon and negotiate protocol
+     * Connect to daemon and discover devices
      */
-    public boolean connect() throws IOException {
-        if(socketChannel.isConnected() && connected){
-            return true;
-        }
-        // Connect to Unix domain socket
+    public CompletableFuture<Void> connect() {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                establishConnection();
+                negotiateProtocol();
+                startRoutingLoop();
+                
+                connectionState.setFlag(InputStateFlags.CONTAINER_ACTIVE);
+                System.out.println("IODaemon connected at: " + basePath);
+                
+            } catch (IOException e) {
+                System.err.println("Daemon connection failed: " + e.getMessage());
+                throw new CompletionException(e);
+            }
+        }, ioExecutor);
+    }
+    
+    private void establishConnection() throws IOException {
         Path path = Path.of(socketPath);
         socketChannel = SocketChannel.open(StandardProtocolFamily.UNIX);
         UnixDomainSocketAddress addr = UnixDomainSocketAddress.of(path);
         socketChannel.connect(addr);
         
         if (!socketChannel.isConnected()) {
-            return false;
+            throw new IOException("Failed to connect to daemon");
         }
         
         InputStream inputStream = Channels.newInputStream(socketChannel);
@@ -91,88 +127,48 @@ public class IODaemonSource implements InputSource, AutoCloseable {
         reader = new NoteBytesReader(inputStream);
         
         connected = true;
-        
-        // Start protocol negotiation
-        negotiateProtocol();
-        return true;
     }
     
-    /**
-     * Protocol negotiation:
-     * 1. Send HELLO
-     * 2. Request capabilities
-     * 3. Receive available devices
-     * 4. Register each device with registry (get sourceIds)
-     * 5. Send sourceIds + PID back to daemon
-     * 6. Start routing loop
-     */
     private void negotiateProtocol() throws IOException {
         // 1. Send HELLO
-        sendCommand("hello", null);
+        sendCommand("hello");
         
         // 2. Request capabilities
-        sendCommand("capabilities", null);
+        sendCommand("capabilities");
         
-        // 3. Read capabilities response (OBJECT packet)
+        // 3. Read capabilities response
         NoteBytesReadOnly response = reader.nextNoteBytesReadOnly();
         if (response.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-            throw new IOException("Expected OBJECT response, got type: " + response.getType());
+            throw new IOException("Expected OBJECT response");
         }
         
         handleCapabilitiesResponse(response);
         
-        // 4. Register each device with registry and send back to daemon
+        // 4. Register each discovered device with daemon
         int ourPid = getPid();
         
-        for (DaemonDevice device : devicesByName.values()) {
-            // Registry generates the sourceId (as INTEGER NoteBytesReadOnly)
-            NoteBytesReadOnly sourceId = registry.registerSource(
-                device.name,
-                device.capabilities,
-                device.contextPath
-            );
+        for (VirtualDevice device : devices.values()) {
+            System.out.println("Registering device with daemon: " + device.name + 
+                             " (sourceId=" + device.sourceId + ")");
             
-            device.sourceId = sourceId;
-            devicesById.put(sourceId, device);
-            
-            System.out.println("Registered daemon device: " + device.name + 
-                             " with sourceId: " + sourceId.getAsInt());
-            
-            // 5. Send device registration to daemon
-            NoteBytesPair[] registrationParams = {
+            NoteBytesPair[] params = {
                 new NoteBytesPair("device", device.name),
-                new NoteBytesPair("source_id", sourceId),
+                new NoteBytesPair("source_id", new NoteBytesReadOnly(device.sourceId)),
                 new NoteBytesPair("pid", ourPid)
             };
-            sendCommand("register_device", registrationParams);
-            
-            // Register reply channel so destinations can talk back to daemon
-            registry.registerSourceReplyChannel(sourceId, command -> {
-                try {
-                    handleDestinationCommand(sourceId, command);
-                } catch (IOException e) {
-                    System.err.println("Error handling destination command: " + e.getMessage());
-                }
-            });
+            sendCommand("register_device", params);
         }
         
-        // 6. Request keyboard access (example)
-        sendCommand("request_keyboard", null);
-        
-        // 7. Start routing loop
-        running = true;
-        startRouting();
+        // 5. Request initial devices (example: keyboard)
+        sendCommand("request_keyboard");
     }
     
-    /**
-     * Handle capabilities response from daemon
-     */
     private void handleCapabilitiesResponse(NoteBytesReadOnly responseReadOnly) {
         NoteBytesMap response = responseReadOnly.getAsMap();
         
         String cmd = response.get("cmd").getAsString();
         if (!"capabilities".equals(cmd)) {
-            throw new IllegalStateException("Expected capabilities response, got: " + cmd);
+            throw new IllegalStateException("Expected capabilities response");
         }
         
         int version = response.get("version").getAsInt();
@@ -183,203 +179,264 @@ public class IODaemonSource implements InputSource, AutoCloseable {
         if (devicesValue != null && devicesValue.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
             NoteBytesReadOnly[] devicesArray = devicesValue.getAsNoteBytesArrayReadOnly().getAsArray();
             
-            for (int i = 0; i < devicesArray.length; i++) {
-                NoteBytesReadOnly deviceValue = devicesArray[i];
+            for (NoteBytesReadOnly deviceValue : devicesArray) {
                 if (deviceValue.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                     NoteBytesMap deviceMap = deviceValue.getAsMap();
                     
                     String deviceName = deviceMap.get("name").getAsString();
                     String deviceType = deviceMap.get("type").getAsString();
                     
-                    DaemonDevice device = new DaemonDevice();
-                    device.name = deviceName;
-                    device.deviceType = deviceType;
-                    device.capabilities = createCapabilities(deviceType);
-                    device.contextPath = ContextPath.of(socketPath, deviceName);
-                    
-                    devicesByName.put(deviceName, device);
-                    
-                    System.out.println("Found device: " + deviceName + " (type: " + deviceType + ")");
+                    createVirtualDevice(deviceName, deviceType);
                 }
             }
         }
     }
     
     /**
-     * Create capabilities based on device type
+     * Create virtual device and register in InputSourceRegistry
+     * 
+     * Path structure: /daemon/{connectionName}/{deviceType}/{sourceId}
+     * Example: /daemon/main/keyboard/123
      */
+    private VirtualDevice createVirtualDevice(String deviceName, String deviceType) {
+        // Create device capabilities
+        InputSourceCapabilities capabilities = createCapabilities(deviceType);
+        
+        // Register in InputSourceRegistry (registry generates sourceId)
+        ContextPath deviceBasePath = basePath.append(deviceType);
+        ContextPath fullPath = registry.registerSource(
+            deviceBasePath,
+            deviceName,
+            capabilities
+        );
+        
+        // Extract sourceId from path leaf
+        int sourceId = registry.getSourceIdFromPath(fullPath);
+        
+        // Create virtual device info
+        VirtualDevice device = new VirtualDevice(
+            sourceId,
+            deviceName,
+            deviceType,
+            fullPath
+        );
+        
+        // Store for routing
+        devices.put(sourceId, device);
+        deviceNameToId.put(deviceName, sourceId);
+        
+        System.out.println("Created virtual device: " + fullPath);
+        
+        return device;
+    }
+    
     private InputSourceCapabilities createCapabilities(String deviceType) {
-        if ("keyboard".equals(deviceType)) {
-            return new InputSourceCapabilities.Builder("Daemon Keyboard")
+        return switch (deviceType) {
+            case "keyboard" -> new InputSourceCapabilities.Builder("DaemonKeyboard")
                 .enableKeyboard()
                 .withScanCodes()
                 .build();
-        } else if ("mouse".equals(deviceType)) {
-            return new InputSourceCapabilities.Builder("Daemon Mouse")
+            case "mouse" -> new InputSourceCapabilities.Builder("DaemonMouse")
                 .enableMouse()
                 .providesAbsoluteCoordinates()
                 .build();
-        } else {
-            return new InputSourceCapabilities.Builder("Unknown Device")
+            default -> new InputSourceCapabilities.Builder("UnknownDevice")
                 .build();
-        }
+        };
     }
     
-    /**
-     * Start routing loop: read packets and route them
-     */
-    private void startRouting() {
-        executor.execute(() -> {
+    // ===== PACKET ROUTING LOOP =====
+    
+    private void startRoutingLoop() {
+        running = true;
+        
+        ioExecutor.execute(() -> {
             try {
                 while (running && connected) {
                     NoteBytesReadOnly first = reader.nextNoteBytesReadOnly();
                     if (first == null) {
+                        System.out.println("Daemon connection closed");
                         break;
                     }
                     
                     if (first.getType() == NoteBytesMetaData.INTEGER_TYPE) {
-                        // This IS the sourceId
-                        NoteBytesReadOnly sourceId = first;
-                        NoteBytesReadOnly packet = reader.nextNoteBytesReadOnly();
+                        // Format: [sourceId:INTEGER][payload:ANY]
+                        int sourceId = first.getAsInt();
+                        NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
                         
-                        if (packet == null) {
-                            System.err.println("Missing packet after sourceId");
+                        if (payload == null) {
+                            System.err.println("Missing payload after sourceId");
                             continue;
                         }
                         
-                        // Create routed packet and route it
-                        RoutedPacket routed = new RoutedPacket(sourceId, packet);
-                        registry.routePacket(routed);
+                        // Route to device via registry
+                        routeToDevice(sourceId, payload);
                         
                     } else if (first.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                         // Protocol message
                         handleProtocolMessage(first);
-                    } else {
-                        System.err.println("Unexpected packet type: " + first.getType());
                     }
                 }
             } catch (Exception e) {
                 System.err.println("Routing loop error: " + e.getMessage());
                 e.printStackTrace();
             } finally {
-                running = false;
                 handleDisconnect();
             }
         });
     }
     
     /**
-     * Handle protocol messages (OBJECT packets during operation)
+     * Route packet from daemon to device subscribers via registry
      */
-    private void handleProtocolMessage(NoteBytesReadOnly messageReadOnly) {
-        NoteBytesMap message = messageReadOnly.getAsMap();
-        
-        int type = message.get("typ").getAsByte();
-        
-        if (type == 249) { // TYPE_DISCONNECTED
-            String deviceName = message.get("device").getAsString();
-            System.out.println("Device disconnected: " + deviceName);
-            
-            DaemonDevice device = devicesByName.get(deviceName);
-            if (device != null) {
-                registry.setSourceState(device.sourceId, SourceState.DISCONNECTED_BIT, true);
-            }
-        } else if (type == 248) { // TYPE_ERROR
-            int errorCode = message.get("err").getAsInt();
-            String errorMsg = message.get("msg").getAsString();
-            System.err.println("Daemon error " + errorCode + ": " + errorMsg);
-        } else if (type == 252) { // TYPE_ACCEPT
-            String status = message.get("sts").getAsString();
-            System.out.println("Daemon: " + status);
-        }
-    }
-    
-    /**
-     * Handle command from destination (sent via registry)
-     */
-    private void handleDestinationCommand(NoteBytesReadOnly sourceId, NoteBytesReadOnly command) 
-            throws IOException {
-        
-        DaemonDevice device = devicesById.get(sourceId);
+    private void routeToDevice(int sourceId, NoteBytesReadOnly payload) {
+        VirtualDevice device = devices.get(sourceId);
         if (device == null) {
-            System.err.println("Unknown sourceId: " + sourceId);
+            System.err.println("Unknown sourceId from daemon: " + sourceId);
             return;
         }
         
-        NoteBytesMap commandMap = command.getAsMap();
-        String cmd = commandMap.get("cmd").getAsString();
-        
-        System.out.println("Destination command for " + device.name + ": " + cmd);
-        
-        if ("enable_encryption".equals(cmd)) {
-            // Forward encryption request to daemon
-            NoteBytesPair[] params = {
-                new NoteBytesPair("device", device.name),
-                new NoteBytesPair("phase", commandMap.get("phase").getAsInt()),
-                new NoteBytesPair("pub_key", commandMap.get("pub_key"))
-            };
-            sendCommand("enable_encryption", params);
-        }
-        // Add other command handlers as needed
+        // Emit through InputSourceRegistry
+        // Registry will create RoutedPacket and publish to all subscribers
+        registry.emit(sourceId, payload);
     }
     
+    private void handleProtocolMessage(NoteBytesReadOnly messageReadOnly) {
+        NoteBytesMap message = messageReadOnly.getAsMap();
+        int type = message.get("typ").getAsByte();
+        
+        switch (type) {
+            case 249: { // TYPE_DISCONNECTED
+                String deviceName = message.get("device").getAsString();
+                System.out.println("Device disconnected: " + deviceName);
+                
+                Integer sourceId = deviceNameToId.get(deviceName);
+                if (sourceId != null) {
+                    VirtualDevice device = devices.get(sourceId);
+                    if (device != null) {
+                        registry.setSourceState(device.fullPath, InputStateFlags.PROCESS_SUSPENDED);
+                    }
+                }
+                break;
+            }
+            case 248: { // TYPE_ERROR
+                int errorCode = message.get("err").getAsInt();
+                String errorMsg = message.get("msg").getAsString();
+                System.err.println("Daemon error " + errorCode + ": " + errorMsg);
+                break;
+            }
+            case 252: { // TYPE_ACCEPT
+                String status = message.get("sts").getAsString();
+                System.out.println("Daemon: " + status);
+                break;
+            }
+        }
+    }
+    
+    // ===== SEND TO DAEMON =====
+    
     /**
-     * Send a command to the daemon (OBJECT packet)
+     * Send command to daemon (for control operations)
      */
-    private void sendCommand(String command, NoteBytesPair[] params) throws IOException {
+    public CompletableFuture<Void> sendControlCommand(String command, NoteBytesPair... params) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                NoteBytesPair[] pairs = new NoteBytesPair[params.length + 2];
+                pairs[0] = new NoteBytesPair("typ", EventBytes.TYPE_CMD); // TYPE_CMD
+                pairs[1] = new NoteBytesPair("cmd", command);
+                
+                if (params != null && params.length > 0) {
+                    System.arraycopy(params, 0, pairs, 2, params.length);
+                }
+                
+                synchronized (writer) {
+                    writer.writeObject(new NoteBytesObject(pairs));
+                }
+                
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        }, ioExecutor);
+    }
+    
+    private void sendCommand(String command, NoteBytesPair... params) throws IOException {
         int pairCount = 2 + (params != null ? params.length : 0);
         NoteBytesPair[] pairs = new NoteBytesPair[pairCount];
         
-        pairs[0] = new NoteBytesPair("typ", (byte) 254); // TYPE_CMD
+        pairs[0] = new NoteBytesPair("typ", EventBytes.TYPE_CMD);
         pairs[1] = new NoteBytesPair("cmd", command);
         
         if (params != null) {
             System.arraycopy(params, 0, pairs, 2, params.length);
         }
         
-        writer.writeObject(new NoteBytesObject(pairs));
+        synchronized (writer) {
+            writer.writeObject(new NoteBytesObject(pairs));
+        }
     }
     
     /**
-     * Handle disconnection
+     * Send packet to daemon for a specific device (if device supports bidirectional)
      */
+    public CompletableFuture<Void> sendToDevice(int sourceId, NoteBytesReadOnly payload) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                synchronized (writer) {
+                    writer.write(new NoteBytesReadOnly(sourceId));
+                    writer.write(payload);
+                }
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        }, ioExecutor);
+    }
+    
+    // ===== QUERIES =====
+    
+    public List<VirtualDevice> getDevices() {
+        return new ArrayList<>(devices.values());
+    }
+    
+    public VirtualDevice getDevice(int sourceId) {
+        return devices.get(sourceId);
+    }
+    
+    public VirtualDevice getDeviceByName(String deviceName) {
+        Integer sourceId = deviceNameToId.get(deviceName);
+        return sourceId != null ? devices.get(sourceId) : null;
+    }
+    
+    public boolean isConnected() {
+        return connected && connectionState.hasFlag(InputStateFlags.CONTAINER_ACTIVE);
+    }
+    
+    public ContextPath getBasePath() {
+        return basePath;
+    }
+    
+    public BitFlagStateMachine getConnectionState() {
+        return connectionState;
+    }
+    
+    // ===== CLEANUP =====
+    
     private void handleDisconnect() {
         connected = false;
+        running = false;
         
-        // Mark all devices as disconnected
-        for (DaemonDevice device : devicesByName.values()) {
-            if (device.sourceId != null) {
-                registry.setSourceState(device.sourceId, SourceState.DISCONNECTED_BIT, true);
-            }
+        connectionState.clearFlag(InputStateFlags.CONTAINER_ACTIVE);
+        
+        // Mark all devices as suspended
+        for (VirtualDevice device : devices.values()) {
+            registry.setSourceState(device.fullPath, InputStateFlags.PROCESS_SUSPENDED);
         }
         
-        System.out.println("Disconnected from daemon");
-    }
-    
-    /**
-     * Get list of registered devices
-     */
-    public List<DaemonDevice> getDevices() {
-        return new ArrayList<>(devicesByName.values());
-    }
-    
-    /**
-     * Check if connected
-     */
-    public boolean isConnected() {
-        return connected;
-    }
-    
-    /**
-     * Get current process PID
-     */
-    private int getPid() {
-        return (int) ProcessHandle.current().pid();
+        System.out.println("Disconnected from daemon: " + connectionName);
     }
     
     @Override
     public void close() {
-        if(connected){
+        if (connected) {
             running = false;
             connected = false;
             
@@ -388,55 +445,52 @@ public class IODaemonSource implements InputSource, AutoCloseable {
                     socketChannel.close();
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                System.err.println("Error closing socket: " + e.getMessage());
             }
             
             // Unregister all devices
-            for (DaemonDevice device : devicesByName.values()) {
-                if (device.sourceId != null) {
-                    registry.unregisterSource(device.sourceId);
-                }
+            for (VirtualDevice device : devices.values()) {
+                registry.unregisterSource(device.fullPath);
             }
             
-            devicesByName.clear();
-            devicesById.clear();
+            devices.clear();
+            deviceNameToId.clear();
+            
+            connectionState.setFlag(InputStateFlags.PROCESS_KILLED);
+            ioExecutor.shutdown();
         }
     }
     
+    private int getPid() {
+        return (int) ProcessHandle.current().pid();
+    }
+    
+    // ===== VIRTUAL DEVICE INFO =====
+    
     /**
-     * Represents a device from the daemon
+     * VirtualDevice - Information about a tunneled daemon device
      */
-    public static class DaemonDevice {
-        public String name;
-        public String deviceType;
-        public NoteBytesReadOnly sourceId;
-        public InputSourceCapabilities capabilities;
-        public ContextPath contextPath;
+    public static class VirtualDevice {
+        public final int sourceId;
+        public final String name;
+        public final String type;
+        public final ContextPath fullPath;
+        
+        public VirtualDevice(int sourceId, String name, String type, ContextPath fullPath) {
+            this.sourceId = sourceId;
+            this.name = name;
+            this.type = type;
+            this.fullPath = fullPath;
+        }
+        
+        public NoteBytesReadOnly getSourceIdAsNoteBytes() {
+            return new NoteBytesReadOnly(sourceId);
+        }
         
         @Override
         public String toString() {
-            return "DaemonDevice{" +
-                   "name='" + name + '\'' +
-                   ", type='" + deviceType + '\'' +
-                   ", sourceId=" + (sourceId != null ? sourceId.getAsInt() : "null") +
-                   '}';
+            return String.format("VirtualDevice{id=%d, name='%s', type='%s', path=%s}",
+                sourceId, name, type, fullPath);
         }
     }
-
-    @Override
-    public void start() throws IOException {
-        
-        connect();
-      
-    }
-
-    @Override
-    public void stop() {
-        close();
-    }
-
-    public InputSourceCapabilities getCapabilities(){
-        return m_ioDaemonSourceCapabilities;
-    }
-
 }

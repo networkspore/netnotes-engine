@@ -60,6 +60,11 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
         return null;
         
     }
+    
+    @Override
+    public int hashCode(){
+        return Arrays.hashCode(get());
+    }
 
     public NoteBytes get(int index){
         return getAt(index);
@@ -117,6 +122,8 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
         return getAsReadOnlyStream().toList();
     }
 
+    public boolean isEmpty() { return size() == 0; }
+    
 
     public boolean contains(NoteBytes noteBytes){
         return indexOf(noteBytes) != -1;

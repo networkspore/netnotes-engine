@@ -1,4 +1,4 @@
-package io.netnotes.engine.io.processing;
+package io.netnotes.engine.io;
 
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;

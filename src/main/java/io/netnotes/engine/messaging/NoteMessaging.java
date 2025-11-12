@@ -1,5 +1,6 @@
 package io.netnotes.engine.messaging;
 
+import io.netnotes.engine.io.events.EventBytes;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -216,7 +217,7 @@ public class NoteMessaging {
 
     public static NoteBytesObject getCmdObject(String subject) {
         NoteBytesObject nbo = new NoteBytesObject();
-        nbo.add(EventBytes.TYPE_CMD, subject);
+        nbo.add(EventBytes.NB_TYPE_CMD, subject);
         nbo.add("timeStamp", System.currentTimeMillis());
         return nbo;
     }

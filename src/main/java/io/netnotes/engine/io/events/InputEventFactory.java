@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.messaging.EventBytes;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -22,21 +21,21 @@ public final class InputEventFactory {
 
     static {
         // ===== Mouse Events =====
-        REGISTRY.put(EventBytes.EVENT_MOUSE_BUTTON_DOWN, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_MOUSE_BUTTON_DOWN, (src, flags, p) ->
             new MouseButtonDownEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsDouble(),
                 p[2].getAsDouble(),
                 flags));
 
-        REGISTRY.put(EventBytes.EVENT_MOUSE_BUTTON_UP, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_MOUSE_BUTTON_UP, (src, flags, p) ->
             new MouseButtonUpEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsDouble(),
                 p[2].getAsDouble(),
                 flags));
 
-        REGISTRY.put(EventBytes.EVENT_SCROLL, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_SCROLL, (src, flags, p) ->
             new ScrollEvent(src,
                 p[0].getAsDouble(),
                 p[1].getAsDouble(),
@@ -45,33 +44,33 @@ public final class InputEventFactory {
                 flags));
 
         // ===== Keyboard Events =====
-        REGISTRY.put(EventBytes.EVENT_KEY_UP, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_KEY_UP, (src, flags, p) ->
             new KeyUpEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsInt(),
                 flags));
 
-        REGISTRY.put(EventBytes.EVENT_KEY_REPEAT, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_KEY_REPEAT, (src, flags, p) ->
             new KeyRepeatEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsInt(),
                 flags));
 
-        REGISTRY.put(EventBytes.EVENT_KEY_CHAR, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_KEY_CHAR, (src, flags, p) ->
             new KeyCharEvent(src,
                 p[0].getAsInt(),
                 flags));
 
-        REGISTRY.put(EventBytes.EVENT_KEY_CHAR_MODS, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_KEY_CHAR_MODS, (src, flags, p) ->
             new KeyCharModsEvent(src,
                 p[0].getAsInt(),
                 flags));
 
         // ===== Focus Events =====
-        REGISTRY.put(EventBytes.EVENT_FOCUS_GAINED, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_FOCUS_GAINED, (src, flags, p) ->
             new FocusGainedEvent(src));
 
-        REGISTRY.put(EventBytes.EVENT_FOCUS_LOST, (src, flags, p) ->
+        REGISTRY.put(EventBytes.NB_EVENT_FOCUS_LOST, (src, flags, p) ->
             new FocusLostEvent(src));
     }
 
