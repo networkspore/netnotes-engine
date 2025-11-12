@@ -261,8 +261,10 @@ public class ByteDecoding{
                 return new String(bytes, StandardCharsets.ISO_8859_1);
             case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
                 return new String(bytes, StandardCharsets.UTF_16LE);
-             case NoteBytesMetaData.STRING_TYPE:
+            case NoteBytesMetaData.STRING_TYPE:
                 return new String(bytes);
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+                return codePointBytesToString(bytes);
             default:
                 return new String(bytes);
         }

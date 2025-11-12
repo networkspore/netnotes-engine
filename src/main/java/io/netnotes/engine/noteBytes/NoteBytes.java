@@ -173,7 +173,7 @@ public class NoteBytes {
 
     @Override
     public String toString(){
-        return getAsString();
+        return ByteDecoding.displayByteValueAsString(m_value, m_type);
     }
 
     public char[] getAsChars(){

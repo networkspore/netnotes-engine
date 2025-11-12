@@ -1,0 +1,13 @@
+interface InputEvent: All  NoteBytesReadOnly sourceId
+EncryptedInputEvent: NoteBytesReadOnly encryptedPacket
+FocusGainedEvent: void
+FocusLostEvent: void
+KeyCharEvent: int codepoint, int stateFlags
+KeyCharModsEvent: int codepoint, int stateFlags
+KeyDownEvent: int key, int scancode, int stateFlags
+KeyRepeatEvent: int key, int scancode, int stateFlags
+KeyUpEvent: int key, int scancode, int stateFlags
+MouseButtonDownEvent: int button, double x, double y, int stateFlags
+MouseButtonUpEvent: int button, double x, double y, int stateFlags
+MouseMoveEvent: double x, double y, int stateFlags
+ScrollEvent:  double xOffset, double yOffset, double mouseX, double mouseY, int stateFlags

@@ -9,21 +9,13 @@ public interface InputSource {
     /**
      * Start emitting events to the output stream
      */
-    void start();
+    void start() throws Exception;
     
     /**
      * Stop emitting events
      */
     void stop();
     
-    
-    /**
-     * Get source capabilities
-     */
     InputSourceCapabilities getCapabilities();
     
-    /**
-     * Get unique source ID
-     */
-    int getSourceId();
 }

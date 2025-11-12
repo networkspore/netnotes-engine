@@ -33,6 +33,7 @@ public final class SourceState {
     public static final int FILTERED_MODE_BIT = 18;
     public static final int RECORDING_BIT = 19;
     public static final int PLAYBACK_BIT = 20;
+    public static final int BROADCASTING_BIT = 21;
     
     // Source health/diagnostics (bits 24-31)
     public static final int BUFFER_FULL_BIT = 24;

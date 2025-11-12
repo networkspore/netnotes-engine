@@ -1,6 +1,6 @@
 package io.netnotes.engine.noteBytes.processing;
 
-import java.io.ByteArrayOutputStream;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,13 +49,15 @@ public class NoteBytesReader implements AutoCloseable{
         int type = m_in.read();
         if(type != -1){
             byte[] fourBytes = new byte[4];
-
+            m_in.read(fourBytes);
             int len = ByteDecoding.bytesToIntBigEndian(fourBytes);
             byte[] data = readNextBytes(len);
             return new NoteBytesReadOnly(data, (byte) type);
         }
         return null;
     }
+
+
 
 
     public NoteBytesMetaData nextMetaData() throws IOException{
@@ -70,22 +72,52 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
     public byte[] readNextBytes(int size) throws IOException{
-        try(ByteArrayOutputStream byteOutput = new ByteArrayOutputStream(size)){
+
             int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
             byte[] buffer = new byte[bufferSize];
             int length = 0;
             int remaining = size;
+            byte[] byteOutput = new byte[size];
+            int offset = 0;
             while(remaining > 0 && ((length = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
-                byteOutput.write(buffer, 0, length);
+                System.arraycopy(buffer, 0, byteOutput, offset, length);
+                offset += length;
                 remaining -= length;
             }
             if(remaining > 0){
-                throw new IOException("Reached pre-mature end of stream expected: " + size);
+                throw new EOFException("Reached pre-mature end of stream expected: " + size);
             }
-            return byteOutput.toByteArray();
-        }
+            return byteOutput;
+        
     }
 
+    /****
+     * 
+     * @param buf buffer to write to
+     * @param offset offset of buffer to write to
+     * @param length bytes to write
+     * @return offset after writing bytes to buffer
+     * @throws IOException
+     */
+
+    public int readNextBytes(byte[] buf, int offset, int length) throws IOException{
+    
+            int bufferSize = length < StreamUtils.BUFFER_SIZE ? length : StreamUtils.BUFFER_SIZE;
+            byte[] buffer = new byte[bufferSize];
+            int readLength = 0;
+            int remaining = length;
+            int writeOffset = offset;
+            while(remaining > 0 && ((readLength = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
+                System.arraycopy(buffer, 0, buf, writeOffset, readLength);
+                writeOffset += readLength;
+                remaining -= readLength;
+            }
+            if(remaining > 0){
+                throw new EOFException("Reached pre-mature end of stream expected: " + length);
+            }
+            return writeOffset;
+        
+    }
 
 
 
