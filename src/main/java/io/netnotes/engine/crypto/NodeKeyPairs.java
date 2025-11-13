@@ -10,7 +10,7 @@ import org.bouncycastle.crypto.params.X25519KeyGenerationParameters;
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 
-import io.netnotes.engine.messaging.NoteMessaging.Headings;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -63,7 +63,7 @@ public class NodeKeyPairs{
         m_isInternal = false;
         NoteBytesPair exPrivKeyPair = obj.get(EXCHANGE_PRIVATE_KEY);
         NoteBytesPair sigPrivKeyPair = obj.get(SIGNATURE_PRIVATE_KEY);
-        NoteBytesPair uuidPair = obj.get(Headings.UUID_128);
+        NoteBytesPair uuidPair = obj.get(Keys.UUID_128);
 
         if(exPrivKeyPair == null || sigPrivKeyPair == null || uuidPair == null){
             throw new IllegalArgumentException("Object is missing required arguments");
@@ -111,7 +111,7 @@ public class NodeKeyPairs{
         NoteBytesReadOnly sigPrivKey = new NoteBytesReadOnly(m_signPrivateKey.getEncoded());
 
         NoteBytesObject obj = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Headings.UUID_128, m_uuid),
+            new NoteBytesPair(Keys.UUID_128, m_uuid),
             new NoteBytesPair(EXCHANGE_PRIVATE_KEY, exPrivKey),
             new NoteBytesPair(SIGNATURE_PRIVATE_KEY, sigPrivKey)
         });

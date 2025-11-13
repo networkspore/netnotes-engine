@@ -18,7 +18,7 @@ import javax.crypto.SecretKey;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.SettingsData.InvalidPasswordException;
 import io.netnotes.engine.crypto.HashServices;
-import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -165,14 +165,14 @@ public class NotePathFactory {
                 }
                 try {
                     getSettingsData().updatePassword(oldPassword, newPassword);
-                    ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 3, 4, 
+                    ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 3, 4, 
                         "Created new key",progressWriter);
                  } catch (IOException | InvalidPasswordException | InvalidKeySpecException | NoSuchAlgorithmException e) {
                      throw new RuntimeException("Failed to update password", e);
                 } 
             }, getExecService())
             .thenCompose(v -> {
-                ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 4, 4, 
+                ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 4, 4, 
                         "Opening file path ledger",progressWriter);
                 return NotePathReEncryption.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
             });
@@ -186,7 +186,7 @@ public class NotePathFactory {
     
     protected CompletableFuture<NotePath> deleteNoteFilePath(NotePath notePath){
 
-        notePath.progressMsg(NoteMessaging.Status.STARTING,3, 4, "Initializing pipeline");
+        notePath.progressMsg(ProtocolMesssages.STARTING,3, 4, "Initializing pipeline");
         
         File ledger = notePath.getPathLedger();
         SecretKey secretKey = getSecretKey();

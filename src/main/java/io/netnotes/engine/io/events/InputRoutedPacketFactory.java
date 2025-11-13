@@ -8,6 +8,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.io.InputSourceRegistry;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 
 /**
  * InputPacket - Binary format for input events
@@ -15,11 +16,6 @@ import io.netnotes.engine.io.InputSourceRegistry;
  */
 public class InputRoutedPacketFactory {
   
-   public static final NoteBytesReadOnly SOURCE_KEY        = new NoteBytesReadOnly("sId");
-   public static final NoteBytesReadOnly TYPE_KEY          = new NoteBytesReadOnly("typ");
-   public static final NoteBytesReadOnly SEQUENCE_KEY      = new NoteBytesReadOnly("seq");
-   public static final NoteBytesReadOnly STATE_FLAGS_KEY   = new NoteBytesReadOnly("stF");
-   public static final NoteBytesReadOnly PAYLOAD_KEY       = new NoteBytesReadOnly("pld");
     
     private static final int BASE_BODY_SIZE = 3;
 
@@ -34,7 +30,7 @@ public class InputRoutedPacketFactory {
     // Mouse event creators
     
    public void createMouseMove(double x, double y, int stateFlags) {
-        of(EventBytes.NB_EVENT_MOUSE_MOVE_ABSOLUTE, 
+        of(EventBytes.EVENT_MOUSE_MOVE_ABSOLUTE, 
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(x),
@@ -42,7 +38,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createMouseMoveRelative(double dx, double dy, int stateFlags) {
-        of(EventBytes.NB_EVENT_MOUSE_MOVE_RELATIVE,
+        of(EventBytes.EVENT_MOUSE_MOVE_RELATIVE,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(dx),
@@ -50,7 +46,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createMouseButtonDown(int button, double x, double y, int stateFlags) {
-        of(EventBytes.NB_EVENT_MOUSE_BUTTON_DOWN,
+        of(EventBytes.EVENT_MOUSE_BUTTON_DOWN,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(button),
@@ -59,7 +55,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createMouseButtonUp(int button, double x, double y, int stateFlags) {
-        of(EventBytes.NB_EVENT_MOUSE_BUTTON_UP,
+        of(EventBytes.EVENT_MOUSE_BUTTON_UP,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(button),
@@ -68,7 +64,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createMouseClick(int button, double x, double y, int clickCount, int stateFlags) {
-        of(EventBytes.NB_EVENT_MOUSE_CLICK,
+        of(EventBytes.EVENT_MOUSE_CLICK,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(button),
@@ -78,7 +74,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createScroll(double xOffset, double yOffset, double mouseX, double mouseY, int stateFlags) {
-        of(EventBytes.NB_EVENT_SCROLL,
+        of(EventBytes.EVENT_SCROLL,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(xOffset),
@@ -90,7 +86,7 @@ public class InputRoutedPacketFactory {
     // Keyboard event creators
     
    public void createKeyDown(int key, int scancode, int stateFlags) {
-        of(EventBytes.NB_EVENT_KEY_DOWN,
+        of(EventBytes.EVENT_KEY_DOWN,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(key),
@@ -98,7 +94,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createKeyUp(int key, int scancode, int stateFlags) {
-        of(EventBytes.NB_EVENT_KEY_UP,
+        of(EventBytes.EVENT_KEY_UP,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(key),
@@ -106,7 +102,7 @@ public class InputRoutedPacketFactory {
     }
     
    public void createKeyRepeat(int key, int scancode, int stateFlags) {
-        of(EventBytes.NB_EVENT_KEY_REPEAT,
+        of(EventBytes.EVENT_KEY_REPEAT,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(key),
@@ -114,14 +110,14 @@ public class InputRoutedPacketFactory {
     }
     
    public void createKeyChar(int codepoint, int stateFlags) {
-        of(EventBytes.NB_EVENT_KEY_CHAR,
+        of(EventBytes.EVENT_KEY_CHAR,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(codepoint));
     }
     
    public void createKeyCharMods(int codepoint, int stateFlags) {
-        of(EventBytes.NB_EVENT_KEY_CHAR_MODS,
+        of(EventBytes.EVENT_KEY_CHAR_MODS,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             stateFlags,
             new NoteBytesReadOnly(codepoint));
@@ -130,13 +126,13 @@ public class InputRoutedPacketFactory {
     // Focus event creators
     
    public void createFocusGained(NoteBytesReadOnly sourceId) {
-        of(EventBytes.NB_EVENT_FOCUS_GAINED,
+        of(EventBytes.EVENT_FOCUS_GAINED,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             0);
     }
     
    public void createFocusLost(NoteBytesReadOnly sourceId) {
-        of(EventBytes.NB_EVENT_FOCUS_LOST,
+        of(EventBytes.EVENT_FOCUS_LOST,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             0);
     }
@@ -144,7 +140,7 @@ public class InputRoutedPacketFactory {
     // Window event creators
     
    public void createFramebufferResize(int width, int height) {
-        of(EventBytes.NB_EVENT_FRAMEBUFFER_RESIZE,
+        of(EventBytes.EVENT_FRAMEBUFFER_RESIZE,
             new NoteBytesReadOnly(AtomicSequence.getNextSequence()),
             0,
             new NoteBytesReadOnly(width),
@@ -175,16 +171,16 @@ public class InputRoutedPacketFactory {
         int size = BASE_BODY_SIZE + (hasStateFlags ? 1 : 0) + (hasPayload ? 1 : 0);
         
         NoteBytesPair[] pairs = new NoteBytesPair[size];
-        pairs[0] = new NoteBytesPair(TYPE_KEY, type);
-        pairs[1] = new NoteBytesPair(SEQUENCE_KEY, atomicSequence);
+        pairs[0] = new NoteBytesPair(Keys.TYPE_KEY, type);
+        pairs[1] = new NoteBytesPair(Keys.SEQUENCE_KEY, atomicSequence);
         
         int index = BASE_BODY_SIZE;
         
         if (hasStateFlags) {
-            pairs[index++] = new NoteBytesPair(STATE_FLAGS_KEY, new NoteInteger(stateFlags));
+            pairs[index++] = new NoteBytesPair(Keys.STATE_FLAGS_KEY, new NoteInteger(stateFlags));
         }
         if (hasPayload) {
-            pairs[index] = new NoteBytesPair(PAYLOAD_KEY, new NoteBytesArray(payload));
+            pairs[index] = new NoteBytesPair(Keys.PAYLOAD_KEY, new NoteBytesArray(payload));
         }
         
         NoteBytesReadOnly packet = new NoteBytesReadOnly(

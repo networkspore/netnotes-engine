@@ -16,6 +16,7 @@ import javax.crypto.SecretKey;
 
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -84,7 +85,7 @@ public class NotePathReEncryption {
                     NoteBytesWriter writer = new NoteBytesWriter(parsedOutput)
                 ) {
 
-                    ProgressMessage.writeAsync(NoteMessaging.General.INFO,
+                    ProgressMessage.writeAsync(ProtocolMesssages.INFO,
                         12, fileSize, "Finding file paths", progressWriter);
                     
                     rootLevelParse(futures, fileSize, fileUpdateSemaphore, oldKey, newKey, reader, writer, 
@@ -101,8 +102,8 @@ public class NotePathReEncryption {
                     futures.stream()
                         .map(future -> future.whenComplete((result, ex) -> {
                             int completed = completedCount.incrementAndGet();
-                            ProgressMessage.writeAsync(NoteMessaging.Status.UPDATED,
-                                completed, totalFutures, NoteMessaging.General.SUCCESS, progressWriter);
+                            ProgressMessage.writeAsync(ProtocolMesssages.UPDATED,
+                               completed, totalFutures, ProtocolMesssages.SUCCESS, progressWriter);
                     })).toArray(CompletableFuture[]::new)
                 );
 
@@ -196,13 +197,13 @@ public class NotePathReEncryption {
                     File tmpFile = new File(file.getAbsolutePath() + ".tmp");
                     fileUpdateSemaphore.acquire();
                     try{
-                        ProgressMessage.writeAsync(NoteMessaging.General.INFO,
+                        ProgressMessage.writeAsync(ProtocolMesssages.INFO,
                             byteCounter.get(), fileSize, file.getAbsolutePath(), progressWriter);
                         
                         FileStreamUtils.updateFileEncryption(oldKey, newKey, file, tmpFile, progressWriter);
 
                     }catch(Exception e){
-                        TaskMessages.writeErrorAsync(NoteMessaging.General.ERROR, file.getAbsolutePath() , e, progressWriter);
+                        TaskMessages.writeErrorAsync(ProtocolMesssages.ERROR, file.getAbsolutePath() , e, progressWriter);
                     }finally{
                         try{
                             Files.deleteIfExists(tmpFile.toPath());
@@ -217,7 +218,7 @@ public class NotePathReEncryption {
                 }
               
             }else{
-                ProgressMessage.writeAsync(NoteMessaging.General.INFO,
+                ProgressMessage.writeAsync(ProtocolMesssages.INFO,
                     byteCounter.get(), fileSize, file.getAbsolutePath(), progressWriter);
             }
         }, execService);

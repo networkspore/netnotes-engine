@@ -8,7 +8,8 @@ import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -264,39 +265,63 @@ public class NotePath{
         completableList.add(CompletableFuture.runAsync(()->{
             String filePath = filePathValue.getAsString();
 
-            progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath,new NoteBytesPair[]{new NoteBytesPair(
-                TaskMessages.STATUS_KEY, NoteMessaging.Status.STARTED) });
-           
+            progressMsg(ProtocolMesssages.UPDATED,new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), new NoteBytesReadOnly(filePath),new NoteBytesPair[]{
+                new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.STARTED) 
+            });
             try{
                 
                 Files.deleteIfExists(new File(filePath).toPath());
                
-                progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath, new NoteBytesPair[]{
-                    new NoteBytesPair(TaskMessages.STATUS_KEY, NoteMessaging.General.SUCCESS)});
+                progressMsg(ProtocolMesssages.UPDATED, new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), new NoteBytesReadOnly( filePath), new NoteBytesPair[]{
+                    new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.SUCCESS)});
 
             }catch(IOException e){
 
-                progressMsg(NoteMessaging.Status.UPDATED,0, -1, filePath,  new NoteBytesPair[]{
-                    new NoteBytesPair(TaskMessages.STATUS_KEY, NoteMessaging.General.ERROR),
-                    new NoteBytesPair(TaskMessages.EXCEPTION_KEY, e)});
-    
+                progressMsg(ProtocolMesssages.UPDATED,new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), 
+                    new NoteBytesReadOnly(filePath),  
+                    new NoteBytesPair[]{
+                        new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.ERROR),
+                        new NoteBytesPair(Keys.EXCEPTION_KEY, e)});
+        
                 throw new RuntimeException(filePath, e);
             }
         }));
     }
 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long total, long completed, String message){
+        return progressMsg(scope, new NoteBytesReadOnly(total), new NoteBytesReadOnly(completed), 
+            new NoteBytesReadOnly(message));
+    }
+
     public CompletableFuture<Integer> progressMsg(String scope, long total, long completed, String message){
+        return progressMsg(new NoteBytesReadOnly(scope), new NoteBytesReadOnly(total), new NoteBytesReadOnly(completed), new NoteBytesReadOnly(message));
+    }
+
+
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, NoteBytesReadOnly total, NoteBytesReadOnly completed, NoteBytesReadOnly message){
         return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, progressWriter) : 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }
 
-    public CompletableFuture<Integer> progressMsg(String scope, long total, long completed, String message, 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long total, long completed, String message, 
+        NoteBytesPair[] pairs){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope, new NoteBytesReadOnly( total), 
+            new NoteBytesReadOnly(completed), new NoteBytesReadOnly(message), pairs, progressWriter) : 
+            CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
+    }
+
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, NoteBytesReadOnly total, NoteBytesReadOnly completed, NoteBytesReadOnly message, 
         NoteBytesPair[] pairs){
         return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, pairs, progressWriter) : 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }
 
-     public CompletableFuture<Integer> errorMsg(String scope, String message, Throwable e){
+     public CompletableFuture<Integer> errorMsg(NoteBytesReadOnly scope, String message, Throwable e){
+        return progressWriter != null ? progressWriter.writeAsync(TaskMessages.createErrorMessage(scope, message, e)): 
+            CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
+    }
+
+    public CompletableFuture<Integer> errorMsg(String scope, String message, Throwable e){
         return progressWriter != null ? progressWriter.writeAsync(TaskMessages.createErrorMessage(scope, message, e)): 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }

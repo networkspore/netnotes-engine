@@ -8,7 +8,7 @@ import java.util.concurrent.ExecutorService;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.streams.AESBackedInputStream;
@@ -28,7 +28,7 @@ public class NotePathDelete {
     ) {
         return CompletableFuture
             .runAsync(() -> {
-                notePath.progressMsg(NoteMessaging.Status.STARTING, 4, 4, 
+                notePath.progressMsg(ProtocolMesssages.STARTING, 4, 4, 
                 "Initialized, ledger parse starting");
                 
 
@@ -51,7 +51,7 @@ public class NotePathDelete {
                             int rootBucketSize = metaData.getLength();
                             if(notePath.getSize() == 1 && notePath.isRecursive()){
 
-                                notePath.progressMsg(NoteMessaging.General.PROCESSING,0, rootBucketSize,
+                                notePath.progressMsg(ProtocolMesssages.PROCESSING,0, rootBucketSize,
                                     "Path found: recursive pruning from file");
 
                                 //entire root path and all children deleted
@@ -59,7 +59,7 @@ public class NotePathDelete {
                                 StreamUtils.readWriteBytes(reader, writer);
                              
                             }else{
-                                notePath.progressMsg(NoteMessaging.General.PROCESSING,0, rootBucketSize,
+                                notePath.progressMsg(ProtocolMesssages.PROCESSING,0, rootBucketSize,
                                     "Path found: Finding end point");
 
                                 processFoundRootKey(notePath, secretKey, reader, writer);
@@ -74,7 +74,7 @@ public class NotePathDelete {
                     
                 } catch (Exception e) {
                     String msg = "Critical error, failed before completion";
-                    notePath.errorMsg(NoteMessaging.Status.STOPPING,  msg, e);
+                    notePath.errorMsg(ProtocolMesssages.STOPPING,  msg, e);
 
                     throw new RuntimeException(msg, e);
                 }
@@ -216,7 +216,7 @@ public class NotePathDelete {
                         notePath.setTargetFilePath(filePathValue);
                         
                     }
-                    notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
+                    notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
                         notePath.getRootPathSize(),isTarget ? "Target file path found" : "File path found");
                     
                     notePath.getDeletedFilePathLength().add(filePathValueSize);
@@ -228,7 +228,7 @@ public class NotePathDelete {
                     notePath.getByteCounter().add(metaDataSize);
                     notePath.getDeletedFilePathLength().add( metaDataSize);
 
-                    notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
+                    notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
                         notePath.getRootPathSize(), "Nested path found: " + key.getAsString());
                         
                     recursiveDeleteFull(notePath, notePath.getByteCounter().get() + metaData.getLength(), reader);
@@ -237,13 +237,13 @@ public class NotePathDelete {
                     notePath.errorMsg("recursiveDeleteFull: " + notePath.getByteCounter().get(),
                         msg, null);
 
-                    notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
+                    notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
                         notePath.getRootPathSize(), msg);
                     throw new IllegalArgumentException(msg);
                 }
             }else{
                 String msg = "Unexpected end of file:" + notePath.getByteCounter().get() + " expected:" + bucketEnd;
-                notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
+                notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
                         notePath.getRootPathSize(), msg);
                  throw new IllegalArgumentException(msg);
             }
@@ -265,7 +265,7 @@ public class NotePathDelete {
             if(nextNoteBytes == null){
                 if(notePath.getByteCounter().get() < bucketSize){
                     String msg = "Unexpected end of file";
-                    notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
+                    notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
                         notePath.getRootPathSize(), msg);
                     throw new IllegalArgumentException(msg);
                 }else{
@@ -290,14 +290,14 @@ public class NotePathDelete {
                         notePath.getByteCounter().add(filePathSize);
                         notePath.getDeletedFilePathLength().add(filePathSize);
 
-                        notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
-                            notePath.getByteCounter().get(), NoteMessaging.General.SUCCESS);
+                        notePath.progressMsg(ProtocolMesssages.PROCESSING, new NoteBytesReadOnly(notePath.getByteCounter().get()), 
+                            new NoteBytesReadOnly(notePath.getByteCounter().get()), ProtocolMesssages.SUCCESS);
                         return true;
                     }else{
                         notePath.skipKeyValue(nextNoteBytes, reader, writer);
 
-                        notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
-                            notePath.getRootPathSize(), NoteMessaging.General.INFO + ": found non target file path");
+                        notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
+                            notePath.getRootPathSize(), ProtocolMesssages.INFO + ": found non target file path");
                     }
                 }else if( currentPath != null && nextNoteBytes.equals(currentPath)){
                     NoteBytesMetaData metaData = reader.nextMetaData();
@@ -308,8 +308,8 @@ public class NotePathDelete {
                     if(notePath.getCurrentLevel().get() == notePath.getSize() -1 && notePath.isRecursive()){
                         
                         //document deleted key + metadata + value metadata + all children length 
-                        notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
-                            notePath.getRootPathSize(), NoteMessaging.General.INFO + ": found recursive delete point");
+                        notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
+                            notePath.getRootPathSize(), ProtocolMesssages.INFO + ": found recursive delete point");
 
                         notePath.getDeletedFilePathLength().add((metaDataSize * 2) + nextNoteBytes.byteLength());
                         int remainingPathSize = notePath.getByteCounter().get() + metaData.getLength();
@@ -319,8 +319,8 @@ public class NotePathDelete {
                         notePath.getByteCounter().add(writer.write(nextNoteBytes));
                         notePath.getByteCounter().add(writer.write(metaData));
 
-                        notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
-                            notePath.getRootPathSize(), NoteMessaging.General.INFO + ": found target path node " + 
+                        notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
+                            notePath.getRootPathSize(), ProtocolMesssages.INFO + ": found target path node " + 
                                 nextNoteBytes.getAsString()
                         );
 
@@ -331,8 +331,8 @@ public class NotePathDelete {
                 }else{
                     notePath.skipKeyValue(nextNoteBytes, reader, writer);
 
-                    notePath.progressMsg(NoteMessaging.General.PROCESSING, notePath.getByteCounter().get(), 
-                        notePath.getRootPathSize(), NoteMessaging.General.INFO + ": found non target path node " + 
+                    notePath.progressMsg(ProtocolMesssages.PROCESSING, notePath.getByteCounter().get(), 
+                        notePath.getRootPathSize(), ProtocolMesssages.INFO + ": found non target path node " + 
                             nextNoteBytes.getAsString()
                     );
                 }

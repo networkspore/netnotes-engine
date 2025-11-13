@@ -11,8 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 import io.netnotes.engine.messaging.TypedMessageMap;
-import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.messaging.NoteMessaging.General;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -99,7 +98,7 @@ public class NodeBroadcaster {
                         //Create boadcast result header
                         NoteBytesObject object = TypedMessageMap.createHeader(
                             this.broadcasterId, 
-                            NoteMessaging.General.BROADCAST_RESULT, 
+                            ProtocolMesssages.BROADCAST_RESULT, 
                             noteBytes
                         );
 
@@ -142,7 +141,8 @@ public class NodeBroadcaster {
         INode targetNode = nodeRegistry.get(recipientId);
 
         if (targetNode == null) {
-            resultMap.put(recipientId.copy(), TaskMessages.getTaskMessage(NoteMessaging.General.PROCESSING, General.ERROR, "Node not found"));
+            resultMap.put(recipientId.copy(), TaskMessages.getTaskMessage(ProtocolMesssages.PROCESSING, ProtocolMesssages.ERROR, 
+                new NoteBytesReadOnly("Node not found")));
             return CompletableFuture.completedFuture(null);
         }
 
@@ -172,14 +172,14 @@ public class NodeBroadcaster {
                     byte[] bytes = StreamUtils.readEntireOutputStream(replyOut);
                     resultMap.put(recipientId.copy(), new NoteBytes(bytes));
                 } catch (Exception e) {
-                    resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage(NoteMessaging.General.PROCESSING, "Failed to read reply", e));
+                    resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage(ProtocolMesssages.PROCESSING, "Failed to read reply", e));
                 }
             }, exec);
 
             return CompletableFuture.allOf(sendFuture, writeFuture, replyFuture);
 
         } catch (Exception e) {
-            resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage(NoteMessaging.General.PROCESSING, "Setup error for", e));
+            resultMap.put(recipientId.copy(),TaskMessages.createErrorMessage(ProtocolMesssages.PROCESSING, "Setup error for", e));
             return CompletableFuture.completedFuture(null);
         }
     }

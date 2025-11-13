@@ -94,6 +94,9 @@ public class NoteBytesReadOnly extends NoteBytes {
 
     }
 
+    public byte getAsByte(){
+        return getBytesInternal()[0];
+    }
     
  
     @Override

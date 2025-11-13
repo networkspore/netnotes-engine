@@ -3,6 +3,8 @@ package io.netnotes.engine.noteFiles.notePath;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -123,14 +125,14 @@ public class NoteFileService extends NotePathFactory {
         NoteBytesEphemeral newPassword,
         int batchSize
     ) {
-        ProgressMessage.writeAsync(NoteMessaging.Status.STARTING, 0, 4, "Aquiring file locks", 
+        ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 0, 4, "Aquiring file locks", 
             progressWriter);
 
         return prepareAllForKeyUpdate()
             .thenCompose(filePathLedger->
                 super.updateFilePathLedgerEncryption(filePathLedger, progressWriter, 
                     oldPassword, newPassword, batchSize)).whenComplete((result, throwable) -> {
-                        ProgressMessage.writeAsync(NoteMessaging.Status.STOPPING, 0, -1, "Releasing locks", 
+                        ProgressMessage.writeAsync(ProtocolMesssages.STOPPING, 0, -1, "Releasing locks", 
                             progressWriter);
                         completeKeyUpdateForAll();
                         StreamUtils.safeClose(progressWriter);
@@ -190,7 +192,7 @@ public class NoteFileService extends NotePathFactory {
         }
 
         if(progressWriter != null){
-            ProgressMessage.writeAsync(NoteMessaging.Status.STARTING,
+            ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
                     0, 4, "Aquiring lock", progressWriter);
         }
          List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
@@ -204,7 +206,7 @@ public class NoteFileService extends NotePathFactory {
 
             NotePath notePath = new NotePath(filePathLedger, path, recursive, progressWriter);
 
-            notePath.progressMsg(NoteMessaging.Status.STARTING,2, 4,
+            notePath.progressMsg(ProtocolMesssages.STARTING,2, 4,
                 "Initial lock aquired, preparing registry interfaces");
             return prepareForShutdown(path, recursive, interfaceList).thenCompose(v->deleteNoteFilePath(notePath));
         }).whenComplete((notePath, ex)->{
@@ -217,10 +219,10 @@ public class NoteFileService extends NotePathFactory {
                     managedInterface.releaseLock();
                 }
                 
-                notePath.progressMsg(NoteMessaging.Status.STOPPING, i, toRemoveSize, managedInterface.getId().getAsString(), new NoteBytesPair[]{
-                    new NoteBytesPair(NoteMessaging.General.STATUS, 
+                notePath.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, managedInterface.getId().getAsString(), new NoteBytesPair[]{
+                    new NoteBytesPair(Keys.STATUS_KEY, 
                         !managedInterface.isLocked() && isDeleted ? 
-                            NoteMessaging.General.SUCCESS : NoteMessaging.General.FAILED
+                            ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
                     )
                 });
                 

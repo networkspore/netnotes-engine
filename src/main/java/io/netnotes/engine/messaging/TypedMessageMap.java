@@ -58,6 +58,21 @@ public class TypedMessageMap extends MessageHeader {
         return m_values.get(TYPE_KEY);
     }
 
+    public static NoteBytesObject createHeader(NoteBytes senderId, NoteBytesReadOnly type, NoteBytes data){
+
+
+        NoteBytesMap map = new NoteBytesMap(new NoteBytesPair[]{
+            new NoteBytesPair(SENDER_ID_KEY, senderId),
+            new NoteBytesPair(TYPE_KEY, type),
+            new NoteBytesPair(DATA_KEY, data),
+            new NoteBytesPair(TIME_STAMP_KEY, System.currentTimeMillis())
+        });
+
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(HEADER_KEY, map.getNoteBytesObject())
+        });
+    }
+
     public static NoteBytesObject createHeader(NoteBytes senderId, String type, NoteBytes data){
 
 

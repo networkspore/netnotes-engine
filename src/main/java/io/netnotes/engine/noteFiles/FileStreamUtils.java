@@ -24,12 +24,13 @@ import javax.crypto.SecretKey;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
@@ -127,8 +128,8 @@ public class FileStreamUtils {
             Path filePath = file.toPath();
             Path tmpPath = tmpFile.toPath();
             if(progressWriter != null){
-                progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
-                    0, -1, NoteMessaging.Status.STARTED, new NoteBytesPair[]{
+                progressWriter.writeAsync(ProgressMessage.getProgressMessage(ProtocolMesssages.UPDATED_ENCRYPTION,
+                    new NoteBytesReadOnly( 0), new NoteBytesReadOnly( -1), ProtocolMesssages.STARTED, new NoteBytesPair[]{
                         new NoteBytesPair("file", file.getAbsolutePath()),
                         new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
                     }
@@ -160,8 +161,8 @@ public class FileStreamUtils {
                         outputStream.write(buffer, 0, length);
                         total += length;
                         if(progressWriter != null){
-                        progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
-                            total, fileSize, NoteMessaging.Status.UPDATED, new NoteBytesPair[]{
+                        progressWriter.writeAsync(ProgressMessage.getProgressMessage(ProtocolMesssages.UPDATED_ENCRYPTION,
+                            total, fileSize, ProtocolMesssages.UPDATED, new NoteBytesPair[]{
                                 new NoteBytesPair("file", file.getAbsolutePath()),
                                 new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
                             }
@@ -173,8 +174,8 @@ public class FileStreamUtils {
         
             Files.move(tmpPath, filePath, StandardCopyOption.REPLACE_EXISTING);
             if(progressWriter != null){
-                progressWriter.writeAsync(ProgressMessage.getProgressMessage("updateFileEncryption",
-                    0, -1, NoteMessaging.General.SUCCESS, new NoteBytesPair[]{
+                progressWriter.writeAsync(ProgressMessage.getProgressMessage(ProtocolMesssages.UPDATED_ENCRYPTION,
+                    0, -1, ProtocolMesssages.SUCCESS, new NoteBytesPair[]{
                         new NoteBytesPair("file", file.getAbsolutePath()),
                         new NoteBytesPair("tmpFile", tmpFile.getAbsolutePath())
                     }

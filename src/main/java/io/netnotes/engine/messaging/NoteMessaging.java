@@ -1,6 +1,5 @@
 package io.netnotes.engine.messaging;
 
-import io.netnotes.engine.io.events.EventBytes;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -17,54 +16,97 @@ public class NoteMessaging {
     public static final long POLLING_TIME = 7000;
 
 
-    /* =========================
-     * General constants
-     * ========================= */
-    public static class General {
-        public static final String DEFAULT = "Default";
-        public static final String SUCCESS = "Success";
-        public static final String ERROR = "Error";
-        public static final String INFO = "Info";
-        public static final String WARNING = "Warning";
-        public static final String FAILED = "Failed";
-        public static final String CANCEL = "Cancel";
-        public static final String READY = "Ready";
-        public static final String VERIFIED = "Verified";
-        public static final String BLOCKED = "Blocked";
-        public static final String INCOMPLETE = "Incomplete";
-        public static final String BROADCAST_RESULT = "Broadcast"; 
-        public static final String BROADCAST = "Broadcast Result";
-        public static final String STATUS = "Status";
-        public static final String PROCESSING = "Processing";
+
+
+
+
+    public static class ProtocolMesssages {
+            
+        
+        public static final NoteBytesReadOnly UPDATED_ENCRYPTION    = new NoteBytesReadOnly("updatedEncryption");
+        public static final NoteBytesReadOnly DISABLE_ENCRYPTION    = new NoteBytesReadOnly("disable_encryption");
+        public static final NoteBytesReadOnly ENABLE_ENCRYPTION     = new NoteBytesReadOnly("enable_encryption");   // Initialization vector
+        public static final NoteBytesReadOnly SUCCESS               = new NoteBytesReadOnly("success");
+        public static final NoteBytesReadOnly INFO                  = new NoteBytesReadOnly("info");
+      
+        public static final NoteBytesReadOnly UNKNOWN               = new NoteBytesReadOnly("unknown");
+        public static final NoteBytesReadOnly VERIFIED              = new NoteBytesReadOnly("verified");
+        public static final NoteBytesReadOnly BLOCKED               = new NoteBytesReadOnly("blocked");
+        public static final NoteBytesReadOnly INCOMPLETE            = new NoteBytesReadOnly("incomplete");
+        public static final NoteBytesReadOnly BROADCAST_RESULT      = new NoteBytesReadOnly("broadcast_result"); 
+        public static final NoteBytesReadOnly BROADCAST             = new NoteBytesReadOnly("broadcast");
+        public static final NoteBytesReadOnly PROCESSING            = new NoteBytesReadOnly("processing");
+
+        public static final NoteBytesReadOnly ERROR                 = new NoteBytesReadOnly("error");
+        public static final NoteBytesReadOnly DISCONNECTED          = new NoteBytesReadOnly("disconnected");
+        public static final NoteBytesReadOnly CONNECTED             = new NoteBytesReadOnly("connected");
+        public static final NoteBytesReadOnly PONG                  = new NoteBytesReadOnly("pong");
+        public static final NoteBytesReadOnly PING                  = new NoteBytesReadOnly("ping");
+        public static final NoteBytesReadOnly ACCEPT                = new NoteBytesReadOnly("accept");
+        public static final NoteBytesReadOnly HELLO                 = new NoteBytesReadOnly("hello");
+        public static final NoteBytesReadOnly READY                 = new NoteBytesReadOnly("ready");
+        public static final NoteBytesReadOnly SHUTDOWN              = new NoteBytesReadOnly("shutdown");
+        public static final NoteBytesReadOnly FAILED                = new NoteBytesReadOnly("failed");
+        public static final NoteBytesReadOnly CANCEL                = new NoteBytesReadOnly("cancel");
+        public static final NoteBytesReadOnly PROGRESS              = new NoteBytesReadOnly("progress");
+
+        public static final NoteBytesReadOnly STARTING              = new NoteBytesReadOnly( "starting");
+        public static final NoteBytesReadOnly STARTED               = new NoteBytesReadOnly( "started");
+        public static final NoteBytesReadOnly STOPPING              = new NoteBytesReadOnly( "stopping");
+        public static final NoteBytesReadOnly STOPPED               = new NoteBytesReadOnly( "stopped");
+        public static final NoteBytesReadOnly SHUTTING_DOWN         = new NoteBytesReadOnly( "shuttingDown");
+        public static final NoteBytesReadOnly MINIMIZED             = new NoteBytesReadOnly( "minimized");
+        public static final NoteBytesReadOnly UPDATED               = new NoteBytesReadOnly( "updated");
+        public static final NoteBytesReadOnly UNAVAILABLE           = new NoteBytesReadOnly( "unavailable");
+        public static final NoteBytesReadOnly AVAILABLE             = new NoteBytesReadOnly( "available");
+        public static final NoteBytesReadOnly TIMED_OUT             = new NoteBytesReadOnly( "timedOut");
+        public static final NoteBytesReadOnly DISABLED              = new NoteBytesReadOnly( "disabled");
+
+        public static final NoteBytesReadOnly CAPABILITIES          = new NoteBytesReadOnly( "capabilities");
+        public static final NoteBytesReadOnly REGISTER              = new NoteBytesReadOnly("register");
+        public static final NoteBytesReadOnly GET_AVAILABLE         = new NoteBytesReadOnly("getAvailable");
     }
 
-    public static class Headings {
-        public static final NoteBytesReadOnly UUID_128 = new NoteBytesReadOnly("uuid_128");
-        public static final NoteBytesReadOnly UUID_256 = new NoteBytesReadOnly("uuid_256");
-        public static final NoteBytesReadOnly TIME_STAMP = new NoteBytesReadOnly("timeStamp");
-        public static final NoteBytesReadOnly VERSION_KEY = new NoteBytesReadOnly("version");
-    }
+    public static class Keys {
+        public static final NoteBytesReadOnly UUID_128          = new NoteBytesReadOnly("uuid128");
+        public static final NoteBytesReadOnly UUID_256          = new NoteBytesReadOnly("uuid256");
+        public static final NoteBytesReadOnly TIME_STAMP        = new NoteBytesReadOnly("timeStamp");
+        public static final NoteBytesReadOnly VERSION_KEY       = new NoteBytesReadOnly("version");
+        public static final NoteBytesReadOnly SOURCE_ID_KEY     = new NoteBytesReadOnly("srcId");
+        public static final NoteBytesReadOnly TYPE_KEY          = new NoteBytesReadOnly("type");
+        public static final NoteBytesReadOnly SEQUENCE_KEY      = new NoteBytesReadOnly("seqId");
+        public static final NoteBytesReadOnly STATE_FLAGS_KEY   = new NoteBytesReadOnly("stFlags");
+        public static final NoteBytesReadOnly PAYLOAD_KEY       = new NoteBytesReadOnly("payload");
+        public static final NoteBytesReadOnly NAME_KEY          = new NoteBytesReadOnly("name");
+
+        public static final NoteBytesReadOnly CMD_KEY           = new NoteBytesReadOnly("cmd");
+        public final static NoteBytesReadOnly RESULT_KEY        = new NoteBytesReadOnly("result");
+        public final static NoteBytesReadOnly SCOPE_KEY         = new NoteBytesReadOnly("scope");
+        public final static NoteBytesReadOnly EXCEPTION_KEY     = new NoteBytesReadOnly("exception");
+        public static final NoteBytesReadOnly ERROR_KEY         = new NoteBytesReadOnly("error"); 
+        public static final NoteBytesReadOnly MSG_KEY           = new NoteBytesReadOnly("msg"); 
+        public static final NoteBytesReadOnly STATUS_KEY        = new NoteBytesReadOnly("status");  
+        public static final NoteBytesReadOnly WARNING_KEY       = new NoteBytesReadOnly("warning");
+        public static final NoteBytesReadOnly LOCATION_ID       = new NoteBytesReadOnly("locationId");
+        public static final NoteBytesReadOnly SENDER_ID_KEY     = new NoteBytesReadOnly("senderId");
+        public static final NoteBytesReadOnly RECEIVER_ID_KEY   = new NoteBytesReadOnly("receiverId");
+        public static final NoteBytesReadOnly CODE_KEY          = new NoteBytesReadOnly("code");
+        public static final NoteBytesReadOnly PID_KEY           = new NoteBytesReadOnly("pid");
+        public static final NoteBytesReadOnly DEVICE_KEY        = new NoteBytesReadOnly("device");
+        public static final NoteBytesReadOnly DEVICES_KEY       = new NoteBytesReadOnly("devices");
+
+        public final static NoteBytesReadOnly TOTAL_KEY = new NoteBytesReadOnly("total");
+        public final static NoteBytesReadOnly COMPLETED_KEY = new NoteBytesReadOnly("completed");
+
+        //encryption
+        public static final NoteBytesReadOnly ENCRYPTION_KEY = new NoteBytesReadOnly("encryption");  // Encrypted flag
+        public static final NoteBytesReadOnly CIPHER_KEY = new NoteBytesReadOnly("cipher");  // Ciphertext
+        public static final NoteBytesReadOnly PHASE_KEY = new NoteBytesReadOnly("phase");  // Phase
+        public static final NoteBytesReadOnly PUB_KEY = new NoteBytesReadOnly("pubKey");  // Public key
+        public static final NoteBytesReadOnly AES_IV_KEY = new NoteBytesReadOnly("aesIV");   // Initialization vector
 
 
-    /* =========================
-     * Status lifecycle constants
-     * ========================= */
-    public static class Status {
-        public static final String STARTING = "Status_Starting";
-        public static final String STARTED = "Status_Started";
-        public static final String STOPPING = "Status_Stopping";
-        public static final String STOPPED = "Status_Stopped";
-        public static final String SHUTTING_DOWN = "StatusShutting Down";
-        public static final String SHUTDOWN = "Status_Shutdown";
-
-        public static final String MINIMIZED = "Status_Minimized";
-        public static final String UPDATED = "Status_Updated";
-        public static final String UNAVAILABLE = "Status_Unavailable";
-        public static final String AVAILABLE = "Status_Available";
-        public static final String READY = "Status_Ready";
-        public static final String TIMED_OUT = "Status_Timed Out";
-        public static final String DISABLED = "Status_Disabled";
-        public static final String UNKNOWN = "Status_Unknown";
+        
     }
 
     /* =========================
@@ -217,8 +259,8 @@ public class NoteMessaging {
 
     public static NoteBytesObject getCmdObject(String subject) {
         NoteBytesObject nbo = new NoteBytesObject();
-        nbo.add(EventBytes.NB_TYPE_CMD, subject);
-        nbo.add("timeStamp", System.currentTimeMillis());
+        nbo.add(Keys.CMD_KEY, subject);
+        nbo.add(Keys.TIME_STAMP, System.currentTimeMillis());
         return nbo;
     }
 
@@ -226,7 +268,7 @@ public class NoteMessaging {
 
     public static NoteBytesObject getCmdObject(String cmd, NoteBytes locationId){        
         NoteBytesObject note = NoteMessaging.getCmdObject(cmd);
-        note.add("locationId", locationId);
+        note.add(Keys.LOCATION_ID, locationId);
         return note;
     }
 
@@ -242,9 +284,9 @@ public class NoteMessaging {
 
     public static NoteBytes getNameFromNetworkObject(NoteBytesObject bytesObject){
       
-        NoteBytesPair nameElement = bytesObject != null ? bytesObject.get("name") : null;
+        NoteBytesPair nameElement = bytesObject != null ? bytesObject.get(Keys.NAME_KEY) : null;
         
-        return nameElement != null ? nameElement.getValue() : new NoteBytes( "(Unknown)");
+        return nameElement != null ? nameElement.getValue() : new NoteBytes( ProtocolMesssages.UNKNOWN);
     
     }
 
@@ -254,7 +296,7 @@ public class NoteMessaging {
 
         for(NoteBytes noteBytes : array){
   
-            NoteBytesPair pair = noteBytes.getAsNoteBytesObject().get("name");
+            NoteBytesPair pair = noteBytes.getAsNoteBytesObject().get(Keys.NAME_KEY);
             
             if(pair != null && pair.getValue() != null){
                 if(nameNoteBytes.equals(pair.getValue())){
@@ -296,10 +338,10 @@ public class NoteMessaging {
     
     public static NoteBytesObject getNoteDataObject(NoteBytes type, NoteBytes code, long timeStamp, NoteBytes receiverId, NoteBytes senderId){
         NoteBytesObject nbo = new NoteBytesObject();
-        nbo.add("timeStamp", timeStamp);
-        nbo.add("receiverId", receiverId);
-        nbo.add("senderId", senderId);
-        nbo.add("code", code);
+        nbo.add(Keys.TIME_STAMP, timeStamp);
+        nbo.add(Keys.RECEIVER_ID_KEY, receiverId);
+        nbo.add(Keys.SENDER_ID_KEY, senderId);
+        nbo.add(Keys.CODE_KEY, code);
         return nbo;
     }
     

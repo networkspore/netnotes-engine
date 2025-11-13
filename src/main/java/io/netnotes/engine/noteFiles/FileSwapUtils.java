@@ -6,7 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
-import io.netnotes.engine.messaging.NoteMessaging.General;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteSerializable;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -38,8 +38,8 @@ public class FileSwapUtils {
             
             
             // Success case
-            NoteBytesObject result = TaskMessages.getTaskMessage(originalFile.getAbsolutePath(),
-                General.SUCCESS, "File length:" + bytesWritten);
+            NoteBytesObject result = TaskMessages.getTaskMessage(ProtocolMesssages.UPDATED,
+                ProtocolMesssages.SUCCESS, "File length:" + bytesWritten);
             result.add("completionStage", 2);
             return result;
             

@@ -3,7 +3,8 @@ package io.netnotes.engine.messaging.task;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.messaging.NoteMessaging.General;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -12,46 +13,74 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 
 public class TaskMessages {
-    public final static NoteBytesReadOnly MESSAGE_KEY = new NoteBytesReadOnly("message");
-    public final static NoteBytesReadOnly TYPE_KEY = new NoteBytesReadOnly("type");
-    public final static NoteBytesReadOnly EXCEPTION_KEY = new NoteBytesReadOnly("exception");
-    public final static NoteBytesReadOnly SCOPE_KEY = new NoteBytesReadOnly("scope");
-    public final static NoteBytesReadOnly RESULT_KEY = new NoteBytesReadOnly("result");
-    public final static NoteBytesReadOnly TIMESTAMP_KEY = new NoteBytesReadOnly("timeStamp");
-    public final static NoteBytesReadOnly STATUS_KEY = new NoteBytesReadOnly("status");
+
+     public static NoteBytesObject getTaskMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, String message){
+        return getTaskMessage(scope, type, new NoteBytesReadOnly(message));
+    }
 
     public static NoteBytesObject getTaskMessage(String scope, String type, String message){
+        return getTaskMessage(new NoteBytesReadOnly(scope), new NoteBytesReadOnly(type), new NoteBytesReadOnly(message));
+    }
+
+    public static NoteBytesObject getTaskMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(new NoteBytes(SCOPE_KEY), new NoteBytes(scope)),
-            new NoteBytesPair(new NoteBytes(TYPE_KEY), new NoteBytes(type)),
-            new NoteBytesPair(new NoteBytes(MESSAGE_KEY), message),
-            new NoteBytesPair(new NoteBytes(TIMESTAMP_KEY), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(Keys.SCOPE_KEY), new NoteBytes(scope)),
+            new NoteBytesPair(new NoteBytes(Keys.TYPE_KEY), new NoteBytes(type)),
+            new NoteBytesPair(new NoteBytes(Keys.MSG_KEY), message),
+            new NoteBytesPair(new NoteBytes(Keys.TIME_STAMP), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
-
     public static NoteBytesObject getProgressMessage(String scope, String type, String message){
+        return getProgressMessage(new NoteBytesReadOnly(scope),new NoteBytesReadOnly(type),new NoteBytesReadOnly(message));
+    }
+
+    public static NoteBytesObject getProgressMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(new NoteBytes(SCOPE_KEY), new NoteBytes(scope)),
-            new NoteBytesPair(new NoteBytes(TYPE_KEY), new NoteBytes(type)),
-            new NoteBytesPair(new NoteBytes(MESSAGE_KEY), message),
-            new NoteBytesPair(new NoteBytes(TIMESTAMP_KEY), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(Keys.SCOPE_KEY), scope),
+            new NoteBytesPair(new NoteBytes(Keys.TYPE_KEY), type),
+            new NoteBytesPair(new NoteBytes(Keys.MSG_KEY), message),
+            new NoteBytesPair(new NoteBytes(Keys.TIME_STAMP), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
     
     public static NoteBytesObject createSuccessResult(String scope, String message) {
-        NoteBytesObject result = getTaskMessage(scope, General.SUCCESS, message);
+        NoteBytesObject result = getTaskMessage(new NoteBytesReadOnly(scope), ProtocolMesssages.SUCCESS, new NoteBytesReadOnly(message));
         return result;
     }
 
  
 
     public static NoteBytesObject createErrorMessage(String scope, String message, Throwable e)  {
-        NoteBytesObject result = getTaskMessage(scope, General.ERROR, message);
+        NoteBytesObject result = getTaskMessage(new NoteBytesReadOnly(scope), ProtocolMesssages.ERROR, new NoteBytesReadOnly(message));
         if(e != null){
             try{
-                result.add(EXCEPTION_KEY, new NoteSerializable(e));
+                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
+            }catch(IOException ex){
+
+            }
+        }
+        return result;
+    }
+
+     public static NoteBytesObject createErrorMessage(NoteBytesReadOnly scope, String message, Throwable e)  {
+        NoteBytesObject result = getTaskMessage(scope, ProtocolMesssages.ERROR, new NoteBytesReadOnly(message));
+        if(e != null){
+            try{
+                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
+            }catch(IOException ex){
+
+            }
+        }
+        return result;
+    }
+
+     public static NoteBytesObject createErrorMessage(NoteBytesReadOnly scope, NoteBytesReadOnly message, Throwable e)  {
+        NoteBytesObject result = getTaskMessage(scope, ProtocolMesssages.ERROR, message);
+        if(e != null){
+            try{
+                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
             }catch(IOException ex){
 
             }
@@ -60,6 +89,10 @@ public class TaskMessages {
     }
 
 
+    public static CompletableFuture<Integer> writeErrorAsync(NoteBytesReadOnly scope, String message, Throwable e, AsyncNoteBytesWriter asyncWriter){
+
+        return asyncWriter.writeAsync(createErrorMessage(scope, message, e));
+    }
    
     public static CompletableFuture<Integer> writeErrorAsync(String scope, String message, Throwable e, AsyncNoteBytesWriter asyncWriter){
 
