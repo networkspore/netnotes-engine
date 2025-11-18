@@ -2,7 +2,6 @@ package io.netnotes.engine.noteFiles.notePath;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;

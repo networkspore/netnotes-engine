@@ -10,7 +10,7 @@ import java.util.concurrent.ExecutorService;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.core.bootstrap.BootstrapManager;
+import io.netnotes.engine.core.bootstrap.BaseSystemProcess;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
@@ -113,7 +113,7 @@ public class SettingsData {
     }
 
     private static File getSettingsFile() throws IOException{
-        File dataDir = BootstrapManager.getDataDir();
+        File dataDir = BaseSystemProcess.getDataDir();
         
         return new File(dataDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
         
