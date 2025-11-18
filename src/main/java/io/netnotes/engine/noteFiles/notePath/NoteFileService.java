@@ -220,7 +220,7 @@ public class NoteFileService extends NotePathFactory {
                 }
                 
                 notePath.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, managedInterface.getId().getAsString(), new NoteBytesPair[]{
-                    new NoteBytesPair(Keys.STATUS_KEY, 
+                    new NoteBytesPair(Keys.STATUS, 
                         !managedInterface.isLocked() && isDeleted ? 
                             ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
                     )

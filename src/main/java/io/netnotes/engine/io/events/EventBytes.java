@@ -51,6 +51,8 @@ public class EventBytes {
     public static final NoteBytesReadOnly EVENT_WINDOW_MOVE            = new NoteBytesReadOnly((byte)53);
     public static final NoteBytesReadOnly EVENT_WINDOW_CLOSE           = new NoteBytesReadOnly((byte)54);
     public static final NoteBytesReadOnly EVENT_FRAMEBUFFER_RESIZE     = new NoteBytesReadOnly((byte)55);
+
+    
     
     // ===== new NoteBytesReadOnly((byte)STATE CHANGE EVENTS (242-247) =====
     public static final NoteBytesReadOnly EVENT_RELEASE                = new NoteBytesReadOnly((byte) 242);

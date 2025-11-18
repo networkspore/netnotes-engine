@@ -7,8 +7,8 @@ package io.netnotes.engine.io;
 public class SourceStatistics {
         private volatile long packetCount = 0;
         private volatile long byteCount = 0;
-        private volatile long errorCount = 0;
         private volatile long lastPacketTime = 0;
+        private volatile long droppedCount = 0;
         
         public void incrementPacketCount() {
             packetCount++;
@@ -19,12 +19,12 @@ public class SourceStatistics {
             byteCount += bytes;
         }
         
-        public void incrementErrorCount() {
-            errorCount++;
+        public void incrementDroppedCount() {
+            droppedCount++;
         }
         
         public long getPacketCount() { return packetCount; }
         public long getByteCount() { return byteCount; }
-        public long getErrorCount() { return errorCount; }
+        public long getDroppedCount() { return droppedCount; }
         public long getLastPacketTime() { return lastPacketTime; }
     }

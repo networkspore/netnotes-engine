@@ -190,8 +190,8 @@ public class HashServices {
     }
 
 
-    public static String digestToUrlSafeString(byte[] bytes, int length){
-        return EncodingHelpers.encodeUrlSafeString(digestBytesToBytes(bytes, length));
+    public static String digestToB64UrlSafeString(byte[] bytes, int length){
+        return EncodingHelpers.encodeB64UrlSafeString(digestBytesToBytes(bytes, length));
     }
 
     public static byte[] digestBytesToBytes(byte[] bytes){

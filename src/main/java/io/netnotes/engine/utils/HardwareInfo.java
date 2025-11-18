@@ -3,16 +3,17 @@ package io.netnotes.engine.utils;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteStringArray;
+import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.NoteString;
 
 import oshi.SystemInfo;
@@ -23,6 +24,7 @@ import oshi.software.os.OSFileStore;
 
 public class HardwareInfo {
 
+    private static CompletableFuture<NoteBytesReadOnly> CPU_FINGERPRINT = null;
 
     public static String getStringOrRandom(String str){
         return str != null && str.length() > 0? str : RandomService.getRandomString(30);
@@ -83,38 +85,67 @@ public class HardwareInfo {
         return map.getNoteBytesObject();
     }
 
+    public static final String NIC_STRING      = "nic";
+    public static final String CPU_STRING      = "cpu";
+    public static final String HDD_STRING      = "hdd";
+    public static final String MEMORY_STRING   = "memory";
+
+    public static final NoteBytesReadOnly NIC_KEY = new NoteBytesReadOnly(NIC_STRING);
+    public static final NoteBytesReadOnly CPU_KEY = new NoteBytesReadOnly(CPU_STRING);
+    public static final NoteBytesReadOnly HDD_KEY = new NoteBytesReadOnly(HDD_STRING);
+    public static final NoteBytesReadOnly MEMORY_KEY = new NoteBytesReadOnly(MEMORY_STRING);
+
+    public static CompletableFuture<NoteBytesObject> getHardwareInfo(String... keys){
+        return getHardwareInfo(new NoteStringArrayReadOnly(keys));
+    }
+
+    public static CompletableFuture<NoteBytesObject> getHardwareInfo(NoteBytes... keys){
+        return getHardwareInfo(new NoteStringArrayReadOnly(keys));
+    }
 
 
-    public static CompletableFuture<NoteBytesObject> getHardwareInfo(NoteStringArray requestList, ExecutorService execService){
+
+    public static CompletableFuture<NoteBytesObject> getHardwareInfo(NoteBytesArrayReadOnly keys){
         
         return CompletableFuture.supplyAsync(()->{
             SystemInfo systemInfo = new SystemInfo();
-
             NoteBytesMap hardwareInfo = new NoteBytesMap();
            
-            List<NoteBytes> list = requestList.getAsList();
-            if(list.contains(new NoteBytes("nic"))){
-                hardwareInfo.put("nic", nicBytes(systemInfo));
+
+            if(keys.contains(NIC_KEY)){
+                hardwareInfo.put(NIC_KEY, nicBytes(systemInfo));
             }
-            if(list.contains(new NoteBytes("cpu"))){
-                hardwareInfo.put("cpu", processorBytes(systemInfo));
+            if(keys.contains(CPU_KEY)){
+                hardwareInfo.put(CPU_KEY, processorBytes(systemInfo));
             }
-            if(list.contains(new NoteBytes("memory"))){
-                hardwareInfo.put("memory", memorySerialNumberBytes(systemInfo));
+            if(keys.contains(MEMORY_KEY)){
+                hardwareInfo.put(MEMORY_KEY, memorySerialNumberBytes(systemInfo));
             }
-            if(list.contains(new NoteBytes("hdd"))){
-                hardwareInfo.put("hdd",  hdUuidBytes(systemInfo));
+            if(keys.contains(HDD_KEY)){
+                hardwareInfo.put(HDD_KEY,  hdUuidBytes(systemInfo));
             }
             return hardwareInfo.getNoteBytesObject();
-        }, execService);
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public static CompletableFuture<NoteBytesReadOnly> getCPUFingerPrint(ExecutorService execService){
-        return getHardwareInfo(
-                new NoteStringArray("cpu"),
-                execService
-            ).thenApply(hardwareInfo -> {
-                return new NoteBytesReadOnly( HashServices.digestToUrlSafeString(hardwareInfo.getBytes(),16));
-            });
-        }
+    public static CompletableFuture<NoteBytesReadOnly> getCPUFingerPrint(){
+        CPU_FINGERPRINT = CPU_FINGERPRINT == null 
+            ? getHardwareInfo(CPU_KEY)
+                .thenApply(hardwareInfo -> {
+                    return new NoteBytesReadOnly( 
+                        HashServices.digestBytesToBytes(
+                            hardwareInfo.getBytes(),32
+                        )
+                    );
+                }) 
+            : CPU_FINGERPRINT;
+
+        return CPU_FINGERPRINT;
+    }
+
+    public static CompletableFuture<String> getCPUFingerPrintString(){
+        CompletableFuture<NoteBytesReadOnly> future = getCPUFingerPrint();
+
+        return future.thenApply(readOnlyBytes ->EncodingHelpers.encodeB64UrlSafeString(readOnlyBytes.get()));
+    }
 }

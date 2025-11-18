@@ -1,4 +1,4 @@
-package io.netnotes.engine.io;
+package io.netnotes.engine.io.process;
 
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -9,10 +9,10 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
  * Can be converted to/from sourceId (NoteBytesReadOnly INTEGER)
  * for use with the routing registry.
  */
-public final class ProcessId {
+public final class FlowProcessId {
     private final int value;
     
-    public ProcessId(int value) {
+    public FlowProcessId(int value) {
         this.value = value;
     }
     
@@ -26,8 +26,8 @@ public final class ProcessId {
     /**
      * Create from sourceId
      */
-    public static ProcessId fromSourceId(NoteBytesReadOnly sourceId) {
-        return new ProcessId(sourceId.getAsInt());
+    public static FlowProcessId fromSourceId(NoteBytesReadOnly sourceId) {
+        return new FlowProcessId(sourceId.getAsInt());
     }
     
     /**
@@ -40,8 +40,8 @@ public final class ProcessId {
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
-        if (!(obj instanceof ProcessId)) return false;
-        return value == ((ProcessId) obj).value;
+        if (!(obj instanceof FlowProcessId)) return false;
+        return value == ((FlowProcessId) obj).value;
     }
     
     @Override

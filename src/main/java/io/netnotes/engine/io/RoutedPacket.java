@@ -1,6 +1,7 @@
 package io.netnotes.engine.io;
 
 
+import io.netnotes.engine.io.process.FlowProcessId;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 import java.util.HashMap;
@@ -112,18 +113,18 @@ public final class RoutedPacket {
      * Get ProcessId from source path
      * Useful when routing to processes
      */
-    public ProcessId getSourceProcessId() {
-        return new ProcessId(getSourceIdAsInt());
+    public FlowProcessId getSourceProcessId() {
+        return new FlowProcessId(getSourceIdAsInt());
     }
     
     /**
      * Get ProcessId from destination path
      */
-    public ProcessId getDestinationProcessId() {
+    public FlowProcessId getDestinationProcessId() {
         if (destinationPath == null) {
             throw new IllegalStateException("No destination path set");
         }
-        return new ProcessId(destinationPath.hashCode());
+        return new FlowProcessId(destinationPath.hashCode());
     }
     
     // ===== PAYLOAD ACCESSORS =====

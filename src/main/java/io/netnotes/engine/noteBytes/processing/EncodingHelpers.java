@@ -11,7 +11,7 @@ public class EncodingHelpers {
         BASE_16("BASE_16"),
         BASE_32("BASE_32"),
         BASE_64("BASE_64"),
-        URL_SAFE("URL_SAFE"),
+        BASE_64_URL_SAFE("URL_SAFE"),
         UNENCODED("UNENCODED");
 
         private final String val;
@@ -44,7 +44,7 @@ public class EncodingHelpers {
                 return encodeBase32(bytes);
             case BASE_64:
                 return encodeBase64(bytes);
-            case URL_SAFE:
+            case BASE_64_URL_SAFE:
                 return encodeUrlSafe(bytes);
             default:
                 return bytes;
@@ -76,8 +76,8 @@ public class EncodingHelpers {
                 return encodeBase32String(bytes);
             case BASE_64:
                 return encodeBase64String(bytes);
-            case URL_SAFE:
-                return encodeUrlSafeString(bytes);
+            case BASE_64_URL_SAFE:
+                return encodeB64UrlSafeString(bytes);
             default:
                 return new String(bytes);
         }
@@ -95,7 +95,7 @@ public class EncodingHelpers {
         return Base64.getEncoder().encodeToString(base64);
     }
 
-    public static String encodeUrlSafeString(byte[] urlSafe){
+    public static String encodeB64UrlSafeString(byte[] urlSafe){
         return Base64.getUrlEncoder().encodeToString(urlSafe);
     }
 
@@ -111,7 +111,7 @@ public class EncodingHelpers {
                 return decodeBase32(string);
             case BASE_64:
                 return decodeBase64(string);
-            case URL_SAFE:
+            case BASE_64_URL_SAFE:
                 return decodeUrlSafe(string);
             default:
                 return string.getBytes();

@@ -88,20 +88,20 @@ public final class InputEventFactory {
 
         NoteBytesMap body = bodyNoteBytes.getAsNoteBytesMap();
 
-        NoteBytes typeBytes = body.get(Keys.TYPE_KEY);
-        NoteBytes seqBytes = body.get(Keys.SEQUENCE_KEY);
+        NoteBytes typeBytes = body.get(Keys.TYPE);
+        NoteBytes seqBytes = body.get(Keys.SEQUENCE);
 
         if (typeBytes == null || seqBytes == null) {
             throw new IllegalStateException("Invalid InputPacket: missing type or sequence");
         }
 
-        NoteBytesReadOnly type = typeBytes.getAsReadOnly();
+        NoteBytesReadOnly type = typeBytes.readOnly();
 
         int flags = 0;
-        NoteBytes stateFlags = body.get(Keys.STATE_FLAGS_KEY);
+        NoteBytes stateFlags = body.get(Keys.STATE_FLAGS);
         if (stateFlags != null) flags = stateFlags.getAsInt();
 
-        NoteBytes payloadNote = body.get(Keys.PAYLOAD_KEY);
+        NoteBytes payloadNote = body.get(Keys.PAYLOAD);
         NoteBytesArrayReadOnly payloadReadOnly = payloadNote != null ? payloadNote.getAsNoteBytesArrayReadOnly() : null;
         NoteBytes[] payloadArray = payloadReadOnly != null ? payloadReadOnly.getAsArray() : new NoteBytes[0];
 

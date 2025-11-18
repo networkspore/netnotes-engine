@@ -197,7 +197,7 @@ public class OSGiPluginRegistry {
             try (NoteBytesWriter writer = new NoteBytesWriter(outputStream)) {
                 // Write header
                 writer.write(new NoteBytesPair(REGISTRY_HEADER, new NoteBytesPair[]{
-                    new NoteBytesPair(NoteMessaging.Keys.VERSION_KEY, REGISTRY_VERSION)
+                    new NoteBytesPair(NoteMessaging.Keys.VERSION, REGISTRY_VERSION)
                 }));
                 
                 // Write each plugin
@@ -249,7 +249,7 @@ public class OSGiPluginRegistry {
                 NoteBytesMap headerMap = new NoteBytesMap(
                     reader.readNextBytes(headerMetaData.getLength())
                 );
-                NoteBytes versionBytes = headerMap.get(NoteMessaging.Keys.VERSION_KEY);
+                NoteBytes versionBytes = headerMap.get(NoteMessaging.Keys.VERSION);
                 String version = versionBytes != null ? 
                     versionBytes.getAsString() : REGISTRY_VERSION;
                 

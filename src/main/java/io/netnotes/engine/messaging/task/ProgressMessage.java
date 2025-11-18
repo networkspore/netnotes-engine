@@ -24,8 +24,8 @@ public class ProgressMessage {
     public static NoteBytesObject getProgressMessage(NoteBytesReadOnly scope, NoteBytesReadOnly total, NoteBytesReadOnly completed, NoteBytesReadOnly message){
         NoteBytesObject messageObject = TaskMessages.getTaskMessage(scope, ProtocolMesssages.PROGRESS, message);
         messageObject.add(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.TOTAL_KEY, total),
-            new NoteBytesPair(Keys.COMPLETED_KEY, completed)
+            new NoteBytesPair(Keys.TOTAL, total),
+            new NoteBytesPair(Keys.COMPLETED, completed)
         });
         return messageObject;
     }
@@ -41,8 +41,8 @@ public class ProgressMessage {
         NoteBytesObject messageObject = TaskMessages.getTaskMessage(scope, ProtocolMesssages.PROGRESS, message);
         int pairsLength = pairs != null ? pairs.length : 0;
         NoteBytesPair[] newPairs = new NoteBytesPair[pairsLength + 2];
-        newPairs[0] = new NoteBytesPair(Keys.TOTAL_KEY, total);
-        newPairs[1] = new NoteBytesPair(Keys.COMPLETED_KEY, completed);
+        newPairs[0] = new NoteBytesPair(Keys.TOTAL, total);
+        newPairs[1] = new NoteBytesPair(Keys.COMPLETED, completed);
 
         for(int i = 0 ; i < pairsLength ; i++){
             newPairs[i + 2]  = pairs[i];
@@ -52,7 +52,7 @@ public class ProgressMessage {
     }
 
     public static String getMessage(NoteBytesObject taskMessage){
-        NoteBytesPair messagePair = taskMessage.get(Keys.MSG_KEY);
+        NoteBytesPair messagePair = taskMessage.get(Keys.MSG);
         if(messagePair != null){
             return messagePair.getAsString();
         }
@@ -60,7 +60,7 @@ public class ProgressMessage {
     }
 
     public static long getTotal(NoteBytesObject taskMessage){
-        NoteBytesPair totalPair = taskMessage.get(Keys.TOTAL_KEY);
+        NoteBytesPair totalPair = taskMessage.get(Keys.TOTAL);
         if(totalPair != null){
             return totalPair.getAsLong();
         }
@@ -68,7 +68,7 @@ public class ProgressMessage {
     }
 
     public static long getCompleted(NoteBytesObject taskMessage){
-        NoteBytesPair completedPair = taskMessage.get(Keys.COMPLETED_KEY);
+        NoteBytesPair completedPair = taskMessage.get(Keys.COMPLETED);
         if(completedPair != null){
             return completedPair.getAsLong();
         }

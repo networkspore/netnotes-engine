@@ -53,7 +53,9 @@ public class NoteBytes {
     public NoteBytes( NoteBytes value){
          this(value.get(), value.getType());
     }
-
+    public NoteBytes(boolean value){
+        this(ByteDecoding.booleanToBytes(value), NoteBytesMetaData.BOOLEAN_TYPE);
+    }
 
     public NoteBytes( String value){
         this( ByteDecoding.stringToBytes(value,  NoteBytesMetaData.STRING_TYPE), NoteBytesMetaData.STRING_TYPE);
@@ -141,6 +143,11 @@ public class NoteBytes {
 
     public byte[] getBytes(){
         return get();
+    }
+
+    public byte[] getBytes(int length){
+        byte[] bytes = get();
+        return Arrays.copyOf(bytes, length);
     }
 
     public char[] getFromUTF8AsChars(){
@@ -289,7 +296,7 @@ public class NoteBytes {
         }
     }
 
-    public NoteBytesReadOnly getAsReadOnly(){
+    public NoteBytesReadOnly readOnly(){
         if(byteLength() > 0){
             byte[] bytes = m_value;
             byte[] newbytes = new byte[bytes.length];

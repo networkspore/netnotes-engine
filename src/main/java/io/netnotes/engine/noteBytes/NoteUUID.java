@@ -1,16 +1,11 @@
 package io.netnotes.engine.noteBytes;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -75,23 +70,10 @@ public class NoteUUID extends NoteBytes {
         return bytes;
     }
 
-    public static CompletableFuture<NoteUUID> createNotesUUID256(ExecutorService execService){ 
-        return HardwareInfo.getHardwareInfo(new NoteStringArray("nic","hdd"), execService).thenApply((hardwareInfo)->{
-            try(ByteArrayOutputStream outputStream = new ByteArrayOutputStream()){
-                NoteBytesPair[] sources = hardwareInfo.getAsArray();
-                for(NoteBytesPair source : sources){
-                    NoteBytesPair[] sourceItems = source.getValue().getAsNoteBytesObject().getAsArray();
-                    int itemsLength = sourceItems.length;
-                    if(itemsLength > 0){
-                        outputStream.write( sourceItems[RandomService.getRandomInt(0, itemsLength-1)].getValue().get() );
-                    }
-                }
-                byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), HashServices.digestBytesToBytes(outputStream.toByteArray(), 16));
-
-                return fromUnencodedBytes(bytes);
-            } catch (IOException e) {
-                throw new CompletionException(e);
-            }
+    public static CompletableFuture<NoteUUID> createHardwareNoteUUID256(ExecutorService execService){ 
+        return HardwareInfo.getCPUFingerPrint().thenApply(cpuHashBytes->{
+            byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), cpuHashBytes.getBytes(16));
+            return fromUnencodedBytes(bytes);
         });
     }
 
@@ -104,7 +86,7 @@ public class NoteUUID extends NoteBytes {
     }
 
     public static NoteUUID fromUnencodedBytes(byte[] bytes){
-        return fromNoteUUIDBytes( EncodingHelpers.encodeBytes(bytes, Encoding.URL_SAFE));
+        return fromNoteUUIDBytes( EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
 
     }
 

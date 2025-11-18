@@ -5,48 +5,15 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.AtomicSequence;
 
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * IODaemon Protocol - Phased connection lifecycle
- * 
- * Protocol Phases:
- * ================
- * 
- * 1. HANDSHAKE
- *    - Client: HELLO
- *    - Server: ACCEPT + version info
- * 
- * 2. DISCOVERY
- *    - Client: REQUEST_DISCOVERY
- *    - Server: DEVICE_LIST (all available USB devices, detailed info)
- *    - Client can request detailed info: GET_DEVICE_INFO(device_id)
- * 
- * 3. CLAIM
- *    - Client: CLAIM_DEVICE(device_id, source_id, pid, mode)
- *    - Server: DEVICE_CLAIMED or ERROR
- *    - Server locks device to client PID
- * 
- * 4. CONFIGURE
- *    - Optional: ENABLE_ENCRYPTION
- *    - Optional: SET_MODE (raw, keyboard, mouse, etc.)
- *    - Optional: SET_FILTERS
- * 
- * 5. STREAMING
- *    - Server → Client: [sourceId:INTEGER][event:OBJECT/ENCRYPTED]
- *    - Continuous event stream
- *    - Client can send control commands
- * 
- * 6. SHUTDOWN
- *    - Client: RELEASE_DEVICE(source_id) or DISCONNECT
- *    - Server: Releases device, reattaches kernel driver
+ * IODaemon Protocol - Updated with string-based device types
  */
 public class IODaemonProtocol {
     
@@ -61,47 +28,110 @@ public class IODaemonProtocol {
         SHUTDOWN
     }
     
-    // ===== DEVICE MODES =====
+    // ===== DEVICE TYPE (Hardware identification) =====
     
-    public enum DeviceMode {
-        RAW,           // Raw HID reports
-        KEYBOARD,      // Parsed keyboard events
-        MOUSE,         // Parsed mouse events
-        GAMEPAD,       // Parsed gamepad events
-        CUSTOM         // Custom protocol
+    /**
+     * Device Type - What the hardware is (detected from USB descriptors)
+     */
+    public static class DeviceType {
+        public static final String KEYBOARD = "keyboard";
+        public static final String MOUSE = "mouse";
+        public static final String GAMEPAD = "gamepad";
+        public static final String TOUCHPAD = "touchpad";
+        public static final String UNKNOWN = "unknown";
+        
+        /**
+         * Validate device type string
+         */
+        public static boolean isValid(String type) {
+            return type != null && (
+                type.equals(KEYBOARD) ||
+                type.equals(MOUSE) ||
+                type.equals(GAMEPAD) ||
+                type.equals(TOUCHPAD) ||
+                type.equals(UNKNOWN)
+            );
+        }
+        
+        /**
+         * Get default type for unknown devices
+         */
+        public static String getDefault() {
+            return UNKNOWN;
+        }
+    }
+    
+    // ===== DEVICE MODE (User preference for how to use device) =====
+    
+    /**
+     * Device Mode - How the user wants to interact with the device
+     */
+    public static class DeviceMode {
+        public static final String RAW = "raw";           // Raw HID reports
+        public static final String PARSED = "parsed";     // Parsed events (default)
+        public static final String PASSTHROUGH = "passthrough"; // Forward to OS
+        public static final String FILTERED = "filtered"; // Apply filters
+        
+        /**
+         * Validate device mode string
+         */
+        public static boolean isValid(String mode) {
+            return mode != null && (
+                mode.equals(RAW) ||
+                mode.equals(PARSED) ||
+                mode.equals(PASSTHROUGH) ||
+                mode.equals(FILTERED)
+            );
+        }
+        
+        /**
+         * Get default mode
+         */
+        public static String getDefault() {
+            return PARSED;
+        }
+        
+        /**
+         * Check if mode is compatible with device type
+         */
+        public static boolean isCompatible(String deviceType, String mode) {
+            // Raw mode works with everything
+            if (mode.equals(RAW)) {
+                return true;
+            }
+            
+            // Parsed mode requires known device type
+            if (mode.equals(PARSED)) {
+                return !deviceType.equals(DeviceType.UNKNOWN);
+            }
+            
+            return true;
+        }
     }
     
     // ===== COMMAND CONSTANTS =====
     
     public static class Commands {
         // Handshake
-        public static final String HELLO = "hello";
-        public static final String ACCEPT = "accept";
+        //public static final String HELLO = ProtocolMesssages.HELLO;
+        //public static final String ACCEPT = "accept";
         
         // Discovery
-        public static final String REQUEST_DISCOVERY = "request_discovery";
-        public static final String DEVICE_LIST = "device_list";
-        public static final String GET_DEVICE_INFO = "get_device_info";
-        public static final String DEVICE_INFO = "device_info";
+        public static final NoteBytesReadOnly DEVICE_LIST = new NoteBytesReadOnly("device_list");
+        public static final NoteBytesReadOnly GET_DEVICE_INFO = new NoteBytesReadOnly("get_device_info");
+        public static final NoteBytesReadOnly DEVICE_INFO = new NoteBytesReadOnly("device_info");
         
         // Claim
-        public static final String CLAIM_DEVICE = "claim_device";
-        public static final String DEVICE_CLAIMED = "device_claimed";
-        public static final String RELEASE_DEVICE = "release_device";
-        public static final String DEVICE_RELEASED = "device_released";
-        
-        // Configure
-        public static final String ENABLE_ENCRYPTION = "enable_encryption";
-        public static final String SET_MODE = "set_mode";
-        public static final String SET_FILTER = "set_filter";
+        public static final NoteBytesReadOnly CLAIM_DEVICE = new NoteBytesReadOnly("claim_device");
+        public static final NoteBytesReadOnly DEVICE_CLAIMED = new NoteBytesReadOnly("device_claimed");
+        public static final NoteBytesReadOnly RELEASE_DEVICE = new NoteBytesReadOnly("release_device");
+        public static final NoteBytesReadOnly DEVICE_RELEASED = new NoteBytesReadOnly("device_released");
         
         // Control
-        public static final String PAUSE_DEVICE = "pause_device";
-        public static final String RESUME_DEVICE = "resume_device";
-        public static final String DISCONNECT = "disconnect";
+        public static final NoteBytesReadOnly PAUSE_DEVICE = new NoteBytesReadOnly("pause_device");
+        public static final NoteBytesReadOnly RESUME_DEVICE = new NoteBytesReadOnly("resume_device");
         
         // Errors
-        public static final String ERROR = "error";
     }
     
     // ===== USB DEVICE DESCRIPTOR =====
@@ -128,15 +158,65 @@ public class IODaemonProtocol {
         // Device capabilities
         public int busNumber;
         public int deviceAddress;
-        public int usbVersion;          // e.g., 0x0200 for USB 2.0
+        public int usbVersion;
         public int maxPacketSize;
         
         // Daemon-assigned identifier
-        public String deviceId;         // Unique ID for this session
+        public String deviceId;
+        
+        // Device type (string-based)
+        private String deviceType;
         
         // Device state
-        public boolean available;       // Can be claimed
+        public boolean available;
         public boolean kernelDriverAttached;
+        
+        /**
+         * Get device type (auto-detect if not set)
+         */
+        public String get_device_type() {
+            if (deviceType != null) {
+                return deviceType;
+            }
+            
+            // Auto-detect from USB class codes
+            deviceType = detectDeviceType();
+            return deviceType;
+        }
+        
+        /**
+         * Set device type explicitly
+         */
+        public void set_device_type(String type) {
+            if (DeviceType.isValid(type)) {
+                this.deviceType = type;
+            } else {
+                this.deviceType = DeviceType.UNKNOWN;
+            }
+        }
+        
+        /**
+         * Detect device type from USB descriptors
+         */
+        private String detectDeviceType() {
+            // Check interfaces for HID devices
+            for (USBInterface iface : interfaces) {
+                if (iface.interfaceClass == 3) { // HID class
+                    if (iface.interfaceProtocol == 1) {
+                        return DeviceType.KEYBOARD;
+                    } else if (iface.interfaceProtocol == 2) {
+                        return DeviceType.MOUSE;
+                    }
+                }
+            }
+            
+            // Check device class
+            if (deviceClass == 3) { // HID
+                return DeviceType.UNKNOWN; // Generic HID, type unclear
+            }
+            
+            return DeviceType.UNKNOWN;
+        }
         
         /**
          * Convert to NoteBytesObject for transmission
@@ -150,6 +230,7 @@ public class IODaemonProtocol {
             obj.add("device_class", deviceClass);
             obj.add("device_subclass", deviceSubClass);
             obj.add("device_protocol", deviceProtocol);
+            obj.add("device_type", get_device_type()); // String type
             
             obj.add("bus_number", busNumber);
             obj.add("device_address", deviceAddress);
@@ -187,6 +268,12 @@ public class IODaemonProtocol {
             desc.deviceClass = map.get("device_class").getAsInt();
             desc.deviceSubClass = map.get("device_subclass").getAsInt();
             desc.deviceProtocol = map.get("device_protocol").getAsInt();
+            
+            // Get device type as string
+            NoteBytes typeBytes = map.get("device_type");
+            if (typeBytes != null) {
+                desc.set_device_type(typeBytes.getAsString());
+            }
             
             desc.busNumber = map.get("bus_number").getAsInt();
             desc.deviceAddress = map.get("device_address").getAsInt();
@@ -229,11 +316,9 @@ public class IODaemonProtocol {
         public int interfaceProtocol;
         public int numEndpoints;
         
-        // HID-specific
         public boolean isHID;
         public int hidReportDescriptorLength;
         
-        // Endpoints
         public List<USBEndpoint> endpoints = new ArrayList<>();
         
         public NoteBytesObject toNoteBytesObject() {
@@ -250,7 +335,6 @@ public class IODaemonProtocol {
                 obj.add("hid_report_descriptor_length", hidReportDescriptorLength);
             }
             
-            // Add endpoints
             NoteBytesArray endpointsArray = new NoteBytesArray();
             for (USBEndpoint ep : endpoints) {
                 endpointsArray.add(ep.toNoteBytesObject());
@@ -276,7 +360,6 @@ public class IODaemonProtocol {
                     map.get("hid_report_descriptor_length").getAsInt();
             }
             
-            // Parse endpoints
             NoteBytes eps = map.get("endpoints");
             if (eps != null) {
                 NoteBytesArray epsArray = eps.getAsNoteBytesArray();
@@ -295,8 +378,8 @@ public class IODaemonProtocol {
      */
     public static class USBEndpoint {
         public int endpointAddress;
-        public int direction;        // 0=OUT, 1=IN
-        public int transferType;     // 0=control, 1=iso, 2=bulk, 3=interrupt
+        public int direction;
+        public int transferType;
         public int maxPacketSize;
         public int interval;
         
@@ -326,12 +409,8 @@ public class IODaemonProtocol {
     
     // ===== ASYNC NOTEBYTES WRITER =====
     
-    /**
-     * Thread-safe NoteBytesWriter using semaphore for synchronization
-    */
     public static class AsyncNoteBytesWriter {
         private final NoteBytesWriter writer;
-      //  private final Semaphore writeLock = new Semaphore(1);
         private final BlockingQueue<WriteRequest> writeQueue = new LinkedBlockingQueue<>();
         private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor(
             r -> Thread.ofVirtual().name("AsyncWriter").unstarted(r)
@@ -362,29 +441,19 @@ public class IODaemonProtocol {
                 }
             });
         }
-
         
-        /**
-         * Write NoteBytesObject asynchronously
-         */
         public CompletableFuture<Void> writeAsync(NoteBytesObject obj) {
             WriteRequest request = new WriteRequest(obj);
             writeQueue.offer(request);
             return request.future;
         }
         
-        /**
-         * Write NoteBytes asynchronously
-         */
         public CompletableFuture<Void> writeAsync(NoteBytes bytes) {
             WriteRequest request = new WriteRequest(bytes);
             writeQueue.offer(request);
             return request.future;
         }
         
-        /**
-         * Write synchronously (blocks until complete)
-         */
         public void writeSync(NoteBytesObject obj) throws IOException {
             try {
                 writeAsync(obj).get();
@@ -411,7 +480,7 @@ public class IODaemonProtocol {
             
             void write(NoteBytesWriter writer) throws IOException {
                 if (data instanceof NoteBytesObject) {
-                    writer.writeObject((NoteBytesObject) data);
+                    writer.write((NoteBytesObject) data);
                 } else if (data instanceof NoteBytes) {
                     writer.write((NoteBytes) data);
                 }
@@ -429,19 +498,12 @@ public class IODaemonProtocol {
     
     // ===== PROTOCOL MESSAGE BUILDERS =====
     
-    /**
-     * Build protocol messages
-     */
     public static class MessageBuilder {
-
-        /**
-         * Create command message
-         */
-        public static NoteBytesObject createCommand(String command, NoteBytesPair... params) {
+        public static NoteBytesObject createCommand(NoteBytesReadOnly command, NoteBytesPair... params) {
             NoteBytesObject msg = new NoteBytesObject();
-            msg.add(Keys.TYPE_KEY, EventBytes.TYPE_CMD);
-            msg.add(Keys.SEQUENCE_KEY, generateSequence());
-            msg.add(Keys.CMD_KEY, command);
+            msg.add(Keys.TYPE, EventBytes.TYPE_CMD);
+            msg.add(Keys.SEQUENCE, generateSequence());
+            msg.add(Keys.CMD, command);
             
             for (NoteBytesPair param : params) {
                 msg.add(param.getKey(), param.getValue());
@@ -450,32 +512,23 @@ public class IODaemonProtocol {
             return msg;
         }
         
-        /**
-         * Create error message
-         */
         public static NoteBytesObject createError(int errorCode, String message) {
             NoteBytesObject msg = new NoteBytesObject();
-            msg.add(Keys.TYPE_KEY, EventBytes.TYPE_ERROR);
-            msg.add(Keys.SEQUENCE_KEY, generateSequence());
-            msg.add(Keys.ERROR_KEY, errorCode);
-            msg.add(Keys.MSG_KEY, message);
+            msg.add(Keys.TYPE, EventBytes.TYPE_ERROR);
+            msg.add(Keys.SEQUENCE, generateSequence());
+            msg.add(Keys.ERROR_CODE, errorCode);
+            msg.add(Keys.MSG, message);
             return msg;
         }
         
-        /**
-         * Create accept message
-         */
         public static NoteBytesObject createAccept(String status) {
             NoteBytesObject msg = new NoteBytesObject();
-            msg.add(Keys.TYPE_KEY, EventBytes.TYPE_ACCEPT);
-            msg.add(Keys.SEQUENCE_KEY, generateSequence());
-            msg.add(Keys.STATUS_KEY, status);
+            msg.add(Keys.TYPE, EventBytes.TYPE_ACCEPT);
+            msg.add(Keys.SEQUENCE, generateSequence());
+            msg.add(Keys.STATUS, status);
             return msg;
         }
         
-        /**
-         * Generate 6-byte sequence
-         */
         public static NoteBytes generateSequence() {
             return AtomicSequence.getNextSequenceReadOnly();
         }

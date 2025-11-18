@@ -1,5 +1,8 @@
-package io.netnotes.engine.io;
+package io.netnotes.engine.io.process;
 
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 import java.time.Duration;
@@ -30,15 +33,15 @@ import java.util.function.Function;
  * - Composable (pipeline, map-reduce, scatter-gather)
  * - Automatic backpressure management
  */
-public abstract class Process implements Flow.Publisher<RoutedPacket> {
+public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== IDENTITY =====
     protected ContextPath contextPath;
-    protected ProcessId processId;  // Derived from contextPath
+    protected FlowProcessId processId;  // Derived from contextPath
     protected ContextPath parentPath;
     
     // ===== REGISTRY =====
-    protected ProcessRegistry registry;
+    protected FlowProcessRegistry registry;
     
     // ===== LIFECYCLE =====
     private volatile boolean alive = true;
@@ -68,7 +71,7 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
     /**
      * Constructor - specify process type
      */
-    public Process(ProcessType type) {
+    public FlowProcess(ProcessType type) {
         this.processType = type;
         this.publisherExecutor = getExecutorForType(type);
         this.outgoingPublisher = new SubmissionPublisher<>(
@@ -160,6 +163,34 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
         outgoingPublisher.subscribe(subscriber);
     }
     
+    public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber, ContextPath filterPath) {
+        // Wrap subscriber with filter
+        Flow.Subscriber<RoutedPacket> filteredSubscriber = new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscriber.onSubscribe(subscription);
+            }
+            
+            @Override
+            public void onNext(RoutedPacket packet) {
+                if (packet.getSourcePath().startsWith(filterPath)) {
+                    subscriber.onNext(packet);
+                }
+            }
+            
+            @Override
+            public void onError(Throwable throwable) {
+                subscriber.onError(throwable);
+            }
+            
+            @Override
+            public void onComplete() {
+                subscriber.onComplete();
+            }
+        };
+        
+        outgoingPublisher.subscribe(filteredSubscriber);
+    }
     /**
      * Get number of downstream subscribers
      */
@@ -305,6 +336,10 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
         
         return future;
     }
+
+    protected void reply(RoutedPacket originalRequest, NoteBytes payload) {
+        reply(originalRequest, payload.readOnly());
+    }
     
     /**
      * Reply to a request
@@ -338,6 +373,12 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
     
     // ===== COMPOSITION PATTERNS =====
     
+   
+    protected CompletableFuture<RoutedPacket> pipeline(
+            NoteBytes input,
+            ContextPath... stages) {
+        return pipeline(input.readOnly(), stages);
+    }
     /**
      * Pipeline: chain multiple processes
      */
@@ -357,6 +398,12 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
         return result;
     }
     
+    protected CompletableFuture<List<RoutedPacket>> scatterGather(
+            NoteBytes input,
+            Collection<ContextPath> targets,
+            Duration timeout) {
+        return scatterGather(input.readOnly(), targets, timeout);
+    }
     /**
      * Scatter-gather: parallel fan-out then collect
      */
@@ -376,18 +423,19 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
                 .filter(Objects::nonNull)
                 .toList());
     }
-    
+
+
     /**
      * Map-reduce: transform in parallel, then reduce
      */
     protected <T> CompletableFuture<T> mapReduce(
-            Collection<NoteBytesReadOnly> inputs,
+            Collection<NoteBytes> inputs,
             ContextPath mapper,
             Function<List<RoutedPacket>, T> reducer,
             Duration timeout) {
         
         List<CompletableFuture<RoutedPacket>> mapFutures = inputs.stream()
-            .map(input -> request(mapper, input, timeout))
+            .map(input -> request(mapper, input.readOnly(), timeout))
             .toList();
         
         return CompletableFuture.allOf(mapFutures.toArray(new CompletableFuture[0]))
@@ -431,7 +479,7 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
     // ===== CHILD PROCESS MANAGEMENT =====
     
     protected CompletableFuture<ContextPath> spawnChild(
-            Process child,
+            FlowProcess child,
             String childName) {
         
         return CompletableFuture.supplyAsync(() -> {
@@ -442,9 +490,9 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
     
     // ===== LIFECYCLE CONTROL =====
     
-    public void initialize(ContextPath path, ContextPath parentPath, ProcessRegistry registry) {
+    public void initialize(ContextPath path, ContextPath parentPath, FlowProcessRegistry registry) {
         this.contextPath = path;
-        this.processId = new ProcessId(path.hashCode());
+        this.processId = new FlowProcessId(path.hashCode());
         this.parentPath = parentPath;
         this.registry = registry;
         this.startTime = System.currentTimeMillis();
@@ -479,7 +527,7 @@ public abstract class Process implements Flow.Publisher<RoutedPacket> {
         return contextPath;
     }
     
-    public ProcessId getProcessId() {
+    public FlowProcessId getProcessId() {
         return processId;
     }
     

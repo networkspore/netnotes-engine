@@ -1,139 +1,155 @@
 package io.netnotes.engine.io.daemon;
 
-import io.netnotes.engine.io.*;
-import io.netnotes.engine.io.daemon.DaemonProtocolState.BackpressureManager;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.SocketChannel;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientSession;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
-import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceStateFlags;
-import io.netnotes.engine.io.daemon.DaemonProtocolState.HeartbeatManager;
 import io.netnotes.engine.io.daemon.IODaemonProtocol.AsyncNoteBytesWriter;
 import io.netnotes.engine.io.events.EventBytes;
+import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.*;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.state.BitFlagStateMachine;
-
-import java.io.*;
-import java.net.StandardProtocolFamily;
-import java.net.UnixDomainSocketAddress;
-import java.nio.channels.*;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
- * Complete IODaemon Client with State Management
+ * IODaemon - Process wrapper for daemon socket communication
  * 
- * Integrates:
- * - Phased protocol (handshake, discovery, claim, configure, streaming)
- * - State machines for connection and devices
- * - Heartbeat monitoring
- * - Backpressure control
- * - Multi-device support
+ * Process Type: BIDIRECTIONAL
+ * - Receives: Commands from other processes (claim, release, discover)
+ * - Emits: USB device events routed by sourceId
+ * 
+ * Connects to the io-daemon socket and manages USB devices.
+ * Each claimed device gets a child process for routing.
  */
-public class IODaemon implements AutoCloseable {
+public class IODaemon extends FlowProcess {
     
     private final String socketPath;
     private final String sessionId;
-    private final InputSourceRegistry registry;
     
-    // Connection
     private SocketChannel socketChannel;
     private AsyncNoteBytesWriter asyncWriter;
     private NoteBytesReader reader;
     
-    // State management
     private final ClientSession clientSession;
     private final Map<Integer, DeviceState> deviceStates = new ConcurrentHashMap<>();
     
-    // Managers
-    private final BackpressureManager backpressureManager = new BackpressureManager();
-    private final HeartbeatManager heartbeatManager;
+    // Pre-claim device registry
+    private final DiscoveredDeviceRegistry discoveredDevices = new DiscoveredDeviceRegistry();
     
-    // Executors
-    private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
+    // Message dispatch map
+    private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
     
-    // Discovery cache
-    private final Map<String, IODaemonProtocol.USBDeviceDescriptor> discoveredDevices = 
-        new ConcurrentHashMap<>();
-    
-    // Running state
     private volatile boolean connected = false;
     private volatile boolean running = false;
-    private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
+    
     @FunctionalInterface
     private interface MessageExecutor {
-        void execute(NoteBytesMap map);
+        void execute(NoteBytesMap message);
     }
-
     
     public IODaemon(String socketPath, String sessionId) {
+        super(ProcessType.BIDIRECTIONAL);
         this.socketPath = socketPath;
         this.sessionId = sessionId;
-        this.registry = InputSourceRegistry.getInstance();
         
         int pid = (int) ProcessHandle.current().pid();
         this.clientSession = new ClientSession(sessionId, pid);
         
-        this.heartbeatManager = new HeartbeatManager();
-        this.heartbeatManager.registerSession(clientSession);
-        
         setupClientStateTransitions();
-        setupMsgMapping();
+        setupMessageMapping();
     }
     
-    private void setupClientStateTransitions() {
-        // When authenticated, can start discovering
-        clientSession.state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
-            System.out.println("Client authenticated, enabling heartbeat");
-            clientSession.state.setFlag(ClientStateFlags.HEARTBEAT_ENABLED);
-        });
-        
-        // When backpressure activates, log warning
-        clientSession.state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
-            System.out.println("WARNING: Backpressure active - too many unacknowledged messages");
-        });
-        
-        // When heartbeat timeout, disconnect
-        clientSession.state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
-            System.err.println("FATAL: Heartbeat timeout - server not responding");
-            clientSession.state.setFlag(ClientStateFlags.DISCONNECTING);
-            close();
-        });
+    // ===== PROCESS LIFECYCLE =====
+    
+    @Override
+    public CompletableFuture<Void> run() {
+        return connect()
+            .thenCompose(v -> startReadLoop())
+            .thenRun(() -> {
+                System.out.println("IODaemon running at: " + contextPath);
+            });
     }
-
-   
+    
+    @Override
+    protected void onStart() {
+        System.out.println("IODaemon starting: " + sessionId);
+    }
+    
+    @Override
+    protected void onStop() {
+        System.out.println("IODaemon stopping: " + sessionId);
+        handleDisconnect();
+    }
+    
+    @Override
+    protected CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+        // Handle commands from other processes
+        try {
+            NoteBytesReadOnly payload = packet.getPayload();
+            NoteBytesMap command = payload.getAsNoteBytesMap();
+            
+            String action = command.get("action").getAsString();
+            
+            switch (action) {
+                case "discover":
+                    return handleDiscoverCommand(packet);
+                case "claim":
+                    return handleClaimCommand(command, packet);
+                case "release":
+                    return handleReleaseCommand(command, packet);
+                case "list":
+                    return handleListDevicesCommand(packet);
+                default:
+                    System.err.println("Unknown action: " + action);
+                    return CompletableFuture.completedFuture(null);
+            }
+            
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
     
     // ===== CONNECTION LIFECYCLE =====
     
-    /**
-     * Connect and complete handshake
-     */
     public CompletableFuture<Void> connect() {
         return CompletableFuture.runAsync(() -> {
             try {
                 establishConnection();
                 performHandshake();
-                startHeartbeat();
-                startReadLoop();
                 
-                clientSession.state.setFlag(ClientStateFlags.CONNECTED);
-                clientSession.state.setFlag(ClientStateFlags.AUTHENTICATED);
+                clientSession.state.addState(ClientStateFlags.CONNECTED);
+                clientSession.state.addState(ClientStateFlags.AUTHENTICATED);
                 connected = true;
                 
-                System.out.println("IODaemon client connected: " + sessionId);
+                System.out.println("IODaemon connected: " + sessionId);
                 
             } catch (IOException e) {
                 System.err.println("Connection failed: " + e.getMessage());
                 throw new CompletionException(e);
             }
-        }, ioExecutor);
+        }, VirtualExecutors.getVirtualExecutor());
     }
     
     private void establishConnection() throws IOException {
@@ -154,9 +170,8 @@ public class IODaemon implements AutoCloseable {
     }
     
     private void performHandshake() throws IOException {
-        // Send HELLO
         NoteBytesObject hello = IODaemonProtocol.MessageBuilder.createCommand(
-            IODaemonProtocol.Commands.HELLO,
+            ProtocolMesssages.HELLO,
             new NoteBytesPair("client_version", 1),
             new NoteBytesPair("session_id", sessionId),
             new NoteBytesPair("pid", clientSession.clientPid)
@@ -164,63 +179,49 @@ public class IODaemon implements AutoCloseable {
         
         asyncWriter.writeSync(hello);
         
-        // Wait for ACCEPT
+        // Wait for ACCEPT response
         NoteBytesReadOnly response = reader.nextNoteBytesReadOnly();
         if (response.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
             throw new IOException("Invalid handshake response");
         }
         
-        NoteBytesMap responseMap = response.getAsNoteBytesObject().getAsNoteBytesMap();
-        byte type = responseMap.get(Keys.TYPE_KEY).getAsByte();
+        NoteBytesMap responseMap = response.getAsNoteBytesMap();
+        byte type = responseMap.get(Keys.TYPE).getAsByte();
         
         if (type != EventBytes.TYPE_ACCEPT.getAsByte()) {
-            throw new IOException("Handshake failed");
+            throw new IOException("Handshake rejected");
         }
         
         System.out.println("Handshake complete");
     }
     
-    private void startHeartbeat() {
-        heartbeatManager.start();
-        
-        // Also start local heartbeat responder
-        heartbeatExecutor.scheduleAtFixedRate(this::checkHeartbeat, 
-            1000, 1000, TimeUnit.MILLISECONDS);
-    }
-    
-    private void checkHeartbeat() {
-        if (!clientSession.checkHeartbeat()) {
-            System.err.println("Heartbeat check failed");
-        }
-    }
-    
-    private void startReadLoop() {
+    /**
+     * Main read loop - reads from daemon socket and emits to subscribers
+     */
+    private CompletableFuture<Void> startReadLoop() {
         running = true;
         
-        ioExecutor.execute(() -> {
+        return CompletableFuture.runAsync(() -> {
             try {
                 while (running && connected) {
+                    // Read first value - determines message type
                     NoteBytesReadOnly first = reader.nextNoteBytesReadOnly();
                     if (first == null) {
                         System.out.println("Connection closed by server");
                         break;
                     }
                     
-                    // Check if this is a routed packet [INTEGER:sourceId][OBJECT:event]
+                    // Check if routed (has sourceId) or control message
                     if (first.getType() == NoteBytesMetaData.INTEGER_TYPE) {
-                        int sourceId = first.getAsInt();
-                        NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
+                        // ROUTED MESSAGE: [INTEGER:sourceId][OBJECT/ENCRYPTED:payload]
+                        handleRoutedMessage(first);
                         
-                        if (payload != null) {
-                            handleDeviceEvent(sourceId, payload);
-                            
-                            // Implicit acknowledgment
-                            clientSession.messagesAcknowledged(1);
-                        }
-                    } 
-                    // Protocol message [OBJECT]
-                    else if (first.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                        handleProtocolMessage(first);
+                    } else if (first.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                        // CONTROL MESSAGE: [OBJECT]
+                        handleControlMessage(first);
+                        
+                    } else {
+                        System.err.println("Unexpected message type: " + first.getType());
                     }
                 }
             } catch (Exception e) {
@@ -229,315 +230,359 @@ public class IODaemon implements AutoCloseable {
             } finally {
                 handleDisconnect();
             }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+    
+    /**
+     * Handle routed message from daemon (USB device event)
+     * Format: [INTEGER:sourceId][OBJECT/ENCRYPTED:payload]
+     */
+    private void handleRoutedMessage(NoteBytesReadOnly sourceIdBytes) throws IOException {
+        int sourceId = sourceIdBytes.getAsInt();
+        
+        // Read payload
+        NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
+        if (payload == null) {
+            System.err.println("No payload for routed message");
+            return;
+        }
+        
+        // Get device info
+        DeviceState device = deviceStates.get(sourceId);
+        if (device == null) {
+            System.err.println("Unknown sourceId: " + sourceId);
+            return;
+        }
+        
+        // Create routed packet with device path
+        ContextPath devicePath = contextPath.append(device.getDeviceType())
+                                            .append(String.valueOf(sourceId));
+        RoutedPacket packet = RoutedPacket.create(devicePath, payload);
+        
+        // Emit through Process publisher (subscribers will receive this)
+        emit(packet);
+        
+        // Track for backpressure
+        clientSession.messagesAcknowledged(1);
+    }
+    
+    /**
+     * Handle control message from daemon (protocol messages)
+     */
+    private void handleControlMessage(NoteBytesReadOnly messageBytes) {
+        NoteBytesMap map = messageBytes.getAsNoteBytesMap();
+        
+        // Get message type
+        NoteBytes typeBytes = map.get(Keys.TYPE);
+        if (typeBytes == null) {
+            System.err.println("No type field in control message");
+            return;
+        }
+        
+        // Dispatch using map
+        MessageExecutor executor = m_execMsgMap.get(typeBytes);
+        if (executor != null) {
+            executor.execute(map);
+        } else {
+            System.err.println("Unknown message type: " + typeBytes);
+        }
+    }
+    
+    private void setupClientStateTransitions() {
+        clientSession.state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
+            System.out.println("Client authenticated");
         });
+        
+        clientSession.state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
+            System.out.println("WARNING: Backpressure active");
+        });
+    }
+    
+    private void setupMessageMapping() {
+        // Protocol messages
+        m_execMsgMap.put(EventBytes.TYPE_PING, this::handlePing);
+        m_execMsgMap.put(EventBytes.TYPE_PONG, this::handlePong);
+        m_execMsgMap.put(EventBytes.TYPE_ACCEPT, this::handleAccept);
+        m_execMsgMap.put(EventBytes.TYPE_ERROR, this::handleError);
+        m_execMsgMap.put(EventBytes.TYPE_CMD, this::handleCommand);
+        m_execMsgMap.put(EventBytes.TYPE_DISCONNECTED, this::handleDisconnected);
+        
+        // Command subtypes
+        m_execMsgMap.put(ProtocolMesssages.ITEM_LIST, this::handleDeviceList);
+        m_execMsgMap.put(ProtocolMesssages.ITEM_CLAIMED, this::handleDeviceClaimed);
+        m_execMsgMap.put(ProtocolMesssages.ITEM_RELEASED, this::handleDeviceReleased);
+    }
+    
+    // ===== COMMAND HANDLERS (FROM OTHER PROCESSES) =====
+    
+    private CompletableFuture<Void> handleDiscoverCommand(RoutedPacket request) {
+        return discoverDevices()
+            .thenAccept(devices -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put("status", new NoteBytes("success"));
+                response.put("device_count", new NoteBytes(devices.size()));
+                // TODO: Serialize device list
+                
+                reply(request, response.getNoteBytesObject());
+            });
+    }
+    
+    private CompletableFuture<Void> handleClaimCommand(NoteBytesMap command, RoutedPacket request) {
+        String deviceId = command.get("device_id").getAsString();
+        String mode = command.get("mode").getAsString();
+        
+        return claimDevice(deviceId, mode)
+            .thenAccept(devicePath -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put("status", new NoteBytes("success"));
+                response.put("device_path", new NoteBytes(devicePath.toString()));
+                
+                reply(request, response.getNoteBytesObject());
+            })
+            .exceptionally(ex -> {
+                NoteBytesMap errorResponse = new NoteBytesMap();
+                errorResponse.put("status", new NoteBytes("error"));
+                errorResponse.put("message", new NoteBytes(ex.getMessage()));
+                
+                reply(request, errorResponse.getNoteBytesObject());
+                return null;
+            });
+    }
+    
+    private CompletableFuture<Void> handleReleaseCommand(NoteBytesMap command, RoutedPacket request) {
+        String deviceId = command.get("device_id").getAsString();
+        
+        return releaseDevice(deviceId)
+            .thenAccept(v -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put("status", new NoteBytes("success"));
+                
+                reply(request, response.getNoteBytesObject());
+            });
+    }
+    
+    private CompletableFuture<Void> handleListDevicesCommand(RoutedPacket request) {
+        List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities> devices = 
+            discoveredDevices.getAllDevices();
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put("status", new NoteBytes("success"));
+        response.put("device_count", new NoteBytes(devices.size()));
+        // TODO: Serialize device list
+        
+        reply(request, response.getNoteBytesObject());
+        
+        return CompletableFuture.completedFuture(null);
     }
     
     // ===== DISCOVERY PHASE =====
     
-    /**
-     * Request full device discovery
-     */
-    public CompletableFuture<List<IODaemonProtocol.USBDeviceDescriptor>> discoverDevices() {
+    public CompletableFuture<List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities>> discoverDevices() {
         if (!ClientStateFlags.canDiscover(clientSession.state)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cannot discover in current state"));
         }
         
-        clientSession.state.setFlag(ClientStateFlags.DISCOVERING);
+        clientSession.state.addState(ClientStateFlags.DISCOVERING);
         
         NoteBytesObject request = IODaemonProtocol.MessageBuilder.createCommand(
-            IODaemonProtocol.Commands.REQUEST_DISCOVERY
+            ProtocolMesssages.REQUEST_DISCOVERY
         );
         
         return asyncWriter.writeAsync(request)
             .thenApply(v -> {
-                // Response will come via read loop
-                return waitForDeviceList();
+                // Wait for device list response
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return discoveredDevices.getAllDevices();
             });
     }
     
-    private List<IODaemonProtocol.USBDeviceDescriptor> waitForDeviceList() {
-        // Wait for DEVICE_LIST response (handled in protocol message handler)
-        // This is simplified - real implementation would use CompletableFuture
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        return new ArrayList<>(discoveredDevices.values());
+    public List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities> getDiscoveredDevices() {
+        return discoveredDevices.getAllDevices();
+    }
+    
+    public DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities getDevice(String deviceId) {
+        return discoveredDevices.getDevice(deviceId);
     }
     
     // ===== CLAIM PHASE =====
     
-    /**
-     * Claim a device
-     */
-    public CompletableFuture<ContextPath> claimDevice(
-            String deviceId, 
-            IODaemonProtocol.DeviceMode mode) {
-        
+    public CompletableFuture<ContextPath> claimDevice(String deviceId, String requestedMode) {
         if (!ClientStateFlags.canClaim(clientSession.state)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cannot claim in current state"));
         }
         
-        IODaemonProtocol.USBDeviceDescriptor device = discoveredDevices.get(deviceId);
-        if (device == null) {
+        // Get device from discovered registry
+        DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo = 
+            discoveredDevices.getDevice(deviceId);
+        
+        if (deviceInfo == null) {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Device not found: " + deviceId));
         }
         
-        // Register in InputSourceRegistry (gets sourceId)
-        ContextPath basePath = ContextPath.of("daemon", sessionId, device.get_device_type());
-        InputSourceCapabilities capabilities = createCapabilities(device);
-        ContextPath fullPath = registry.registerSource(basePath, device.product, capabilities);
+        if (deviceInfo.claimed()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Device already claimed: " + deviceId));
+        }
         
-        int sourceId = registry.getSourceIdFromPath(fullPath);
+        // Validate mode locally BEFORE sending claim
+        if (!discoveredDevices.validateModeCompatibility(deviceId, requestedMode)) {
+            String availableModes = String.join(", ", 
+                discoveredDevices.getAvailableModes(deviceId));
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException(
+                    "Device does not support mode: " + requestedMode + 
+                    ". Available: " + availableModes));
+        }
+        
+        // Generate sourceId (simple: hash of deviceId)
+        int sourceId = deviceId.hashCode();
         
         // Create device state
-        DeviceState deviceState = new DeviceState(deviceId, sourceId, clientSession.clientPid);
-        deviceStates.put(sourceId, deviceState);
-        clientSession.claimedDevices.put(sourceId, deviceState);
+        DeviceState deviceState = new DeviceState(
+            deviceId,
+            sourceId,
+            clientSession.clientPid,
+            deviceInfo.usbDevice().get_device_type(),
+            deviceInfo.capabilities()
+        );
         
-        // Send CLAIM command to daemon
+        // Enable requested mode
+        if (!deviceState.enableMode(requestedMode)) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Failed to enable mode: " + requestedMode));
+        }
+        
+        // Send CLAIM command to daemon with sourceId
         NoteBytesObject claimCmd = IODaemonProtocol.MessageBuilder.createCommand(
-            IODaemonProtocol.Commands.CLAIM_DEVICE,
-            new NoteBytesPair("device_id", deviceId),
-            new NoteBytesPair("source_id", new NoteBytesReadOnly(sourceId)),
-            new NoteBytesPair("pid", clientSession.clientPid),
-            new NoteBytesPair("mode", mode.name().toLowerCase())
+            ProtocolMesssages.CLAIM_ITEM,
+            new NoteBytesPair(Keys.ITEM_ID, deviceId),
+            new NoteBytesPair("source_id", sourceId),
+            new NoteBytesPair(Keys.PID, clientSession.clientPid),
+            new NoteBytesPair("mode", requestedMode)
         );
         
         return asyncWriter.writeAsync(claimCmd)
             .thenApply(v -> {
-                deviceState.state.setFlag(DeviceStateFlags.CLAIMED);
-                clientSession.state.setFlag(ClientStateFlags.HAS_CLAIMED_DEVICES);
+                // Mark as claimed
+                discoveredDevices.markClaimed(deviceId, sourceId);
                 
-                System.out.println("Claimed device: " + deviceId + " as sourceId " + sourceId);
-                return fullPath;
+                // Store device state
+                deviceStates.put(sourceId, deviceState);
+                clientSession.claimedDevices.put(sourceId, deviceState);
+                clientSession.state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+                
+                // Create device path under this process
+                ContextPath devicePath = contextPath
+                    .append(deviceInfo.usbDevice().get_device_type())
+                    .append(String.valueOf(sourceId));
+                
+                System.out.println("Claimed device: " + deviceId + 
+                                 " at " + devicePath +
+                                 " with mode: " + requestedMode);
+                
+                return devicePath;
             });
     }
     
-    private InputSourceCapabilities createCapabilities(IODaemonProtocol.USBDeviceDescriptor device) {
-        String deviceType = device.get_device_type();
-        return switch (deviceType) {
-            case "keyboard" -> new InputSourceCapabilities.Builder("USB Keyboard")
-                .enableKeyboard()
-                .withScanCodes()
-                .build();
-            case "mouse" -> new InputSourceCapabilities.Builder("USB Mouse")
-                .enableMouse()
-                .providesAbsoluteCoordinates()
-                .build();
-            default -> new InputSourceCapabilities.Builder("USB HID Device")
-                .build();
-        };
-    }
-    
-    // ===== STREAMING PHASE =====
-    
-    /**
-     * Start streaming from a claimed device
-     */
-    public CompletableFuture<Void> startStreaming(int sourceId) {
-        DeviceState device = deviceStates.get(sourceId);
-        if (device == null) {
+    public CompletableFuture<Void> releaseDevice(String deviceId) {
+        Integer sourceId = discoveredDevices.getSourceId(deviceId);
+        if (sourceId == null) {
             return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Device not claimed: " + sourceId));
+                new IllegalArgumentException("Device not claimed: " + deviceId));
         }
         
-        if (!device.state.hasFlag(DeviceStateFlags.CLAIMED)) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Device not claimed"));
-        }
-        
-        device.state.setFlag(DeviceStateFlags.STREAMING);
-        clientSession.state.setFlag(ClientStateFlags.STREAMING);
-        
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    /**
-     * Pause streaming
-     */
-    public CompletableFuture<Void> pauseDevice(int sourceId) {
-        DeviceState device = deviceStates.get(sourceId);
-        if (device != null) {
-            device.state.setFlag(DeviceStateFlags.PAUSED);
-            
-            NoteBytesObject pauseCmd = IODaemonProtocol.MessageBuilder.createCommand(
-                IODaemonProtocol.Commands.PAUSE_DEVICE,
-                new NoteBytesPair("source_id", new NoteBytesReadOnly(sourceId))
-            );
-            
-            return asyncWriter.writeAsync(pauseCmd);
-        }
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    /**
-     * Resume streaming
-     */
-    public CompletableFuture<Void> resumeDevice(int sourceId) {
-        DeviceState device = deviceStates.get(sourceId);
-        if (device != null) {
-            device.state.clearFlag(DeviceStateFlags.PAUSED);
-            
-            // Send RESUME with acknowledgment count
-            int processed = clientSession.messagesSent.get() - clientSession.messagesAcknowledged.get();
-            
-            NoteBytesObject resumeCmd = IODaemonProtocol.MessageBuilder.createCommand(
-                IODaemonProtocol.Commands.RESUME_DEVICE,
-                new NoteBytesPair("source_id", new NoteBytesReadOnly(sourceId)),
-                new NoteBytesPair("processed_count", processed)
-            );
-            
-            return asyncWriter.writeAsync(resumeCmd)
-                .thenRun(() -> clientSession.messagesAcknowledged(processed));
-        }
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    // ===== MESSAGE HANDLING =====
-    
-    private void handleDeviceEvent(int sourceId, NoteBytesReadOnly payload) {
-        DeviceState device = deviceStates.get(sourceId);
-        if (device == null) {
-            System.err.println("Event for unknown device: " + sourceId);
-            return;
-        }
-        
-        // Check backpressure
-        if (!backpressureManager.canEmitFromDevice(device)) {
-            device.eventsDropped++;
-            return;
-        }
-        
-        // Emit through InputSourceRegistry
-        registry.emit(sourceId, payload);
-        
-        // Track delivery
-        device.eventDelivered();
-        
-        // Check if we need to send RESUME
-        if (backpressureManager.shouldSendResume(clientSession)) {
-            resumeAll();
-        }
-    }
-  
-    private void setupMsgMapping(){
-        m_execMsgMap.put( EventBytes.TYPE_PING, (map)->handlePing(map));
-        m_execMsgMap.put( EventBytes.TYPE_ACCEPT, (map)->handleAccept(map));
-        m_execMsgMap.put( EventBytes.TYPE_ERROR, (map)->handleError(map));
-        m_execMsgMap.put( EventBytes.TYPE_CMD, (map)->handleCommand(map));
-        m_execMsgMap.put( EventBytes.TYPE_DISCONNECTED, (map)->handleDeviceDisconnected(map));
-    }
- 
-    
-    private void handleProtocolMessage(NoteBytesReadOnly messageBytes) {
-        NoteBytesMap message = messageBytes.getAsNoteBytesObject().getAsNoteBytesMap();
-        NoteBytes type = message.get(Keys.TYPE_KEY);
-        
-        MessageExecutor msgExecutor = m_execMsgMap.get(type);
-
-        if(msgExecutor != null){
-            msgExecutor.execute(message);
-        }else{
-            System.err.println("Cannot execute protocol message type: " + type);
-        }
-    }
-    
-    private void handlePing(NoteBytesMap message) {
-        // Send PONG immediately
-        NoteBytesObject pong = IODaemonProtocol.MessageBuilder.createCommand(
-            "pong"
+        NoteBytesObject releaseCmd = IODaemonProtocol.MessageBuilder.createCommand(
+            ProtocolMesssages.RELEASE_ITEM,
+            new NoteBytesPair(Keys.ITEM_ID, deviceId),
+            new NoteBytesPair("source_id", sourceId)
         );
         
+        return asyncWriter.writeAsync(releaseCmd)
+            .thenRun(() -> {
+                // Remove from device states
+                deviceStates.remove(sourceId);
+                clientSession.claimedDevices.remove(sourceId);
+                
+                // Mark as released
+                discoveredDevices.markReleased(deviceId);
+                
+                System.out.println("Released device: " + deviceId);
+            });
+    }
+    
+    // ===== DAEMON MESSAGE HANDLERS =====
+    
+    private void handleCommand(NoteBytesMap map) {
+        NoteBytes cmdBytes = map.get(Keys.CMD);
+        if (cmdBytes == null) {
+            System.err.println("No cmd field in TYPE_CMD message");
+            return;
+        }
+        
+        // Dispatch command subtype
+        MessageExecutor executor = m_execMsgMap.get(cmdBytes);
+        if (executor != null) {
+            executor.execute(map);
+        } else {
+            System.err.println("Unknown command: " + cmdBytes);
+        }
+    }
+    
+    private void handleDeviceList(NoteBytesMap map) {
+        // Parse into discovered device registry
+        discoveredDevices.parseDeviceList(map);
+        
+        clientSession.state.removeState(ClientStateFlags.DISCOVERING);
+        
+        System.out.println("Device discovery complete: " + 
+            discoveredDevices.getAllDevices().size() + " devices found");
+        
+        discoveredDevices.printDevices();
+    }
+    
+    private void handleDeviceClaimed(NoteBytesMap map) {
+        System.out.println("Device claim confirmed by daemon");
+    }
+    
+    private void handleDeviceReleased(NoteBytesMap map) {
+        System.out.println("Device release confirmed by daemon");
+    }
+    
+    private void handlePing(NoteBytesMap map) {
+        NoteBytesObject pong = IODaemonProtocol.MessageBuilder.createCommand(
+            ProtocolMesssages.PONG
+        );
         asyncWriter.writeAsync(pong)
             .thenRun(() -> clientSession.receivedPong());
     }
     
-    private void handleAccept(NoteBytesMap message) {
-        String status = message.get(Keys.STATUS_KEY).getAsString();
-        System.out.println("Server: " + status);
+    private void handlePong(NoteBytesMap map) {
+        clientSession.receivedPong();
     }
     
-    private void handleError(NoteBytesMap message) {
-        int errorCode = message.get(Keys.ERROR_KEY).getAsInt();
-        String errorMsg = message.get(Keys.MSG_KEY).getAsString();
+    private void handleAccept(NoteBytesMap map) {
+        NoteBytes statusBytes = map.get(Keys.STATUS);
+        if (statusBytes != null) {
+            System.out.println("Server: " + statusBytes.getAsString());
+        }
+    }
+    
+    private void handleError(NoteBytesMap map) {
+        int errorCode = map.get(Keys.ERROR_CODE).getAsInt();
+        String errorMsg = map.get(Keys.MSG).getAsString();
         System.err.println("Server error " + errorCode + ": " + errorMsg);
     }
     
-    private void handleCommand(NoteBytesMap message) {
-        String cmd = message.get(Keys.CMD_KEY).getAsString();
-        
-        switch (cmd) {
-            case IODaemonProtocol.Commands.DEVICE_LIST -> handleDeviceList(message);
-            case IODaemonProtocol.Commands.DEVICE_CLAIMED -> handleDeviceClaimed(message);
-            case IODaemonProtocol.Commands.DEVICE_RELEASED -> handleDeviceReleased(message);
-        }
-    }
-    
-    private void handleDeviceList(NoteBytesMap message) {
-        NoteBytes devicesBytes = message.get("devices");
-        if (devicesBytes != null && devicesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-            NoteBytesReadOnly[] devicesArray = devicesBytes.getAsNoteBytesArrayReadOnly().getAsArray();
-            
-            discoveredDevices.clear();
-            
-            for (NoteBytesReadOnly deviceBytes : devicesArray) {
-                if (deviceBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    IODaemonProtocol.USBDeviceDescriptor device = 
-                        IODaemonProtocol.USBDeviceDescriptor.fromNoteBytesObject(
-                            deviceBytes.getAsNoteBytesObject());
-                    
-                    discoveredDevices.put(device.deviceId, device);
-                }
-            }
-            
-            System.out.println("Discovered " + discoveredDevices.size() + " devices");
-            clientSession.state.clearFlag(ClientStateFlags.DISCOVERING);
-        }
-    }
-    
-    private void handleDeviceClaimed(NoteBytesMap message) {
-        // Device claim confirmed by server
-        System.out.println("Device claim confirmed");
-    }
-    
-    private void handleDeviceReleased(NoteBytesMap message) {
-        // Device released by server
-        System.out.println("Device released");
-    }
-    
-    private void handleDeviceDisconnected(NoteBytesMap message) {
-        String deviceName = message.get("device").getAsString();
-        System.out.println("Device disconnected: " + deviceName);
-        
-        // Find and mark device as disconnected
-        for (DeviceState device : deviceStates.values()) {
-            if (device.deviceId.equals(deviceName)) {
-                device.state.setFlag(DeviceStateFlags.DISCONNECTED);
-                registry.setSourceState(device.sourceId, DeviceStateFlags.DISCONNECTED);
-            }
-        }
-    }
-    
-    // ===== BACKPRESSURE MANAGEMENT =====
-    
-    private void resumeAll() {
-        int totalProcessed = clientSession.messagesSent.get() - 
-                           clientSession.messagesAcknowledged.get();
-        
-        if (totalProcessed > 0) {
-            NoteBytesObject resumeCmd = IODaemonProtocol.MessageBuilder.createCommand(
-                "resume",
-                new NoteBytesPair("processed_count", totalProcessed)
-            );
-            
-            asyncWriter.writeAsync(resumeCmd)
-                .thenRun(() -> clientSession.messagesAcknowledged(totalProcessed));
-        }
+    private void handleDisconnected(NoteBytesMap map) {
+        System.out.println("Server disconnected");
+        handleDisconnect();
     }
     
     // ===== CLEANUP =====
@@ -546,30 +591,30 @@ public class IODaemon implements AutoCloseable {
         connected = false;
         running = false;
         
-        clientSession.state.setFlag(ClientStateFlags.DISCONNECTING);
+        clientSession.state.addState(ClientStateFlags.DISCONNECTING);
         
-        // Release all devices
+        // Cleanup all claimed devices
         for (DeviceState device : deviceStates.values()) {
             device.release();
-            registry.unregisterSource(device.sourceId);
         }
+        
+        deviceStates.clear();
+        discoveredDevices.clear();
         
         System.out.println("Disconnected from daemon");
     }
     
     @Override
-    public void close() {
+    public void kill() {
         if (connected) {
-            clientSession.state.setFlag(ClientStateFlags.DISCONNECTING);
+            clientSession.state.addState(ClientStateFlags.DISCONNECTING);
             
-            // Send disconnect
-            NoteBytesObject disconnect = new NoteBytesObject();
-            disconnect.add(Keys.TYPE_KEY, EventBytes.TYPE_SHUTDOWN);
-            disconnect.add(Keys.SEQUENCE_KEY, 
-                         IODaemonProtocol.MessageBuilder.generateSequence());
+            NoteBytesObject shutdown = new NoteBytesObject();
+            shutdown.add(Keys.TYPE, EventBytes.TYPE_SHUTDOWN);
+            shutdown.add(Keys.SEQUENCE, IODaemonProtocol.MessageBuilder.generateSequence());
             
             try {
-                asyncWriter.writeSync(disconnect);
+                asyncWriter.writeSync(shutdown);
             } catch (IOException e) {
                 // Ignore
             }
@@ -585,10 +630,9 @@ public class IODaemon implements AutoCloseable {
             }
             
             asyncWriter.shutdown();
-            heartbeatManager.unregisterSession(sessionId);
-            heartbeatExecutor.shutdown();
-            ioExecutor.shutdown();
         }
+        
+        super.kill();
     }
     
     // ===== QUERIES =====
@@ -597,27 +641,12 @@ public class IODaemon implements AutoCloseable {
         return clientSession;
     }
     
-    public Map<Integer, DeviceState> getDeviceStates() {
-        return Collections.unmodifiableMap(deviceStates);
-    }
-    
-    public List<IODaemonProtocol.USBDeviceDescriptor> getDiscoveredDevices() {
-        return new ArrayList<>(discoveredDevices.values());
+    public String getSessionId() {
+        return sessionId;
     }
     
     public boolean isConnected() {
-        return connected && clientSession.state.hasFlag(ClientStateFlags.CONNECTED);
+        return connected && clientSession.state.hasState(ClientStateFlags.CONNECTED);
     }
-    
-    public boolean canDiscover() {
-        return ClientStateFlags.canDiscover(clientSession.state);
-    }
-    
-    public boolean canClaim() {
-        return ClientStateFlags.canClaim(clientSession.state);
-    }
-    
-    public boolean canStream() {
-        return ClientStateFlags.canStream(clientSession.state);
-    }
+
 }

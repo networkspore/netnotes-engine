@@ -24,10 +24,10 @@ public class TaskMessages {
 
     public static NoteBytesObject getTaskMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(new NoteBytes(Keys.SCOPE_KEY), new NoteBytes(scope)),
-            new NoteBytesPair(new NoteBytes(Keys.TYPE_KEY), new NoteBytes(type)),
-            new NoteBytesPair(new NoteBytes(Keys.MSG_KEY), message),
-            new NoteBytesPair(new NoteBytes(Keys.TIME_STAMP), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(Keys.SCOPE), new NoteBytes(scope)),
+            new NoteBytesPair(new NoteBytes(Keys.TYPE), new NoteBytes(type)),
+            new NoteBytesPair(new NoteBytes(Keys.MSG), message),
+            new NoteBytesPair(new NoteBytes(Keys.TIMESTAMP), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
@@ -37,10 +37,10 @@ public class TaskMessages {
 
     public static NoteBytesObject getProgressMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(new NoteBytes(Keys.SCOPE_KEY), scope),
-            new NoteBytesPair(new NoteBytes(Keys.TYPE_KEY), type),
-            new NoteBytesPair(new NoteBytes(Keys.MSG_KEY), message),
-            new NoteBytesPair(new NoteBytes(Keys.TIME_STAMP), new NoteBytes(System.currentTimeMillis()))
+            new NoteBytesPair(new NoteBytes(Keys.SCOPE), scope),
+            new NoteBytesPair(new NoteBytes(Keys.TYPE), type),
+            new NoteBytesPair(new NoteBytes(Keys.MSG), message),
+            new NoteBytesPair(new NoteBytes(Keys.TIMESTAMP), new NoteBytes(System.currentTimeMillis()))
         });
         return result;
     }
@@ -56,7 +56,7 @@ public class TaskMessages {
         NoteBytesObject result = getTaskMessage(new NoteBytesReadOnly(scope), ProtocolMesssages.ERROR, new NoteBytesReadOnly(message));
         if(e != null){
             try{
-                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
+                result.add(Keys.EXCEPTION, new NoteSerializable(e));
             }catch(IOException ex){
 
             }
@@ -68,7 +68,7 @@ public class TaskMessages {
         NoteBytesObject result = getTaskMessage(scope, ProtocolMesssages.ERROR, new NoteBytesReadOnly(message));
         if(e != null){
             try{
-                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
+                result.add(Keys.EXCEPTION, new NoteSerializable(e));
             }catch(IOException ex){
 
             }
@@ -80,7 +80,7 @@ public class TaskMessages {
         NoteBytesObject result = getTaskMessage(scope, ProtocolMesssages.ERROR, message);
         if(e != null){
             try{
-                result.add(Keys.EXCEPTION_KEY, new NoteSerializable(e));
+                result.add(Keys.EXCEPTION, new NoteSerializable(e));
             }catch(IOException ex){
 
             }

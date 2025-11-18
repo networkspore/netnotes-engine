@@ -266,22 +266,22 @@ public class NotePath{
             String filePath = filePathValue.getAsString();
 
             progressMsg(ProtocolMesssages.UPDATED,new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), new NoteBytesReadOnly(filePath),new NoteBytesPair[]{
-                new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.STARTED) 
+                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.STARTED) 
             });
             try{
                 
                 Files.deleteIfExists(new File(filePath).toPath());
                
                 progressMsg(ProtocolMesssages.UPDATED, new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), new NoteBytesReadOnly( filePath), new NoteBytesPair[]{
-                    new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.SUCCESS)});
+                    new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS)});
 
             }catch(IOException e){
 
                 progressMsg(ProtocolMesssages.UPDATED,new NoteBytesReadOnly(0), new NoteBytesReadOnly(-1), 
                     new NoteBytesReadOnly(filePath),  
                     new NoteBytesPair[]{
-                        new NoteBytesPair(Keys.STATUS_KEY, ProtocolMesssages.ERROR),
-                        new NoteBytesPair(Keys.EXCEPTION_KEY, e)});
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.ERROR),
+                        new NoteBytesPair(Keys.EXCEPTION, e)});
         
                 throw new RuntimeException(filePath, e);
             }

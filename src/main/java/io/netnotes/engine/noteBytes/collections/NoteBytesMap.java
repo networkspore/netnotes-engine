@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -322,6 +323,9 @@ public class NoteBytesMap{
         m_pairs.putAll(m);
     }
 
+    public void forEach(BiConsumer<? super NoteBytes,? super NoteBytes> biConsumer){
+        m_pairs.forEach(biConsumer);
+    }
     
     public NoteBytes remove(Object key) {
         return m_pairs.remove(key);

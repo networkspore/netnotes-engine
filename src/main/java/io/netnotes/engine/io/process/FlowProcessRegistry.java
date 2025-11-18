@@ -1,7 +1,9 @@
-package io.netnotes.engine.io;
+package io.netnotes.engine.io.process;
 
 import java.util.*;
 import java.util.concurrent.*;
+
+import io.netnotes.engine.io.ContextPath;
 
 /**
  * UnifiedProcessRegistry - Single registry for ALL processes.
@@ -18,11 +20,11 @@ import java.util.concurrent.*;
  * 3. Start processes (they begin emitting/processing)
  * 4. Backpressure handled automatically by Flow API
  */
-public class ProcessRegistry {
-    private static final ProcessRegistry INSTANCE = new ProcessRegistry();
+public class FlowProcessRegistry {
+    private static final FlowProcessRegistry INSTANCE = new FlowProcessRegistry();
     
     // Path → Process
-    private final ConcurrentHashMap<ContextPath, Process> processes = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ContextPath, FlowProcess> processes = new ConcurrentHashMap<>();
     
     // Parent-child relationships
     private final ConcurrentHashMap<ContextPath, Set<ContextPath>> children = new ConcurrentHashMap<>();
@@ -33,9 +35,9 @@ public class ProcessRegistry {
     
     private final Executor virtualExec = Executors.newVirtualThreadPerTaskExecutor();;
 
-    private ProcessRegistry() {}
+    private FlowProcessRegistry() {}
     
-    public static ProcessRegistry getInstance() {
+    public static FlowProcessRegistry getInstance() {
         return INSTANCE;
     }
     
@@ -44,14 +46,14 @@ public class ProcessRegistry {
     /**
      * Register a process at a path
      */
-    public ContextPath registerProcess(Process process, ContextPath path) {
+    public ContextPath registerProcess(FlowProcess process, ContextPath path) {
         return registerProcess(process, path, null);
     }
     
     /**
      * Register a process with parent
      */
-    public ContextPath registerProcess(Process process, ContextPath path, ContextPath parentPath) {
+    public ContextPath registerProcess(FlowProcess process, ContextPath path, ContextPath parentPath) {
         // Check for duplicates
         if (processes.containsKey(path)) {
             throw new IllegalStateException("Process already registered at: " + path);
@@ -78,7 +80,7 @@ public class ProcessRegistry {
      * Unregister a process
      */
     public void unregisterProcess(ContextPath path) {
-        Process process = processes.remove(path);
+        FlowProcess process = processes.remove(path);
         if (process == null) return;
         
         // Kill process if still alive
@@ -116,8 +118,8 @@ public class ProcessRegistry {
      * Flow: upstream.emit() → downstream.handleMessage()
      */
     public void connect(ContextPath upstreamPath, ContextPath downstreamPath) {
-        Process upstream = processes.get(upstreamPath);
-        Process downstream = processes.get(downstreamPath);
+        FlowProcess upstream = processes.get(upstreamPath);
+        FlowProcess downstream = processes.get(downstreamPath);
         
         if (upstream == null) {
             throw new IllegalArgumentException("Upstream process not found: " + upstreamPath);
@@ -177,7 +179,7 @@ public class ProcessRegistry {
      * Start a process (begin execution)
      */
     public CompletableFuture<Void> startProcess(ContextPath path) {
-        Process process = processes.get(path);
+        FlowProcess process = processes.get(path);
         if (process == null) {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Process not found: " + path));
@@ -211,7 +213,7 @@ public class ProcessRegistry {
      * Kill a process
      */
     public void killProcess(ContextPath path) {
-        Process process = processes.get(path);
+        FlowProcess process = processes.get(path);
         if (process != null) {
             process.kill();
         }
@@ -231,7 +233,7 @@ public class ProcessRegistry {
     /**
      * Get process at path
      */
-    public Process getProcess(ContextPath path) {
+    public FlowProcess getProcess(ContextPath path) {
         return processes.get(path);
     }
     
@@ -245,7 +247,7 @@ public class ProcessRegistry {
     /**
      * Find all processes under a prefix
      */
-    public List<Process> findProcessesUnder(ContextPath prefix) {
+    public List<FlowProcess> findProcessesUnder(ContextPath prefix) {
         return processes.entrySet().stream()
             .filter(e -> e.getKey().startsWith(prefix))
             .map(Map.Entry::getValue)
@@ -255,7 +257,7 @@ public class ProcessRegistry {
     /**
      * Find processes by type
      */
-    public List<Process> findProcessesByType(Process.ProcessType type) {
+    public List<FlowProcess> findProcessesByType(FlowProcess.ProcessType type) {
         return processes.values().stream()
             .filter(p -> p.getProcessType() == type)
             .toList();
@@ -328,9 +330,9 @@ public class ProcessRegistry {
         dot.append("  node [shape=box];\n\n");
         
         // Add nodes
-        for (Map.Entry<ContextPath, Process> entry : processes.entrySet()) {
+        for (Map.Entry<ContextPath, FlowProcess> entry : processes.entrySet()) {
             ContextPath path = entry.getKey();
-            Process process = entry.getValue();
+            FlowProcess process = entry.getValue();
             String color = switch (process.getProcessType()) {
                 case SOURCE -> "lightblue";
                 case TRANSFORM -> "lightgreen";
@@ -360,13 +362,13 @@ public class ProcessRegistry {
     
     public String getSummary() {
         int total = processes.size();
-        int alive = (int) processes.values().stream().filter(Process::isAlive).count();
+        int alive = (int) processes.values().stream().filter(FlowProcess::isAlive).count();
         int sources = (int) processes.values().stream()
-            .filter(p -> p.getProcessType() == Process.ProcessType.SOURCE).count();
+            .filter(p -> p.getProcessType() == FlowProcess.ProcessType.SOURCE).count();
         int transforms = (int) processes.values().stream()
-            .filter(p -> p.getProcessType() == Process.ProcessType.TRANSFORM).count();
+            .filter(p -> p.getProcessType() == FlowProcess.ProcessType.TRANSFORM).count();
         int sinks = (int) processes.values().stream()
-            .filter(p -> p.getProcessType() == Process.ProcessType.SINK).count();
+            .filter(p -> p.getProcessType() == FlowProcess.ProcessType.SINK).count();
         
         int totalConnections = connections.values().stream().mapToInt(Set::size).sum();
         
@@ -380,7 +382,7 @@ public class ProcessRegistry {
      * Get detailed process info
      */
     public Map<String, Object> getProcessStats(ContextPath path) {
-        Process process = processes.get(path);
+        FlowProcess process = processes.get(path);
         if (process == null) return null;
         
         Map<String, Object> stats = new HashMap<>();

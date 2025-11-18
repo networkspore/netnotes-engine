@@ -6,7 +6,6 @@ import java.io.OutputStream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 
@@ -15,13 +14,6 @@ public class NoteBytesWriter implements AutoCloseable {
 
     public NoteBytesWriter(OutputStream outputStream){
         m_out = new DataOutputStream(outputStream);
-    }
-
-    public int writeObject(NoteBytesObject object) throws IOException{
-        byte[] metaData = new byte[5];
-        NoteBytesMetaData.write(NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE, object.byteLength() , metaData,0);
-        m_out.write(metaData);
-        return write(object) + metaData.length;
     }
 
     public int write(NoteBytes noteBytes) throws IOException{
