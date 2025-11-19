@@ -7,6 +7,7 @@ import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -17,24 +18,24 @@ public class NoteBytesPair {
 
 
     public NoteBytesPair(String key, String value){
-        this(key.toCharArray(), value.toCharArray());
+        this(new NoteString(key), new NoteString(value));
     }
 
     public NoteBytesPair(String key, char[] value){
-        this(key.toCharArray(), value);
+        this(new NoteString(key), value);
     }
 
     public NoteBytesPair(char[] key, char[] value){
-        m_key = new NoteBytes(key);
-        m_value =new NoteBytes(value);
+        m_key = new NoteString(key);
+        m_value =new NoteString(value);
     }
 
     public NoteBytesPair(String key, NoteBytes value){
-        this(new NoteBytes(key), value);    
+        this(new NoteString(key), value);    
     }
 
     public NoteBytesPair(String key, Object value){
-        this(new NoteBytes(key), NoteBytes.of(value));    
+        this(new NoteString(key), NoteBytes.of(value));    
     }
     
     public NoteBytesPair(NoteBytes key, Object value){

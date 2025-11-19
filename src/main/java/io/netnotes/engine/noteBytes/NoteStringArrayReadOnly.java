@@ -233,6 +233,17 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     }
 
     /**
+     * Check if this path starts with the given prefix
+     */
+    public boolean startsWith(NoteBytesReadOnly prefix) {
+        if (this.byteLength() == 0) {
+            return false;
+        }
+        return this.get(0).equals(prefix);
+    }
+
+
+    /**
      * Check if this path starts with the given prefix string
      */
     public boolean startsWith(String prefixPath) {

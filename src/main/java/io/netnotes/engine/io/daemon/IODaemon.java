@@ -93,18 +93,18 @@ public class IODaemon extends FlowProcess {
     }
     
     @Override
-    protected void onStart() {
+    public void onStart() {
         System.out.println("IODaemon starting: " + sessionId);
     }
     
     @Override
-    protected void onStop() {
+    public void onStop() {
         System.out.println("IODaemon stopping: " + sessionId);
         handleDisconnect();
     }
     
     @Override
-    protected CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         // Handle commands from other processes
         try {
             NoteBytesReadOnly payload = packet.getPayload();

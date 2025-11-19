@@ -36,12 +36,12 @@ import java.util.function.Function;
 public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== IDENTITY =====
-    protected ContextPath contextPath;
-    protected FlowProcessId processId;  // Derived from contextPath
-    protected ContextPath parentPath;
+    public ContextPath contextPath;
+    public FlowProcessId processId;  // Derived from contextPath
+    public ContextPath parentPath;
     
     // ===== REGISTRY =====
-    protected FlowProcessRegistry registry;
+    public FlowProcessRegistry registry;
     
     // ===== LIFECYCLE =====
     private volatile boolean alive = true;
@@ -95,14 +95,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Handle incoming packet - MAIN METHOD FOR TRANSFORM/SINK PROCESSES
      * SOURCE processes typically don't override this.
      */
-    protected CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         return CompletableFuture.completedFuture(null);
     }
     
     /**
      * Configure backpressure for INCOMING messages
      */
-    protected BackpressureStrategy getBackpressureStrategy() {
+    public BackpressureStrategy getBackpressureStrategy() {
         return switch (processType) {
             case SOURCE -> BackpressureStrategy.UNBOUNDED; // Sources generate, don't receive
             case TRANSFORM -> BackpressureStrategy.BUFFERED_100;
@@ -114,13 +114,13 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Lifecycle hooks
      */
-    protected void onStart() {}
-    protected void onStop() {}
-    protected void onStreamError(Throwable error) {
+    public void onStart() {}
+    public void onStop() {}
+    public void onStreamError(Throwable error) {
         System.err.println("Process " + contextPath + " error: " + error.getMessage());
         error.printStackTrace();
     }
-    protected void onStreamComplete() {}
+    public void onStreamComplete() {}
     
     // ===== OUTGOING PACKET EMISSION (PUBLISHER) =====
     
@@ -129,7 +129,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Use this in SOURCE processes to generate events.
      * Use this in TRANSFORM processes to send output.
      */
-    protected void emit(RoutedPacket packet) {
+    public void emit(RoutedPacket packet) {
         if (!alive) return;
         
         try {
@@ -145,14 +145,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Emit with automatic source path stamping
      */
-    protected void emit(NoteBytesReadOnly payload) {
+    public void emit(NoteBytesReadOnly payload) {
         emit(RoutedPacket.create(contextPath, payload));
     }
     
     /**
      * Emit to specific destination
      */
-    protected void emitTo(ContextPath destination, NoteBytesReadOnly payload) {
+    public void emitTo(ContextPath destination, NoteBytesReadOnly payload) {
         emit(RoutedPacket.createDirect(contextPath, destination, payload));
     }
     
@@ -303,7 +303,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Send request and wait for reply
      */
-    protected CompletableFuture<RoutedPacket> request(
+    public CompletableFuture<RoutedPacket> request(
             ContextPath targetPath,
             NoteBytesReadOnly payload,
             Duration timeout) {
@@ -337,14 +337,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         return future;
     }
 
-    protected void reply(RoutedPacket originalRequest, NoteBytes payload) {
+    public void reply(RoutedPacket originalRequest, NoteBytes payload) {
         reply(originalRequest, payload.readOnly());
     }
     
     /**
      * Reply to a request
      */
-    protected void reply(RoutedPacket originalRequest, NoteBytesReadOnly payload) {
+    public void reply(RoutedPacket originalRequest, NoteBytesReadOnly payload) {
         String correlationId = originalRequest.getMetadataString("correlationId");
         String replyTo = originalRequest.getMetadataString("replyTo");
         
@@ -374,7 +374,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     // ===== COMPOSITION PATTERNS =====
     
    
-    protected CompletableFuture<RoutedPacket> pipeline(
+    public CompletableFuture<RoutedPacket> pipeline(
             NoteBytes input,
             ContextPath... stages) {
         return pipeline(input.readOnly(), stages);
@@ -382,7 +382,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Pipeline: chain multiple processes
      */
-    protected CompletableFuture<RoutedPacket> pipeline(
+    public CompletableFuture<RoutedPacket> pipeline(
             NoteBytesReadOnly input,
             ContextPath... stages) {
         
@@ -398,7 +398,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         return result;
     }
     
-    protected CompletableFuture<List<RoutedPacket>> scatterGather(
+    public CompletableFuture<List<RoutedPacket>> scatterGather(
             NoteBytes input,
             Collection<ContextPath> targets,
             Duration timeout) {
@@ -407,7 +407,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Scatter-gather: parallel fan-out then collect
      */
-    protected CompletableFuture<List<RoutedPacket>> scatterGather(
+    public CompletableFuture<List<RoutedPacket>> scatterGather(
             NoteBytesReadOnly input,
             Collection<ContextPath> targets,
             Duration timeout) {
@@ -428,7 +428,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Map-reduce: transform in parallel, then reduce
      */
-    protected <T> CompletableFuture<T> mapReduce(
+    public <T> CompletableFuture<T> mapReduce(
             Collection<NoteBytes> inputs,
             ContextPath mapper,
             Function<List<RoutedPacket>, T> reducer,
@@ -450,11 +450,11 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     /**
      * Block safely (virtual threads make this cheap)
      */
-    protected <T> T await(CompletableFuture<T> future) {
+    public <T> T await(CompletableFuture<T> future) {
         return await(future, Duration.ofSeconds(30));
     }
     
-    protected <T> T await(CompletableFuture<T> future, Duration timeout) {
+    public <T> T await(CompletableFuture<T> future, Duration timeout) {
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -467,7 +467,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         }
     }
     
-    protected void sleep(Duration duration) {
+    public void sleep(Duration duration) {
         try {
             Thread.sleep(duration);
         } catch (InterruptedException e) {
@@ -478,7 +478,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== CHILD PROCESS MANAGEMENT =====
     
-    protected CompletableFuture<ContextPath> spawnChild(
+    public CompletableFuture<ContextPath> spawnChild(
             FlowProcess child,
             String childName) {
         

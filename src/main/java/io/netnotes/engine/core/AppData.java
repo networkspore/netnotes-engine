@@ -6,11 +6,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
+import io.netnotes.engine.core.nodes.INode;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 
 public class AppData {
@@ -445,7 +450,50 @@ public class AppData {
   */
     //Data files
 
+    public AppDataInterface getAppDataInterface(NoteBytesReadOnly id){
+        return new AppDataInterface(){
+            final NoteBytesReadOnly startingPath = new NoteBytesReadOnly(id.get(), NoteBytesMetaData.STRING_TYPE);
+            @Override
+            public void shutdown() {
+                AppData.this.shutdown(null);
+            }
 
+            @Override
+            public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly path) {
+                if(path == null){
+                    return CompletableFuture.failedFuture(new NullPointerException("Path is null"));
+                }
+                return CompletableFuture.supplyAsync(()->{
+                    NoteBytesReadOnly[] originalPath = path.getAsArray();
+
+                    boolean isStartingPath = originalPath.length > 0 ? originalPath[0].equals(startingPath) : false;
+
+                    if(isStartingPath){
+                        NoteBytesReadOnly[] copiedPath = new NoteBytesReadOnly[originalPath.length];
+                        for(int i = 0; i < originalPath.length; i++){
+                            copiedPath[i] = new NoteBytesReadOnly(originalPath[i].get(), NoteBytesMetaData.STRING_TYPE);
+                        }
+                        return new NoteStringArrayReadOnly(copiedPath);
+                    
+                    }else{
+                        NoteBytesReadOnly[] copiedPath = new NoteBytesReadOnly[originalPath.length + 1];
+
+                        copiedPath[0] = startingPath;
+                        for(int i = 0; i < originalPath.length; i++){
+                            copiedPath[i + 1] = new NoteBytesReadOnly(originalPath[i].get(), NoteBytesMetaData.STRING_TYPE);
+                        }
+                        return new NoteStringArrayReadOnly(copiedPath);
+                    
+                    }
+                }, VirtualExecutors.getVirtualExecutor())
+                    .thenCompose(scopedPath->AppData.this.m_noteFileRegistry.getNoteFile(scopedPath));
+
+            }
+
+        
+
+        };
+    }
 
 
     public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter){

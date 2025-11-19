@@ -2,7 +2,6 @@ package io.netnotes.engine.noteBytes;
 
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.crypto.RandomService;
@@ -12,7 +11,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
 import io.netnotes.engine.utils.HardwareInfo;
 
-public class NoteUUID extends NoteBytes {
+public class NoteUUID extends NoteBytesReadOnly {
 
     private static final AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
 
@@ -21,16 +20,6 @@ public class NoteUUID extends NoteBytes {
     }
 
 
-    @Override
-    public void set(byte[] bytes, byte type){
-   
-    }
-
-    @Override
-    public byte[] get(){
-        byte[] bytes = super.getBytesInternal();
-        return Arrays.copyOf(bytes, byteLength());
-    }
 
       
     public static byte[] littleEndianNanoTimeHash(){
@@ -70,7 +59,7 @@ public class NoteUUID extends NoteBytes {
         return bytes;
     }
 
-    public static CompletableFuture<NoteUUID> createHardwareNoteUUID256(ExecutorService execService){ 
+    public static CompletableFuture<NoteUUID> createHardwareNoteUUID256(){ 
         return HardwareInfo.getCPUFingerPrint().thenApply(cpuHashBytes->{
             byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), cpuHashBytes.getBytes(16));
             return fromUnencodedBytes(bytes);

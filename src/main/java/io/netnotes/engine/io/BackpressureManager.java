@@ -1,4 +1,4 @@
-package io.netnotes.engine.io.daemon;
+package io.netnotes.engine.io;
 
 import io.netnotes.engine.io.daemon.DaemonProtocolState.*;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;

@@ -295,7 +295,7 @@ public class BaseSystemProcess extends FlowProcess {
     }
     
     @Override
-    protected CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         // Handle system-level commands
         try {
             NoteBytesMap command = packet.getPayload().getAsNoteBytesMap();

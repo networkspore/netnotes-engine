@@ -2,7 +2,11 @@ package io.netnotes.engine.io;
 
 
 import io.netnotes.engine.io.process.FlowProcessId;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -286,6 +290,18 @@ public final class RoutedPacket {
     }
     
     // ===== STATIC FACTORIES =====
+
+    public static RoutedPacket create(ContextPath sourcePath, NoteBytesPair... payload) {
+        return create(sourcePath, new NoteBytesObject(payload));
+    }
+
+    public static RoutedPacket create(ContextPath sourcePath, NoteBytesMap payload) {
+        return create(sourcePath, payload.getNoteBytesObject());
+    }
+    
+    public static RoutedPacket create(ContextPath sourcePath, NoteBytes payload) {
+        return create(sourcePath, payload.readOnly());
+    }
     
     /**
      * Create a simple packet from path and payload
