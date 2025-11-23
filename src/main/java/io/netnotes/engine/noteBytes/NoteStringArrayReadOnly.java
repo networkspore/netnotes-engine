@@ -96,11 +96,11 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
     }
     
 
-    public NoteBytes get(int index){
+    public NoteBytesReadOnly get(int index){
         return getAt(index);
     }
 
-    public NoteBytes getAt(int index){
+    public NoteBytesReadOnly getAt(int index){
      
         byte[] bytes = getBytesInternal();
         int length = bytes.length;
@@ -115,7 +115,7 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
             if(counter == index){
                 byte[] dst = new byte[size];
                 System.arraycopy(bytes, offset, dst, 0, size);
-                return NoteBytes.of(dst, type);
+                return NoteBytesReadOnly.of(dst, type);
             }
             offset += size;
             counter++;
@@ -205,14 +205,24 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
      * Get the first segment (root)
      */
     public String getRootString() {
-        return size() > 0 ? getString(0) : null;
+        NoteBytes first = getFirst();
+        return first != null ? first.getAsString() : null;
+    }
+
+    public NoteBytesReadOnly getRoot(){
+        return super.getFirst();
     }
 
     /**
      * Get the last segment (leaf)
      */
     public String getLeafString() {
-        return size() > 0 ? getString(size() - 1) : null;
+        NoteBytesReadOnly last = getLast();
+        return last != null ? last.getAsString() : null;
+    }
+
+    public NoteBytesReadOnly getLeaf(){
+        return getLast();
     }
 
     /**

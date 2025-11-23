@@ -3,7 +3,7 @@ package io.netnotes.engine.io.events;
 import java.util.HashMap;
 import java.util.Map;
 
-import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
@@ -17,7 +17,7 @@ public final class InputEventFactory {
 
     @FunctionalInterface
     private interface EventDeserializer {
-        InputEvent create(NoteBytesReadOnly sourceId, int stateFlags, NoteBytes[] payload);
+        RoutedEvent create(ContextPath sourcePath, int stateFlags, NoteBytes[] payload);
     }
 
     static {
@@ -43,25 +43,35 @@ public final class InputEventFactory {
                 p[2].getAsDouble(),
                 p[3].getAsDouble(),
                 flags));
-
+    
+                
         // ===== Keyboard Events =====
+        //NoteBytesReadOnly sourceId, int key, int scancode, int stateFlags
+        REGISTRY.put(EventBytes.EVENT_KEY_DOWN, (src, flags, p) ->
+            new KeyDownEvent(src,
+                p[0].getAsInt(),
+                p[1].getAsInt(),
+                flags));
+
         REGISTRY.put(EventBytes.EVENT_KEY_UP, (src, flags, p) ->
             new KeyUpEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsInt(),
                 flags));
-
+        //NoteBytesReadOnly sourceId, int key, int scancode, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_REPEAT, (src, flags, p) ->
             new KeyRepeatEvent(src,
                 p[0].getAsInt(),
                 p[1].getAsInt(),
                 flags));
 
+        //NoteBytesReadOnly sourceId, int codepoint, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_CHAR, (src, flags, p) ->
             new KeyCharEvent(src,
                 p[0].getAsInt(),
                 flags));
 
+        //NoteBytesReadOnly sourceId, int codepoint, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_CHAR_MODS, (src, flags, p) ->
             new KeyCharModsEvent(src,
                 p[0].getAsInt(),
@@ -78,15 +88,13 @@ public final class InputEventFactory {
     /**
      * Deserializes a RoutedPacket into a typed InputEvent.
      */
-    public static InputEvent from(RoutedPacket packet) {
-        NoteBytesReadOnly sourceId = packet.getSourceId();
-        NoteBytesReadOnly bodyNoteBytes = packet.getPacket();
+    public static RoutedEvent from( ContextPath sourcePath, NoteBytesReadOnly packet) {
 
-        if (bodyNoteBytes.getType() == NoteBytesMetaData.NOTE_BYTES_ENCRYPTED_TYPE) {
-            return new EncryptedInputEvent(sourceId, bodyNoteBytes);
+        if (packet.getType() == NoteBytesMetaData.NOTE_BYTES_ENCRYPTED_TYPE) {
+            return new EncryptedInputEvent(sourcePath, packet);
         }
 
-        NoteBytesMap body = bodyNoteBytes.getAsNoteBytesMap();
+        NoteBytesMap body = packet.getAsNoteBytesMap();
 
         NoteBytes typeBytes = body.get(Keys.TYPE);
         NoteBytes seqBytes = body.get(Keys.SEQUENCE);
@@ -110,7 +118,7 @@ public final class InputEventFactory {
             throw new IllegalArgumentException("Unknown InputEvent type: " + type);
         }
 
-        return constructor.create(sourceId, flags, payloadArray);
+        return constructor.create(sourcePath, flags, payloadArray);
     }
 
 }

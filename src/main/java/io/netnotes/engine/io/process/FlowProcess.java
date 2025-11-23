@@ -3,7 +3,10 @@ package io.netnotes.engine.io.process;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 import java.time.Duration;
 import java.util.*;
@@ -111,6 +114,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         };
     }
     
+
+    /**
+     * Handles stream messages from a stream channel
+     * 
+     */
+     public abstract void handleStreamChannel(StreamChannel channel, ContextPath fromPath);
+    
+
     /**
      * Lifecycle hooks
      */
@@ -142,13 +153,32 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         }
     }
     
+    public void emit(NoteBytesMap map){
+        emit(map.getNoteBytesObject());
+    }
+
+    public void emit(NoteBytesObject object){
+        emit(object.readOnly());
+    }
+
     /**
      * Emit with automatic source path stamping
      */
     public void emit(NoteBytesReadOnly payload) {
         emit(RoutedPacket.create(contextPath, payload));
     }
+
+    public void emitTo(ContextPath destination, NoteBytesPair... pairs) {
+        emitTo(destination, new NoteBytesObject(pairs));
+    }
     
+    public void emitTo(ContextPath destination, NoteBytesMap payload) {
+        emitTo(destination, payload.getNoteBytesObject());
+    }
+
+    public void emitTo(ContextPath destination, NoteBytesObject payload) {
+        emitTo(destination, payload.readOnly());
+    }
     /**
      * Emit to specific destination
      */
@@ -299,7 +329,27 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     // ===== REQUEST-REPLY PATTERN =====
+
+    public CompletableFuture<RoutedPacket> request(
+            ContextPath targetPath,
+            Duration timeout, NoteBytesPair... pairs) {
+        return request(targetPath, new NoteBytesObject(pairs), timeout);
+    }
     
+
+    public CompletableFuture<RoutedPacket> request(
+            ContextPath targetPath,
+            NoteBytesMap map,
+            Duration timeout) {
+        return request(targetPath, map.getNoteBytesObject(), timeout);
+    }
+    
+    public CompletableFuture<RoutedPacket> request(
+            ContextPath targetPath,
+            NoteBytesObject object,
+            Duration timeout) {
+        return request(targetPath, object.readOnly(), timeout);
+    }
     /**
      * Send request and wait for reply
      */
@@ -489,6 +539,10 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     // ===== LIFECYCLE CONTROL =====
+
+    protected FlowProcessRegistry getFlowProcessRegistry(){
+        return registry;
+    }
     
     public void initialize(ContextPath path, ContextPath parentPath, FlowProcessRegistry registry) {
         this.contextPath = path;
@@ -569,7 +623,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     // ===== UTILITIES =====
     
     private String generateCorrelationId() {
-        return processId.asInt() + "-" + System.nanoTime();
+        return processId.asString();
     }
     
     private ExecutorService getExecutorForType(ProcessType type) {

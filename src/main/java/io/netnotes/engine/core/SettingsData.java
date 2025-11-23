@@ -2,6 +2,8 @@ package io.netnotes.engine.core;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
+import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.CompletableFuture;
@@ -10,7 +12,7 @@ import java.util.concurrent.ExecutorService;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.core.bootstrap.BaseSystemProcess;
+
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
@@ -21,6 +23,8 @@ import io.netnotes.engine.noteBytes.NoteRandom;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
+import io.netnotes.engine.utils.JarHelpers;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 public class SettingsData {
     public static final NoteBytes BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 1});
@@ -31,6 +35,49 @@ public class SettingsData {
 
     private static final String SETTINGS_FILE_NAME = "settings.dat";
 
+
+     
+    private static File m_appDir = null;
+    private static File m_appFile = null;
+    
+    static {
+        try {
+            URL classLocation = JarHelpers.getLocation(SettingsData.class);
+            m_appFile = JarHelpers.urlToFile(classLocation);
+            m_appDir = m_appFile.getParentFile();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    
+    public static File getBootstrapFile() throws IOException {
+        File dataDir = getAppDataDir();
+        return new File(dataDir, "bootstrap.dat");
+    }
+    
+    public static File getAppDataDir() {
+        File dataDir = new File(m_appDir, "data");
+        if (!dataDir.isDirectory()) {
+            try {
+                Files.createDirectory(dataDir.toPath());
+            } catch (IOException e) {
+                throw new RuntimeException("Cannot create data directory", e);
+            }
+        }
+        return dataDir;
+    }
+    
+    public static File getAppDir() {
+        return m_appDir;
+    }
+    
+    public static File getAppFile() {
+        return m_appFile;
+    }
+    
+    public static File getDataDir() {
+        return getAppDataDir();
+    }
     
 
 
@@ -57,14 +104,24 @@ public class SettingsData {
         return m_oldSalt;
     }
 
-    public static CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password, NoteBytesMap map, ExecutorService executorService ){
+    public CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password){
+        NoteBytesEphemeral copy = password.copy();
+        return CompletableFuture.supplyAsync(()->{
+            try(copy){
+                
+                return HashServices.verifyBCryptPassword(password, m_bcryptKey);
+            }
+        },  VirtualExecutors.getVirtualExecutor());
+    }
+
+    public static CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password, NoteBytesMap map){
         NoteBytesEphemeral copy = password.copy();
         return CompletableFuture.supplyAsync(()->{
             try(copy){
                 NoteBytes bcrypt = map.get(BCRYPT_KEY);
                 return HashServices.verifyBCryptPassword(password, bcrypt);
             }
-        }, executorService);
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
     public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws InvalidPasswordException, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
@@ -113,7 +170,7 @@ public class SettingsData {
     }
 
     private static File getSettingsFile() throws IOException{
-        File dataDir = BaseSystemProcess.getDataDir();
+        File dataDir = getDataDir();
         
         return new File(dataDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
         
@@ -147,8 +204,17 @@ public class SettingsData {
         return false;
     }
 
+    public static boolean isBootstrapData() throws IOException{
+        File bootstrapFile = getBootstrapFile();
+        if(bootstrapFile.exists() && bootstrapFile.isFile()){
+            return true;
+        }
 
-    public static CompletableFuture<SettingsData> createSettings(NoteBytesEphemeral password, ExecutorService service){
+        return false;
+    }
+
+
+    public static CompletableFuture<SettingsData> createSettings(NoteBytesEphemeral password){
         NoteBytesEphemeral pass = password.copy();
 
         return CompletableFuture.supplyAsync(()->{
@@ -166,10 +232,10 @@ public class SettingsData {
             }finally{
                 pass.close();
             }
-        });
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public static CompletableFuture<NoteBytesMap> loadSettingsMap(ExecutorService service){
+    public static CompletableFuture<NoteBytesMap> loadSettingsMap(){
 
         return CompletableFuture.supplyAsync(()->{
             try{
@@ -179,10 +245,24 @@ public class SettingsData {
                 throw new CompletionException("Settings could not be read", e);
             }
 
-        }, service);
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public static CompletableFuture<SettingsData> loadSettingsData(NoteBytesEphemeral pass, NoteBytesMap map, ExecutorService executor){
+    public static CompletableFuture<NoteBytesMap> loadBootStrapConfig(){
+
+        return CompletableFuture.supplyAsync(()->{
+            try{
+                File bootStrapFile = getBootstrapFile();
+                return FileStreamUtils.readFileToMap(bootStrapFile);
+            }catch(Exception e){
+                throw new CompletionException("Settings could not be read", e);
+            }
+
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+
+
+    public static CompletableFuture<SettingsData> loadSettingsData(NoteBytesEphemeral pass, NoteBytesMap map){
         final NoteBytesEphemeral password = pass.copy();
         return CompletableFuture.supplyAsync(()->{
             try(password){
@@ -199,7 +279,7 @@ public class SettingsData {
             }catch(Exception e){
                   throw new CompletionException(e);
             }
-        }, executor);
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
 }

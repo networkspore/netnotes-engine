@@ -23,6 +23,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.VirtualExecutors;
 /**
  * Manages the plugin registry - a NoteFile that stores information about installed plugins.
  * The registry persists plugin metadata including: plugin ID, version, JAR path, and enabled status.
@@ -45,9 +46,9 @@ public class OSGiPluginRegistry {
     // In-memory cache of installed plugins
     private final ConcurrentHashMap<String, OSGiPluginMetaData> m_installedPlugins;
     
-    public OSGiPluginRegistry(ExecutorService execService) {
+    public OSGiPluginRegistry() {
       
-        m_execService = execService;
+        m_execService = VirtualExecutors.getVirtualExecutor();
         m_installedPlugins = new ConcurrentHashMap<>();
     
     }

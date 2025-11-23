@@ -1,15 +1,15 @@
 package io.netnotes.engine.io.events;
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.io.ContextPath;
 
-public final class FocusLostEvent implements InputEvent {
-    private final NoteBytesReadOnly sourceId;
+public final class FocusLostEvent implements RoutedEvent {
+    private final ContextPath sourcePath;
 
-    public FocusLostEvent(NoteBytesReadOnly sourceId) {
-        this.sourceId = sourceId;
+    public FocusLostEvent(ContextPath sourcePath) {
+        this.sourcePath = sourcePath;
     }
 
     @Override
-    public NoteBytesReadOnly getSourceId() { return sourceId; }
+    public ContextPath getSourcePath() { return sourcePath; }
 }
 

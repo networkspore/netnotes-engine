@@ -82,7 +82,7 @@ public class NodeKeyPairs{
         m_signPrivateKey = sPriv;
         m_signPublicKey = sPriv.generatePublicKey();
 
-        m_uuid = NoteUUID.fromNoteUUIDBytes(uuidBytes.get());
+        m_uuid = NoteUUID.fromStringBytes(uuidBytes.get());
 
         uuidBytes.ruin();
         xPrivBytes.ruin();

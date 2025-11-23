@@ -1,19 +1,20 @@
 package io.netnotes.engine.io.events;
 
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
-public class EncryptedInputEvent implements InputEvent {
+public class EncryptedInputEvent implements RoutedEvent {
     
-    private final NoteBytesReadOnly sourceId;
+    private final ContextPath sourcePath;
     private final NoteBytesReadOnly encryptedPacket;
 
-    public EncryptedInputEvent(NoteBytesReadOnly sourceId, NoteBytesReadOnly encryptedPacket){
-        this.sourceId = sourceId;
+    public EncryptedInputEvent(ContextPath sourcePath, NoteBytesReadOnly encryptedPacket){
+        this.sourcePath = sourcePath;
         this.encryptedPacket = encryptedPacket;
     }
 
     @Override
-    public NoteBytesReadOnly getSourceId(){ return sourceId; }
+    public ContextPath getSourcePath(){ return sourcePath; }
     public NoteBytesReadOnly getEncryptedPacket(){ return encryptedPacket; }
 
 }

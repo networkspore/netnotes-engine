@@ -9,6 +9,7 @@ import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
+import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytesReadOnly {
@@ -43,7 +44,18 @@ public class NoteUUID extends NoteBytesReadOnly {
         return createLocalUUID128().getAsString();
     }
 
+    public static NoteUUID createLocalUUID64(){
+        return fromUnencodedBytes(createTimeSequenceBytes64());
+    }
 
+    public static String createSafeUUID64(){
+        return createLocalUUID64().getAsString();
+    }
+    
+
+    public static byte[] createTimeSequenceBytes64(){
+        return AtomicSequence.getNextSequence();
+    }
 
     public static byte[] createTimeRndBytes(){
 		byte[] nanoTime = littleEndianNanoTimeHash();
@@ -67,15 +79,15 @@ public class NoteUUID extends NoteBytesReadOnly {
     }
 
     public static NoteUUID fromNoteUUIDString(String urlSafeString){
-        return new NoteUUID(urlSafeString.getBytes());
+        return fromStringBytes(urlSafeString.getBytes());
     }
 
-    public static NoteUUID fromNoteUUIDBytes(byte[] bytes){
+    public static NoteUUID fromStringBytes(byte[] bytes){
         return new NoteUUID(Arrays.copyOf(bytes, bytes.length));
     }
 
     public static NoteUUID fromUnencodedBytes(byte[] bytes){
-        return fromNoteUUIDBytes( EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
+        return new NoteUUID( EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
 
     }
 

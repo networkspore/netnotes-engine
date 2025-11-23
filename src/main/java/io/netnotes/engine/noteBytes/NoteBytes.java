@@ -17,7 +17,6 @@ import com.google.gson.JsonPrimitive;
 
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.collections.NoteBytesArrayList;
 import io.netnotes.engine.noteBytes.collections.NoteBytesConcurrentMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
@@ -68,9 +67,12 @@ public class NoteBytes {
         this(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
     }
 
+
     public NoteBytes(long l){
         this(ByteDecoding.longToBytesBigEndian(l), NoteBytesMetaData.LONG_TYPE);
     }
+
+
 
     public NoteBytes( char[] value, byte type){
         this( ByteDecoding.charsToByteArray(value, type), type);
@@ -175,7 +177,7 @@ public class NoteBytes {
     }
 
     public String getAsUrlSafeString(){
-        return ByteDecoding.bytesToUrlSafeString(m_value, m_type);
+        return ByteDecoding.bytesToUrlSafeString(m_value);
     }
 
     @Override
@@ -698,8 +700,8 @@ public class NoteBytes {
 
 
 
-    public NoteUUID getNoteUUIDfromBytes(){ 
-        return NoteUUID.fromNoteUUIDBytes(getBytesInternal());
+    public NoteUUID getAsNoteUUID(){ 
+        return NoteUUID.fromStringBytes(getBytesInternal());
     }
 
     public static NoteBytes of(byte[] bytes, byte type){
@@ -775,8 +777,6 @@ public class NoteBytes {
             return ((NoteBytesMap)obj).getNoteBytesObject();
         }else if(obj instanceof NoteSerializable){
             return (NoteSerializable) obj;
-        }else if(obj instanceof NoteBytesArrayList){
-            return ((NoteBytesArrayList) obj).getNoteBytesArray();
         }else if(obj instanceof NoteBytes){
             return (NoteBytes) obj;
         }else if(obj instanceof Serializable){

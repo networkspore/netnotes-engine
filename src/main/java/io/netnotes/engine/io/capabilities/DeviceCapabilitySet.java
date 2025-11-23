@@ -1,5 +1,6 @@
 package io.netnotes.engine.io.capabilities;
 
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
@@ -315,15 +316,15 @@ public class DeviceCapabilitySet {
     public NoteBytesObject toNoteBytes() {
         NoteBytesObject obj = new NoteBytesObject();
         
-        obj.add("name", name);
-        obj.add("device_type", deviceType);
+        obj.add(Keys.NAME, name);
+        obj.add(Keys.ITEM_TYPE, deviceType);
         
         // Serialize capabilities as BigInteger
-        obj.add("available", new NoteBigInteger(availableCapabilities.getState()));
-        obj.add("enabled", new NoteBigInteger(enabledCapabilities.getState()));
+        obj.add(Keys.AVAILABLE_CAPABILITIES, new NoteBigInteger(availableCapabilities.getState()));
+        obj.add(Keys.ENABLED_CAPABILITIES, new NoteBigInteger(enabledCapabilities.getState()));
         
         // Serialize constraints
-        obj.add("constraints", constraints.toNoteBytes());
+        obj.add(Keys.CONSTRAINTS, constraints.toNoteBytes());
         
         // Serialize children
         if (!children.isEmpty()) {
@@ -356,26 +357,26 @@ public class DeviceCapabilitySet {
     public static DeviceCapabilitySet fromNoteBytes(NoteBytesObject obj) {
         NoteBytesMap map = obj.getAsNoteBytesMap();
         
-        String name = map.get("name").getAsString();
-        String deviceType = map.get("device_type").getAsString();
+        String name = map.get(Keys.NAME).getAsString();
+        String deviceType = map.get(Keys.ITEM_TYPE).getAsString();
         
         DeviceCapabilitySet caps = new DeviceCapabilitySet(name, deviceType);
         
         // Restore capabilities from BigInteger
-        BigInteger available = new BigInteger(map.get("available").getBytes());
-        BigInteger enabled = new BigInteger(map.get("enabled").getBytes());
+        BigInteger available = new BigInteger(map.get(Keys.AVAILABLE_CAPABILITIES).getBytes());
+        BigInteger enabled = new BigInteger(map.get(Keys.ENABLED_CAPABILITIES).getBytes());
         
         caps.availableCapabilities.setState(available);
         caps.enabledCapabilities.setState(enabled);
         
         // Restore constraints
-        NoteBytes constraintsBytes = map.get("constraints");
+        NoteBytes constraintsBytes = map.get(Keys.CONSTRAINTS);
         if (constraintsBytes != null) {
             caps.constraints.fromNoteBytes(constraintsBytes.getAsNoteBytesObject());
         }
         
         // Restore children
-        NoteBytes childrenBytes = map.get("children");
+        NoteBytes childrenBytes = map.get(Keys.CHILDREN);
         if (childrenBytes != null) {
             NoteBytesArray childArray = childrenBytes.getAsNoteBytesArray();
             for (NoteBytes childBytes : childArray.getAsArray()) {

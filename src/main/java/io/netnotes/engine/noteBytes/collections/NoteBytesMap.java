@@ -13,6 +13,7 @@ import java.util.stream.Stream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
@@ -168,6 +169,12 @@ public class NoteBytesMap{
 
     public NoteBytes get(NoteBytes key) {
         return m_pairs.get(key);
+    }
+
+    public NoteBytesReadOnly getReadOnly(NoteBytes key) {
+        NoteBytes value = m_pairs.get(key);
+
+        return value != null ? value.readOnly() : null;
     }
 
 

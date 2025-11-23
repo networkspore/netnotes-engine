@@ -3,6 +3,7 @@ package io.netnotes.engine.io;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -85,6 +86,22 @@ public final class ContextPath {
         return segments;
     }
 
+    public NoteBytesReadOnly getRoot(){
+        return segments.getRoot();
+    }
+
+    public String getRootString(){
+        return segments.getRootString();
+    }
+
+    public NoteBytesReadOnly getLeaf(){
+        return segments.getLeaf();
+    }
+
+    public String getLeafString(){
+        return segments.getLeafString();
+    }
+
     public int depth() {
         return segments.size();
     }
@@ -92,6 +109,16 @@ public final class ContextPath {
     public boolean isRoot() {
         return segments.isEmpty();
     }
+    
+    public ContextPath getParent() {
+        return parent();
+    }
+
+    public String getLastSegment(){
+        return getLeafString();
+    }
+
+
 
     public ContextPath parent() {
         if (isRoot()) return null;
@@ -101,7 +128,7 @@ public final class ContextPath {
 
     public String name() {
         if (isRoot()) return "";
-        return segments.getLeafString();
+        return getLeafString();
     }
 
     public ContextPath append(String segment) {

@@ -96,29 +96,14 @@ public final class RoutedPacket {
         return destinationPath;
     }
     
-    /**
-     * Get source ID as integer (derived from path endpoint)
-     * For compatibility with legacy code
-     */
-    public int getSourceIdAsInt() {
-        return sourcePath.hashCode();
-    }
-    
-    /**
-     * Get source ID as NoteBytesReadOnly (for legacy compatibility)
-     * @deprecated Use getSourcePath() instead
-     */
-    @Deprecated
-    public NoteBytesReadOnly getSourceId() {
-        return new NoteBytesReadOnly(getSourceIdAsInt());
-    }
-    
+  
+
     /**
      * Get ProcessId from source path
      * Useful when routing to processes
      */
     public FlowProcessId getSourceProcessId() {
-        return new FlowProcessId(getSourceIdAsInt());
+        return new FlowProcessId();
     }
     
     /**
@@ -350,19 +335,7 @@ public final class RoutedPacket {
             RoutingMode.HIERARCHICAL
         );
     }
-    
-    /**
-     * Create from legacy sourceId format
-     * @deprecated Use path-based constructor instead
-     */
-    @Deprecated
-    public static RoutedPacket fromLegacySourceId(
-            NoteBytesReadOnly sourceId,
-            NoteBytesReadOnly payload) {
-        // Convert sourceId to a simple numeric path
-        ContextPath path = ContextPath.of("legacy", String.valueOf(sourceId.getAsInt()));
-        return new RoutedPacket(path, payload);
-    }
+
     
     // ===== ROUTING MODES =====
     

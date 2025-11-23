@@ -1,0 +1,421 @@
+// ===== NEW FILE: ClientSession.java =====
+
+package io.netnotes.engine.io.daemon;
+
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
+import io.netnotes.engine.noteBytes.*;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * ClientSession - One per authenticated client connection
+ * 
+ * Responsibilities:
+ * - Session lifecycle (auth, heartbeat, backpressure)
+ * - Device discovery and claiming
+ * - Managing ClaimedDevice children
+ * - Forwarding commands to IODaemon socket manager
+ * 
+ * Hierarchy: IODaemon → ClientSession → ClaimedDevice
+ */
+public class ClientSession extends FlowProcess {
+    
+    public final String sessionId;
+    public final int clientPid;
+    public final BitFlagStateMachine state;
+    
+    private final DiscoveredDeviceRegistry discoveredDevices = new DiscoveredDeviceRegistry();
+    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgMap = new ConcurrentHashMap<>();
+
+    public volatile long lastPingSent = 0;
+    public volatile long lastPongReceived = 0;
+    public final AtomicInteger missedPongs = new AtomicInteger(0);
+    
+    public final AtomicInteger messagesSent = new AtomicInteger(0);
+    public final AtomicInteger messagesAcknowledged = new AtomicInteger(0);
+    
+    public int maxUnacknowledgedMessages = 100;
+    public long heartbeatIntervalMs = 5000;
+    public long heartbeatTimeoutMs = 15000;
+    
+    public ClientSession(String sessionId, int clientPid) {
+        super(ProcessType.BIDIRECTIONAL);
+        this.sessionId = sessionId;
+        this.clientPid = clientPid;
+        this.state = new BitFlagStateMachine("client-" + sessionId);
+        
+        setupStateTransitions();
+        setupRoutedMessageMapping();
+    }
+    
+    private void setupStateTransitions() {
+        state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
+            state.addState(ClientStateFlags.HEARTBEAT_ENABLED);
+        });
+        
+        state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
+            state.addState(ClientStateFlags.FLOW_CONTROL_PAUSED);
+            System.out.println("Backpressure activated for client " + sessionId);
+        });
+        
+        state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
+            state.addState(ClientStateFlags.ERROR_STATE);
+            System.err.println("Heartbeat timeout for client " + sessionId);
+        });
+        
+        state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
+            releaseAllDevices();
+        });
+    }
+
+    private void setupRoutedMessageMapping() {
+        m_routedMsgMap.put(ProtocolMesssages.REQUEST_DISCOVERY, this::handleDiscoverCommand);
+        m_routedMsgMap.put(ProtocolMesssages.CLAIM_ITEM, this::handleClaimCommand);
+        m_routedMsgMap.put(ProtocolMesssages.RELEASE_ITEM, this::handleReleaseCommand);
+        m_routedMsgMap.put(ProtocolMesssages.ITEM_LIST, this::handleListDevicesCommand);
+    }
+    
+    @Override
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+        try {
+            NoteBytesReadOnly payload = packet.getPayload();
+            NoteBytesMap command = payload.getAsNoteBytesMap();
+            
+            NoteBytesReadOnly cmd = command.getReadOnly(Keys.CMD);
+            
+            RoutedMessageExecutor msgExecutor = m_routedMsgMap.get(cmd);
+
+            if(msgExecutor != null){
+                return msgExecutor.execute(command, packet);
+            }else{
+                return CompletableFuture.failedFuture(new UnsupportedOperationException("ClientSession does not support this command"));
+            }
+
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+    
+    @Override
+    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        throw new UnsupportedOperationException("ClientSession does not handle streams");
+    }
+    
+    // ===== DISCOVERY =====
+    
+    private CompletableFuture<Void> handleDiscoverCommand(NoteBytesMap message, RoutedPacket request) {
+        return discoverDevices()
+            .thenAccept(devices -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                response.put(Keys.ITEM_COUNT, new NoteBytes(devices.size()));
+                
+                NoteBytesArray deviceArray = new NoteBytesArray();
+                for (var deviceInfo : devices) {
+                    NoteBytesObject deviceObj = serializeDeviceDescriptor(deviceInfo);
+                    deviceArray.add(deviceObj);
+                }
+                response.put(Keys.ITEMS, deviceArray);
+                
+                reply(request, response.getNoteBytesObject());
+            })
+            .exceptionally(ex -> {
+                NoteBytesMap errorResponse = new NoteBytesMap();
+                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
+                errorResponse.put(Keys.MSG, ex.getMessage());
+                reply(request, errorResponse.getNoteBytesObject());
+                return null;
+            });
+    }
+    
+    public CompletableFuture<List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities>> discoverDevices() {
+        if (!ClientStateFlags.canDiscover(state)) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Cannot discover in current state"));
+        }
+        
+        state.addState(ClientStateFlags.DISCOVERING);
+        
+        // Send discovery request to IODaemon (socket manager)
+        return request(parentPath, Duration.ofSeconds(5),
+            new NoteBytesPair(Keys.CMD , ProtocolMesssages.REQUEST_DISCOVERY),
+            new NoteBytesPair(Keys.SESSION_ID, sessionId)
+        ).thenApply(response -> {
+            // IODaemon will send device list via handleDeviceList callback
+            return discoveredDevices.getAllDevices();
+        });
+    }
+    
+    public void handleDeviceList(NoteBytesMap map) {
+        discoveredDevices.parseDeviceList(map);
+        state.removeState(ClientStateFlags.DISCOVERING);
+        System.out.println("Device discovery complete: " + 
+            discoveredDevices.getAllDevices().size() + " devices found");
+    }
+    
+    private CompletableFuture<Void> handleListDevicesCommand(NoteBytesMap message, RoutedPacket request) {
+        List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities> devices = 
+            discoveredDevices.getAllDevices();
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATE_FLAGS, ProtocolMesssages.SUCCESS);
+        response.put(Keys.ITEM_COUNT, new NoteBytes(devices.size())); 
+        
+        NoteBytesArray deviceArray = new NoteBytesArray();
+        for (var deviceInfo : devices) {
+            NoteBytesObject deviceObj = serializeDeviceDescriptor(deviceInfo);
+            deviceArray.add(deviceObj);
+        }
+        response.put(Keys.ITEMS, deviceArray);
+        
+        reply(request, response.getNoteBytesObject());
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private NoteBytesObject serializeDeviceDescriptor(
+            DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo) {
+        // Same implementation as IODaemon's version
+        NoteBytesObject obj = new NoteBytesObject();
+        // ... (copy from IODaemon)
+        return obj;
+    }
+    
+    // ===== CLAIM =====
+    
+    private CompletableFuture<Void> handleClaimCommand(NoteBytesMap command, RoutedPacket request) {
+        String deviceId = command.get(Keys.DEVICE_ID).getAsString();
+        String mode = command.get(Keys.MODE).getAsString();
+        
+        return claimDevice(deviceId, mode)
+            .thenAccept(devicePath -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                response.put(Keys.ITEM_PATH, new NoteBytes(devicePath.toString()));
+                reply(request, response.getNoteBytesObject());
+            })
+            .exceptionally(ex -> {
+                NoteBytesMap errorResponse = new NoteBytesMap();
+                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
+                errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
+                reply(request, errorResponse.getNoteBytesObject());
+                return null;
+            });
+    }
+    
+    public CompletableFuture<ContextPath> claimDevice(String deviceId, String requestedMode) {
+        if (!ClientStateFlags.canClaim(state)) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Cannot claim in current state"));
+        }
+        
+        DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo = 
+            discoveredDevices.getDevice(deviceId);
+        
+        if (deviceInfo == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Device not found: " + deviceId));
+        }
+        
+        if (deviceInfo.claimed()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Device already claimed: " + deviceId));
+        }
+        
+        if (!discoveredDevices.validateModeCompatibility(deviceId, requestedMode)) {
+            String availableModes = String.join(", ", 
+                discoveredDevices.getAvailableModes(deviceId));
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException(
+                    "Device does not support mode: " + requestedMode + 
+                    ". Available: " + availableModes));
+        }
+        
+        // Create ClaimedDevice as child of this session
+        ContextPath claimedDevicePath = contextPath.append(deviceId);
+        
+        ClaimedDevice claimedDevice = new ClaimedDevice(
+            deviceId,
+            claimedDevicePath,
+            deviceInfo.usbDevice().get_device_type(),
+            deviceInfo.capabilities()
+        );
+        
+        if (!claimedDevice.enableMode(requestedMode)) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Failed to enable mode: " + requestedMode));
+        }
+        
+        // Register as child
+        registry.registerProcess(claimedDevice, claimedDevicePath, contextPath);
+        
+        // Setup stream channel between IODaemon and ClaimedDevice
+        return registry.requestStreamChannel(parentPath, claimedDevicePath)
+            .thenCompose(channel -> {
+                return channel.getReadyFuture()
+                    .thenCompose(v -> {
+                        // Send claim request to IODaemon socket manager
+                        return request(parentPath, Duration.ofSeconds(5),
+                            new NoteBytesPair(Keys.CMD, ProtocolMesssages.CLAIM_ITEM),
+                            new NoteBytesPair(Keys.SESSION_ID, sessionId),
+                            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+                            new NoteBytesPair(Keys.MODE, requestedMode)
+                        );
+                    })
+                    .thenApply(response -> {
+                        discoveredDevices.markClaimed(deviceId);
+                        state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+                        
+                        registry.startProcess(claimedDevicePath);
+                        
+                        System.out.println("Claimed device: " + deviceId + 
+                                        " at " + claimedDevicePath +
+                                        " with mode: " + requestedMode);
+                        
+                        return claimedDevicePath;
+                    });
+            });
+    }
+    
+    // ===== RELEASE =====
+    
+    private CompletableFuture<Void> handleReleaseCommand(NoteBytesMap command, RoutedPacket request) {
+        String deviceId = command.get(Keys.DEVICE_ID).getAsString();
+        
+        return releaseDevice(deviceId)
+            .thenAccept(v -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                reply(request, response.getNoteBytesObject());
+            });
+    }
+    
+    public CompletableFuture<Void> releaseDevice(String deviceId) {
+        if (!discoveredDevices.isClaimed(deviceId)) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Device not claimed: " + deviceId));
+        }
+        
+        ClaimedDevice claimedDevice = getClaimedDevice(deviceId);
+        
+        if (claimedDevice != null) {
+            claimedDevice.release();
+        }
+        
+        // Send release to IODaemon socket manager
+        return request(parentPath, Duration.ofSeconds(5),
+            new NoteBytesPair(Keys.CMD, "release_device"),
+            new NoteBytesPair(Keys.SESSION_ID, sessionId),
+            new NoteBytesPair(Keys.DEVICE_ID, deviceId)
+        ).thenRun(() -> {
+            discoveredDevices.markReleased(deviceId);
+            if (claimedDevice != null) {
+                registry.unregisterProcess(claimedDevice.getContextPath());
+            }
+            System.out.println("Released device: " + deviceId);
+        });
+    }
+    
+    private void releaseAllDevices() {
+        List<ClaimedDevice> devices = 
+            registry.findChildrenByType(contextPath, ClaimedDevice.class);
+        
+        for (ClaimedDevice device : devices) {
+            device.release();
+            registry.unregisterProcess(device.getContextPath());
+        }
+    }
+    
+    // ===== BACKPRESSURE =====
+    
+    public boolean shouldApplyBackpressure() {
+        int sent = messagesSent.get();
+        int acked = messagesAcknowledged.get();
+        int unacked = sent - acked;
+        
+        if (unacked >= maxUnacknowledgedMessages) {
+            state.addState(ClientStateFlags.BACKPRESSURE_ACTIVE);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    public void messageSent() {
+        messagesSent.incrementAndGet();
+        shouldApplyBackpressure();
+    }
+    
+    public void messagesAcknowledged(int count) {
+        messagesAcknowledged.addAndGet(count);
+        
+        int sent = messagesSent.get();
+        int acked = messagesAcknowledged.get();
+        int unacked = sent - acked;
+        
+        if (unacked < maxUnacknowledgedMessages / 2) {
+            state.removeState(ClientStateFlags.BACKPRESSURE_ACTIVE);
+            state.removeState(ClientStateFlags.FLOW_CONTROL_PAUSED);
+        }
+    }
+    
+    // ===== HEARTBEAT =====
+    
+    public boolean checkHeartbeat() {
+        if (!state.hasState(ClientStateFlags.HEARTBEAT_ENABLED)) {
+            return true;
+        }
+        
+        long now = System.currentTimeMillis();
+        
+        if (state.hasState(ClientStateFlags.HEARTBEAT_WAITING)) {
+            long timeSincePing = now - lastPingSent;
+            
+            if (timeSincePing > heartbeatTimeoutMs) {
+                missedPongs.incrementAndGet();
+                
+                if (missedPongs.get() >= 3) {
+                    state.addState(ClientStateFlags.HEARTBEAT_TIMEOUT);
+                    return false;
+                }
+            }
+        }
+        
+        return true;
+    }
+    
+    public void sendPing() {
+        lastPingSent = System.currentTimeMillis();
+        state.addState(ClientStateFlags.HEARTBEAT_WAITING);
+    }
+    
+    public void receivedPong() {
+        lastPongReceived = System.currentTimeMillis();
+        state.removeState(ClientStateFlags.HEARTBEAT_WAITING);
+        missedPongs.set(0);
+    }
+    
+    // ===== HELPERS =====
+    
+    public ClaimedDevice getClaimedDevice(String deviceId) {
+        return (ClaimedDevice) registry.getChildProcess(contextPath, deviceId);
+    }
+    
+    public DiscoveredDeviceRegistry getDiscoveredDevices() {
+        return discoveredDevices;
+    }
+}

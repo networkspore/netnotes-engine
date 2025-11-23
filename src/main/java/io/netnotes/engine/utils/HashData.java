@@ -9,9 +9,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.crypto.HashServices;
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
 import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
@@ -20,17 +18,15 @@ public class HashData {
 
     public static String DEFAULT_HASH = "Blake2b-256";
 
-    private NoteUUID m_id;
+
     private String m_name = DEFAULT_HASH;
     private byte[] m_hashBytes = null;
 
     public HashData(File file) throws  IOException{
-        m_id = NoteUUID.createLocalUUID128();
         m_hashBytes = HashServices.digestFile(file);
     }
 
     public HashData(byte[] hashBytes) {
-        m_id = NoteUUID.createLocalUUID128();
         m_hashBytes =  hashBytes;
     }
 
@@ -45,13 +41,9 @@ public class HashData {
 
 
     public void init(NoteBytesObject nbo)  {
-
-        NoteBytesPair idElement = nbo.get("id");
         NoteBytesPair nameElement = nbo.get("name");
         NoteBytesPair hashStringElement = nbo.get("hash");
 
-        m_id = idElement != null ? idElement.getAsNoteUUID()  : NoteUUID.createLocalUUID128();         
-        
         if (nameElement != null) {
             m_name = nameElement.getAsString();
           
@@ -64,19 +56,14 @@ public class HashData {
 
     public void openJson(JsonObject json)  {
 
-        JsonElement idElement = json.get("id");
-        JsonElement nameElement = json.get("name");
-        JsonElement hashStringElement = json.get("hash");
+        JsonElement nameElement = json != null ? json.get("name") : null;
+        JsonElement hashStringElement = json != null ?  json.get("hash") : null;
 
-        m_id = idElement != null ? NoteUUID.fromNoteUUIDString(idElement.getAsString()) : NoteUUID.createLocalUUID128();         
-        
         if (nameElement != null) {
             m_name = nameElement.getAsString();
-          
         }
         if (hashStringElement != null) {
-
-           m_hashBytes = EncodingHelpers.decodeHex(idElement.getAsString());
+           m_hashBytes = EncodingHelpers.decodeHex(hashStringElement.getAsString());
         }
 
     }
@@ -93,9 +80,6 @@ public class HashData {
         reader.beginObject();
         while(reader.hasNext()){
             switch(reader.nextName()){
-                case "id":
-                    m_id = NoteUUID.fromNoteUUIDString(reader.nextString());
-                break;
                 case "name":
                     m_name = reader.nextString();
                 break;
@@ -111,8 +95,6 @@ public class HashData {
 
     public void writeJson(JsonWriter writer) throws IOException{
         writer.beginObject();
-        writer.name("id");
-        writer.value(getId());
         writer.name("name");
         writer.value(getHashName());
         writer.name("hash");
@@ -121,13 +103,6 @@ public class HashData {
     }
 
 
-    public String getId() {
-        return m_id.getAsString();
-    }
-
-    public NoteBytes getUUID(){
-        return m_id;
-    }
 
     public String getHashName() {
         return m_name;
@@ -147,7 +122,6 @@ public class HashData {
 
     public NoteBytesObject getNoteBytesObject() {
         NoteBytesObject nbo = new NoteBytesObject();
-        nbo.add("id", m_id);
         nbo.add("name", m_name);
         if (m_hashBytes != null) {
             nbo.add("hash", m_hashBytes);
@@ -157,7 +131,6 @@ public class HashData {
 
     public JsonObject getJsonObject() {
         JsonObject json = new JsonObject();
-        json.addProperty("id", getId());
         json.addProperty("name", getHashName());
         if (m_hashBytes != null) {
             json.addProperty("hash", getHashStringHex());

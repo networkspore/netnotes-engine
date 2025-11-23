@@ -1,9 +1,11 @@
 package io.netnotes.engine.io.process;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
  * UnifiedProcessRegistry - Single registry for ALL processes.
@@ -29,11 +31,12 @@ public class FlowProcessRegistry {
     // Parent-child relationships
     private final ConcurrentHashMap<ContextPath, Set<ContextPath>> children = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ContextPath, ContextPath> parents = new ConcurrentHashMap<>();
-    
+    private final ConcurrentHashMap<ContextPath, Boolean> streamCapable = new ConcurrentHashMap<>();
+
     // Connections: subscriber path → publisher paths
     private final ConcurrentHashMap<ContextPath, Set<ContextPath>> connections = new ConcurrentHashMap<>();
     
-    private final Executor virtualExec = Executors.newVirtualThreadPerTaskExecutor();;
+    private final Executor virtualExec = VirtualExecutors.getVirtualExecutor();
 
     private FlowProcessRegistry() {}
     
@@ -52,7 +55,7 @@ public class FlowProcessRegistry {
     
     /**
      * Register a process with parent
-     */
+   
     public ContextPath registerProcess(FlowProcess process, ContextPath path, ContextPath parentPath) {
         // Check for duplicates
         if (processes.containsKey(path)) {
@@ -74,7 +77,7 @@ public class FlowProcessRegistry {
         System.out.println("Registered process: " + path + " (type: " + process.getProcessType() + ")");
         
         return path;
-    }
+    }  */
     
     /**
      * Unregister a process
@@ -87,7 +90,7 @@ public class FlowProcessRegistry {
         if (process.isAlive()) {
             process.kill();
         }
-        
+        streamCapable.remove(path);
         // Remove parent-child relationships
         ContextPath parentPath = parents.remove(path);
         if (parentPath != null) {
@@ -172,7 +175,210 @@ public class FlowProcessRegistry {
         
         System.out.println("Disconnected: " + upstreamPath + " ⊣ " + downstreamPath);
     }
+
+    // ===== STREAM ROUTING =====
     
+
+    /**
+     * Request unidirectional stream channel to another process
+     * Returns immediately with channel, completes when receiver is ready
+     * 
+     * Usage (sender):
+     * registry.requestStreamChannel(myPath, targetPath)
+     *     .thenAccept(channel -> {
+     *         channel.write(data);
+     *     });
+     * 
+     * Or with whenReady helper:
+     * registry.requestStreamChannel(myPath, targetPath)
+     *     .thenCompose(channel -> channel.whenReady(ch -> {
+     *         ch.write(data);
+     *     }));
+     */
+    public CompletableFuture<StreamChannel> requestStreamChannel(
+            ContextPath from,
+            ContextPath to) {
+        
+        return CompletableFuture.supplyAsync(() -> {
+            // Get target process
+            FlowProcess target = processes.get(to);
+            if (target == null) {
+                throw new IllegalArgumentException("Target process not found: " + to);
+            }
+            
+            if (!target.isAlive()) {
+                throw new IllegalStateException("Target process not alive: " + to);
+            }
+            
+            try {
+                // Create channel
+                StreamChannel channel = new StreamChannel(from, to);
+                
+                target.handleStreamChannel(channel, from);
+
+                
+                return channel;
+                
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to create stream channel", e);
+            }
+            
+        }, virtualExec);
+    }
+  
+    
+    /**
+     * Mark a process as stream-capable (optional metadata)
+     */
+    public void markStreamCapable(ContextPath path) {
+        streamCapable.put(path, true);
+    }
+    
+    /**
+     * Check if process supports streams
+     */
+    public boolean isStreamCapable(ContextPath path) {
+        return streamCapable.getOrDefault(path, false);
+    }
+
+
+    public ContextPath registerProcess(FlowProcess process, ContextPath path, ContextPath parentPath) {
+        // Check for duplicates
+        if (processes.containsKey(path)) {
+            throw new IllegalStateException("Process already registered at: " + path);
+        }
+        
+        // Initialize process
+        process.initialize(path, parentPath, this);
+        
+        // Store process
+        processes.put(path, process);
+        
+        // Detect if process supports streams (check if receiveStreamMessage is overridden)
+        try {
+            // Try to call with null values - if it throws UnsupportedOperationException, not capable
+            process.handleStreamChannel(null, null);
+        } catch (UnsupportedOperationException e) {
+            // Not stream capable - normal
+        } catch (Exception e) {
+            // Other exception means it IS overridden (NullPointerException, etc)
+            streamCapable.put(path, true);
+        }
+        
+        // Setup parent-child relationship
+        if (parentPath != null) {
+            parents.put(path, parentPath);
+            children.computeIfAbsent(parentPath, k -> ConcurrentHashMap.newKeySet()).add(path);
+        }
+        
+        System.out.println("Registered process: " + path + " (type: " + process.getProcessType() + 
+            ", stream: " + streamCapable.getOrDefault(path, false) + ")");
+        
+        return path;
+    }
+    
+    /**
+     * Get child process by name suffix
+     * E.g. getChildByName(parentPath, "device-123") 
+     * returns /parent/path/device-123
+     */
+    public ContextPath getChildByName(ContextPath parentPath, String childName) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return null;
+        
+        for (ContextPath childPath : childPaths) {
+            
+            if (childPath.getSegments().getLeafString().equals(childName)) {
+                return childPath;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get child process by name suffix
+     */
+    public FlowProcess getChildProcess(ContextPath parentPath, String childName) {
+        ContextPath childPath = getChildByName(parentPath, childName);
+        return childPath != null ? processes.get(childPath) : null;
+    }
+
+    /**
+     * Get all child processes of a parent
+     */
+    public List<FlowProcess> getChildProcesses(ContextPath parentPath) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return Collections.emptyList();
+        
+        return childPaths.stream()
+            .map(processes::get)
+            .filter(Objects::nonNull)
+            .toList();
+    }
+
+    /**
+     * Find child by type
+     */
+    public <T extends FlowProcess> T findChildByType(ContextPath parentPath, Class<T> type) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return null;
+        
+        for (ContextPath childPath : childPaths) {
+            FlowProcess process = processes.get(childPath);
+            if (process != null && type.isInstance(process)) {
+                return type.cast(process);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find all children by type
+     */
+    public <T extends FlowProcess> List<T> findChildrenByType(ContextPath parentPath, Class<T> type) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return Collections.emptyList();
+        
+        return childPaths.stream()
+            .map(processes::get)
+            .filter(Objects::nonNull)
+            .filter(type::isInstance)
+            .map(type::cast)
+            .toList();
+    }
+
+    /**
+     * Find child by predicate
+     */
+    public FlowProcess findChild(ContextPath parentPath, java.util.function.Predicate<FlowProcess> predicate) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return null;
+        
+        for (ContextPath childPath : childPaths) {
+            FlowProcess process = processes.get(childPath);
+            if (process != null && predicate.test(process)) {
+                return process;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get child count
+     */
+    public int getChildCount(ContextPath parentPath) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        return childPaths != null ? childPaths.size() : 0;
+    }
+
+    /**
+     * Check if process has children
+     */
+    public boolean hasChildren(ContextPath parentPath) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        return childPaths != null && !childPaths.isEmpty();
+    }
+
     // ===== PROCESS LIFECYCLE =====
     
     /**

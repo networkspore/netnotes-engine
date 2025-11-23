@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.io.capabilities.CapabilityRegistry;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -9,6 +10,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * DiscoveredDeviceRegistry - Pre-claim device storage
@@ -36,7 +38,7 @@ public class DiscoveredDeviceRegistry {
         new ConcurrentHashMap<>();
     
     // Track claimed devices: deviceId → sourceId
-    private final Map<String, Integer> claimedDevices = new ConcurrentHashMap<>();
+    private final List<String> claimedDevices = new CopyOnWriteArrayList<>();
     
     /**
      * Container for device descriptor + capabilities
@@ -44,12 +46,11 @@ public class DiscoveredDeviceRegistry {
     public record DeviceDescriptorWithCapabilities(
         IODaemonProtocol.USBDeviceDescriptor usbDevice,
         DeviceCapabilitySet capabilities,
-        boolean claimed,
-        Integer sourceId  // null if not claimed
+        boolean claimed
     ) {
-        public DeviceDescriptorWithCapabilities withClaimed(int sourceId) {
+        public DeviceDescriptorWithCapabilities claim() {
             return new DeviceDescriptorWithCapabilities(
-                usbDevice, capabilities, true, sourceId
+                usbDevice, capabilities, true
             );
         }
     }
@@ -73,7 +74,7 @@ public class DiscoveredDeviceRegistry {
      * }
      */
     public void parseDeviceList(NoteBytesMap messageMap) {
-        NoteBytes itemsBytes = messageMap.get("items");
+        NoteBytes itemsBytes = messageMap.get(Keys.ITEMS);
         if (itemsBytes == null || itemsBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
             System.err.println("No items array in device list");
             return;
@@ -111,8 +112,7 @@ public class DiscoveredDeviceRegistry {
             return new DeviceDescriptorWithCapabilities(
                 usbDevice, 
                 capabilities,
-                false,  // Not claimed yet
-                null    // No sourceId yet
+                false
             );
             
         } catch (Exception e) {
@@ -313,38 +313,23 @@ public class DiscoveredDeviceRegistry {
      * Check if device is claimed
      */
     public boolean isClaimed(String deviceId) {
-        return claimedDevices.containsKey(deviceId);
+        return claimedDevices.contains(deviceId);
     }
     
-    /**
-     * Get sourceId for claimed device
-     */
-    public Integer getSourceId(String deviceId) {
-        return claimedDevices.get(deviceId);
-    }
+
     
-    /**
-     * Get deviceId for sourceId
-     */
-    public String getDeviceId(int sourceId) {
-        return claimedDevices.entrySet().stream()
-            .filter(e -> e.getValue() == sourceId)
-            .map(Map.Entry::getKey)
-            .findFirst()
-            .orElse(null);
-    }
     
     // ===== CLAIM MANAGEMENT =====
     
     /**
      * Mark device as claimed with sourceId
      */
-    public void markClaimed(String deviceId, int sourceId) {
+    public void markClaimed(String deviceId) {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device != null) {
-            discoveredDevices.put(deviceId, device.withClaimed(sourceId));
-            claimedDevices.put(deviceId, sourceId);
-            System.out.println("Marked device " + deviceId + " as claimed with sourceId " + sourceId);
+            discoveredDevices.put(deviceId, device.claim());
+            claimedDevices.add(deviceId);
+            System.out.println("Marked device " + deviceId + " as claimed");
         }
     }
     
@@ -355,7 +340,7 @@ public class DiscoveredDeviceRegistry {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device != null) {
             discoveredDevices.put(deviceId, new DeviceDescriptorWithCapabilities(
-                device.usbDevice, device.capabilities, false, null
+                device.usbDevice, device.capabilities, false
             ));
             claimedDevices.remove(deviceId);
             System.out.println("Marked device " + deviceId + " as released");
@@ -417,12 +402,11 @@ public class DiscoveredDeviceRegistry {
         System.out.println("=== Discovered Devices ===");
         for (DeviceDescriptorWithCapabilities device : discoveredDevices.values()) {
             IODaemonProtocol.USBDeviceDescriptor usb = device.usbDevice;
-            System.out.printf("  %s: %s (type=%s, claimed=%s, sourceId=%s)%n",
+            System.out.printf("  %s: %s (type=%s, claimed=%s)%n",
                 usb.deviceId,
                 usb.product != null ? usb.product : "Unknown",
                 usb.get_device_type(),
-                device.claimed,
-                device.sourceId);
+                device.claimed);
             System.out.println("    Available modes: " + device.capabilities.getAvailableModes());
             System.out.println("    Capabilities: " + device.capabilities.getAvailableCapabilities());
         }

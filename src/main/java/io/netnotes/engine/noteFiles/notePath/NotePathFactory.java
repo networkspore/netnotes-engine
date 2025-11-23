@@ -17,7 +17,6 @@ import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.SettingsData.InvalidPasswordException;
-import io.netnotes.engine.core.bootstrap.BaseSystemProcess;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -97,7 +96,7 @@ public class NotePathFactory {
     
 
     public File getFilePathLedger() {
-        File dataDir = BaseSystemProcess.getDataDir();
+        File dataDir = SettingsData.getDataDir();
 
         File idDataFile = new File(dataDir.getAbsolutePath() + "/data.dat");
         return idDataFile;

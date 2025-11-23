@@ -316,8 +316,8 @@ public class ByteDecoding{
          }
     }
 
-    public static String bytesToUrlSafeString(byte[] bytes, byte type){
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytesToString(bytes, type).getBytes());
+    public static String bytesToUrlSafeString(byte[] bytes){
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     public static CharBuffer decodeByteBufferToChars(ByteBuffer byteBuffer, byte type) {

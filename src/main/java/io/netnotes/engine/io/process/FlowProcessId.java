@@ -2,6 +2,8 @@ package io.netnotes.engine.io.process;
 
 
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.utils.AtomicSequence;
 
 /**
  * ProcessId - Unique identifier for a process.
@@ -10,10 +12,14 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
  * for use with the routing registry.
  */
 public final class FlowProcessId {
-    private final int value;
+    private final long value;
     
-    public FlowProcessId(int value) {
+    public FlowProcessId(long value) {
         this.value = value;
+    }
+
+    public FlowProcessId(){
+        this.value = AtomicSequence.getNextSequenceLong();
     }
     
     /**
@@ -33,7 +39,7 @@ public final class FlowProcessId {
     /**
      * Get integer value
      */
-    public int asInt() {
+    public long asLong() {
         return value;
     }
     
@@ -46,11 +52,16 @@ public final class FlowProcessId {
     
     @Override
     public int hashCode() {
-        return Integer.hashCode(value);
+        return Long.hashCode(value);
+    }
+
+    public String asString(){
+        byte[] bytes = ByteDecoding.longToBytesBigEndian(value);
+        return ByteDecoding.bytesToUrlSafeString(bytes);
     }
     
     @Override
     public String toString() {
-        return "ProcessId(" + value + ")";
+        return "ProcessId(" + asString() + ")";
     }
 }

@@ -37,7 +37,7 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
     
     }
 
-    public NoteBytes getAt(int index){
+    public NoteBytesReadOnly getAt(int index){
      
         byte[] bytes = getBytesInternal();
         int length = bytes.length;
@@ -52,10 +52,46 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
             if(counter == index){
                 byte[] dst = new byte[size];
                 System.arraycopy(bytes, offset, dst, 0, size);
-                return NoteBytes.of(dst, type);
+                return new NoteBytesReadOnly(dst, type);
             }
             offset += size;
             counter++;
+        }
+        return null;
+        
+    }
+
+    public NoteBytesReadOnly getFirst(){
+        int length = byteLength();
+        if(length == 0){
+            return null;
+        }
+        byte[] bytes = getBytesInternal();
+        byte type = bytes[0];
+        int size = ByteDecoding.bytesToIntBigEndian(bytes, 1);
+        int offset = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
+        byte[] dst = new byte[size];
+        System.arraycopy(bytes, offset, dst, 0, size);
+        return new NoteBytesReadOnly(dst, type);
+        
+    }
+
+    public NoteBytesReadOnly getLast(){
+     
+        byte[] bytes = getBytesInternal();
+        int length = bytes.length;
+        int offset = 0;
+        while(offset < length){
+            byte type = bytes[offset];
+            offset++;
+            int size = ByteDecoding.bytesToIntBigEndian(bytes, offset);
+            offset += 4;
+            if(offset + size == length){
+                byte[] dst = new byte[size];
+                System.arraycopy(bytes, offset, dst, 0, size);
+                return new NoteBytesReadOnly(dst, type);
+            }
+            offset += size;
         }
         return null;
         
@@ -66,7 +102,7 @@ public class NoteBytesArrayReadOnly extends NoteBytes {
         return Arrays.hashCode(get());
     }
 
-    public NoteBytes get(int index){
+    public NoteBytesReadOnly get(int index){
         return getAt(index);
     }
 

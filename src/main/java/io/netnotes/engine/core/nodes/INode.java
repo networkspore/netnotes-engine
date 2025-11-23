@@ -1,7 +1,5 @@
 package io.netnotes.engine.core.nodes;
 
-import java.io.IOException;
-import java.io.PipedOutputStream;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -10,6 +8,7 @@ import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 
@@ -28,7 +27,7 @@ public interface INode {
     /**
      * Unique Node identifier
      */
-    NoteBytesReadOnly getNodeId();
+    ContextPath getNodeId();
     
     /**
      * Context path in the FlowProcess network
@@ -47,7 +46,6 @@ public interface INode {
     /**
      * Set controller interface for Node-to-Node communication
      */
-    void setNodeControllerInterface(NodeControllerInterface nodeController);
     
     /**
      * Shutdown Node - cleanup both channels
@@ -150,10 +148,7 @@ public interface INode {
      * 
      * This is a DEDICATED connection - doesn't interfere with FlowProcess traffic
      */
-    CompletableFuture<Void> receiveRawMessage(
-        PipedOutputStream messageStream,
-        PipedOutputStream replyStream
-    ) throws IOException;
+    void handleStreamChannel(StreamChannel channel, ContextPath devicePath);
     
     // ===== OPTIONAL BACKGROUND TASKS =====
     

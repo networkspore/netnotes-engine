@@ -1,9 +1,6 @@
 package io.netnotes.engine.core.nodes;
 
-import java.io.IOException;
-import java.io.PipedOutputStream;
 import java.time.Duration;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
 
@@ -11,7 +8,7 @@ import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
-import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
@@ -28,24 +25,24 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  */
 public abstract class BaseNode extends FlowProcess implements INode {
     
-    private final NoteBytesReadOnly nodeId;
-    private NodeControllerInterface nodeController;
+    private final ContextPath nodeId;
+
     private AppDataInterface appData;
     private volatile boolean nodeActive = false;
     
-    protected BaseNode(NoteBytesReadOnly nodeId) {
+    protected BaseNode(ContextPath nodeId) {
         super(ProcessType.BIDIRECTIONAL);
         this.nodeId = nodeId;
     }
     
     protected BaseNode(String nodeId) {
-        this(new NoteBytesReadOnly(nodeId));
+        this(ContextPath.parse(nodeId));
     }
     
     // ===== INode IDENTITY =====
     
     @Override
-    public NoteBytesReadOnly getNodeId() {
+    public ContextPath getNodeId() {
         return nodeId;
     }
     
@@ -60,11 +57,7 @@ public abstract class BaseNode extends FlowProcess implements INode {
             .thenRun(() -> this.nodeActive = true);
     }
     
-    @Override
-    public void setNodeControllerInterface(NodeControllerInterface controller) {
-        this.nodeController = controller;
-    }
-    
+
     @Override
     public boolean isActive() {
         return nodeActive && isAlive();
@@ -125,10 +118,9 @@ public abstract class BaseNode extends FlowProcess implements INode {
      * MUST IMPLEMENT: Handle direct stream messages
      */
     @Override
-    public abstract CompletableFuture<Void> receiveRawMessage(
-        PipedOutputStream messageStream,
-        PipedOutputStream replyStream
-    ) throws IOException;
+    public abstract void handleStreamChannel(
+        StreamChannel channel, ContextPath devicePath
+    );
     
     // ===== INode BACKGROUND TASKS =====
     
@@ -196,34 +188,32 @@ public abstract class BaseNode extends FlowProcess implements INode {
     
     // ===== CONVENIENCE HELPERS =====
     
+    protected CompletableFuture<StreamChannel> requestStreamChannnelToNode(ContextPath targetNodeId) {
+        
+        // Convert nodeId to ContextPath
+        // Assumes nodes are registered at: getContextPath().getParent().append(nodeId)
+        ContextPath targetPath = getContextPath().parent().append(targetNodeId.toString());
+        
+        return getFlowProcessRegistry().requestStreamChannel(contextPath ,targetPath);
+    }
+
     /**
-     * Send to another Node via direct stream
+     * Alternate: Send by direct ContextPath
      */
-    protected CompletableFuture<Void> sendStreamToNode(
-            NoteBytesReadOnly targetNodeId,
-            PipedOutputStream messageStream,
-            PipedOutputStream replyStream) {
-        
-        if (nodeController == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("NodeController not set")
-            );
-        }
-        
-        return nodeController.sendMessage(targetNodeId, messageStream, replyStream);
+    protected CompletableFuture<StreamChannel> requestStreamChannnel(ContextPath targetPath){
+            
+        return getFlowProcessRegistry().requestStreamChannel(contextPath ,targetPath);
     }
     
+
     /**
      * Emit simple event (convenience)
      */
     protected void emitEvent(String eventType, NoteBytesMap data) {
-        emitFlowEvent(RoutedPacket.create(getContextPath(), data.getNoteBytesObject()));
+        emitFlowEvent(RoutedPacket.create(getContextPath(), data.getNoteBytesObject().readOnly()));
     }
     
-    protected NodeControllerInterface getNodeController() {
-        return nodeController;
-    }
-    
+
     protected AppDataInterface getAppData() {
         return appData;
     }

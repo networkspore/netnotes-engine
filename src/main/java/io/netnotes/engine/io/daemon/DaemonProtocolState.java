@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;
@@ -95,13 +96,13 @@ public class DaemonProtocolState {
     }
     
     // ===== CLIENT SESSION =====
-    
+    /* 
     public static class ClientSession {
         public final String sessionId;
         public final int clientPid;
         public final BitFlagStateMachine state;
         
-        public final ConcurrentHashMap<Integer, DeviceState> claimedDevices = 
+        public final ConcurrentHashMap<String, DeviceState> claimedDevices = 
             new ConcurrentHashMap<>();
         
         public volatile long lastPingSent = 0;
@@ -210,12 +211,11 @@ public class DaemonProtocolState {
             missedPongs.set(0);
         }
     }
-    
+    */
     // ===== DEVICE STATE (REFACTORED) =====
     
     public static class DeviceState {
         public final String deviceId;
-        public final int sourceId;
         public final int ownerPid;
         
         public final BitFlagStateMachine state;
@@ -232,18 +232,16 @@ public class DaemonProtocolState {
         
         public DeviceState(
                 String deviceId, 
-                int sourceId, 
                 int ownerPid,
                 String deviceType,
                 DeviceCapabilitySet capabilities) {
             
             this.deviceId = deviceId;
-            this.sourceId = sourceId;
             this.ownerPid = ownerPid;
             this.deviceType = deviceType;
             this.capabilities = capabilities;
             this.hardwareInfo = new HashMap<>();
-            this.state = new BitFlagStateMachine("device-" + sourceId);
+            this.state = new BitFlagStateMachine(deviceId);
             
             setupStateTransitions();
         }
@@ -342,13 +340,12 @@ public class DaemonProtocolState {
         
         public NoteBytesObject toNoteBytes() {
             NoteBytesObject obj = new NoteBytesObject();
-            obj.add("device_id", deviceId);
-            obj.add("source_id", sourceId);
+            obj.add(Keys.DEVICE_ID, deviceId);
             obj.add("owner_pid", ownerPid);
-            obj.add("device_type", deviceType);
+            obj.add(Keys.ITEM_TYPE, deviceType);
             obj.add("current_mode", getCurrentMode());
             obj.add("capabilities", capabilities.toNoteBytes());
-            obj.add("state", new NoteBigInteger(state.getState()));
+            obj.add(Keys.STATE, new NoteBigInteger(state.getState()));
             obj.add("events_sent", eventsSent);
             obj.add("events_dropped", eventsDropped);
             obj.add("pending_events", pendingEvents.get());
@@ -400,8 +397,8 @@ public class DaemonProtocolState {
         @Override
         public String toString() {
             return String.format(
-                "DeviceState{id=%s, sourceId=%d, type=%s, mode=%s, streaming=%s, events=%d}",
-                deviceId, sourceId, deviceType, getCurrentMode(),
+                "DeviceState{id=%s, type=%s, mode=%s, streaming=%s, events=%d}",
+                deviceId, deviceType, getCurrentMode(),
                 state.hasState(DeviceStateFlags.STREAMING), eventsSent
             );
         }

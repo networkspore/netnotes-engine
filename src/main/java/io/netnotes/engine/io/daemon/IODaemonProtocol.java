@@ -224,7 +224,7 @@ public class IODaemonProtocol {
         public NoteBytesObject toNoteBytesObject() {
             NoteBytesObject obj = new NoteBytesObject();
             
-            obj.add("device_id", deviceId);
+            obj.add(Keys.DEVICE_ID, deviceId);
             obj.add("vendor_id", vendorId);
             obj.add("product_id", productId);
             obj.add("device_class", deviceClass);
@@ -262,7 +262,7 @@ public class IODaemonProtocol {
             
             NoteBytesMap map = obj.getAsNoteBytesMap();
             
-            desc.deviceId = map.get("device_id").getAsString();
+            desc.deviceId = map.get(Keys.DEVICE_ID).getAsString();
             desc.vendorId = map.get("vendor_id").getAsInt();
             desc.productId = map.get("product_id").getAsInt();
             desc.deviceClass = map.get("device_class").getAsInt();

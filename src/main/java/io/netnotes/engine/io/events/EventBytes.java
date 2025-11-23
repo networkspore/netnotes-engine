@@ -52,7 +52,15 @@ public class EventBytes {
     public static final NoteBytesReadOnly EVENT_WINDOW_CLOSE           = new NoteBytesReadOnly((byte)54);
     public static final NoteBytesReadOnly EVENT_FRAMEBUFFER_RESIZE     = new NoteBytesReadOnly((byte)55);
 
-    
+    public static final NoteBytesReadOnly EVENT_RAW_HID                 = new NoteBytesReadOnly((byte)60);
+
+
+    public static final NoteBytesReadOnly TYPE_ENCRYPTION_OFFER        = new NoteBytesReadOnly((byte) 225);
+    public static final NoteBytesReadOnly TYPE_ENCRYPTION_ACCEPT       = new NoteBytesReadOnly((byte) 226);
+    public static final NoteBytesReadOnly TYPE_ENCRYPTION_READY        = new NoteBytesReadOnly((byte) 227);
+    public static final NoteBytesReadOnly TYPE_ENCRYPTED               = new NoteBytesReadOnly((byte) 228);
+    public static final NoteBytesReadOnly TYPE_ENCRYPTION_DECLINE      = new NoteBytesReadOnly((byte) 229);
+
     
     // ===== new NoteBytesReadOnly((byte)STATE CHANGE EVENTS (242-247) =====
     public static final NoteBytesReadOnly EVENT_RELEASE                = new NoteBytesReadOnly((byte) 242);

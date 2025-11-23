@@ -1,20 +1,20 @@
 package io.netnotes.engine.io.events;
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.io.ContextPath;
 
-public final class KeyCharEvent implements InputEvent {
-    private final NoteBytesReadOnly sourceId;
+public final class KeyCharEvent implements RoutedEvent {
+    private final ContextPath sourcePath;
     private final int codepoint;
     private final int stateFlags;
 
-    public KeyCharEvent(NoteBytesReadOnly sourceId, int codepoint, int stateFlags) {
-        this.sourceId = sourceId;
+    public KeyCharEvent(ContextPath sourcePath, int codepoint, int stateFlags) {
+        this.sourcePath = sourcePath;
         this.codepoint = codepoint;
         this.stateFlags = stateFlags;
     }
 
     @Override
-    public NoteBytesReadOnly getSourceId() { return sourceId; }
-    public int codepoint() { return codepoint; }
+    public ContextPath getSourcePath() { return sourcePath; }
+    public int getCodepoint() { return codepoint; }
     public int stateFlags() { return stateFlags; }
 }
