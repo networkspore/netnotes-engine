@@ -3,12 +3,10 @@ package io.netnotes.engine.core.system.control;
 import io.netnotes.engine.core.system.control.ui.UIProtocol;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.ClaimedDevice;
+import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -16,26 +14,11 @@ import java.util.function.Function;
 /**
  * PasswordSessionProcess - Secure password verification
  * 
- * SECURITY CRITICAL:
- * - NoteBytesEphemeral passwords are NEVER stored as fields
- * - Passwords are immediately verified and closed
- * - CompletableFutures complete with Boolean, NOT passwords
- * - All password copies are explicitly closed
- * 
- * Usage:
- *   session.onPasswordEntered(password -> {
- *       // password is valid ONLY within this lambda
- *       // must copy if needed beyond this scope
- *       return verify(password).thenApply(valid -> {
- *           // password still accessible here
- *           return valid;
- *       });
- *       // password is CLOSED when this returns
- *   });
+ * Works with any InputDevice (ClaimedDevice or BaseKeyboardInput)
  */
 public class PasswordSessionProcess extends FlowProcess {
     
-    private final ClaimedDevice inputDevice;
+    private final InputDevice inputDevice;
     private final UIRenderer uiRenderer;
     private final String prompt;
     private final int maxAttempts;
@@ -53,7 +36,7 @@ public class PasswordSessionProcess extends FlowProcess {
     private final CompletableFuture<Boolean> result = new CompletableFuture<>();
     
     public PasswordSessionProcess(
-            ClaimedDevice inputDevice,
+            InputDevice inputDevice,
             UIRenderer uiRenderer,
             String prompt,
             int maxAttempts) {
@@ -67,39 +50,15 @@ public class PasswordSessionProcess extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> run() {
-        // Subscribe to input device
-        inputDevice.subscribe(getSubscriber());
-        
+
         // Show prompt
         uiRenderer.render(UIProtocol.showPasswordPrompt(prompt));
-        
+        handlePasswordReady();
         return getCompletionFuture();
     }
     
-    @Override
-    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        if (!active) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        try {
-            NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
-            String eventType = msg.get("event").getAsString();
-            
-            if ("password_ready".equals(eventType)) {
-                // PasswordReader has completed
-                handlePasswordReady();
-            } else if ("cancelled".equals(eventType)) {
-                handleCancellation();
-            }
-            
-            return CompletableFuture.completedFuture(null);
-            
-        } catch (Exception e) {
-            return CompletableFuture.failedFuture(e);
-        }
-    }
-    
+
+
     /**
      * SECURITY CRITICAL: Password handling
      * 
@@ -109,31 +68,32 @@ public class PasswordSessionProcess extends FlowProcess {
      * 2. Immediately pass to verification handler
      * 3. Close it when handler completes
      * 4. NEVER store it anywhere
+     * 5. ALWAYS close PasswordReader
      */
     private void handlePasswordReady() {
         // Create PasswordReader
-        CompletableFuture<NoteBytesEphemeral> passwordFuture = new CompletableFuture<>();
-        PasswordReader reader = new PasswordReader(passwordFuture);
+        
+        PasswordReader reader = new PasswordReader();
         
         // Register reader with device
         String readerId = "password-reader-" + System.currentTimeMillis();
         inputDevice.addEventConsumer(readerId, reader.getEventConsumer());
         
         // Handle password when ready
-        passwordFuture.thenCompose(password -> {
+        reader.setOnPassword(password -> {
             // SECURITY: password is valid ONLY within this block
             
-            // Unregister reader
+            // Unregister and close reader
             inputDevice.removeEventConsumer(readerId);
+            reader.close();
             
             if (verificationHandler == null) {
                 password.close();
-                return CompletableFuture.completedFuture(false);
             }
             
             // Call verification handler
             // Handler MUST NOT store password, only use it for verification
-            return verificationHandler.apply(password)
+            verificationHandler.apply(password)
                 .whenComplete((valid, ex) -> {
                     // SECURITY: Always close password when done
                     password.close();
@@ -176,16 +136,19 @@ public class PasswordSessionProcess extends FlowProcess {
                         }
                     }
                 });
-        }).exceptionally(ex -> {
-            // Unregister reader on error
+        });
+
+        /*
+          // Unregister and close reader on error
             inputDevice.removeEventConsumer(readerId);
+            reader.close();
             
             System.err.println("Password reader error: " + ex.getMessage());
             active = false;
             result.completeExceptionally(ex);
             complete();
             return null;
-        });
+        */
     }
     
     private void handleCancellation() {
@@ -272,5 +235,10 @@ public class PasswordSessionProcess extends FlowProcess {
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         throw new UnsupportedOperationException();
+    }
+
+
+    public boolean isActive(){
+        return active;
     }
 }

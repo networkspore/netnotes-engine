@@ -1,7 +1,7 @@
 package io.netnotes.engine.core.system.control;
 
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import org.bouncycastle.util.Arrays;
 
@@ -36,11 +36,10 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
  *       }
  *   });
  */
-public class PasswordReader implements AutoCloseable {
+public class PasswordReader {
     public static final int MAX_PASSWORD_BYTE_LENGTH = 256;
     public static final int MAX_KEYSTROKE_COUNT = 128;
 
-    private final CompletableFuture<NoteBytesEphemeral> result;
     private NoteBytesEphemeral m_passwordBytes = new NoteBytesEphemeral(new byte[MAX_PASSWORD_BYTE_LENGTH]);
     private byte[] m_keystrokeLengths = new byte[MAX_KEYSTROKE_COUNT];
     private int m_currentLength = 0; // Total bytes used
@@ -50,10 +49,9 @@ public class PasswordReader implements AutoCloseable {
     
     // Event consumer for input device
     private final ExecutorConsumer<RoutedEvent> eventConsumer;
+    private Consumer<NoteBytesEphemeral> onPassword;
     
-    public PasswordReader(CompletableFuture<NoteBytesEphemeral> result) {
-        this.result = result;
-        
+    public PasswordReader() {
         // Create event consumer with virtual thread executor
         this.eventConsumer = new ExecutorConsumer<>(
             Executors.newVirtualThreadPerTaskExecutor(),
@@ -67,25 +65,24 @@ public class PasswordReader implements AutoCloseable {
     public ExecutorConsumer<RoutedEvent> getEventConsumer() {
         return eventConsumer;
     }
-    
+
+    public void setOnPassword(Consumer<NoteBytesEphemeral> onPassword){
+        this.onPassword = onPassword;
+    }
+
     /**
      * Handle input events from device
      */
     private void handleEvent(RoutedEvent event) {
         if (!active) return;
-        
-        try {
-            // Handle key events
-            if (event instanceof KeyDownEvent keyDown) {
-                handleKeyDown(keyDown);
-            } else if (event instanceof KeyCharEvent keyChar) {
-                handleKeyChar(keyChar);
-            }
-            
-        } catch (Exception e) {
-            escape();
-            result.completeExceptionally(e);
+
+        // Handle key events
+        if (event instanceof KeyDownEvent keyDown) {
+            handleKeyDown(keyDown);
+        } else if (event instanceof KeyCharEvent keyChar) {
+            handleKeyChar(keyChar);
         }
+
     }
     
     /**
@@ -107,7 +104,6 @@ public class PasswordReader implements AutoCloseable {
         
         if (keyCode == KeyCode.ESCAPE) {
             escape();
-            result.completeExceptionally(new RuntimeException("Password entry cancelled"));
             return;
         }
     }
@@ -168,12 +164,7 @@ public class PasswordReader implements AutoCloseable {
         if (!active) return;
         
         active = false;
-        
-        if (!result.isDone()) {
-            // Return a copy of the exact password length
-            result.complete(m_passwordBytes.copyOf(m_currentLength));
-        }
-        
+        onPassword.accept(new NoteBytesEphemeral(m_passwordBytes.getBytes(m_currentLength)));
         // Clear our working buffer
         escape();
     }
@@ -182,17 +173,15 @@ public class PasswordReader implements AutoCloseable {
      * Clear password buffer (SECURITY CRITICAL)
      */
     public void escape() {
-        if (m_passwordBytes != null) {
-            m_passwordBytes.close();
-            m_passwordBytes = null;
-        }
+       
+        m_passwordBytes.close();
+  
         m_currentLength = 0;
         m_keystrokeCount = 0;
         Arrays.fill(m_keystrokeLengths, (byte) 0);
         active = false;
     }
     
-    @Override
     public void close() {
         escape();
     }

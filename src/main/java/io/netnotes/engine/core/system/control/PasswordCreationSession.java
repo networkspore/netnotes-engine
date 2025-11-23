@@ -79,24 +79,28 @@ public class PasswordCreationSession extends FlowProcess {
         uiRenderer.render(UIProtocol.showPasswordPrompt(promptText));
         
         // Create password reader
-        CompletableFuture<NoteBytesEphemeral> passwordFuture = new CompletableFuture<>();
-        PasswordReader reader = new PasswordReader(passwordFuture);
+ 
+        PasswordReader reader = new PasswordReader();
         
         // Register reader with device
         String readerId = "password-creation-" + state.name();
         inputDevice.addEventConsumer(readerId, reader.getEventConsumer());
         
         // Handle password when ready
-        passwordFuture.thenAccept(password -> {
+        reader.setOnPassword(password -> {
             // SECURITY: password valid ONLY in this block
             
-            // Unregister reader
+            // Unregister and close reader
             inputDevice.removeEventConsumer(readerId);
+            reader.close();
             
             handlePasswordReceived(password);
-        }).exceptionally(ex -> {
-            // Unregister reader on error
+        });
+        /*
+        exceptionally(ex -> {
+            // Unregister and close reader on error
             inputDevice.removeEventConsumer(readerId);
+            reader.close();
             
             if (ex.getMessage().contains("cancelled")) {
                 handleCancellation();
@@ -106,7 +110,7 @@ public class PasswordCreationSession extends FlowProcess {
                 complete();
             }
             return null;
-        });
+        });*/
     }
     
     /**
@@ -131,10 +135,9 @@ public class PasswordCreationSession extends FlowProcess {
                 break;
                 
             case CONFIRM_PASSWORD:
-                // Compare with first password
-                boolean match = passwordsMatch(temporaryFirstPassword, password);
-                
-                if (match) {
+
+                //use simple password compare, re-entry is to prevent user typos, not security
+                if (temporaryFirstPassword.equals(password)) {
                     // SUCCESS! Use first password (has not been closed yet)
                     handlePasswordCreated(temporaryFirstPassword);
                     
@@ -157,30 +160,14 @@ public class PasswordCreationSession extends FlowProcess {
                     startPasswordReader(prompt1);
                 }
                 break;
+            default:
+                  uiRenderer.render(UIProtocol.showError(
+                        "Session is unavailable"));
+                break;
         }
     }
     
-    /**
-     * SECURITY CRITICAL: Password comparison
-     * 
-     * Constant-time comparison to prevent timing attacks
-     */
-    private boolean passwordsMatch(NoteBytesEphemeral p1, NoteBytesEphemeral p2) {
-        if (p1 == null || p2 == null) return false;
-        
-        byte[] b1 = p1.getBytes();
-        byte[] b2 = p2.getBytes();
-        
-        if (b1.length != b2.length) return false;
-        
-        // Constant-time comparison
-        int diff = 0;
-        for (int i = 0; i < b1.length; i++) {
-            diff |= b1[i] ^ b2[i];
-        }
-        
-        return diff == 0;
-    }
+    
     
     /**
      * SECURITY CRITICAL: Handler receives password

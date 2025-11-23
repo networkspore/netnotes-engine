@@ -22,15 +22,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Harmonized with ClaimedDevice:
  * - Receives input via StreamChannel
  * - Emits RoutedEvents through consumer pattern
- * - No direct packet emission
- * 
- * Usage:
- *   PasswordReader reader = new PasswordReader(...);
- *   baseKeyboard.addEventConsumer("password", reader::handleEvent);
+ * - Implements InputDevice interface
  */
-public class KeyboardInput extends FlowProcess {
+public class KeyboardInput extends FlowProcess implements InputDevice {
     
-    private final String sourceId = "gui-keyboard";
+    private final String sourceId = "KeyboardInput";
     private StreamChannel streamChannel;
     private volatile boolean active = false;
     
@@ -100,31 +96,23 @@ public class KeyboardInput extends FlowProcess {
         m_consumerMap.forEach((k, consumer) -> consumer.accept(event));
     }
     
-    /**
-     * Add event consumer
-     * Used by PasswordReader to receive keyboard events
-     */
+    @Override
     public void addEventConsumer(String id, ExecutorConsumer<RoutedEvent> eventConsumer) {
         m_consumerMap.computeIfAbsent(id, (k) -> eventConsumer);
     }
     
-    /**
-     * Remove event consumer
-     */
+    @Override
     public ExecutorConsumer<RoutedEvent> removeEventConsumer(String id) {
         return m_consumerMap.remove(id);
     }
     
-    /**
-     * Get event consumer
-     */
+    @Override
     public ExecutorConsumer<RoutedEvent> getEventConsumer(String id) {
         return m_consumerMap.get(id);
     }
     
-    /**
-     * Release resources
-     */
+    
+    @Override
     public void release() {
         active = false;
         m_consumerMap.clear();

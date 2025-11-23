@@ -38,7 +38,6 @@ public class BaseSystemProcess extends FlowProcess {
     
     // Services
     private IODaemon ioDaemon;
-    private String activeSecureSessionId;
     
     private BaseSystemProcess() {
         super(ProcessType.BIDIRECTIONAL);
