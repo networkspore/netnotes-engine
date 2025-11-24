@@ -7,6 +7,8 @@ import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteException;
+import io.netnotes.engine.noteBytes.NoteInteger;
 import io.netnotes.engine.noteBytes.NoteString;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -15,13 +17,14 @@ public class NoteBytesPair {
     private NoteBytes m_key;
     private NoteBytes m_value;
 
-
-    public NoteBytesPair(String key, String value){
-        this(new NoteString(key), new NoteString(value));
+    public NoteBytesPair(NoteBytes key, NoteBytes value){
+        m_key = key;
+        m_value = value;
     }
 
-    public NoteBytesPair(String key, char[] value){
-        this(new NoteString(key), value);
+    public NoteBytesPair(NoteBytes key, int value){
+        m_key = key;
+        m_value = new NoteInteger(value);
     }
 
     public NoteBytesPair(char[] key, char[] value){
@@ -29,27 +32,43 @@ public class NoteBytesPair {
         m_value =new NoteString(value);
     }
 
+    public NoteBytesPair(NoteBytes key, Throwable value){
+        this(key, new NoteException(value));
+    }
+
+
+    public NoteBytesPair(String key, String value){
+        this(new NoteString(key), new NoteString(value));
+    }
+
+    public NoteBytesPair(String key, int value){
+        this(new NoteString(key), new NoteBytes(value));
+    }
+
+    public NoteBytesPair(String key, long value){
+        this(new NoteString(key), new NoteBytes(value));
+    }
+
+    public NoteBytesPair(String key, char[] value){
+        this(new NoteString(key), new NoteBytes(value));
+    }
+
+
     public NoteBytesPair(String key, NoteBytes value){
         this(new NoteString(key), value);    
     }
 
-    public NoteBytesPair(String key, Object value){
-        this(new NoteString(key), NoteBytes.of(value));    
-    }
-    
-    public NoteBytesPair(NoteBytes key, Object value){
-        this(key, NoteBytes.of(value));    
-    }
-  
-
-    public NoteBytesPair(NoteBytes key, NoteBytes value){
-        m_key = key;
-        m_value = value;
+    public NoteBytesPair(NoteBytes key, String value){
+        this(key, new NoteString(value));    
     }
 
+    public NoteBytesPair(NoteBytes key, boolean value){
+        this(key, new NoteBytes(value));    
+    }
+ 
     public NoteBytesPair(String key, Byte[] value, byte type){
         m_key = new NoteBytes(key);
-        m_value = NoteBytes.of(ByteDecoding.unboxBytes(value), type);
+        m_value = new NoteBytes(ByteDecoding.unboxBytes(value), type);
     }
 
 

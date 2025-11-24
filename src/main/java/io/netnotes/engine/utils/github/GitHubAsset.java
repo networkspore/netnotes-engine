@@ -156,23 +156,42 @@ public class GitHubAsset {
     }
 
     public NoteBytesObject getNoteBytesObject(){
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair("name", m_name),
-            new NoteBytesPair("label",m_label),
-            new NoteBytesPair("url",m_url),
-            new NoteBytesPair("browser_download_url",m_browserDownloadUrl),
-            new NoteBytesPair("content_type",m_contentType),
-            new NoteBytesPair("size",m_size),
-            new NoteBytesPair("download_count",m_downloadCount),
-            new NoteBytesPair("state",m_state),
-            new NoteBytesPair("tag_name",m_tagName),
-            new NoteBytesPair("node_id",m_nodeId),
-            new NoteBytesPair("id",m_id),
-            new NoteBytesPair("created_at",m_createdAt != null ? m_createdAt.toString() : null),
-            new NoteBytesPair("updated_at",m_updatedAt != null ? m_updatedAt.toString() : null),
-            new NoteBytesPair("uploader", m_uploader != null ? m_uploader : "" ),
-            new NoteBytesPair("digest",m_digest)
-        });
+        if(m_uploader != null){
+            return  new NoteBytesObject(new NoteBytesPair[]{
+                new NoteBytesPair("name", m_name),
+                new NoteBytesPair("label",m_label),
+                new NoteBytesPair("url",m_url),
+                new NoteBytesPair("browser_download_url",m_browserDownloadUrl),
+                new NoteBytesPair("content_type",m_contentType),
+                new NoteBytesPair("size", m_size),
+                new NoteBytesPair("download_count",m_downloadCount),
+                new NoteBytesPair("state",m_state),
+                new NoteBytesPair("tag_name",m_tagName),
+                new NoteBytesPair("node_id",m_nodeId),
+                new NoteBytesPair("id",m_id),
+                new NoteBytesPair("created_at",m_createdAt != null ? m_createdAt.toString() : null),
+                new NoteBytesPair("updated_at",m_updatedAt != null ? m_updatedAt.toString() : null),
+                new NoteBytesPair("uploader", m_uploader.getNoteBytesObject() ),
+                new NoteBytesPair("digest",m_digest)
+            });
+        }else{
+             return  new NoteBytesObject(new NoteBytesPair[]{
+                new NoteBytesPair("name", m_name),
+                new NoteBytesPair("label",m_label),
+                new NoteBytesPair("url",m_url),
+                new NoteBytesPair("browser_download_url",m_browserDownloadUrl),
+                new NoteBytesPair("content_type",m_contentType),
+                new NoteBytesPair("size", m_size),
+                new NoteBytesPair("download_count",m_downloadCount),
+                new NoteBytesPair("state",m_state),
+                new NoteBytesPair("tag_name",m_tagName),
+                new NoteBytesPair("node_id",m_nodeId),
+                new NoteBytesPair("id",m_id),
+                new NoteBytesPair("created_at",m_createdAt != null ? m_createdAt.toString() : null),
+                new NoteBytesPair("updated_at",m_updatedAt != null ? m_updatedAt.toString() : null),
+                new NoteBytesPair("digest",m_digest)
+            });
+        }
     }
 
     // --------------------

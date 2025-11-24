@@ -6,6 +6,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 /**
  * UIProtocol - Builder for UI command messages
@@ -30,12 +31,12 @@ public class UIProtocol {
         // Serialize menu items
         NoteBytesArray itemsArray = new NoteBytesArray();
         for (MenuItem item : items) {
-            NoteBytesObject itemObj = new NoteBytesObject();
-            itemObj.add(Keys.ITEM_NAME, item.name());
-            itemObj.add(Keys.ITEM_DESCRIPTION, item.description());
-            itemObj.add(Keys.ITEM_TYPE, item.type().name());
-            itemObj.add(Keys.ITEM_PROTECTED, item.isProtected());
-            itemsArray.add(itemObj);
+            itemsArray.add(new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.ITEM_NAME, item.name()),
+               new NoteBytesPair(Keys.ITEM_DESCRIPTION, item.description()),
+               new NoteBytesPair(Keys.ITEM_TYPE, item.type().name()),
+               new NoteBytesPair(Keys.ITEM_PROTECTED, item.isProtected())
+            }));
         }
         cmd.put(Keys.MENU_ITEMS, itemsArray);
         

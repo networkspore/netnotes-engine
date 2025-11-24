@@ -63,6 +63,32 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
         this.cleanable = cleaner.register(this, new EphemeralCleanupState(get()));
     }
 
+
+    public NoteBytesEphemeral(boolean value){
+        this(ByteDecoding.booleanToBytes(value), NoteBytesMetaData.BOOLEAN_TYPE);
+    }
+
+    public NoteBytesEphemeral( String value){
+        this( ByteDecoding.stringToBytes(value,  NoteBytesMetaData.STRING_TYPE), NoteBytesMetaData.STRING_TYPE);
+    }
+    public NoteBytesEphemeral(char[] chars){
+        this( chars, NoteBytesMetaData.STRING_TYPE);
+    }
+
+     public NoteBytesEphemeral( char[] value, byte type){
+        this( ByteDecoding.charsToByteArray(value, type), type);
+    }
+
+    public NoteBytesEphemeral(int integer){
+        this(ByteDecoding.intToBytesBigEndian(integer), NoteBytesMetaData.INTEGER_TYPE);
+    }
+
+
+    public NoteBytesEphemeral(long l){
+        this(ByteDecoding.longToBytesBigEndian(l), NoteBytesMetaData.LONG_TYPE);
+    }
+
+
     @Override
     public void set(byte[] bytes, byte type){
         
@@ -145,7 +171,7 @@ public class NoteBytesEphemeral extends NoteBytes implements AutoCloseable {
 
     @Override
     public void clear(){
-        throw new IllegalStateException("data cannot be cleared");
+        close();
     }
 
     public static NoteBytesEphemeral create(Object obj) {

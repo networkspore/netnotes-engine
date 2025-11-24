@@ -197,9 +197,9 @@ public class OSGiPluginRegistry {
         return CompletableFuture.runAsync(()->{
             try (NoteBytesWriter writer = new NoteBytesWriter(outputStream)) {
                 // Write header
-                writer.write(new NoteBytesPair(REGISTRY_HEADER, new NoteBytesPair[]{
+                writer.write(new NoteBytesObject(new NoteBytesPair(REGISTRY_HEADER, new NoteBytesObject( new NoteBytesPair[]{
                     new NoteBytesPair(NoteMessaging.Keys.VERSION, REGISTRY_VERSION)
-                }));
+                }))));
                 
                 // Write each plugin
                 for (OSGiPluginMetaData plugin : m_installedPlugins.values()) {

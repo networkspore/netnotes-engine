@@ -1310,4 +1310,22 @@ public class ByteDecoding{
             return baos.toByteArray();
         }
     }
+
+    public static byte[] serializeException(Throwable throwable){
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ObjectOutputStream out = new ObjectOutputStream(baos)) {
+            out.writeObject(throwable);
+            return baos.toByteArray();
+        }catch(IOException e){
+            try (ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
+                    ObjectOutputStream out2 = new ObjectOutputStream(baos2)) {
+                out2.writeObject( e);
+                return baos2.toByteArray();
+            }catch(IOException e2){
+                System.err.println("Unexpected seriliazation double error: " + e.toString() + "\n" + e2.toString());
+                e2.printStackTrace();
+                return new byte[0];
+            }
+        }
+    }
 }

@@ -22,7 +22,6 @@ import org.bouncycastle.crypto.signers.Ed25519Signer;
 
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
@@ -31,7 +30,7 @@ import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils.StreamProgressTracker;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesObjectEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public class SecureMessageV1 extends MessageHeader {
@@ -233,19 +232,19 @@ public class SecureMessageV1 extends MessageHeader {
 
 
 
-    public static NoteBytesPair getSecuritySignedHeader(NoteBytes senderId, Ed25519PublicKeyParameters senderPublicKey, int dataLength){
-        NoteBytesObject header = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(SENDER_ID_KEY, senderId),
-            new NoteBytesPair(SENDER_PUBLIC_KEY, senderPublicKey.getEncoded()),
-            new NoteBytesPair(SECURITY_LEVEL_KEY, SecurityLevel.SECURITY_SIGNED),
-            new NoteBytesPair(TIME_STAMP_KEY, System.currentTimeMillis()),
-            new NoteBytesPair(DATA_LENGTH, dataLength)
+    public static NoteBytesPairEphemeral getSecuritySignedHeader(NoteBytes senderId, Ed25519PublicKeyParameters senderPublicKey, int dataLength){
+        NoteBytesObjectEphemeral header = new NoteBytesObjectEphemeral(new NoteBytesPairEphemeral[]{
+            new NoteBytesPairEphemeral(SENDER_ID_KEY, senderId),
+            new NoteBytesPairEphemeral(SENDER_PUBLIC_KEY, senderPublicKey.getEncoded()),
+            new NoteBytesPairEphemeral(SECURITY_LEVEL_KEY, SecurityLevel.SECURITY_SIGNED),
+            new NoteBytesPairEphemeral(TIME_STAMP_KEY, System.currentTimeMillis()),
+            new NoteBytesPairEphemeral(DATA_LENGTH, dataLength)
         });
-        return new NoteBytesPair(HEADER_KEY, header);
+        return new NoteBytesPairEphemeral(HEADER_KEY, header);
     }
 
-    public static NoteBytesPair getSecuritySignedFooter(byte[] signature){
-        return new NoteBytesPair(SIGNATURE_KEY, signature);
+    public static NoteBytesPairEphemeral getSecuritySignedFooter(byte[] signature){
+        return new NoteBytesPairEphemeral(SIGNATURE_KEY, signature);
     }
     
     public static NoteBytesPairEphemeral getSecuritySealedHeader(NoteBytes senderId, X25519PublicKeyParameters senderPublicKey, X25519PublicKeyParameters ephemeralPublic, NoteBytes nonce, NoteBytes algorithm){
@@ -254,7 +253,7 @@ public class SecureMessageV1 extends MessageHeader {
             NoteBytesPairEphemeral securityLevel =  new NoteBytesPairEphemeral(SECURITY_LEVEL_KEY, SecurityLevel.SECURITY_SEALED);
             NoteBytesPairEphemeral timeStamp = new NoteBytesPairEphemeral(TIME_STAMP_KEY, System.currentTimeMillis());
             NoteBytesPairEphemeral senderPk = new NoteBytesPairEphemeral(SENDER_PUBLIC_KEY, senderPublicKey.getEncoded());
-            NoteBytesPairEphemeral ephPk =  new NoteBytesPairEphemeral(EPHEMERAL_PUBLIC_KEY, ephemeralPublic);
+            NoteBytesPairEphemeral ephPk =  new NoteBytesPairEphemeral(EPHEMERAL_PUBLIC_KEY, ephemeralPublic.getEncoded());
             NoteBytesPairEphemeral nonceKey = new NoteBytesPairEphemeral(NONCE_KEY, nonce);
             NoteBytesPairEphemeral algo = new NoteBytesPairEphemeral(ALGORITHM_KEY, algorithm);
         ){
@@ -279,7 +278,7 @@ public class SecureMessageV1 extends MessageHeader {
             NoteBytesPairEphemeral securityLevelPair =  new NoteBytesPairEphemeral(SECURITY_LEVEL_KEY, SecurityLevel.SECURITY_SEALED);
             NoteBytesPairEphemeral timeStampPair = new NoteBytesPairEphemeral(TIME_STAMP_KEY, System.currentTimeMillis());
             NoteBytesPairEphemeral senderPkPair = new NoteBytesPairEphemeral(SENDER_PUBLIC_KEY, senderPublicKey.getEncoded());
-            NoteBytesPairEphemeral ephemeralPkPair =  new NoteBytesPairEphemeral(EPHEMERAL_PUBLIC_KEY, ephemeralPublic);
+            NoteBytesPairEphemeral ephemeralPkPair =  new NoteBytesPairEphemeral(EPHEMERAL_PUBLIC_KEY, ephemeralPublic.getEncoded());
             NoteBytesPairEphemeral noncePair = new NoteBytesPairEphemeral(NONCE_KEY, nonce);
             NoteBytesPairEphemeral algorithmPair = new NoteBytesPairEphemeral(ALGORITHM_KEY, algorithm);
             NoteBytesPairEphemeral saltPair = new NoteBytesPairEphemeral(SALT_KEY, salt);
@@ -312,9 +311,10 @@ public class SecureMessageV1 extends MessageHeader {
     ){
         return CompletableFuture.runAsync(() -> {
 
-            NoteBytesPair header = getSecuritySignedHeader(senderId, senderPublicKey, dataLength);
+            
            
             try(
+                NoteBytesPairEphemeral header = getSecuritySignedHeader(senderId, senderPublicKey, dataLength);
                 PipedInputStream inputStream = new PipedInputStream(startStream, StreamUtils.PIPE_BUFFER_SIZE);
                 NoteBytesWriter writer = new NoteBytesWriter(outputEncryptedStream);
             ){

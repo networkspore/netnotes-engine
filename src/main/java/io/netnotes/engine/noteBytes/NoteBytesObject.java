@@ -161,7 +161,7 @@ public class NoteBytesObject extends NoteBytes{
 
 
     public boolean isEmpty() {
-        return get().length == 0;
+        return byteLength()  == 0;
     }
 
     public void add(NoteBytesPair pair) {
@@ -193,14 +193,6 @@ public class NoteBytesObject extends NoteBytes{
 
     }
 
-    public void add(NoteBytes key, Object value){
-        add(new NoteBytesPair(key, value));
-    }
-
-    public void add(String key, Object value){
-        add(new NoteBytesPair(key, value));
-    }
-
     public void add(NoteBytes key, NoteBytes value) {
         add(new NoteBytesPair(key, value));       
     }
@@ -209,7 +201,34 @@ public class NoteBytesObject extends NoteBytes{
         add(new NoteBytesPair(key, new NoteLong(value)));       
     }
 
+    public void add(NoteBytes key, boolean value) {
+        add(new NoteBytesPair(key, new NoteBytes(value)));       
+    }
+
+
+    public void add(NoteBytesReadOnly key, byte[] value) {
+
+        byte[] bytes = getBytes();
+        int length = bytes.length;
+        byte[] newBytes = Arrays.copyOf(bytes, length + key.byteLength() + value.length + 10);
+        int offset = NoteBytes.writeNote(key, newBytes, length);
+        NoteBytes.writeNote(value, newBytes, offset);
+        set(newBytes);
+
+    }
+
+
+    public void add(NoteBytesReadOnly key, String value) {
+        add(new NoteBytesPair(key, new NoteBytes(value)));       
+    }
+
+
     public void add(String key, NoteBytes value) {
+        add(new NoteBytes(key), value);
+    }
+
+
+    public void add(String key, NoteBytesReadOnly value) {
         add(new NoteBytes(key), value);
     }
 
@@ -397,8 +416,8 @@ public class NoteBytesObject extends NoteBytes{
         int counter = 0;
         
         while (offset < length) {
-            NoteBytes noteBytes = NoteBytes.readNote(bytes, offset);
-            offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content
+            offset ++; //+ 1 type
+            offset += 4 + ByteDecoding.bytesToIntBigEndian(bytes, offset); // 4 bytes int length + content
             counter++;
         }
         return counter;

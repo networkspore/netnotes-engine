@@ -5,10 +5,11 @@ import java.io.IOException;
 
 import io.netnotes.engine.messaging.header.MessageHeader;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesObjectEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 
@@ -58,34 +59,34 @@ public class TypedMessageMap extends MessageHeader {
         return m_values.get(TYPE_KEY);
     }
 
-    public static NoteBytesObject createHeader(NoteBytes senderId, NoteBytesReadOnly type, NoteBytes data){
+    public static NoteBytesObjectEphemeral createHeader(NoteBytes senderId, NoteBytesReadOnly type, NoteBytes data){
 
 
-        NoteBytesMap map = new NoteBytesMap(new NoteBytesPair[]{
-            new NoteBytesPair(SENDER_ID_KEY, senderId),
-            new NoteBytesPair(TYPE_KEY, type),
-            new NoteBytesPair(DATA_KEY, data),
-            new NoteBytesPair(TIME_STAMP_KEY, System.currentTimeMillis())
-        });
-
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(HEADER_KEY, map.getNoteBytesObject())
-        });
+       try( NoteBytesMapEphemeral map = new NoteBytesMapEphemeral(new NoteBytesPairEphemeral[]{
+            new NoteBytesPairEphemeral(SENDER_ID_KEY, senderId),
+            new NoteBytesPairEphemeral(TYPE_KEY, type),
+            new NoteBytesPairEphemeral(DATA_KEY, data),
+            new NoteBytesPairEphemeral(TIME_STAMP_KEY, System.currentTimeMillis())
+        });){
+            return new NoteBytesObjectEphemeral(new NoteBytesPairEphemeral[]{
+                new NoteBytesPairEphemeral(HEADER_KEY, map.getNoteBytesObjectEphemeral())
+            });
+        }
     }
 
-    public static NoteBytesObject createHeader(NoteBytes senderId, String type, NoteBytes data){
+    public static NoteBytesObjectEphemeral createHeader(NoteBytes senderId, String type, NoteBytes data){
 
 
-        NoteBytesMap map = new NoteBytesMap(new NoteBytesPair[]{
-            new NoteBytesPair(SENDER_ID_KEY, senderId),
-            new NoteBytesPair(TYPE_KEY, type),
-            new NoteBytesPair(DATA_KEY, data),
-            new NoteBytesPair(TIME_STAMP_KEY, System.currentTimeMillis())
-        });
-
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(HEADER_KEY, map.getNoteBytesObject())
-        });
+        try(NoteBytesMapEphemeral map = new NoteBytesMapEphemeral(new NoteBytesPairEphemeral[]{
+            new NoteBytesPairEphemeral(SENDER_ID_KEY, senderId),
+            new NoteBytesPairEphemeral(TYPE_KEY, type),
+            new NoteBytesPairEphemeral(DATA_KEY, data),
+            new NoteBytesPairEphemeral(TIME_STAMP_KEY, System.currentTimeMillis())
+        });){
+            return new NoteBytesObjectEphemeral(new NoteBytesPairEphemeral[]{
+                new NoteBytesPairEphemeral(HEADER_KEY, map.getNoteBytesObjectEphemeral())
+            });
+        }
     }
 
   

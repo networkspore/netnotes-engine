@@ -14,4 +14,6 @@ public class NoteSerializable extends NoteBytes {
         super(bytes, NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE);
     }
     
+
+
 }

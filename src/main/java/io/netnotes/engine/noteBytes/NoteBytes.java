@@ -3,6 +3,7 @@ package io.netnotes.engine.noteBytes;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.io.OutputStream;
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -52,6 +53,7 @@ public class NoteBytes {
     public NoteBytes( NoteBytes value){
          this(value.get(), value.getType());
     }
+
     public NoteBytes(boolean value){
         this(ByteDecoding.booleanToBytes(value), NoteBytesMetaData.BOOLEAN_TYPE);
     }
@@ -195,6 +197,13 @@ public class NoteBytes {
         set(ByteDecoding.isLittleEndian(m_type) ? ByteDecoding.intToBytesLittleEndian(value) : ByteDecoding.intToBytesBigEndian(value));
     }
 
+    public Object getAsObject() throws IOException, ClassNotFoundException {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(m_value);
+            ObjectInputStream ois = new ObjectInputStream(bais)) {
+            return ois.readObject();
+        }
+    }
+
 
     public boolean getAsBoolean(){
         
@@ -281,6 +290,21 @@ public class NoteBytes {
         if(dstLength >= dstOffset + metaDataSize + srcLength){
             dstOffset = NoteBytesMetaData.write(noteBytes.getType(), srcLength, dst, dstOffset);
             System.arraycopy(src, 0, dst, dstOffset, srcLength);
+            return dstOffset + srcLength;
+        }else{
+            throw new IndexOutOfBoundsException("insufficient destination length");
+        }
+    }
+
+    public static int writeNote(byte[] bytes, byte[] dst, int dstOffset){
+        int dstLength = dst.length;
+        final int metaDataSize = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
+        
+        int srcLength = bytes.length;
+   
+        if(dstLength >= dstOffset + metaDataSize + srcLength){
+            dstOffset = NoteBytesMetaData.write(NoteBytesMetaData.RAW_BYTES_TYPE, srcLength, dst, dstOffset);
+            System.arraycopy(bytes, 0, dst, dstOffset, srcLength);
             return dstOffset + srcLength;
         }else{
             throw new IndexOutOfBoundsException("insufficient destination length");

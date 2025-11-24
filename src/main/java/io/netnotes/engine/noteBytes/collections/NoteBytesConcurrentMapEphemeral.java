@@ -5,14 +5,15 @@ import java.util.Collection;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
-public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytesEphemeral>, AutoCloseable{
-    private ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> m_pairs = null;
+public class NoteBytesConcurrentMapEphemeral implements AutoCloseable{
+    private ConcurrentHashMap<NoteBytesEphemeral, NoteBytesEphemeral> m_pairs = null;
 
 
     public NoteBytesConcurrentMapEphemeral(){
@@ -31,9 +32,9 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
     }
 
 
-    public static ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> getConcurrentHashMap(byte[] bytes) throws IOException{
+    public static ConcurrentHashMap<NoteBytesEphemeral, NoteBytesEphemeral> getConcurrentHashMap(byte[] bytes) throws IOException{
         int length = bytes.length;
-        ConcurrentHashMap<NoteBytes, NoteBytesEphemeral> map = new ConcurrentHashMap<>();
+        ConcurrentHashMap<NoteBytesEphemeral, NoteBytesEphemeral> map = new ConcurrentHashMap<>();
         if(length > 0){
             int offset = 0;
             while(offset < length) {
@@ -56,7 +57,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
     public int rawByteLength(){
         int length = 0; 
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             length += (entry.getKey().byteLength() + entry.getValue().byteLength() );
         }
         return length;
@@ -64,7 +65,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
     public int byteLength_w_MetaData(){
         int length = 0; 
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             length += (entry.getKey().byteLength() + entry.getValue().byteLength()  + 10);
         }
         return length;
@@ -75,7 +76,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
         byte[] bytes = new byte[byteLength_w_MetaData()];
         int offset = 0;
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             offset = NoteBytes.writeNote(entry.getKey(), bytes, offset);
             offset = NoteBytes.writeNote(entry.getValue(), bytes, offset);
         }
@@ -96,7 +97,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
 
     public NoteBytesPairEphemeral getAtIndex(int index){
         int i = 0;
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             if(i == index){
                 return new NoteBytesPairEphemeral(entry.getKey(), entry.getValue());
             }
@@ -133,7 +134,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
     public NoteBytesPairEphemeral removeAt(int index) {
         int i = 0;
         NoteBytesPairEphemeral value = null;
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             value = index == i ? new NoteBytesPairEphemeral(entry.getKey(), entry.getValue()) : value;
             if(value != null){
                 m_pairs.remove(entry.getKey());
@@ -148,9 +149,9 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
         return m_pairs.size();
     }
     
-    @Override
+    
     public void close() throws IOException {
-        for(Map.Entry<NoteBytes, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
+        for(Map.Entry<NoteBytesEphemeral, NoteBytesEphemeral> entry : m_pairs.entrySet()) {
             entry.getKey().clear();
             entry.getValue().close();
         }
@@ -159,7 +160,7 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
         
     }
 
-    @Override
+    
     public void clear() {
         try {
             close();
@@ -168,48 +169,48 @@ public class NoteBytesConcurrentMapEphemeral implements Map<NoteBytes, NoteBytes
         }
     }
 
-    @Override
+    
     public boolean containsKey(Object key) {
         return m_pairs.containsKey(key);
     }
 
-    @Override
+    
     public boolean containsValue(Object value) {
         return m_pairs.containsValue(value);
     }
 
-    @Override
-    public Set<Entry<NoteBytes, NoteBytesEphemeral>> entrySet() {
+
+    public Set<Entry<NoteBytesEphemeral, NoteBytesEphemeral>> entrySet() {
         return m_pairs.entrySet();
     }
 
-    @Override
+    
     public NoteBytesEphemeral get(Object key) {
         return m_pairs.get(NoteBytes.of(key));
     }
 
-    @Override
-    public Set<NoteBytes> keySet() {
+    
+    public Set<NoteBytesEphemeral> keySet() {
         return m_pairs.keySet();
     }
 
 
-    @Override
-    public NoteBytesEphemeral put(NoteBytes key, NoteBytesEphemeral value) {
+    
+    public NoteBytesEphemeral put(NoteBytesEphemeral key, NoteBytesEphemeral value) {
         return m_pairs.put(key, value);
     }
 
-    @Override
-    public void putAll(Map<? extends NoteBytes, ? extends NoteBytesEphemeral> m) {
+    
+    public void putAll(Map<? extends NoteBytesEphemeral, ? extends NoteBytesEphemeral> m) {
         m_pairs.putAll(m);
     }
 
-    @Override
+    
     public NoteBytesEphemeral remove(Object key) {
         return m_pairs.remove(key);
     }
 
-    @Override
+    
     public Collection<NoteBytesEphemeral> values() {
         return m_pairs.values();
     }
