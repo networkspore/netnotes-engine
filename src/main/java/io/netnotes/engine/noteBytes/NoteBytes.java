@@ -404,6 +404,20 @@ public class NoteBytes {
         return false;
     }
 
+    public boolean containsBytes(byte[] bytes){
+        return ByteDecoding.containsBytes(m_value, bytes);
+    }
+
+
+
+    public boolean constantTimeCompare(byte[] bytes){
+        return ByteDecoding.constantTimeCompare(this.m_value, bytes);
+    }
+
+    public boolean constantTimeCompare(NoteBytes noteBytes){
+        return ByteDecoding.constantTimeCompare(m_value, noteBytes.get());
+    }
+
     public boolean compareBytes(byte[] bytes){
         if(isRuined()){
             return false;

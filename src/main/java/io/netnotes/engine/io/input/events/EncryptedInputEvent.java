@@ -1,4 +1,4 @@
-package io.netnotes.engine.io.events;
+package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;

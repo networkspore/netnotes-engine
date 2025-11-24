@@ -50,7 +50,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly ITEM_CLAIMED          = new NoteBytesReadOnly("item_claimed");
         public static final NoteBytesReadOnly RELEASE_ITEM          = new NoteBytesReadOnly("release_item");
         public static final NoteBytesReadOnly ITEM_RELEASED         = new NoteBytesReadOnly("item_released");
-        
+        public static final NoteBytesReadOnly ITEM_TYPE             = new NoteBytesReadOnly("item_type");
 
         // Control
         public static final NoteBytesReadOnly START_STREAM          = new NoteBytesReadOnly("start_stream");
@@ -203,6 +203,12 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly PRODUCT           = new NoteBytesReadOnly("product");
         public static final NoteBytesReadOnly SERIAL_NUMBER     = new NoteBytesReadOnly("serial_number");
         public static final NoteBytesReadOnly KERNEL_DRIVER_ATTACHED    = new NoteBytesReadOnly("kernel_driver_attached");
+        public static final NoteBytesReadOnly DEVICE_CLASS      = new NoteBytesReadOnly("device_class");
+        public static final NoteBytesReadOnly DEVICE_SUBCLASS   = new NoteBytesReadOnly("device_subclass");
+        public static final NoteBytesReadOnly DEVICE_PROTOCOL   = new NoteBytesReadOnly("device_protocol");
+        public static final NoteBytesReadOnly DEVICE_ADDRESS    = new NoteBytesReadOnly("device_address");
+        
+       
         // Capabilities
         public static final NoteBytesReadOnly MODE                      = new NoteBytesReadOnly("mode");
         public static final NoteBytesReadOnly AVAILABLE_CAPABILITIES    = new NoteBytesReadOnly("available_capabilities");        public static final NoteBytesReadOnly CLAIMED_ITEMS             = new NoteBytesReadOnly("claimedItems");
@@ -372,13 +378,14 @@ public class NoteMessaging {
     
     // Status Values
     public static class Status {
-        public static final NoteBytesReadOnly OK         = new NoteBytesReadOnly("ok");
-        public static final NoteBytesReadOnly READY      = new NoteBytesReadOnly("ready");
-        public static final NoteBytesReadOnly PENDING    = new NoteBytesReadOnly("pending");
-        public static final NoteBytesReadOnly PROCESSING = new NoteBytesReadOnly("processing");
-        public static final NoteBytesReadOnly COMPLETE   = new NoteBytesReadOnly("complete");
-        public static final NoteBytesReadOnly FAILED     = new NoteBytesReadOnly("failed");
-        public static final NoteBytesReadOnly CANCELLED  = new NoteBytesReadOnly("cancelled");
+        public static final NoteBytesReadOnly OK            = new NoteBytesReadOnly("ok");
+        public static final NoteBytesReadOnly READY         = new NoteBytesReadOnly("ready");
+        public static final NoteBytesReadOnly PENDING       = new NoteBytesReadOnly("pending");
+        public static final NoteBytesReadOnly PROCESSING    = new NoteBytesReadOnly("processing");
+        public static final NoteBytesReadOnly COMPLETE      = new NoteBytesReadOnly("complete");
+        public static final NoteBytesReadOnly FAILED        = new NoteBytesReadOnly("failed");
+        public static final NoteBytesReadOnly CANCELLED     = new NoteBytesReadOnly("cancelled");
+        public static final NoteBytesReadOnly ACTIVE        = new NoteBytesReadOnly("active");
     }
     
     

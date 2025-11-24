@@ -72,6 +72,25 @@ public final class ContextPath {
         }
 
     }
+    private static final byte[] forwardSlash = "/".getBytes();
+    private static final byte[] doubleBackSlash = "\\".getBytes();
+
+    private static void validateSegment(NoteBytesReadOnly segment) {
+        if (segment == null || segment.isEmpty()) {
+            throw new IllegalArgumentException("Segment cannot be null or empty");
+        }
+        if(!ByteDecoding.isStringType(segment.getType())){
+            throw new IllegalArgumentException("Segment must be a string type");
+        }
+
+
+        if (segment.containsBytes(forwardSlash) || segment.containsBytes(doubleBackSlash)) {
+            throw new IllegalArgumentException("Segment cannot contain path separators: " + segment);
+        }
+
+    }
+
+   
 
     /** Build string representation */
     private String buildPathString() {
@@ -132,6 +151,11 @@ public final class ContextPath {
     }
 
     public ContextPath append(String segment) {
+        validateSegment(segment);
+        return new ContextPath(segments.append(segment));
+    }
+
+    public ContextPath append(NoteBytesReadOnly segment) {
         validateSegment(segment);
         return new ContextPath(segments.append(segment));
     }

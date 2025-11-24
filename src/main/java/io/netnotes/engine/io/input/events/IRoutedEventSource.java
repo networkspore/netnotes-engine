@@ -1,4 +1,4 @@
-package io.netnotes.engine.io.events;
+package io.netnotes.engine.io.input.events;
 
 
 public interface IRoutedEventSource {

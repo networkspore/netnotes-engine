@@ -5,11 +5,11 @@ import java.util.function.Consumer;
 
 import org.bouncycastle.util.Arrays;
 
-import io.netnotes.engine.io.events.ExecutorConsumer;
-import io.netnotes.engine.io.events.RoutedEvent;
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
-import io.netnotes.engine.io.events.KeyDownEvent;
-import io.netnotes.engine.io.events.KeyCharEvent;
+import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.KeyCharEvent;
+import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 
 /**

@@ -8,6 +8,7 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
+import io.netnotes.engine.io.daemon.IODaemonProtocol.DeviceMode;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
@@ -198,9 +199,15 @@ public class ClientSession extends FlowProcess {
     // ===== CLAIM =====
     
     private CompletableFuture<Void> handleClaimCommand(NoteBytesMap command, RoutedPacket request) {
-        String deviceId = command.get(Keys.DEVICE_ID).getAsString();
-        String mode = command.get(Keys.MODE).getAsString();
-        
+        NoteBytes deviceIdBytes = command.get(Keys.DEVICE_ID);
+        NoteBytes modeBytes = command.getOrDefault(Keys.MODE, DeviceMode.getDefault());
+        if(deviceIdBytes == null){
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Device id requried"));
+        }
+
+        String deviceId = deviceIdBytes.getAsString();
+        String mode = modeBytes.getAsString();
+
         return claimDevice(deviceId, mode)
             .thenAccept(devicePath -> {
                 NoteBytesMap response = new NoteBytesMap();
@@ -244,12 +251,12 @@ public class ClientSession extends FlowProcess {
                     "Device does not support mode: " + requestedMode + 
                     ". Available: " + availableModes));
         }
-        
+        String deviceIdString = deviceId;
         // Create ClaimedDevice as child of this session
-        ContextPath claimedDevicePath = contextPath.append(deviceId);
+        ContextPath claimedDevicePath = contextPath.append(deviceIdString);
         
         ClaimedDevice claimedDevice = new ClaimedDevice(
-            deviceId,
+            deviceIdString,
             claimedDevicePath,
             deviceInfo.usbDevice().get_device_type(),
             deviceInfo.capabilities()
@@ -318,7 +325,7 @@ public class ClientSession extends FlowProcess {
         
         // Send release to IODaemon socket manager
         return request(parentPath, Duration.ofSeconds(5),
-            new NoteBytesPair(Keys.CMD, "release_device"),
+            new NoteBytesPair(Keys.CMD, ProtocolMesssages.RELEASE_ITEM),
             new NoteBytesPair(Keys.SESSION_ID, sessionId),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId)
         ).thenRun(() -> {

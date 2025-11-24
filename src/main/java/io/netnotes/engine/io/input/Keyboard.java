@@ -9,6 +9,17 @@ public final class Keyboard {
 
     private Keyboard() {}
 
+    public final class Mod {
+                // Modifier keys (used in modifier byte)
+        public static final byte MOD_LEFT_CTRL   = 0x01;
+        public static final byte MOD_LEFT_SHIFT  = 0x02;
+        public static final byte MOD_LEFT_ALT    = 0x04;
+        public static final byte MOD_LEFT_GUI    = 0x08;  // Windows/Super key
+        public static final byte MOD_RIGHT_CTRL  = 0x10;
+        public static final byte MOD_RIGHT_SHIFT = 0x20;
+        public static final byte MOD_RIGHT_ALT   = 0x40;
+        public static final byte MOD_RIGHT_GUI   = (byte) 0x80;
+    }
 
     public final class KeyCode {
 
@@ -183,14 +194,6 @@ public final class Keyboard {
         public static final int RIGHT_ALT     = 0xE6;
         public static final int RIGHT_META    = 0xE7;
 
-        // User-friendly aliases
-        public static final int SHIFT    = LEFT_SHIFT;
-        public static final int CONTROL  = LEFT_CONTROL;
-        public static final int ALT      = LEFT_ALT;
-        public static final int META     = LEFT_META;
-        public static final int COMMAND  = LEFT_META;
-        public static final int WINDOWS  = LEFT_META;
-        public static final int SHORTCUT = LEFT_META;
 
 
         // ============================================================

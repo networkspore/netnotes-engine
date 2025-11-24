@@ -264,6 +264,10 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return NoteStringArrayReadOnly.append(this, segment, m_delimiter);
     }
 
+    public NoteStringArrayReadOnly append(NoteBytesReadOnly segment) {
+        return NoteStringArrayReadOnly.append(this, segment, m_delimiter);
+    }
+
       /**
      * Create a new path with an additional segment appended
      */
@@ -273,6 +277,24 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         }
 
         NoteStringArrayReadOnly parsed = parse(segment, delimiter);
+        int baseLength = base.byteLength();
+        if(baseLength > 0){
+            
+            byte[] bytes = new byte[baseLength + parsed.byteLength()];
+
+            System.arraycopy(base.get(), 0, bytes, 0, baseLength);
+            System.arraycopy(parsed.get(), 0, bytes, baseLength, parsed.byteLength());
+            return new NoteStringArrayReadOnly(bytes);
+        }
+        return parsed;
+    }
+
+     public static NoteStringArrayReadOnly append(NoteStringArrayReadOnly base, NoteBytesReadOnly segment, String delimiter) {
+        if (segment == null || segment.byteLength() == 0) {
+            return base;
+        }
+
+        NoteStringArrayReadOnly parsed = parse(segment.getAsString(), delimiter);
         int baseLength = base.byteLength();
         if(baseLength > 0){
             
@@ -484,4 +506,6 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         }
         return new NoteStringArrayReadOnly(clean);
     }
+
+    
 }

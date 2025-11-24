@@ -18,7 +18,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.daemon.IODaemonProtocol.AsyncNoteBytesWriter;
-import io.netnotes.engine.io.events.EventBytes;
+import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
@@ -33,6 +33,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
@@ -566,7 +567,7 @@ public class IODaemon extends FlowProcess {
         if (connected) {
             NoteBytesObject shutdown = new NoteBytesObject();
             shutdown.add(Keys.TYPE, EventBytes.TYPE_SHUTDOWN);
-            shutdown.add(Keys.SEQUENCE, IODaemonProtocol.MessageBuilder.generateSequence());
+            shutdown.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
             
             try {
                 asyncWriter.writeSync(shutdown);

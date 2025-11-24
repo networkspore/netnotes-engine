@@ -232,6 +232,35 @@ public class ByteDecoding{
 
     //chars
 
+    public static boolean isStringType(byte type){
+        switch(type){
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+            case NoteBytesMetaData.STRING_TYPE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean containsBytes(byte[] array, byte[] target) {
+        if (target.length == 0) return true;
+        if (target.length > array.length) return false;
+
+        outer:
+        for (int i = 0; i <= array.length - target.length; i++) {
+            for (int j = 0; j < target.length; j++) {
+                if (array[i + j] != target[j]) {
+                    continue outer;
+                }
+            }
+            return true; // match found
+        }
+        return false;
+    }
+
     public static byte[] stringToBytes(String string, byte type){
         switch(type){
             case NoteBytesMetaData.STRING_UTF16_TYPE:
@@ -314,6 +343,22 @@ public class ByteDecoding{
             default:
                 return new String(bytes);
          }
+    }
+
+    public static boolean constantTimeCompare(byte[] b1, byte[] b2){
+        if (b1 == null || b2 == null) return false;
+
+        boolean isSameLength = (b1.length == b2.length);
+        
+        byte[] comp = isSameLength ? b1 : Arrays.copyOf(b1, b2.length);
+
+        // Constant-time comparison
+        int diff = 0;
+        for (int i = 0; i < b2.length; i++) {
+            diff |= comp[i] ^ b2[i];
+        }
+        
+        return isSameLength && diff == 0;
     }
 
     public static String bytesToUrlSafeString(byte[] bytes){

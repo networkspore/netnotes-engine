@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input;
 
-import io.netnotes.engine.io.events.ExecutorConsumer;
-import io.netnotes.engine.io.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 
 /**
  * InputDevice - Common interface for all input sources

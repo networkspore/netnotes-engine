@@ -129,35 +129,35 @@ public class DiscoveredDeviceRegistry {
         IODaemonProtocol.USBDeviceDescriptor desc = new IODaemonProtocol.USBDeviceDescriptor();
         
         // Required fields
-        desc.deviceId = deviceMap.get("itemId").getAsString();
-        desc.vendorId = deviceMap.get("vendor_id").getAsInt();
-        desc.productId = deviceMap.get("product_id").getAsInt();
-        desc.deviceClass = deviceMap.get("device_class").getAsInt();
-        desc.deviceSubClass = deviceMap.get("device_subclass").getAsInt();
-        desc.deviceProtocol = deviceMap.get("device_protocol").getAsInt();
+        desc.deviceId = deviceMap.get(Keys.DEVICE_ID).getAsString();
+        desc.vendorId = deviceMap.get(Keys.VENDOR_ID).getAsInt();
+        desc.productId = deviceMap.get(Keys.PRODUCT_ID).getAsInt();
+        desc.deviceClass = deviceMap.get(Keys.DEVICE_CLASS).getAsInt();
+        desc.deviceSubClass = deviceMap.get(Keys.DEVICE_SUBCLASS).getAsInt();
+        desc.deviceProtocol = deviceMap.get(Keys.DEVICE_PROTOCOL).getAsInt();
         
-        desc.busNumber = deviceMap.get("bus_number").getAsInt();
-        desc.deviceAddress = deviceMap.get("device_address").getAsInt();
+        desc.busNumber = deviceMap.get(Keys.BUS_NUMBER).getAsInt();
+        desc.deviceAddress = deviceMap.get(Keys.DEVICE_ADDRESS).getAsInt();
         
         // Device type
-        NoteBytes typeBytes = deviceMap.get("itemType");
+        NoteBytesReadOnly typeBytes = deviceMap.getReadOnly(Keys.ITEM_TYPE);
         if (typeBytes != null) {
-            desc.set_device_type(typeBytes.getAsString());
+            desc.set_device_type(typeBytes);
         }
         
         // Optional string fields
-        NoteBytes mfg = deviceMap.get("manufacturer");
+        NoteBytes mfg = deviceMap.get(Keys.MANUFACTURER);
         if (mfg != null) desc.manufacturer = mfg.getAsString();
         
-        NoteBytes prod = deviceMap.get("product");
+        NoteBytes prod = deviceMap.get(Keys.PRODUCT);
         if (prod != null) desc.product = prod.getAsString();
         
-        NoteBytes serial = deviceMap.get("serial_number");
+        NoteBytes serial = deviceMap.get(Keys.SERIAL_NUMBER);
         if (serial != null) desc.serialNumber = serial.getAsString();
         
         // Status fields
-        desc.available = deviceMap.get("available").getAsBoolean();
-        desc.kernelDriverAttached = deviceMap.get("kernel_driver_attached").getAsBoolean();
+        desc.available = deviceMap.get(Keys.AVAILABLE).getAsBoolean();
+        desc.kernelDriverAttached = deviceMap.get(Keys.KERNEL_DRIVER_ATTACHED).getAsBoolean();
         
         return desc;
     }

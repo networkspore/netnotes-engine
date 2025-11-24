@@ -7,9 +7,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteInteger;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -19,11 +19,11 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
-import io.netnotes.engine.io.events.EventBytes;
-import io.netnotes.engine.io.events.ExecutorConsumer;
-import io.netnotes.engine.io.events.InputEventFactory;
-import io.netnotes.engine.io.events.RoutedEvent;
 import io.netnotes.engine.io.input.InputDevice;
+import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.InputEventFactory;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 
@@ -157,8 +157,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         
         try {
             // Extract server public key
-            byte[] serverPublicKey = offer.get("public_key").getBytes();
-            String cipher = offer.get("cipher").getAsString();
+            byte[] serverPublicKey = offer.get(Keys.PUBLIC_KEY).getBytes();
+            String cipher = offer.get(Keys.CIPHER).getAsString();
             
             // Create encryption session
             encryptionSession = new DeviceEncryptionSession(deviceId, devicePath);
@@ -168,8 +168,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             byte[] clientPublicKey = encryptionSession.getPublicKey();
             NoteBytesObject accept = new NoteBytesObject();
             accept.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_ACCEPT);
-            accept.add(Keys.SEQUENCE, IODaemonProtocol.MessageBuilder.generateSequence());
-            accept.add("public_key", clientPublicKey);
+            accept.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            accept.add(Keys.PUBLIC_KEY, clientPublicKey);
             
             sendDeviceControlMessage(accept);
             
@@ -203,8 +203,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private void declineEncryption(String reason) {
         NoteBytesObject decline = new NoteBytesObject();
         decline.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_DECLINE);
-        decline.add(Keys.SEQUENCE, IODaemonProtocol.MessageBuilder.generateSequence());
-        decline.add("reason", reason);
+        decline.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+        decline.add(Keys.MSG, reason);
         
         sendDeviceControlMessage(decline);
     }
@@ -233,9 +233,9 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         try {
 
             request(ioDaemonPath, Duration.ofSeconds(1), 
-                new NoteBytesPair("action", ProtocolMesssages.RESUME),
+                new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
                 new NoteBytesPair(Keys.DEVICE_ID, deviceId),
-                new NoteBytesPair("processed_count", new NoteInteger(count))
+                new NoteBytesPair(Keys.PROCESSED_COUNT, count)
             )
                 .exceptionally(ex -> {
                     System.err.println("Failed to send ACK: " + ex.getMessage());

@@ -1,4 +1,4 @@
-package io.netnotes.engine.io.events;
+package io.netnotes.engine.io.input.events;
 
 import java.util.HashMap;
 import java.util.Map;

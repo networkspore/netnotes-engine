@@ -2,9 +2,9 @@ package io.netnotes.engine.io.input;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.events.ExecutorConsumer;
-import io.netnotes.engine.io.events.InputEventFactory;
-import io.netnotes.engine.io.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.InputEventFactory;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
