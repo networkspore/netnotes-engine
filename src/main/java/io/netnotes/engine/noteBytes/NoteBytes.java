@@ -417,10 +417,10 @@ public class NoteBytes {
             if(byteLength() != objValue.length){
                 return false;
             }
-            return compareBytes(objValue);
+            return equalsBytes(objValue);
         }
         if(obj instanceof byte[]){
-            return compareBytes((byte[]) obj);
+            return equalsBytes((byte[]) obj);
         }
         if(obj instanceof String){
             return equalsString((String) obj);
@@ -432,17 +432,24 @@ public class NoteBytes {
         return ByteDecoding.containsBytes(m_value, bytes);
     }
 
+    public int compare(NoteBytes noteBytes){
+        byte[] bytes = noteBytes.get();
+        return compareBytes(bytes);
+    }
 
+    public int compareBytes(byte[] bytes){
+        return Arrays.compare(m_value, bytes);
+    }
 
-    public boolean constantTimeCompare(byte[] bytes){
+    public boolean constantTimmEqualsBytes(byte[] bytes){
         return ByteDecoding.constantTimeCompare(this.m_value, bytes);
     }
 
-    public boolean constantTimeCompare(NoteBytes noteBytes){
+    public boolean constantTimeEquals(NoteBytes noteBytes){
         return ByteDecoding.constantTimeCompare(m_value, noteBytes.get());
     }
 
-    public boolean compareBytes(byte[] bytes){
+    public boolean equalsBytes(byte[] bytes){
         if(isRuined()){
             return false;
         }

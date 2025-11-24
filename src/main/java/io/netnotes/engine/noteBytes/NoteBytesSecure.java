@@ -76,7 +76,7 @@ public class NoteBytesSecure extends NoteBytes implements AutoCloseable {
         return Arrays.copyOf(bytes, bytes.length);
     }
     @Override
-    public boolean compareBytes(byte[] bytes){
+    public boolean equalsBytes(byte[] bytes){
         byte[] value = get();
         return Arrays.equals(value, bytes);
     }

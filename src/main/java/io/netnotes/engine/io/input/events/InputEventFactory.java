@@ -49,8 +49,8 @@ public final class InputEventFactory {
         //NoteBytesReadOnly sourceId, int key, int scancode, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_DOWN, (src, flags, p) ->
             new KeyDownEvent(src,
-                p[0].getAsInt(),
-                p[1].getAsInt(),
+                p[0],
+                p[1],
                 flags));
 
         REGISTRY.put(EventBytes.EVENT_KEY_UP, (src, flags, p) ->
@@ -68,13 +68,13 @@ public final class InputEventFactory {
         //NoteBytesReadOnly sourceId, int codepoint, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_CHAR, (src, flags, p) ->
             new KeyCharEvent(src,
-                p[0].getAsInt(),
+                p[0],
                 flags));
 
         //NoteBytesReadOnly sourceId, int codepoint, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_CHAR_MODS, (src, flags, p) ->
             new KeyCharModsEvent(src,
-                p[0].getAsInt(),
+                p[0],
                 flags));
 
         // ===== Focus Events =====

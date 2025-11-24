@@ -1,13 +1,12 @@
 package io.netnotes.engine.core.system.control;
 
-import java.util.HashMap;
-import java.util.Map;
+
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 import org.bouncycastle.util.Arrays;
 
-import io.netnotes.engine.io.input.Keyboard.KeyCode;
+import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
@@ -15,8 +14,10 @@ import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesRunnableLookup;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support
@@ -53,7 +54,11 @@ public class PasswordReader {
     private int m_keystrokeCount = 0; // Number of keystrokes
     
     private volatile boolean active = true;
-    private final Map<NoteBytesReadOnly, Runnable> m_keyCodes = new HashMap<>();
+    private final NoteBytesRunnableLookup m_keyCodes = new NoteBytesRunnableLookup(
+        new NoteBytesRunnablePair(KeyCodeBytes.ENTER, ()->onComplete()),
+        new NoteBytesRunnablePair(KeyCodeBytes.BACKSPACE ,()->handleBackspace()),
+        new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE ,()->escape())
+    );
    
     
     // Event consumer for input device
@@ -66,13 +71,7 @@ public class PasswordReader {
             Executors.newVirtualThreadPerTaskExecutor(),
             this::handleEvent
         );
-        setupKeyCodeBytes();
-    }
 
-    private void setupKeyCodeBytes(){
-        m_keyCodes.put(new NoteBytesReadOnly(KeyCode.ENTER) ,()->onComplete());
-        m_keyCodes.put(new NoteBytesReadOnly(KeyCode.BACKSPACE) ,()->handleBackspace());
-        m_keyCodes.put(new NoteBytesReadOnly(KeyCode.ESCAPE) ,()->escape());
     }
     
     /**
@@ -125,11 +124,8 @@ public class PasswordReader {
      * Handle ephemeral key down (for special keys)
      */
     private void handleEphemeralKeyDown(EphemeralKeyDownEvent event) {
-        // Extract key code from ephemeral data
-        Runnable runnable = m_keyCodes.get(event.getKeyData());
-        if(runnable != null){
-            runnable.run();
-        }
+        // lookup keycode and run
+        m_keyCodes.run(event.getKeyData());
     }
     
     /**
@@ -138,27 +134,33 @@ public class PasswordReader {
      */
     private void handleEphemeralKeyChar(EphemeralKeyCharModsEvent event) {
         // Get UTF-8 bytes from registry
-        NoteBytesReadOnly readOnly = event.getUTF8();
+        NoteBytes keyUTF8 = event.getUTF8();
+    
         
+        if(keyUTF8 == null){
+            System.err.println("Key is not in lookup table");
+        }
 
         // Check buffer space
         if (m_keystrokeCount >= MAX_KEYSTROKE_COUNT) {
             System.err.println("Password too long (max keystrokes exceeded)");
             return;
         }
+
+        int keyUTF8ByteLength = keyUTF8.byteLength();
         
-        if (m_currentLength + readOnly.byteLength() > MAX_PASSWORD_BYTE_LENGTH) {
+        if (m_currentLength + keyUTF8ByteLength > MAX_PASSWORD_BYTE_LENGTH) {
             System.err.println("Password too long (max bytes exceeded)");
             return;
         }
         
         // Copy UTF-8 bytes into password buffer
-        System.arraycopy(readOnly.get(), 0, m_passwordBytes.get(), m_currentLength, readOnly.byteLength());
+        System.arraycopy(keyUTF8.get(), 0, m_passwordBytes.get(), m_currentLength, keyUTF8ByteLength);
         
         // Record this keystroke
-        m_keystrokeLengths[m_keystrokeCount] = (byte) readOnly.byteLength();
+        m_keystrokeLengths[m_keystrokeCount] = (byte) keyUTF8ByteLength;
         m_keystrokeCount++;
-        m_currentLength += readOnly.byteLength();
+        m_currentLength += keyUTF8ByteLength;
         
        
     }
@@ -167,59 +169,41 @@ public class PasswordReader {
      * Handle key down events (for special keys) - Regular events
      */
     private void handleKeyDown(KeyDownEvent event) {
-        int keyCode = event.getKeyCode();
-        
-        // Handle special keys
-        if (keyCode == KeyCode.ENTER) {
-            onComplete();
-            return;
-        }
-        
-        if (keyCode == KeyCode.BACKSPACE) {
-            handleBackspace();
-            return;
-        }
-        
-        if (keyCode == KeyCode.ESCAPE) {
-            escape();
-            return;
-        }
+        m_keyCodes.run(event.getKeyCode());
     }
     
     /**
      * Handle character events (for regular input) - Regular events
      */
     private void handleKeyChar(KeyCharEvent event) {
-        int codepoint = event.getCodepoint();
-        
-        // Convert codepoint to UTF-8 bytes
-        String str = new String(Character.toChars(codepoint));
-        byte[] utf8Bytes = str.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        
-        try {
-            // Check buffer space
-            if (m_keystrokeCount >= MAX_KEYSTROKE_COUNT) {
-                System.err.println("Password too long (max keystrokes exceeded)");
-                return;
-            }
-            
-            if (m_currentLength + utf8Bytes.length > MAX_PASSWORD_BYTE_LENGTH) {
-                System.err.println("Password too long (max bytes exceeded)");
-                return;
-            }
-            
-            // Copy UTF-8 bytes into password buffer
-            System.arraycopy(utf8Bytes, 0, m_passwordBytes.get(), m_currentLength, utf8Bytes.length);
-            
-            // Record this keystroke
-            m_keystrokeLengths[m_keystrokeCount] = (byte) utf8Bytes.length;
-            m_keystrokeCount++;
-            m_currentLength += utf8Bytes.length;
-            
-        } finally {
-            // Wipe UTF-8 bytes after use
-            Arrays.fill(utf8Bytes, (byte) 0);
+        NoteBytes utf8 = event.getUTF8();
+
+        if(utf8 == null){
+            System.err.println("Key is not in lookup table");
+            return;
         }
+        // Check buffer space
+        if (m_keystrokeCount >= MAX_KEYSTROKE_COUNT) {
+            System.err.println("Password too long (max keystrokes exceeded)");
+            return;
+        }
+
+        int utf8ByteLength = utf8.byteLength();
+        
+        if (m_currentLength + utf8ByteLength > MAX_PASSWORD_BYTE_LENGTH) {
+            System.err.println("Password too long (max bytes exceeded)");
+            return;
+        }
+        
+        // Copy UTF-8 bytes into password buffer
+        System.arraycopy(utf8.get(), 0, m_passwordBytes.get(), m_currentLength, utf8ByteLength);
+        
+        // Record this keystroke
+        m_keystrokeLengths[m_keystrokeCount] = (byte) utf8ByteLength;
+        m_keystrokeCount++;
+        m_currentLength += utf8ByteLength;
+        
+       
     }
     
     /**

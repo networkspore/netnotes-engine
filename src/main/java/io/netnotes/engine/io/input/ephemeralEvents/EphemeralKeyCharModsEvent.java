@@ -2,8 +2,8 @@ package io.netnotes.engine.io.input.ephemeralEvents;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
  * EphemeralKeyCharModsEvent - Character with modifiers (ephemeral)
@@ -35,8 +35,8 @@ public class EphemeralKeyCharModsEvent extends EphemeralRoutedEvent {
     /**
      * secure untraceable UTF8 bytes from registry
      */
-    public NoteBytesReadOnly getUTF8() {
-        return Keyboard.CodePointByteRegistry.get(codepointData);
+    public NoteBytes getUTF8() {
+        return Keyboard.CodePointCharsByteRegistry.get(codepointData);
     }
     
     @Override

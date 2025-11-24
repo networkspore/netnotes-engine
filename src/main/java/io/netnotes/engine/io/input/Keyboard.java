@@ -1,12 +1,14 @@
 package io.netnotes.engine.io.input;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPairLookup;
 
 public final class Keyboard {
 
@@ -300,31 +302,31 @@ public final class Keyboard {
         }
     }
 
-    public final class CodePointByteRegistry{
-        private static final Map<NoteBytesReadOnly, NoteBytesReadOnly> CODEPOINT_TO_CHAR = new HashMap<>();
+    public final class CodePointCharsByteRegistry{
+        private static NoteBytesPairLookup CODEPOINT_TO_CHAR = null;
        
-        private static Map<NoteBytesReadOnly, NoteBytesReadOnly> buildRegistry() {
-
+        private static void buildRegistry() {
+            ArrayList<NoteBytesPair> pairs = new ArrayList<>();
             // Letters: a-z and A-Z
             for (int i = 0; i < 26; i++) {
                 char lower = (char) ('a' + i);
                 char upper = (char) ('A' + i);
 
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) lower), new NoteBytesReadOnly(String.valueOf(lower)));
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) upper), new NoteBytesReadOnly(String.valueOf(upper)));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) lower), new NoteBytes(String.valueOf(lower))));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) upper), new NoteBytes(String.valueOf(upper))));
             }
 
             // Number row unshifted
             for (int i = 1; i <= 9; i++) {
                 char c = (char) ('0' + i);
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) c), new NoteBytesReadOnly(String.valueOf(c)));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
             }
-            CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) '0'), new NoteBytesReadOnly("0"));
+            pairs.add(new NoteBytesPair(new NoteBytes((int) '0'), new NoteBytes("0")));
 
             // Number row shifted
             char[] shiftedNums = "!@#$%^&*()".toCharArray();
             for (char c : shiftedNums) {
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) c), new NoteBytesReadOnly(String.valueOf(c)));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
             }
 
             // Unshifted punctuation
@@ -332,7 +334,7 @@ public final class Keyboard {
                     '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/', ' ', '\t', '\n'
             };
             for (char c : unshifted) {
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) c), new NoteBytesReadOnly(String.valueOf(c)));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
             }
 
             // Shifted punctuation
@@ -340,186 +342,186 @@ public final class Keyboard {
                     '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
             };
             for (char c : shifted) {
-                CODEPOINT_TO_CHAR.put(new NoteBytesReadOnly((int) c), new NoteBytesReadOnly(String.valueOf(c)));
+                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
             }
-
-            return CODEPOINT_TO_CHAR;
+            CODEPOINT_TO_CHAR = new NoteBytesPairLookup(pairs.toArray(new NoteBytesPair[0]));
+  
         }
         
-        public static NoteBytesReadOnly get(NoteBytes key){
-            if(CODEPOINT_TO_CHAR.size() == 0){
+        public static NoteBytes get(NoteBytes key){
+            if(CODEPOINT_TO_CHAR == null){
                 buildRegistry();
             }
-            return CODEPOINT_TO_CHAR.get(key);
+            return CODEPOINT_TO_CHAR.lookup(key);
         }
      
     }
 
     public final class KeyCodeBytes{
-        public static final NoteBytesReadOnly NONE  = new NoteBytesReadOnly(0x00);
+        public static final NoteBytes NONE  = new NoteBytes(0x00);
 
-        public static final NoteBytesReadOnly ERROR_ROLLOVER    = new NoteBytesReadOnly(0x01);
-        public static final NoteBytesReadOnly POST_FAIL         = new NoteBytesReadOnly(0x02);
-        public static final NoteBytesReadOnly ERROR_UNDEFINED   = new NoteBytesReadOnly(0x03);
+        public static final NoteBytes ERROR_ROLLOVER    = new NoteBytes(0x01);
+        public static final NoteBytes POST_FAIL         = new NoteBytes(0x02);
+        public static final NoteBytes ERROR_UNDEFINED   = new NoteBytes(0x03);
 
         // Letters
-        public static final NoteBytesReadOnly A  = new NoteBytesReadOnly(0x04);
-        public static final NoteBytesReadOnly B  = new NoteBytesReadOnly(0x05);
-        public static final NoteBytesReadOnly C  = new NoteBytesReadOnly(0x06);
-        public static final NoteBytesReadOnly D  = new NoteBytesReadOnly(0x07);
-        public static final NoteBytesReadOnly E  = new NoteBytesReadOnly(0x08);
-        public static final NoteBytesReadOnly F  = new NoteBytesReadOnly(0x09);
-        public static final NoteBytesReadOnly G  = new NoteBytesReadOnly(0x0A);
-        public static final NoteBytesReadOnly H  = new NoteBytesReadOnly(0x0B);
-        public static final NoteBytesReadOnly I  = new NoteBytesReadOnly(0x0C);
-        public static final NoteBytesReadOnly J  = new NoteBytesReadOnly(0x0D);
-        public static final NoteBytesReadOnly K  = new NoteBytesReadOnly(0x0E);
-        public static final NoteBytesReadOnly L  = new NoteBytesReadOnly(0x0F);
-        public static final NoteBytesReadOnly M  = new NoteBytesReadOnly(0x10);
-        public static final NoteBytesReadOnly N  = new NoteBytesReadOnly(0x11);
-        public static final NoteBytesReadOnly O  = new NoteBytesReadOnly(0x12);
-        public static final NoteBytesReadOnly P  = new NoteBytesReadOnly(0x13);
-        public static final NoteBytesReadOnly Q  = new NoteBytesReadOnly(0x14);
-        public static final NoteBytesReadOnly R  = new NoteBytesReadOnly(0x15);
-        public static final NoteBytesReadOnly S  = new NoteBytesReadOnly(0x16);
-        public static final NoteBytesReadOnly T  = new NoteBytesReadOnly(0x17);
-        public static final NoteBytesReadOnly U  = new NoteBytesReadOnly(0x18);
-        public static final NoteBytesReadOnly V  = new NoteBytesReadOnly(0x19);
-        public static final NoteBytesReadOnly W  = new NoteBytesReadOnly(0x1A);
-        public static final NoteBytesReadOnly X  = new NoteBytesReadOnly(0x1B);
-        public static final NoteBytesReadOnly Y  = new NoteBytesReadOnly(0x1C);
-        public static final NoteBytesReadOnly Z  = new NoteBytesReadOnly(0x1D);
+        public static final NoteBytes A  = new NoteBytes(0x04);
+        public static final NoteBytes B  = new NoteBytes(0x05);
+        public static final NoteBytes C  = new NoteBytes(0x06);
+        public static final NoteBytes D  = new NoteBytes(0x07);
+        public static final NoteBytes E  = new NoteBytes(0x08);
+        public static final NoteBytes F  = new NoteBytes(0x09);
+        public static final NoteBytes G  = new NoteBytes(0x0A);
+        public static final NoteBytes H  = new NoteBytes(0x0B);
+        public static final NoteBytes I  = new NoteBytes(0x0C);
+        public static final NoteBytes J  = new NoteBytes(0x0D);
+        public static final NoteBytes K  = new NoteBytes(0x0E);
+        public static final NoteBytes L  = new NoteBytes(0x0F);
+        public static final NoteBytes M  = new NoteBytes(0x10);
+        public static final NoteBytes N  = new NoteBytes(0x11);
+        public static final NoteBytes O  = new NoteBytes(0x12);
+        public static final NoteBytes P  = new NoteBytes(0x13);
+        public static final NoteBytes Q  = new NoteBytes(0x14);
+        public static final NoteBytes R  = new NoteBytes(0x15);
+        public static final NoteBytes S  = new NoteBytes(0x16);
+        public static final NoteBytes T  = new NoteBytes(0x17);
+        public static final NoteBytes U  = new NoteBytes(0x18);
+        public static final NoteBytes V  = new NoteBytes(0x19);
+        public static final NoteBytes W  = new NoteBytes(0x1A);
+        public static final NoteBytes X  = new NoteBytes(0x1B);
+        public static final NoteBytes Y  = new NoteBytes(0x1C);
+        public static final NoteBytes Z  = new NoteBytes(0x1D);
 
         // Number row
-        public static final NoteBytesReadOnly DIGIT_1  = new NoteBytesReadOnly(0x1E);
-        public static final NoteBytesReadOnly DIGIT_2  = new NoteBytesReadOnly(0x1F);
-        public static final NoteBytesReadOnly DIGIT_3  = new NoteBytesReadOnly(0x20);
-        public static final NoteBytesReadOnly DIGIT_4  = new NoteBytesReadOnly(0x21);
-        public static final NoteBytesReadOnly DIGIT_5  = new NoteBytesReadOnly(0x22);
-        public static final NoteBytesReadOnly DIGIT_6  = new NoteBytesReadOnly(0x23);
-        public static final NoteBytesReadOnly DIGIT_7  = new NoteBytesReadOnly(0x24);
-        public static final NoteBytesReadOnly DIGIT_8  = new NoteBytesReadOnly(0x25);
-        public static final NoteBytesReadOnly DIGIT_9  = new NoteBytesReadOnly(0x26);
-        public static final NoteBytesReadOnly DIGIT_0  = new NoteBytesReadOnly(0x27);
+        public static final NoteBytes DIGIT_1  = new NoteBytes(0x1E);
+        public static final NoteBytes DIGIT_2  = new NoteBytes(0x1F);
+        public static final NoteBytes DIGIT_3  = new NoteBytes(0x20);
+        public static final NoteBytes DIGIT_4  = new NoteBytes(0x21);
+        public static final NoteBytes DIGIT_5  = new NoteBytes(0x22);
+        public static final NoteBytes DIGIT_6  = new NoteBytes(0x23);
+        public static final NoteBytes DIGIT_7  = new NoteBytes(0x24);
+        public static final NoteBytes DIGIT_8  = new NoteBytes(0x25);
+        public static final NoteBytes DIGIT_9  = new NoteBytes(0x26);
+        public static final NoteBytes DIGIT_0  = new NoteBytes(0x27);
 
         // Basics
-        public static final NoteBytesReadOnly ENTER  = new NoteBytesReadOnly(0x28);
-        public static final NoteBytesReadOnly ESCAPE  = new NoteBytesReadOnly(0x29);
-        public static final NoteBytesReadOnly BACKSPACE  = new NoteBytesReadOnly(0x2A);
-        public static final NoteBytesReadOnly TAB  = new NoteBytesReadOnly(0x2B);
-        public static final NoteBytesReadOnly SPACE  = new NoteBytesReadOnly(0x2C);
+        public static final NoteBytes ENTER  = new NoteBytes(0x28);
+        public static final NoteBytes ESCAPE  = new NoteBytes(0x29);
+        public static final NoteBytes BACKSPACE  = new NoteBytes(0x2A);
+        public static final NoteBytes TAB  = new NoteBytes(0x2B);
+        public static final NoteBytes SPACE  = new NoteBytes(0x2C);
 
         // Symbols
-        public static final NoteBytesReadOnly MINUS  = new NoteBytesReadOnly(0x2D);
-        public static final NoteBytesReadOnly EQUALS  = new NoteBytesReadOnly(0x2E);
-        public static final NoteBytesReadOnly LEFT_BRACKET  = new NoteBytesReadOnly(0x2F);
-        public static final NoteBytesReadOnly RIGHT_BRACKET  = new NoteBytesReadOnly(0x30);
-        public static final NoteBytesReadOnly BACKSLASH  = new NoteBytesReadOnly(0x31);
-        public static final NoteBytesReadOnly NON_US_HASH  = new NoteBytesReadOnly(0x32);
-        public static final NoteBytesReadOnly SEMICOLON  = new NoteBytesReadOnly(0x33);
-        public static final NoteBytesReadOnly APOSTROPHE  = new NoteBytesReadOnly(0x34);
-        public static final NoteBytesReadOnly GRAVE  = new NoteBytesReadOnly(0x35);
-        public static final NoteBytesReadOnly COMMA  = new NoteBytesReadOnly(0x36);
-        public static final NoteBytesReadOnly PERIOD  = new NoteBytesReadOnly(0x37);
-        public static final NoteBytesReadOnly SLASH  = new NoteBytesReadOnly(0x38);
+        public static final NoteBytes MINUS  = new NoteBytes(0x2D);
+        public static final NoteBytes EQUALS  = new NoteBytes(0x2E);
+        public static final NoteBytes LEFT_BRACKET  = new NoteBytes(0x2F);
+        public static final NoteBytes RIGHT_BRACKET  = new NoteBytes(0x30);
+        public static final NoteBytes BACKSLASH  = new NoteBytes(0x31);
+        public static final NoteBytes NON_US_HASH  = new NoteBytes(0x32);
+        public static final NoteBytes SEMICOLON  = new NoteBytes(0x33);
+        public static final NoteBytes APOSTROPHE  = new NoteBytes(0x34);
+        public static final NoteBytes GRAVE  = new NoteBytes(0x35);
+        public static final NoteBytes COMMA  = new NoteBytes(0x36);
+        public static final NoteBytes PERIOD  = new NoteBytes(0x37);
+        public static final NoteBytes SLASH  = new NoteBytes(0x38);
 
         // Locks & function keys
-        public static final NoteBytesReadOnly CAPS_LOCK  = new NoteBytesReadOnly(0x39);
-        public static final NoteBytesReadOnly F1  = new NoteBytesReadOnly(0x3A);
-        public static final NoteBytesReadOnly F2  = new NoteBytesReadOnly(0x3B);
-        public static final NoteBytesReadOnly F3  = new NoteBytesReadOnly(0x3C);
-        public static final NoteBytesReadOnly F4  = new NoteBytesReadOnly(0x3D);
-        public static final NoteBytesReadOnly F5  = new NoteBytesReadOnly(0x3E);
-        public static final NoteBytesReadOnly F6  = new NoteBytesReadOnly(0x3F);
-        public static final NoteBytesReadOnly F7  = new NoteBytesReadOnly(0x40);
-        public static final NoteBytesReadOnly F8  = new NoteBytesReadOnly(0x41);
-        public static final NoteBytesReadOnly F9  = new NoteBytesReadOnly(0x42);
-        public static final NoteBytesReadOnly F10  = new NoteBytesReadOnly(0x43);
-        public static final NoteBytesReadOnly F11  = new NoteBytesReadOnly(0x44);
-        public static final NoteBytesReadOnly F12  = new NoteBytesReadOnly(0x45);
+        public static final NoteBytes CAPS_LOCK  = new NoteBytes(0x39);
+        public static final NoteBytes F1  = new NoteBytes(0x3A);
+        public static final NoteBytes F2  = new NoteBytes(0x3B);
+        public static final NoteBytes F3  = new NoteBytes(0x3C);
+        public static final NoteBytes F4  = new NoteBytes(0x3D);
+        public static final NoteBytes F5  = new NoteBytes(0x3E);
+        public static final NoteBytes F6  = new NoteBytes(0x3F);
+        public static final NoteBytes F7  = new NoteBytes(0x40);
+        public static final NoteBytes F8  = new NoteBytes(0x41);
+        public static final NoteBytes F9  = new NoteBytes(0x42);
+        public static final NoteBytes F10  = new NoteBytes(0x43);
+        public static final NoteBytes F11  = new NoteBytes(0x44);
+        public static final NoteBytes F12  = new NoteBytes(0x45);
 
-        public static final NoteBytesReadOnly PRINT_SCREEN  = new NoteBytesReadOnly(0x46);
-        public static final NoteBytesReadOnly SCROLL_LOCK   = new NoteBytesReadOnly(0x47);
-        public static final NoteBytesReadOnly PAUSE  = new NoteBytesReadOnly(0x48);
+        public static final NoteBytes PRINT_SCREEN  = new NoteBytes(0x46);
+        public static final NoteBytes SCROLL_LOCK   = new NoteBytes(0x47);
+        public static final NoteBytes PAUSE  = new NoteBytes(0x48);
 
         // Navigation block
-        public static final NoteBytesReadOnly INSERT  = new NoteBytesReadOnly(0x49);
-        public static final NoteBytesReadOnly HOME  = new NoteBytesReadOnly(0x4A);
-        public static final NoteBytesReadOnly PAGE_UP  = new NoteBytesReadOnly(0x4B);
-        public static final NoteBytesReadOnly DELETE  = new NoteBytesReadOnly(0x4C);
-        public static final NoteBytesReadOnly END  = new NoteBytesReadOnly(0x4D);
-        public static final NoteBytesReadOnly PAGE_DOWN  = new NoteBytesReadOnly(0x4E);
+        public static final NoteBytes INSERT  = new NoteBytes(0x49);
+        public static final NoteBytes HOME  = new NoteBytes(0x4A);
+        public static final NoteBytes PAGE_UP  = new NoteBytes(0x4B);
+        public static final NoteBytes DELETE  = new NoteBytes(0x4C);
+        public static final NoteBytes END  = new NoteBytes(0x4D);
+        public static final NoteBytes PAGE_DOWN  = new NoteBytes(0x4E);
 
         // Arrows
-        public static final NoteBytesReadOnly RIGHT  = new NoteBytesReadOnly(0x4F);
-        public static final NoteBytesReadOnly LEFT   = new NoteBytesReadOnly(0x50);
-        public static final NoteBytesReadOnly DOWN   = new NoteBytesReadOnly(0x51);
-        public static final NoteBytesReadOnly UP     = new NoteBytesReadOnly(0x52);
+        public static final NoteBytes RIGHT  = new NoteBytes(0x4F);
+        public static final NoteBytes LEFT   = new NoteBytes(0x50);
+        public static final NoteBytes DOWN   = new NoteBytes(0x51);
+        public static final NoteBytes UP     = new NoteBytes(0x52);
 
         // Keypad
-        public static final NoteBytesReadOnly NUM_LOCK  = new NoteBytesReadOnly(0x53);
-        public static final NoteBytesReadOnly KP_SLASH  = new NoteBytesReadOnly(0x54);
-        public static final NoteBytesReadOnly KP_ASTERISK  = new NoteBytesReadOnly(0x55);
-        public static final NoteBytesReadOnly KP_MINUS  = new NoteBytesReadOnly(0x56);
-        public static final NoteBytesReadOnly KP_PLUS  = new NoteBytesReadOnly(0x57);
-        public static final NoteBytesReadOnly KP_ENTER  = new NoteBytesReadOnly(0x58);
-        public static final NoteBytesReadOnly KP_1  = new NoteBytesReadOnly(0x59);
-        public static final NoteBytesReadOnly KP_2  = new NoteBytesReadOnly(0x5A);
-        public static final NoteBytesReadOnly KP_3  = new NoteBytesReadOnly(0x5B);
-        public static final NoteBytesReadOnly KP_4  = new NoteBytesReadOnly(0x5C);
-        public static final NoteBytesReadOnly KP_5  = new NoteBytesReadOnly(0x5D);
-        public static final NoteBytesReadOnly KP_6  = new NoteBytesReadOnly(0x5E);
-        public static final NoteBytesReadOnly KP_7  = new NoteBytesReadOnly(0x5F);
-        public static final NoteBytesReadOnly KP_8  = new NoteBytesReadOnly(0x60);
-        public static final NoteBytesReadOnly KP_9  = new NoteBytesReadOnly(0x61);
-        public static final NoteBytesReadOnly KP_0  = new NoteBytesReadOnly(0x62);
-        public static final NoteBytesReadOnly KP_PERIOD  = new NoteBytesReadOnly(0x63);
+        public static final NoteBytes NUM_LOCK  = new NoteBytes(0x53);
+        public static final NoteBytes KP_SLASH  = new NoteBytes(0x54);
+        public static final NoteBytes KP_ASTERISK  = new NoteBytes(0x55);
+        public static final NoteBytes KP_MINUS  = new NoteBytes(0x56);
+        public static final NoteBytes KP_PLUS  = new NoteBytes(0x57);
+        public static final NoteBytes KP_ENTER  = new NoteBytes(0x58);
+        public static final NoteBytes KP_1  = new NoteBytes(0x59);
+        public static final NoteBytes KP_2  = new NoteBytes(0x5A);
+        public static final NoteBytes KP_3  = new NoteBytes(0x5B);
+        public static final NoteBytes KP_4  = new NoteBytes(0x5C);
+        public static final NoteBytes KP_5  = new NoteBytes(0x5D);
+        public static final NoteBytes KP_6  = new NoteBytes(0x5E);
+        public static final NoteBytes KP_7  = new NoteBytes(0x5F);
+        public static final NoteBytes KP_8  = new NoteBytes(0x60);
+        public static final NoteBytes KP_9  = new NoteBytes(0x61);
+        public static final NoteBytes KP_0  = new NoteBytes(0x62);
+        public static final NoteBytes KP_PERIOD  = new NoteBytes(0x63);
 
         // Extended keys
-        public static final NoteBytesReadOnly NON_US_BACKSLASH  = new NoteBytesReadOnly(0x64);
-        public static final NoteBytesReadOnly APPLICATION  = new NoteBytesReadOnly(0x65);
-        public static final NoteBytesReadOnly POWER  = new NoteBytesReadOnly(0x66);
-        public static final NoteBytesReadOnly KP_EQUALS  = new NoteBytesReadOnly(0x67);
+        public static final NoteBytes NON_US_BACKSLASH  = new NoteBytes(0x64);
+        public static final NoteBytes APPLICATION  = new NoteBytes(0x65);
+        public static final NoteBytes POWER  = new NoteBytes(0x66);
+        public static final NoteBytes KP_EQUALS  = new NoteBytes(0x67);
 
         // F13–F24
-        public static final NoteBytesReadOnly F13  = new NoteBytesReadOnly(0x68);
-        public static final NoteBytesReadOnly F14  = new NoteBytesReadOnly(0x69);
-        public static final NoteBytesReadOnly F15  = new NoteBytesReadOnly(0x6A);
-        public static final NoteBytesReadOnly F16  = new NoteBytesReadOnly(0x6B);
-        public static final NoteBytesReadOnly F17  = new NoteBytesReadOnly(0x6C);
-        public static final NoteBytesReadOnly F18  = new NoteBytesReadOnly(0x6D);
-        public static final NoteBytesReadOnly F19  = new NoteBytesReadOnly(0x6E);
-        public static final NoteBytesReadOnly F20  = new NoteBytesReadOnly(0x6F);
-        public static final NoteBytesReadOnly F21  = new NoteBytesReadOnly(0x70);
-        public static final NoteBytesReadOnly F22  = new NoteBytesReadOnly(0x71);
-        public static final NoteBytesReadOnly F23  = new NoteBytesReadOnly(0x72);
-        public static final NoteBytesReadOnly F24  = new NoteBytesReadOnly(0x73);
+        public static final NoteBytes F13  = new NoteBytes(0x68);
+        public static final NoteBytes F14  = new NoteBytes(0x69);
+        public static final NoteBytes F15  = new NoteBytes(0x6A);
+        public static final NoteBytes F16  = new NoteBytes(0x6B);
+        public static final NoteBytes F17  = new NoteBytes(0x6C);
+        public static final NoteBytes F18  = new NoteBytes(0x6D);
+        public static final NoteBytes F19  = new NoteBytes(0x6E);
+        public static final NoteBytes F20  = new NoteBytes(0x6F);
+        public static final NoteBytes F21  = new NoteBytes(0x70);
+        public static final NoteBytes F22  = new NoteBytes(0x71);
+        public static final NoteBytes F23  = new NoteBytes(0x72);
+        public static final NoteBytes F24  = new NoteBytes(0x73);
 
         // Media keys
-        public static final NoteBytesReadOnly EXECUTE  = new NoteBytesReadOnly(0x74);
-        public static final NoteBytesReadOnly HELP  = new NoteBytesReadOnly(0x75);
-        public static final NoteBytesReadOnly MENU  = new NoteBytesReadOnly(0x76);
-        public static final NoteBytesReadOnly SELECT  = new NoteBytesReadOnly(0x77);
-        public static final NoteBytesReadOnly STOP  = new NoteBytesReadOnly(0x78);
-        public static final NoteBytesReadOnly AGAIN  = new NoteBytesReadOnly(0x79);
-        public static final NoteBytesReadOnly UNDO  = new NoteBytesReadOnly(0x7A);
-        public static final NoteBytesReadOnly CUT  = new NoteBytesReadOnly(0x7B);
-        public static final NoteBytesReadOnly COPY  = new NoteBytesReadOnly(0x7C);
-        public static final NoteBytesReadOnly PASTE  = new NoteBytesReadOnly(0x7D);
-        public static final NoteBytesReadOnly FIND  = new NoteBytesReadOnly(0x7E);
-        public static final NoteBytesReadOnly MUTE  = new NoteBytesReadOnly(0x7F);
-        public static final NoteBytesReadOnly VOLUME_UP  = new NoteBytesReadOnly(0x80);
-        public static final NoteBytesReadOnly VOLUME_DOWN  = new NoteBytesReadOnly(0x81);
+        public static final NoteBytes EXECUTE  = new NoteBytes(0x74);
+        public static final NoteBytes HELP  = new NoteBytes(0x75);
+        public static final NoteBytes MENU  = new NoteBytes(0x76);
+        public static final NoteBytes SELECT  = new NoteBytes(0x77);
+        public static final NoteBytes STOP  = new NoteBytes(0x78);
+        public static final NoteBytes AGAIN  = new NoteBytes(0x79);
+        public static final NoteBytes UNDO  = new NoteBytes(0x7A);
+        public static final NoteBytes CUT  = new NoteBytes(0x7B);
+        public static final NoteBytes COPY  = new NoteBytes(0x7C);
+        public static final NoteBytes PASTE  = new NoteBytes(0x7D);
+        public static final NoteBytes FIND  = new NoteBytes(0x7E);
+        public static final NoteBytes MUTE  = new NoteBytes(0x7F);
+        public static final NoteBytes VOLUME_UP  = new NoteBytes(0x80);
+        public static final NoteBytes VOLUME_DOWN  = new NoteBytes(0x81);
 
         // Modifiers (left/right)
-        public static final NoteBytesReadOnly LEFT_CONTROL   = new NoteBytesReadOnly(0xE0);
-        public static final NoteBytesReadOnly LEFT_SHIFT     = new NoteBytesReadOnly(0xE1);
-        public static final NoteBytesReadOnly LEFT_ALT       = new NoteBytesReadOnly(0xE2);
-        public static final NoteBytesReadOnly LEFT_META      = new NoteBytesReadOnly(0xE3);
-        public static final NoteBytesReadOnly RIGHT_CONTROL  = new NoteBytesReadOnly(0xE4);
-        public static final NoteBytesReadOnly RIGHT_SHIFT    = new NoteBytesReadOnly(0xE5);
-        public static final NoteBytesReadOnly RIGHT_ALT      = new NoteBytesReadOnly(0xE6);
-        public static final NoteBytesReadOnly RIGHT_META     = new NoteBytesReadOnly(0xE7);
+        public static final NoteBytes LEFT_CONTROL   = new NoteBytes(0xE0);
+        public static final NoteBytes LEFT_SHIFT     = new NoteBytes(0xE1);
+        public static final NoteBytes LEFT_ALT       = new NoteBytes(0xE2);
+        public static final NoteBytes LEFT_META      = new NoteBytes(0xE3);
+        public static final NoteBytes RIGHT_CONTROL  = new NoteBytes(0xE4);
+        public static final NoteBytes RIGHT_SHIFT    = new NoteBytes(0xE5);
+        public static final NoteBytes RIGHT_ALT      = new NoteBytes(0xE6);
+        public static final NoteBytes RIGHT_META     = new NoteBytes(0xE7);
     }
 
 } 
