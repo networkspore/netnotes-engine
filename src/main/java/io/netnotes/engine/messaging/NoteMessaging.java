@@ -151,12 +151,14 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly TIMESTAMP     = new NoteBytesReadOnly("time_stamp");
         public static final NoteBytesReadOnly VERSION       = new NoteBytesReadOnly("version");
         public static final NoteBytesReadOnly TITLE         = new NoteBytesReadOnly("title");
-        
+        public static final NoteBytesReadOnly CONTENT       = new NoteBytesReadOnly("content");
+        public static final NoteBytesReadOnly ALLOW_COPY    = new NoteBytesReadOnly("allow_copy");
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");
         public static final NoteBytesReadOnly CMD           = new NoteBytesReadOnly("cmd");
-        
+        public static final NoteBytesReadOnly STRING_LIST   = new NoteBytesReadOnly("string_list");
+
         // Status & Results
         public static final NoteBytesReadOnly INFO          = new NoteBytesReadOnly("info");
         public static final NoteBytesReadOnly STATUS        = new NoteBytesReadOnly("status");
@@ -166,6 +168,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly WARNING       = new NoteBytesReadOnly("warning");
         public static final NoteBytesReadOnly EXCEPTION     = new NoteBytesReadOnly("exception");
         public static final NoteBytesReadOnly AVAILABLE     = new NoteBytesReadOnly("available");
+        public static final NoteBytesReadOnly SELECTED_INDEX = new NoteBytesReadOnly("selected_index");
 
         // Items (Generic resource term)
         public static final NoteBytesReadOnly ITEM          = new NoteBytesReadOnly("item");

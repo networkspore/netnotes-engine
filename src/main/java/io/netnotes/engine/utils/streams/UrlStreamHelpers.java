@@ -10,6 +10,8 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -61,6 +63,15 @@ public class UrlStreamHelpers {
             InputStream inputStream = getHttpUrlConnection(urlString).getInputStream();
         ){
             return StreamUtils.readInputStreamAsBytes(inputStream);
+        }
+    }
+
+    public static void streamUrlToFile(String urlString, Path path) throws IOException, URISyntaxException{
+        try(
+            InputStream inputStream = getHttpUrlConnection(urlString).getInputStream();
+            OutputStream outputStream = Files.newOutputStream(path);
+        ){
+            inputStream.transferTo(outputStream);
         }
     }
     

@@ -212,6 +212,23 @@ public class SettingsData {
         return false;
     }
 
+    public static CompletableFuture<Void> saveBootstrapConfig( NoteBytesMap map){
+        return CompletableFuture.runAsync(()->{
+            try {
+                saveBootstrapConfig( map.getNoteBytesObject());
+            } catch (IOException e) {
+                throw new CompletionException("Failed to save", e);
+            }
+
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+    
+    public static void saveBootstrapConfig( NoteBytesObject nbo) throws IOException{
+        File file = getBootstrapFile();
+
+        FileStreamUtils.writeFileBytes(file, nbo.get());
+    }
+    
 
     public static CompletableFuture<SettingsData> createSettings(NoteBytesEphemeral password){
         NoteBytesEphemeral pass = password.copy();
