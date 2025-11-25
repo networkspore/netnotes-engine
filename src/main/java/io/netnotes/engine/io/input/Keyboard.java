@@ -348,7 +348,7 @@ public final class Keyboard {
   
         }
         
-        public static NoteBytes get(NoteBytes key){
+        public static NoteBytes getCharBytes(NoteBytes key){
             if(CODEPOINT_TO_CHAR == null){
                 buildRegistry();
             }

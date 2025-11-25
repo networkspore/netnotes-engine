@@ -9,16 +9,17 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 public class EphemeralKeyDownEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral keyData;
     private final NoteBytesEphemeral scancodeData;
-    private final int stateFlags;
+    private int stateFlagsCache = -1;
+    private final NoteBytesEphemeral stateFlagsBytes;
     
     public EphemeralKeyDownEvent(ContextPath sourcePath, 
                                  NoteBytesEphemeral keyData,
                                  NoteBytesEphemeral scancodeData,
-                                 int stateFlags) {
+                                 NoteBytesEphemeral stateFlagsBytes) {
         super(sourcePath);
         this.keyData = keyData;
         this.scancodeData = scancodeData;
-        this.stateFlags = stateFlags;
+        this.stateFlagsBytes = stateFlagsBytes;
     }
     
     /**
@@ -35,13 +36,22 @@ public class EphemeralKeyDownEvent extends EphemeralRoutedEvent {
         return scancodeData;
     }
     
-    public int getStateFlags() {
-        return stateFlags;
+    public NoteBytesEphemeral getStateFlagsBytes() {
+        return stateFlagsBytes;
+    }
+
+    public int getStateFlags(){
+        if(stateFlagsCache != -1){
+            return stateFlagsCache;
+        }
+        stateFlagsCache = stateFlagsBytes.getAsInt();
+        return stateFlagsCache;
     }
     
     @Override
     public void close() {
         keyData.close();
         scancodeData.close();
+        stateFlagsBytes.close();
     }
 }

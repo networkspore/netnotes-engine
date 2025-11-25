@@ -5,15 +5,25 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 
 public class EphemeralUnknownEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral[] payload;
-    private final int flags;
-    public EphemeralUnknownEvent(ContextPath sourcePath, int flags, NoteBytesEphemeral[] payload){
+    private final NoteBytesEphemeral stateFlagsBytes;
+    private int stateFlagsCache = -1;
+
+    public EphemeralUnknownEvent(ContextPath sourcePath, NoteBytesEphemeral flags, NoteBytesEphemeral[] payload){
         super(sourcePath);
         this.payload = payload;
-        this.flags = flags;
+        this.stateFlagsBytes = flags;
     }
 
-    public int getFlags(){
-        return flags;
+    public NoteBytesEphemeral getStateFlagsBytes() {
+        return stateFlagsBytes;
+    }
+
+    public int getStateFlags(){
+        if(stateFlagsCache != -1){
+            return stateFlagsCache;
+        }
+        stateFlagsCache = stateFlagsBytes.getAsInt();
+        return stateFlagsCache;
     }
 
     public NoteBytesEphemeral[] getPayload(){
@@ -25,5 +35,6 @@ public class EphemeralUnknownEvent extends EphemeralRoutedEvent {
        for(NoteBytesEphemeral item : payload){
             item.close();
        }
+       stateFlagsBytes.close();
     }
 }

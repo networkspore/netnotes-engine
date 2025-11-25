@@ -11,14 +11,15 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
  */
 public class EphemeralKeyCharModsEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral codepointData;
-    private final int stateFlags;
+    private final NoteBytesEphemeral stateFlagsBytes;
+    private int stateFlagsCache = -1;
     
     public EphemeralKeyCharModsEvent(ContextPath sourcePath,
                                      NoteBytesEphemeral codepointData,
-                                     int stateFlags) {
+                                     NoteBytesEphemeral stateFlags) {
         super(sourcePath);
         this.codepointData = codepointData;
-        this.stateFlags = stateFlags;
+        this.stateFlagsBytes = stateFlags;
     }
     
     /**
@@ -28,19 +29,28 @@ public class EphemeralKeyCharModsEvent extends EphemeralRoutedEvent {
         return codepointData;
     }
 
-    public int getStateFlags() {
-        return stateFlags;
+    public NoteBytesEphemeral getStateFlagsBytes() {
+        return stateFlagsBytes;
+    }
+
+    public int getStateFlags(){
+        if(stateFlagsCache != -1){
+            return stateFlagsCache;
+        }
+        stateFlagsCache = stateFlagsBytes.getAsInt();
+        return stateFlagsCache;
     }
     
     /**
      * secure untraceable UTF8 bytes from registry
      */
     public NoteBytes getUTF8() {
-        return Keyboard.CodePointCharsByteRegistry.get(codepointData);
+        return Keyboard.CodePointCharsByteRegistry.getCharBytes(codepointData);
     }
     
     @Override
     public void close() {
         codepointData.close();
+        stateFlagsBytes.close();
     }
 }

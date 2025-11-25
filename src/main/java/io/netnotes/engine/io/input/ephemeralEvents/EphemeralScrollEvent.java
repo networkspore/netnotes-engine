@@ -11,20 +11,21 @@ public class EphemeralScrollEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral yOffsetData;
     private final NoteBytesEphemeral mouseXData;
     private final NoteBytesEphemeral mouseYData;
-    private final int stateFlags;
-    
+    private final NoteBytesEphemeral stateFlagsBytes;
+    private int stateFlagsCache = -1;
+
     public EphemeralScrollEvent(ContextPath sourcePath,
                                 NoteBytesEphemeral xOffsetData,
                                 NoteBytesEphemeral yOffsetData,
                                 NoteBytesEphemeral mouseXData,
                                 NoteBytesEphemeral mouseYData,
-                                int stateFlags) {
+                                NoteBytesEphemeral stateFlags) {
         super(sourcePath);
         this.xOffsetData = xOffsetData;
         this.yOffsetData = yOffsetData;
         this.mouseXData = mouseXData;
         this.mouseYData = mouseYData;
-        this.stateFlags = stateFlags;
+        this.stateFlagsBytes = stateFlags;
     }
     
     public NoteBytesEphemeral getXOffsetData() {
@@ -43,9 +44,18 @@ public class EphemeralScrollEvent extends EphemeralRoutedEvent {
         return mouseYData;
     }
     
-    public int getStateFlags() {
-        return stateFlags;
+   public NoteBytesEphemeral getStateFlagsBytes() {
+        return stateFlagsBytes;
     }
+
+    public int getStateFlags(){
+        if(stateFlagsCache != -1){
+            return stateFlagsCache;
+        }
+        stateFlagsCache = stateFlagsBytes.getAsInt();
+        return stateFlagsCache;
+    }
+    
     
     @Override
     public void close() {
@@ -53,5 +63,6 @@ public class EphemeralScrollEvent extends EphemeralRoutedEvent {
         yOffsetData.close();
         mouseXData.close();
         mouseYData.close();
+        stateFlagsBytes.close();
     }
 }

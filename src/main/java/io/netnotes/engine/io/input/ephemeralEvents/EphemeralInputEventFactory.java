@@ -33,7 +33,7 @@ public final class EphemeralInputEventFactory {
     @FunctionalInterface
     private interface EphemeralEventDeserializer {
         EphemeralRoutedEvent create(ContextPath sourcePath, 
-                                    int stateFlags, 
+                                    NoteBytesEphemeral stateFlags, 
                                     NoteBytesEphemeral[] payload);
     }
 
@@ -92,7 +92,7 @@ public final class EphemeralInputEventFactory {
          
             
             // Extract state flags (optional)
-            int flags = flagsPair != null ? flags = flagsPair.getValue().getAsInt() : 0;
+            NoteBytesEphemeral flags = flagsPair != null ? flags = flagsPair.getValue() : new NoteBytesEphemeral(0);
             
             // Extract payload array (ephemeral)
             // payloadPair.getValue().get() cleaned up in above try (close warning suppressed)

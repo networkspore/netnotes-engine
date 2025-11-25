@@ -10,18 +10,19 @@ public class EphemeralMouseButtonDownEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral buttonData;
     private final NoteBytesEphemeral xData;
     private final NoteBytesEphemeral yData;
-    private final int stateFlags;
+    private final NoteBytesEphemeral stateFlagsBytes;
+    private int stateFlagsCache = -1;
     
     public EphemeralMouseButtonDownEvent(ContextPath sourcePath,
                                          NoteBytesEphemeral buttonData,
                                          NoteBytesEphemeral xData,
                                          NoteBytesEphemeral yData,
-                                         int stateFlags) {
+                                         NoteBytesEphemeral stateFlags) {
         super(sourcePath);
         this.buttonData = buttonData;
         this.xData = xData;
         this.yData = yData;
-        this.stateFlags = stateFlags;
+        this.stateFlagsBytes = stateFlags;
     }
     
     public NoteBytesEphemeral getButtonData() {
@@ -36,14 +37,24 @@ public class EphemeralMouseButtonDownEvent extends EphemeralRoutedEvent {
         return yData;
     }
     
-    public int getStateFlags() {
-        return stateFlags;
+    public NoteBytesEphemeral getStateFlagsBytes() {
+        return stateFlagsBytes;
     }
+
+    public int getStateFlags(){
+        if(stateFlagsCache != -1){
+            return stateFlagsCache;
+        }
+        stateFlagsCache = stateFlagsBytes.getAsInt();
+        return stateFlagsCache;
+    }
+    
     
     @Override
     public void close() {
         buttonData.close();
         xData.close();
         yData.close();
+        stateFlagsBytes.close();
     }
 }

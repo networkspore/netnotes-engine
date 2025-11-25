@@ -169,7 +169,7 @@ public class PasswordReader {
      * Handle key down events (for special keys) - Regular events
      */
     private void handleKeyDown(KeyDownEvent event) {
-        m_keyCodes.run(event.getKeyCode());
+        m_keyCodes.run(event.getKeyCodeBytes());
     }
     
     /**
