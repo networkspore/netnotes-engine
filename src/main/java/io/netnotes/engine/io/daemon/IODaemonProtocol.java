@@ -177,6 +177,10 @@ public class IODaemonProtocol {
             deviceType = detectDeviceType();
             return deviceType;
         }
+
+        public String get_device_id(){
+            return deviceId;
+        }
        
         /**
          * Set device type explicitly

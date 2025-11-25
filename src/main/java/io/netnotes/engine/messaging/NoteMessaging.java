@@ -169,6 +169,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly EXCEPTION     = new NoteBytesReadOnly("exception");
         public static final NoteBytesReadOnly AVAILABLE     = new NoteBytesReadOnly("available");
         public static final NoteBytesReadOnly SELECTED_INDEX = new NoteBytesReadOnly("selected_index");
+        public static final NoteBytesReadOnly DATA          = new NoteBytesReadOnly("data");
 
         // Items (Generic resource term)
         public static final NoteBytesReadOnly ITEM          = new NoteBytesReadOnly("item");

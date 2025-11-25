@@ -10,7 +10,7 @@ import java.util.concurrent.CompletableFuture;
  * Receives command messages, renders UI, returns user responses
  * 
  * Implementations:
- * - JavaFXRenderer (GUI)
+ * - NanoVG (GUI)
  * - ConsoleRenderer (terminal)
  * - WebRenderer (browser)
  */

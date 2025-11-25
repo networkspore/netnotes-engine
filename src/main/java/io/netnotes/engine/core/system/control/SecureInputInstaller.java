@@ -51,23 +51,73 @@ public class SecureInputInstaller extends FlowProcess {
     private int currentStep = 0;
     private int totalSteps = 14;
     
+    // States
+    public static final long IDLE = 1L << 0;
+    public static final long FETCHING_RELEASES = 1L << 1;
+    public static final long SHOWING_MENU = 1L << 2;
+    public static final long CONFIRMING = 1L << 3;
+    public static final long INSTALLING = 1L << 4;
+    public static final long VERIFYING = 1L << 5;
+    public static final long COMPLETE = 1L << 6;
+    public static final long FAILED = 1L << 7;
+    
     public SecureInputInstaller(String os, UIRenderer uiRenderer) {
         super(ProcessType.SINK);
         this.os = os;
         this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("installer");
+        
+        setupStateTransitions();
+    }
+    
+    private void setupStateTransitions() {
+        state.onStateAdded(FETCHING_RELEASES, (old, now, bit) -> {
+            System.out.println("[Installer] Fetching releases from GitHub...");
+        });
+        
+        state.onStateAdded(SHOWING_MENU, (old, now, bit) -> {
+            System.out.println("[Installer] Displaying release selection menu");
+        });
+        
+        state.onStateAdded(CONFIRMING, (old, now, bit) -> {
+            System.out.println("[Installer] Awaiting installation confirmation");
+        });
+        
+        state.onStateAdded(INSTALLING, (old, now, bit) -> {
+            System.out.println("[Installer] Installation in progress...");
+        });
+        
+        state.onStateAdded(VERIFYING, (old, now, bit) -> {
+            System.out.println("[Installer] Verifying installation...");
+        });
+        
+        state.onStateAdded(COMPLETE, (old, now, bit) -> {
+            System.out.println("[Installer] Installation complete!");
+        });
+        
+        state.onStateAdded(FAILED, (old, now, bit) -> {
+            System.out.println("[Installer] Installation failed");
+        });
     }
     
     @Override
     public CompletableFuture<Void> run() {
+        state.addState(IDLE);
+        
         // Create menu navigator
         menuNavigator = new MenuNavigatorProcess(uiRenderer);
         
         return spawnChild(menuNavigator, "installer-menu")
             .thenCompose(path -> registry.startProcess(path))
-            .thenCompose(v -> fetchReleases())
+            .thenCompose(v -> {
+                state.removeState(IDLE);
+                state.addState(FETCHING_RELEASES);
+                return fetchReleases();
+            })
             .thenCompose(assets -> {
                 this.availableReleases = assets;
+                state.removeState(FETCHING_RELEASES);
+                state.addState(SHOWING_MENU);
                 return showReleaseSelectionMenu();
             })
             .thenCompose(v -> getCompletionFuture());
@@ -136,6 +186,9 @@ public class SecureInputInstaller extends FlowProcess {
         this.selectedAsset = asset;
         this.selectedVersion = extractVersionFromAsset(asset);
         
+        state.removeState(SHOWING_MENU);
+        state.addState(CONFIRMING);
+        
         // Show confirmation menu
         showConfirmationMenu();
     }
@@ -176,13 +229,37 @@ public class SecureInputInstaller extends FlowProcess {
     }
     
     private void startInstallation() {
+        state.removeState(CONFIRMING);
+        state.addState(INSTALLING);
+        
+        // Reset progress
+        currentStep = 0;
+        
         uiRenderer.render(UIProtocol.showMessage("Starting installation..."));
         
         performInstallation()
             .thenRun(() -> {
+                state.removeState(INSTALLING);
+                state.addState(VERIFYING);
+                
+                updateProgress("Verifying installation...", totalSteps - 1);
+                
+                // Brief verification
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                
+                state.removeState(VERIFYING);
+                state.addState(COMPLETE);
+                
                 showCompletionMenu(true, null);
             })
             .exceptionally(ex -> {
+                state.removeState(INSTALLING);
+                state.addState(FAILED);
+                
                 showCompletionMenu(false, ex.getMessage());
                 return null;
             });
@@ -197,9 +274,11 @@ public class SecureInputInstaller extends FlowProcess {
                 "NoteDaemon %s installed successfully!\n\n" +
                 "Service Status: Active\n" +
                 "Socket: /var/run/io-daemon.sock\n\n" +
+                "Installation completed in %d steps.\n\n" +
                 "You may need to log out and back in for group membership to take effect.\n" +
                 "Or run: newgrp netnotes",
-                selectedVersion
+                selectedVersion,
+                currentStep
             );
             
             uiRenderer.render(UIProtocol.showMessage(message));
@@ -210,15 +289,19 @@ public class SecureInputInstaller extends FlowProcess {
             
         } else {
             String message = String.format(
-                "Installation failed!\n\n" +
+                "Installation failed at step %d of %d!\n\n" +
                 "Error: %s\n\n" +
                 "Please check the logs for details.",
+                currentStep,
+                totalSteps,
                 errorMessage != null ? errorMessage : "Unknown error"
             );
             
             uiRenderer.render(UIProtocol.showError(message));
             
-            menu.addItem("retry", "Retry", () -> {
+            menu.addItem("retry", "Retry Installation", () -> {
+                state.removeState(FAILED);
+                state.addState(SHOWING_MENU);
                 showReleaseSelectionMenu();
             });
             
@@ -251,49 +334,63 @@ public class SecureInputInstaller extends FlowProcess {
     // ===== LINUX INSTALLATION =====
     
     private void installLinux() throws Exception {
-        updateProgress("Checking prerequisites...", 1);
+        currentStep = 1;
+        updateProgress("Checking prerequisites...", currentStep);
         checkRootAccess();
         
-        updateProgress("Installing dependencies...", 2);
+        currentStep = 2;
+        updateProgress("Installing dependencies...", currentStep);
         installLinuxDependencies();
         
-        updateProgress("Setting up work directory...", 3);
+        currentStep = 3;
+        updateProgress("Setting up work directory...", currentStep);
         setupWorkDirectory();
         
-        updateProgress("Downloading NoteDaemon " + selectedVersion + "...", 4);
+        currentStep = 4;
+        updateProgress("Downloading NoteDaemon " + selectedVersion + "...", currentStep);
         downloadSelectedRelease();
         
-        updateProgress("Extracting archive...", 5);
+        currentStep = 5;
+        updateProgress("Extracting archive...", currentStep);
         extractArchive();
         
-        updateProgress("Creating system user and group...", 6);
+        currentStep = 6;
+        updateProgress("Creating system user and group...", currentStep);
         createSystemUser();
         
-        updateProgress("Creating runtime directories...", 7);
+        currentStep = 7;
+        updateProgress("Creating runtime directories...", currentStep);
         createRuntimeDirectories();
         
-        updateProgress("Building NoteDaemon...", 8);
+        currentStep = 8;
+        updateProgress("Building NoteDaemon...", currentStep);
         buildProject();
         
-        updateProgress("Installing binary...", 9);
+        currentStep = 9;
+        updateProgress("Installing binary...", currentStep);
         installBinary();
         
-        updateProgress("Installing udev rules...", 10);
+        currentStep = 10;
+        updateProgress("Installing udev rules...", currentStep);
         installUdevRules();
         
-        updateProgress("Installing systemd service...", 11);
+        currentStep = 11;
+        updateProgress("Installing systemd service...", currentStep);
         installSystemdService();
         
-        updateProgress("Starting service...", 12);
+        currentStep = 12;
+        updateProgress("Starting service...", currentStep);
         startService();
         
-        updateProgress("Configuring user permissions...", 13);
+        currentStep = 13;
+        updateProgress("Configuring user permissions...", currentStep);
         configureUserPermissions();
         
-        updateProgress("Cleaning up...", 14);
+        currentStep = 14;
+        updateProgress("Cleaning up...", currentStep);
         cleanup();
         
-        updateProgress("Installation complete!", 14);
+        updateProgress("Installation complete!", currentStep);
     }
     
     private void checkRootAccess() throws Exception {
@@ -517,7 +614,11 @@ public class SecureInputInstaller extends FlowProcess {
     }
     
     private void updateProgress(String message, int step) {
-        currentStep = step;
+        // Ensure we're in INSTALLING state
+        if (!state.hasState(INSTALLING)) {
+            return;
+        }
+        
         int percent = totalSteps > 0 ? (step * 100) / totalSteps : 0;
         
         System.out.println("[" + step + "/" + totalSteps + "] " + message);
@@ -612,5 +713,31 @@ public class SecureInputInstaller extends FlowProcess {
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         throw new UnsupportedOperationException();
+    }
+    
+    // ===== GETTERS =====
+    
+    public BitFlagStateMachine getState() {
+        return state;
+    }
+    
+    public int getCurrentStep() {
+        return currentStep;
+    }
+    
+    public int getTotalSteps() {
+        return totalSteps;
+    }
+    
+    public boolean isInstalling() {
+        return state.hasState(INSTALLING);
+    }
+    
+    public boolean isComplete() {
+        return state.hasState(COMPLETE);
+    }
+    
+    public boolean hasFailed() {
+        return state.hasState(FAILED);
     }
 }
