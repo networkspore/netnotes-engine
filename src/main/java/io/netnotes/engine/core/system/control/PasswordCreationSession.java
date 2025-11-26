@@ -4,7 +4,7 @@ import io.netnotes.engine.core.system.control.ui.UIProtocol;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.ClaimedDevice;
+import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -32,7 +32,7 @@ import java.util.function.Function;
  */
 public class PasswordCreationSession extends FlowProcess {
     
-    private final ClaimedDevice inputDevice;
+    private final InputDevice inputDevice;
     private final UIRenderer uiRenderer;
     private final String prompt1;
     private final String prompt2;
@@ -50,7 +50,7 @@ public class PasswordCreationSession extends FlowProcess {
     private NoteBytesEphemeral temporaryFirstPassword = null;
     
     public PasswordCreationSession(
-            ClaimedDevice inputDevice,
+            InputDevice inputDevice,
             UIRenderer uiRenderer,
             String prompt1,
             String prompt2) {

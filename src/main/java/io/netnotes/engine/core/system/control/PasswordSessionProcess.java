@@ -112,7 +112,7 @@ public class PasswordSessionProcess extends FlowProcess {
                         // Failed attempt
                         attemptCount++;
                         
-                        if (attemptCount >= maxAttempts) {
+                        if (maxAttempts > 0 && attemptCount >= maxAttempts) {
                             // Max attempts reached
                             active = false;
                             result.complete(false);
@@ -121,14 +121,15 @@ public class PasswordSessionProcess extends FlowProcess {
                                 onMaxAttemptsHandler.run();
                             }
                             
-                            uiRenderer.render(UIProtocol.showError(
-                                "Maximum attempts exceeded"));
+                            uiRenderer.render(UIProtocol.showError("Maximum attempts exceeded"));
                             complete();
                         } else {
                             // Retry
-                            uiRenderer.render(UIProtocol.showError(
-                                String.format("Invalid password (%d/%d attempts)", 
-                                    attemptCount, maxAttempts)));
+                            String msg = maxAttempts > 0 
+                                ? String.format("Invalid password (%d/%d attempts)", attemptCount, maxAttempts) 
+                                : "Invalid password";
+
+                            uiRenderer.render(UIProtocol.showError(msg));
                             uiRenderer.render(UIProtocol.showPasswordPrompt(prompt));
                             
                             // Start another reader

@@ -288,31 +288,35 @@ public class NotePath{
         }));
     }
 
-    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long total, long completed, String message){
-        return progressMsg(scope, new NoteBytesReadOnly(total), new NoteBytesReadOnly(completed), 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long completed, long total, String message){
+        return progressMsg(scope, 
+            new NoteBytesReadOnly(completed), 
+            new NoteBytesReadOnly(total), 
             new NoteBytesReadOnly(message));
     }
 
-    public CompletableFuture<Integer> progressMsg(String scope, long total, long completed, String message){
-        return progressMsg(new NoteBytesReadOnly(scope), new NoteBytesReadOnly(total), new NoteBytesReadOnly(completed), new NoteBytesReadOnly(message));
+    public CompletableFuture<Integer> progressMsg(String scope, long completed, long total, String message){
+        return progressMsg(new NoteBytesReadOnly(scope), new NoteBytesReadOnly(completed), new NoteBytesReadOnly(total), new NoteBytesReadOnly(message));
     }
 
 
-    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, NoteBytesReadOnly total, NoteBytesReadOnly completed, NoteBytesReadOnly message){
-        return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, progressWriter) : 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope,NoteBytesReadOnly completed,  NoteBytesReadOnly total, NoteBytesReadOnly message){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope,completed, total,  message, progressWriter) : 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }
 
-    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long total, long completed, String message, 
-        NoteBytesPair[] pairs){
-        return progressWriter != null ? ProgressMessage.writeAsync(scope, new NoteBytesReadOnly( total), 
-            new NoteBytesReadOnly(completed), new NoteBytesReadOnly(message), pairs, progressWriter) : 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, long completed, long total, String message, 
+        NoteBytesPair... pairs){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope, 
+            new NoteBytesReadOnly(completed), 
+            new NoteBytesReadOnly(total),
+            new NoteBytesReadOnly(message), progressWriter, pairs) : 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }
 
-    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope, NoteBytesReadOnly total, NoteBytesReadOnly completed, NoteBytesReadOnly message, 
-        NoteBytesPair[] pairs){
-        return progressWriter != null ? ProgressMessage.writeAsync(scope, total, completed, message, pairs, progressWriter) : 
+    public CompletableFuture<Integer> progressMsg(NoteBytesReadOnly scope,  NoteBytesReadOnly completed, NoteBytesReadOnly total, NoteBytesReadOnly message, 
+        NoteBytesPair... pairs){
+        return progressWriter != null ? ProgressMessage.writeAsync(scope,completed, total, message, progressWriter, pairs) : 
             CompletableFuture.failedFuture(new NullPointerException("progress writer is null"));
     }
 

@@ -135,6 +135,8 @@ public class UIProtocol {
         cmd.put(Keys.PROGRESS_PERCENT, new NoteBytes(percent));
         return cmd;
     }
+
+
     
     // ===== HELPER RECORD =====
     public record MenuItem(

@@ -5,8 +5,12 @@ import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.*;
 import io.netnotes.engine.core.system.control.ui.*;
 
-
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -14,21 +18,24 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.ClaimedDevice;
+import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteFiles.DiskSpaceValidation;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
  * SystemSessionProcess - Manages user session lifecycle
  * 
- * Initialization Flow:
+ * Refined Initialization Flow:
  * 
  * 1. INITIALIZING
  *    Load bootstrap config
@@ -39,26 +46,35 @@ import io.netnotes.engine.utils.VirtualExecutors;
  * 3a. FIRST_RUN (no settings file)
  *     - Start password creation session
  *     - User enters password twice (matching)
- *     - SettingsData.createSettings(password)
- *     -> READY
+ *     - SettingsData.createSettings(password) → settingsData
+ *     - new AppData(settingsData) → appData
+ *     → READY
  * 
  * 3b. SETTINGS_EXIST (settings file found)
- *     - SettingsData.loadSettingsMap()
+ *     - Load settingsMap (ephemeral, function-scoped)
  *     - Start password verification session
  *     - User enters password
  *     - SettingsData.verifyPassword(password, map)
- *     - If valid: SettingsData.loadSettingsData(password, map)
- *     READY
+ *     - If valid: SettingsData.loadSettingsData(password, map) → settingsData
+ *     - new AppData(settingsData) → appData
+ *     - Discard settingsMap
+ *     → READY
  * 
- * 4. READY (SettingsData created)
+ * 4. READY (AppData created)
  *    - Check if secure input is required
  *    - If yes: LOCKED
  *    - If no: UNLOCKED
  * 
- * 5. LOCKED -> UNLOCKED
+ * 5. LOCKED → UNLOCKED
  *    - Start password verification
- *    - settingsData.verifyPassword(password)
+ *    - appData.getSettingsData().verifyPassword(password)
  *    - If valid: UNLOCKED
+ * 
+ * Key Changes:
+ * - settingsMap is ephemeral (function-scoped only)
+ * - settingsData is not cached (used only to create AppData)
+ * - appData is the primary interface (cached)
+ * - All operations go through appData
  */
 public class SystemSessionProcess extends FlowProcess {
     
@@ -67,11 +83,9 @@ public class SystemSessionProcess extends FlowProcess {
     
     // Configuration
     private NoteBytesMap bootstrapConfig;
-    private NoteBytesMap settingsMap; // Loaded settings (contains BCrypt hash)
     
     // System data (created after password verification)
-    private SettingsData settingsData;
-    private AppData appData;
+    private AppData appData; // PRIMARY INTERFACE - cached
     
     // Session info
     private final String sessionId;
@@ -108,14 +122,15 @@ public class SystemSessionProcess extends FlowProcess {
         m_routedMsgMap.put(UICommands.UI_CANCELLED, this::handleCancelled);
         
         // System commands
-        m_routedMsgMap.put(new NoteBytesReadOnly("lock_system"), this::handleLockSystem);
-        m_routedMsgMap.put(new NoteBytesReadOnly("unlock_system"), this::handleUnlockSystem);
+        m_routedMsgMap.put(UICommands.LOCK_SYSTEM, this::handleLockSystem);
+        m_routedMsgMap.put(UICommands.UNLOCK_SYSTEM, this::handleUnlockSystem);
+        m_routedMsgMap.put(UICommands.CHANGE_PASSWORD, this::handleChangePassword);
     }
     
     private void setupStateTransitions() {
-        // INITIALIZING -> BOOTSTRAP_LOADED
+        // INITIALIZING → BOOTSTRAP_LOADED
         state.onStateAdded(SystemSessionStates.BOOTSTRAP_LOADED, (old, now, bit) -> {
-            System.out.println("Bootstrap config loaded");
+            System.out.println("[SystemSession] Bootstrap config loaded");
             
             // Check if settings exist
             checkSettingsExist()
@@ -130,7 +145,7 @@ public class SystemSessionProcess extends FlowProcess {
         
         // FIRST_RUN_SETUP (no settings file)
         state.onStateAdded(SystemSessionStates.FIRST_RUN_SETUP, (old, now, bit) -> {
-            System.out.println("First run - creating new settings");
+            System.out.println("[SystemSession] First run - creating new settings");
             uiRenderer.render(UIProtocol.showMessage("Welcome! Please create a master password."));
             
             // Start password creation session
@@ -139,56 +154,49 @@ public class SystemSessionProcess extends FlowProcess {
         
         // SETTINGS_EXIST (settings file found)
         state.onStateAdded(SystemSessionStates.SETTINGS_EXIST, (old, now, bit) -> {
-            System.out.println("Settings found - loading");
+            System.out.println("[SystemSession] Settings found - requesting password");
             
-            // Load settings map
-            SettingsData.loadSettingsMap()
-                .thenAccept(map -> {
-                    this.settingsMap = map;
-                    state.addState(SystemSessionStates.SETTINGS_LOADED);
-                })
-                .exceptionally(ex -> {
-                    System.err.println("Failed to load settings: " + ex.getMessage());
-                    uiRenderer.render(UIProtocol.showError("Failed to load settings: " + ex.getMessage()));
-                    return null;
-                });
-        });
-        
-        // SETTINGS_LOADED -> verify password
-        state.onStateAdded(SystemSessionStates.SETTINGS_LOADED, (old, now, bit) -> {
-            System.out.println("Settings loaded - requesting password");
-            
-            // Start password verification session
+            // Start password verification session directly
+            // (we'll load the map in the verification handler)
             startPasswordVerificationSession();
         });
         
-        // READY (SettingsData created)
+        // READY (AppData created)
         state.onStateAdded(SystemSessionStates.READY, (old, now, bit) -> {
-            System.out.println("System ready - SettingsData initialized");
+            System.out.println("[SystemSession] System ready - AppData initialized");
             
-            // Check if we should start locked
-            if (BootstrapConfig.isSecureInputInstalled(bootstrapConfig)) {
-                state.addState(SystemSessionStates.LOCKED);
-            } else {
-                state.addState(SystemSessionStates.UNLOCKED);
-            }
+            // Check for incomplete password change
+            checkForIncompletePasswordChange()
+                .whenComplete((v, ex) -> {
+                    if (ex != null) {
+                        System.err.println("[SystemSession] Error checking recovery: " + 
+                            ex.getMessage());
+                    }
+                    
+                    /* Check if we should start locked
+                    if (BootstrapConfig.isSecureInputInstalled(bootstrapConfig)) {
+                        state.addState(SystemSessionStates.LOCKED);
+                    } else {
+                        state.addState(SystemSessionStates.UNLOCKED);
+                    }*/
+                });
         });
         
         // LOCKED
         state.onStateAdded(SystemSessionStates.LOCKED, (old, now, bit) -> {
-            System.out.println("System locked");
+            System.out.println("[SystemSession] System locked");
             showLockedMenu();
         });
         
         // UNLOCKING
         state.onStateAdded(SystemSessionStates.UNLOCKING, (old, now, bit) -> {
-            System.out.println("Unlocking system...");
+            System.out.println("[SystemSession] Unlocking system...");
             startUnlockPasswordSession();
         });
         
         // UNLOCKED
         state.onStateAdded(SystemSessionStates.UNLOCKED, (old, now, bit) -> {
-            System.out.println("System unlocked");
+            System.out.println("[SystemSession] System unlocked");
             showMainMenu();
         });
     }
@@ -225,7 +233,7 @@ public class SystemSessionProcess extends FlowProcess {
             if (executor != null) {
                 return executor.execute(msg, packet);
             } else {
-                System.err.println("Unknown command: " + cmd);
+                System.err.println("[SystemSession] Unknown command: " + cmd);
                 return CompletableFuture.failedFuture(
                     new IllegalArgumentException("Unknown command: " + cmd));
             }
@@ -245,7 +253,7 @@ public class SystemSessionProcess extends FlowProcess {
     private CompletableFuture<NoteBytesMap> loadBootstrapConfig() {
         return SettingsData.loadBootStrapConfig()
             .exceptionally(ex -> {
-                System.err.println("Failed to load bootstrap config: " + ex.getMessage());
+                System.err.println("[SystemSession] Failed to load bootstrap config: " + ex.getMessage());
                 // Create default if missing
                 return BootstrapConfig.createDefault();
             });
@@ -265,13 +273,11 @@ public class SystemSessionProcess extends FlowProcess {
     
     /**
      * First run: Create new password
-     * User must enter password twice (matching)
+     * Creates SettingsData → AppData in one flow
      */
     private void startPasswordCreationSession() {
-        // Get secure input device
         getSecureInputDevice()
             .thenAccept(device -> {
-                // Create password creation session
                 PasswordCreationSession session = new PasswordCreationSession(
                     device,
                     uiRenderer,
@@ -281,9 +287,9 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 // Handle successful password creation
                 session.onPasswordCreated(password -> {
-                    return SettingsData.createSettings(password)
-                        .thenAccept(settings -> {
-                            this.settingsData = settings;
+                    return createNewSystem(password)
+                        .thenAccept(appDataResult -> {
+                            this.appData = appDataResult;
                             
                             state.removeState(SystemSessionStates.FIRST_RUN_SETUP);
                             state.addState(SystemSessionStates.READY);
@@ -306,8 +312,26 @@ public class SystemSessionProcess extends FlowProcess {
     }
     
     /**
+     * Create new system: SettingsData → AppData
+     */
+    private CompletableFuture<AppData> createNewSystem(NoteBytesEphemeral password) {
+        System.out.println("[SystemSession] Creating new system with password");
+        
+        return SettingsData.createSettings(password)
+            .thenApply(settingsData -> {
+                System.out.println("[SystemSession] SettingsData created, initializing AppData");
+                
+                // Create AppData from SettingsData
+                AppData newAppData = new AppData(settingsData);
+                
+                System.out.println("[SystemSession] AppData initialized successfully");
+                return newAppData;
+            });
+    }
+    
+    /**
      * Existing settings: Verify password
-     * Load SettingsData if password is correct
+     * Loads ephemeral map → verifies → creates SettingsData → AppData
      */
     private void startPasswordVerificationSession() {
         getSecureInputDevice()
@@ -316,37 +340,26 @@ public class SystemSessionProcess extends FlowProcess {
                     device,
                     uiRenderer,
                     "Enter master password",
-                    3 // max attempts
+                    0
                 );
                 
                 // Set password verification handler
                 session.onPasswordEntered(password -> {
-                    // First verify using the map
-                    return SettingsData.verifyPassword(password, settingsMap)
-                        .thenCompose(valid -> {
-                            if (valid) {
-                                // Load full SettingsData
-                                return SettingsData.loadSettingsData(password, settingsMap)
-                                    .thenApply(settings -> {
-                                        this.settingsData = settings;
-                                        
-                                        state.removeState(SystemSessionStates.SETTINGS_LOADED);
-                                        state.addState(SystemSessionStates.READY);
-                                        
-                                        return true;
-                                    });
+                    return verifyAndLoadSystem(password)
+                        .thenApply(appDataResult -> {
+                            if (appDataResult != null) {
+                                this.appData = appDataResult;
+                                
+                                state.removeState(SystemSessionStates.SETTINGS_EXIST);
+                                state.addState(SystemSessionStates.READY);
+                                
+                                return true;
                             } else {
                                 uiRenderer.render(UIProtocol.showError("Invalid password"));
-                                return CompletableFuture.completedFuture(false);
+                                return false;
                             }
                         });
                 });
-                /*
-                // Handle too many failures
-                session.onMaxAttemptsReached(() -> {
-                    uiRenderer.render(UIProtocol.showError(
-                        "Too many failed attempts - system locked"));
-                });*/
                 
                 this.passwordSession = session;
                 
@@ -357,8 +370,47 @@ public class SystemSessionProcess extends FlowProcess {
     }
     
     /**
+     * Verify password and load system (ephemeral settingsMap)
+     * settingsMap is function-scoped only, discarded after use
+     */
+    private CompletableFuture<AppData> verifyAndLoadSystem(NoteBytesEphemeral password) {
+        System.out.println("[SystemSession] Verifying password and loading system");
+        
+        // Load settingsMap (ephemeral - only exists in this scope)
+        return SettingsData.loadSettingsMap()
+            .thenCompose(settingsMap -> {
+                System.out.println("[SystemSession] Settings map loaded, verifying password");
+                
+                // Verify password using the map
+                return SettingsData.verifyPassword(password, settingsMap)
+                    .thenCompose(valid -> {
+                        if (valid) {
+                            System.out.println("[SystemSession] Password valid, loading SettingsData");
+                            
+                            // Load SettingsData
+                            return SettingsData.loadSettingsData(password, settingsMap)
+                                .thenApply(settingsData -> {
+                                    System.out.println("[SystemSession] SettingsData loaded, creating AppData");
+                                    
+                                    // Create AppData
+                                    AppData newAppData = new AppData(settingsData);
+                                    
+                                    // settingsMap goes out of scope here (garbage collected)
+                                    System.out.println("[SystemSession] AppData created, settingsMap discarded");
+                                    
+                                    return newAppData;
+                                });
+                        } else {
+                            System.out.println("[SystemSession] Password invalid");
+                            return CompletableFuture.completedFuture(null);
+                        }
+                    });
+            });
+    }
+    
+    /**
      * Unlock from LOCKED state
-     * SettingsData already exists, just verify password
+     * AppData already exists, just verify password
      */
     private void startUnlockPasswordSession() {
         getSecureInputDevice()
@@ -372,8 +424,8 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 // Set password verification handler
                 session.onPasswordEntered(password -> {
-                    // Verify using existing settingsData
-                    return settingsData.verifyPassword(password)
+                    // Verify using AppData's SettingsData
+                    return appData.getSettingsData().verifyPassword(password)
                         .thenApply(valid -> {
                             if (valid) {
                                 state.removeState(SystemSessionStates.UNLOCKING);
@@ -400,7 +452,7 @@ public class SystemSessionProcess extends FlowProcess {
     /**
      * Get secure input device from parent (BaseSystemProcess)
      */
-    private CompletableFuture<ClaimedDevice> getSecureInputDevice() {
+    private CompletableFuture<InputDevice> getSecureInputDevice() {
         if (parentPath == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("No parent process"));
@@ -408,7 +460,7 @@ public class SystemSessionProcess extends FlowProcess {
         
         // Request device from BaseSystemProcess
         return request(parentPath, Duration.ofSeconds(5),
-            new NoteBytesPair("cmd", "get_secure_input_device")
+            new NoteBytesPair(Keys.CMD, "get_secure_input_device")
         ).thenApply(response -> {
             NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
             String devicePath = resp.get("device_path").getAsString();
@@ -417,7 +469,7 @@ public class SystemSessionProcess extends FlowProcess {
                 throw new IllegalStateException("No secure input device available");
             }
             
-            ClaimedDevice device = (ClaimedDevice) 
+            InputDevice device = (InputDevice) 
                 registry.getProcess(ContextPath.parse(devicePath));
             
             if (device == null) {
@@ -479,8 +531,18 @@ public class SystemSessionProcess extends FlowProcess {
         ContextPath menuPath = contextPath.append("menu", "main");
         MenuContext menu = new MenuContext(menuPath, "Main Menu", uiRenderer);
         
-        menu.addItem("about", "About System", () -> {
-            uiRenderer.render(UIProtocol.showMessage("Netnotes v1.0"));
+        menu.addItem("nodes", "Node Manager", () -> {
+            // TODO: Launch node manager process
+            uiRenderer.render(UIProtocol.showMessage("Node Manager coming soon"));
+        });
+        
+        menu.addItem("files", "File Browser", () -> {
+            // TODO: Launch file browser process
+            uiRenderer.render(UIProtocol.showMessage("File Browser coming soon"));
+        });
+        
+        menu.addItem("settings", "Settings", () -> {
+            showSettingsMenu();
         });
         
         menu.addItem("lock", "Lock System", () -> {
@@ -488,11 +550,403 @@ public class SystemSessionProcess extends FlowProcess {
             state.addState(SystemSessionStates.LOCKED);
         });
         
-        // TODO: Add more menu items (settings, plugins, etc.)
+        menu.addItem("about", "About System", () -> {
+            uiRenderer.render(UIProtocol.showMessage("Netnotes v1.0"));
+        });
         
         return menu;
     }
     
+    private void showSettingsMenu() {
+        ContextPath menuPath = contextPath.append("menu", "settings");
+        MenuContext menu = new MenuContext(menuPath, "Settings", uiRenderer, 
+            menuNavigator.getCurrentMenu());
+        
+        menu.addItem("change_password", "Change Master Password", 
+            "⚠️  Re-encrypts all files", () -> {
+            startChangePasswordSession();
+        });
+        
+        menu.addItem("bootstrap", "Bootstrap Configuration", () -> {
+            uiRenderer.render(UIProtocol.showMessage("Bootstrap config coming soon"));
+        });
+        
+        menu.addItem("back", "Back to Main Menu", () -> {
+            showMainMenu();
+        });
+        
+        menuNavigator.showMenu(menu);
+    }
+    
+    // ===== PASSWORD CHANGE =====
+    /**
+     * Change master password
+     * Goes through AppData to update all encrypted files
+     */
+    private void startChangePasswordSession() {
+        getSecureInputDevice()
+            .thenAccept(device -> {
+                // First verify current password
+                PasswordSessionProcess verifySession = new PasswordSessionProcess(
+                    device,
+                    uiRenderer,
+                    "Enter current password",
+                    3
+                );
+                
+                verifySession.onPasswordEntered(currentPassword -> {
+                    return appData.getSettingsData().verifyPassword(currentPassword)
+                        .thenCompose(valid -> {
+                            if (valid) {
+                                // Password valid, validate disk space before proceeding
+                                return validateAndRequestNewPassword(device, currentPassword);
+                            } else {
+                                uiRenderer.render(UIProtocol.showError("Invalid password"));
+                                return CompletableFuture.completedFuture(false);
+                            }
+                        });
+                });
+                
+                spawnChild(verifySession, "verify-current-password")
+                    .thenCompose(path -> registry.startProcess(path));
+            });
+    }
+
+        
+    /**
+     * Validate disk space and request new password
+     */
+    private CompletableFuture<Boolean> validateAndRequestNewPassword(
+            InputDevice device,
+            NoteBytesEphemeral currentPassword) {
+        
+        // Show validating message
+        uiRenderer.render(UIProtocol.showMessage("Validating disk space..."));
+        
+        // Pre-validate disk space (async)
+        return appData.getNoteFileService().validateDiskSpaceForReEncryption()
+            .thenCompose(validation -> {
+                
+                if (!validation.isValid()) {
+                    String error = String.format(
+                        "Insufficient disk space for password change.\n\n" +
+                        "Files to re-encrypt: %d\n" +
+                        "Total size: %.2f MB\n" +
+                        "Space required: %.2f MB\n" +
+                        "Space available: %.2f MB\n" +
+                        "Additional space needed: %.2f MB\n\n" +
+                        "Please free up disk space and try again.",
+                        validation.getNumberOfFiles(),
+                        validation.getTotalFileSizes() / (1024.0 * 1024.0),
+                        (validation.getRequiredSpace() + validation.getBufferSpace()) / (1024.0 * 1024.0),
+                        validation.getAvailableSpace() / (1024.0 * 1024.0),
+                        ((validation.getRequiredSpace() + validation.getBufferSpace()) - 
+                            validation.getAvailableSpace()) / (1024.0 * 1024.0)
+                    );
+                    
+                    uiRenderer.render(UIProtocol.showError(error));
+                    showMainMenu();
+                    return CompletableFuture.completedFuture(false);
+                }
+                
+                // Space validated, show summary and proceed
+                String summary = String.format(
+                    "Disk space validation passed.\n\n" +
+                    "Files to re-encrypt: %d\n" +
+                    "Total size: %.2f MB\n" +
+                    "Available space: %.2f MB\n\n" +
+                    "Ready to change password.",
+                    validation.getNumberOfFiles(),
+                    validation.getTotalFileSizes() / (1024.0 * 1024.0),
+                    validation.getAvailableSpace() / (1024.0 * 1024.0)
+                );
+                
+                uiRenderer.render(UIProtocol.showMessage(summary));
+                
+                // Proceed with password creation
+                return startPasswordCreationForChange(device, currentPassword, validation);
+            })
+            .exceptionally(ex -> {
+                System.err.println("[SystemSession] Disk space validation failed: " + 
+                    ex.getMessage());
+                
+                uiRenderer.render(UIProtocol.showError(
+                    "Failed to validate disk space: " + ex.getMessage()));
+                
+                showMainMenu();
+                return false;
+            });
+    }
+            
+        
+    /**
+     * Start password creation session after validation passes
+     */
+    private CompletableFuture<Boolean> startPasswordCreationForChange(
+            InputDevice device,
+            NoteBytesEphemeral currentPassword,
+            DiskSpaceValidation validation) {
+        
+        PasswordCreationSession newPasswordSession = new PasswordCreationSession(
+            device,
+            uiRenderer,
+            "Enter new password",
+            "Confirm new password"
+        );
+        
+        newPasswordSession.onPasswordCreated(newPassword -> {
+            // Calculate optimal batch size from validation
+            int batchSize = calculateOptimalBatchSize(validation);
+            
+            System.out.println("[SystemSession] Starting password change with batch size: " + 
+                batchSize);
+            
+            // Show starting message
+            uiRenderer.render(UIProtocol.showMessage(
+                "Starting password change. This may take a while..."));
+            
+            // Create progress tracking process
+            File dataDir = SettingsData.getDataDir();
+            File recoveryLog = new File(dataDir, "password_change_recovery.log");
+            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
+                uiRenderer, 
+                recoveryLog
+            );
+            
+            // Spawn and start progress tracker
+            return spawnChild(progressTracker, "progress-tracker")
+                .thenCompose(trackerPath -> {
+                    // Start the tracker process
+                    return registry.startProcess(trackerPath)
+                        .thenApply(v -> trackerPath);
+                })
+                .thenCompose(trackerPath -> {
+                    // Request stream channel to progress tracker
+                    return registry.requestStreamChannel(contextPath, trackerPath)
+                        .thenCompose(progressChannel -> {
+                            
+                            // Create AsyncNoteBytesWriter with the stream channel
+                            AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
+                                progressChannel.getStream()
+                            );
+                            
+                            // Start password change
+                            return appData.changePassword(
+                                currentPassword, 
+                                newPassword, 
+                                batchSize, 
+                                progressWriter
+                            )
+                            .thenApply(result -> {
+                                System.out.println("[SystemSession] Password change operation completed");
+                                return new PasswordChangeResult(progressWriter, progressChannel, progressTracker);
+                            })
+                            .exceptionally(ex -> {
+                                // Password change failed
+                                System.err.println("[SystemSession] Password change operation failed: " + 
+                                    ex.getMessage());
+                                return new PasswordChangeResult(progressWriter, progressChannel, progressTracker, ex);
+                            });
+                        });
+                })
+                .thenCompose(result -> {
+                    // Close the writer and channel
+                    try {
+                        if (result.progressWriter != null) {
+                            result.progressWriter.close();
+                        }
+                        if (result.progressChannel != null) {
+                            result.progressChannel.close();
+                        }
+                    } catch (IOException e) {
+                        System.err.println("[SystemSession] Error closing progress stream: " + 
+                            e.getMessage());
+                    }
+                    
+                    // Wait for progress tracker to complete reading and processing
+                    return result.progressTracker.getCompletionFuture()
+                        .thenApply(v -> result);
+                })
+                .thenApply(result -> {
+                    // Check results
+                    if (result.exception != null) {
+                        // Operation failed
+                        System.err.println("[SystemSession] Password change failed: " + 
+                            result.exception.getMessage());
+                        result.exception.printStackTrace();
+                        
+                        uiRenderer.render(UIProtocol.showError(
+                            "Password change failed: " + result.exception.getMessage() + 
+                            "\n\nYour data may be in an inconsistent state.\n" +
+                            "Check recovery log for details."));
+                        
+                    } else if (result.progressTracker.hasErrors()) {
+                        // Operation completed but with errors
+                        System.err.println("[SystemSession] Password change completed with errors");
+                        
+                        uiRenderer.render(UIProtocol.showError(
+                            "Password change completed with errors.\n\n" +
+                            "Files completed: " + result.progressTracker.getCompletedFiles().size() + "\n" +
+                            "Files failed: " + result.progressTracker.getFailedFiles().size() + "\n\n" +
+                            "Your data may be in an inconsistent state.\n" +
+                            "Check recovery log for details."));
+                        
+                    } else {
+                        // Success!
+                        System.out.println("[SystemSession] Password change completed successfully");
+                        
+                        uiRenderer.render(UIProtocol.showMessage(
+                            "Master password changed successfully!\n\n" +
+                            "All " + result.progressTracker.getCompletedFiles().size() + 
+                            " files have been re-encrypted."));
+                    }
+                    
+                    // Return to main menu
+                    showMainMenu();
+                    return null;
+                });
+        });
+        
+        newPasswordSession.onCancelled(() -> {
+            uiRenderer.render(UIProtocol.showMessage("Password change cancelled"));
+            showMainMenu();
+        });
+        
+        return spawnChild(newPasswordSession, "new-password")
+            .thenCompose(path -> registry.startProcess(path))
+            .thenApply(v -> true);
+    }
+
+
+        
+    /**
+     * Calculate optimal batch size from disk space validation
+     * 
+     * The batch size limits concurrent file re-encryption operations.
+     * Each operation creates a .tmp file, so batch size is constrained by disk space.
+     */
+    private int calculateOptimalBatchSize(DiskSpaceValidation validation) {
+        int fileCount = validation.getNumberOfFiles();
+        long totalSize = validation.getTotalFileSizes();
+        long availableSpace = validation.getAvailableSpace();
+        long bufferSpace = validation.getBufferSpace();
+        
+        if (fileCount == 0) {
+            return 1; // No files to process
+        }
+        
+        // Calculate safe working space (available - buffer)
+        long safeWorkingSpace = availableSpace - bufferSpace;
+        
+        // Average file size
+        long avgFileSize = totalSize / fileCount;
+        
+        if (avgFileSize == 0) {
+            return 1;
+        }
+        
+        // How many files can we process simultaneously?
+        // Each file needs space for its .tmp copy
+        int maxSimultaneous = (int) (safeWorkingSpace / avgFileSize);
+        
+        // Clamp to reasonable bounds
+        int minBatch = 1;
+        int maxBatch = 50; // Don't overwhelm the system
+        int optimalBatch = Math.max(minBatch, Math.min(maxBatch, maxSimultaneous));
+        
+        System.out.println(String.format(
+            "[SystemSession] Batch size calculation:\n" +
+            "  Files: %d\n" +
+            "  Total size: %.2f MB\n" +
+            "  Avg file size: %.2f KB\n" +
+            "  Available space: %.2f MB\n" +
+            "  Buffer space: %.2f MB\n" +
+            "  Safe working space: %.2f MB\n" +
+            "  Max simultaneous: %d\n" +
+            "  Optimal batch size: %d",
+            fileCount,
+            totalSize / (1024.0 * 1024.0),
+            avgFileSize / 1024.0,
+            availableSpace / (1024.0 * 1024.0),
+            bufferSpace / (1024.0 * 1024.0),
+            safeWorkingSpace / (1024.0 * 1024.0),
+            maxSimultaneous,
+            optimalBatch
+        ));
+        
+        return optimalBatch;
+    }
+
+    /**
+     * Check for incomplete password change and offer recovery
+     */
+    private CompletableFuture<Void> checkForIncompletePasswordChange() {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                File dataDir = SettingsData.getDataDir();
+                File logFile = new File(dataDir, "password_change_recovery.log");
+                
+                if (logFile.exists() && logFile.length() > 0) {
+                    // Found incomplete password change
+                    System.err.println("[SystemSession] Incomplete password change detected");
+                    
+                    // Read log to get status
+                    List<String> logLines = Files.readAllLines(logFile.toPath());
+                    
+                    int completed = 0;
+                    int failed = 0;
+                    List<String> failedFiles = new ArrayList<>();
+                    
+                    for (String line : logLines) {
+                        if (line.startsWith("#")) continue; // Skip comments
+                        
+                        String[] parts = line.split("\\|");
+                        if (parts.length >= 3) {
+                            String status = parts[0];
+                            String filePath = parts[2];
+                            
+                            if (status.equals("success")) {
+                                completed++;
+                            } else if (status.equals("error") || status.equals("started")) {
+                                failed++;
+                                failedFiles.add(filePath);
+                            }
+                        }
+                    }
+                    
+                    // Show recovery options to user
+                    String message = String.format(
+                        "An incomplete password change was detected.\n\n" +
+                        "Files successfully updated: %d\n" +
+                        "Files not completed: %d\n\n" +
+                        "Your data may be in an inconsistent state.\n" +
+                        "Please contact support for recovery assistance.\n\n" +
+                        "Recovery log: %s",
+                        completed,
+                        failed,
+                        logFile.getAbsolutePath()
+                    );
+                    
+                    uiRenderer.render(UIProtocol.showError(message));
+                    
+                    // Archive the log file
+                    File archivedLog = new File(dataDir, 
+                        "password_change_recovery_" + System.currentTimeMillis() + ".log");
+                    Files.move(logFile.toPath(), archivedLog.toPath());
+                    
+                    System.out.println("[SystemSession] Recovery log archived to: " + 
+                        archivedLog.getAbsolutePath());
+                }
+                
+            } catch (IOException e) {
+                System.err.println("[SystemSession] Error checking for incomplete password change: " + 
+                    e.getMessage());
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+
+
+
     // ===== MESSAGE HANDLERS =====
     
     private CompletableFuture<Void> handleMenuSelection(
@@ -566,6 +1020,18 @@ public class SystemSessionProcess extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
     
+    private CompletableFuture<Void> handleChangePassword(
+            NoteBytesMap msg, RoutedPacket packet) {
+        
+        if (state.hasState(SystemSessionStates.UNLOCKED)) {
+            startChangePasswordSession();
+        } else {
+            uiRenderer.render(UIProtocol.showError("System must be unlocked to change password"));
+        }
+        
+        return CompletableFuture.completedFuture(null);
+    }
+    
     // ===== GETTERS =====
     
     public BitFlagStateMachine getState() {
@@ -588,12 +1054,18 @@ public class SystemSessionProcess extends FlowProcess {
         return state.hasState(SystemSessionStates.UNLOCKED);
     }
     
-    public SettingsData getSettingsData() {
-        return settingsData;
-    }
-    
+    /**
+     * Get AppData (primary interface)
+     */
     public AppData getAppData() {
         return appData;
+    }
+    
+    /**
+     * Check if system is fully initialized
+     */
+    public boolean isReady() {
+        return state.hasState(SystemSessionStates.READY) && appData != null;
     }
     
     // ===== SESSION TYPE =====
@@ -601,5 +1073,32 @@ public class SystemSessionProcess extends FlowProcess {
     public enum SessionType {
         PHYSICAL,  // Local UI
         NETWORK    // Remote connection
+    }
+
+
+    /**
+     * Helper class to pass password change result through completion chain
+     */
+    private static class PasswordChangeResult {
+        final AsyncNoteBytesWriter progressWriter;
+        final StreamChannel progressChannel;
+        final ProgressTrackingProcess progressTracker;
+        final Throwable exception;
+        
+        PasswordChangeResult(AsyncNoteBytesWriter progressWriter, 
+                            StreamChannel progressChannel,
+                            ProgressTrackingProcess progressTracker) {
+            this(progressWriter, progressChannel, progressTracker, null);
+        }
+        
+        PasswordChangeResult(AsyncNoteBytesWriter progressWriter,
+                            StreamChannel progressChannel,
+                            ProgressTrackingProcess progressTracker,
+                            Throwable exception) {
+            this.progressWriter = progressWriter;
+            this.progressChannel = progressChannel;
+            this.progressTracker = progressTracker;
+            this.exception = exception;
+        }
     }
 }

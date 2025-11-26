@@ -28,10 +28,15 @@ public class UICommands {
     public static final NoteBytesReadOnly PASSWORD_RETRY = new NoteBytesReadOnly("password_retry");
     public static final NoteBytesReadOnly PASSWORD_SUCCESS = new NoteBytesReadOnly("password_success");
     public static final NoteBytesReadOnly PASSWORD_MAX_ATTEMPTS = new NoteBytesReadOnly("password_max_attempts");
+    public static final NoteBytesReadOnly CHANGE_PASSWORD = new NoteBytesReadOnly("change_password");
     
     // ===== RESPONSE COMMANDS (from UI to system) =====
     public static final NoteBytesReadOnly UI_MENU_SELECTED = new NoteBytesReadOnly("ui_menu_selected");
     public static final NoteBytesReadOnly UI_PASSWORD_ENTERED = new NoteBytesReadOnly("ui_password_entered");
     public static final NoteBytesReadOnly UI_CANCELLED = new NoteBytesReadOnly("ui_cancelled");
     public static final NoteBytesReadOnly UI_BACK = new NoteBytesReadOnly("ui_back");
+
+    public static final NoteBytesReadOnly LOCK_SYSTEM = new NoteBytesReadOnly("lock_system");
+    public static final NoteBytesReadOnly UNLOCK_SYSTEM = new NoteBytesReadOnly("unlock_system");
+    
 }

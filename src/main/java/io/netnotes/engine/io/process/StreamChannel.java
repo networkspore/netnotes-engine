@@ -4,9 +4,8 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
  * StreamChannel - Unidirectional pipe communication between processes
@@ -107,10 +106,8 @@ public class StreamChannel {
      * Call this from receiveStreamMessage implementation
      */
     public void startReceiving(StreamReader reader) {
-        Executors.newVirtualThreadPerTaskExecutor().execute(() -> {
+        VirtualExecutors.getVirtualExecutor().execute(() -> {
             try {
-                // Signal ready
-
                 // Process stream
                 reader.read(receiverInput);
                 
