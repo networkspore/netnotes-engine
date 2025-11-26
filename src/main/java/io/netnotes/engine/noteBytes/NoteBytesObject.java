@@ -30,7 +30,7 @@ public class NoteBytesObject extends NoteBytes{
         super(bytes, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);        
     }
 
-    public NoteBytesObject(NoteBytesPair[] pairs){
+    public NoteBytesObject(NoteBytesPair... pairs){
         this(noteBytePairsToByteArray(pairs));
     }
 

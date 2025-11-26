@@ -28,6 +28,9 @@ import io.netnotes.engine.utils.VirtualExecutors;
 public class SettingsData {
     public static final NoteBytes BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 1});
     public static final NoteBytes SALT_KEY = new NoteBytes(new byte[]{(byte) 2}); 
+    public static final NoteBytes OLD_BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 3});
+    public static final NoteBytes OLD_SALT_KEY = new NoteBytes(new byte[]{(byte) 4}); 
+
     public static class InvalidPasswordException extends RuntimeException {
         public InvalidPasswordException(String msg) { super(msg); }
     }
@@ -83,16 +86,26 @@ public class SettingsData {
     private SecretKey m_oldKey = null;
     private SecretKey m_secretKey = null;
     private NoteBytes m_oldSalt = null;
+    private NoteBytes m_oldBcrypt = null;
     private NoteBytes m_salt = null;
-    private NoteBytes m_bcryptKey;
+    private NoteBytes m_bcryptKey = null;
 
 
-    public SettingsData(SecretKey secretKey, NoteBytes salt, NoteBytes bcrypt){
+    public SettingsData(SecretKey secretKey, NoteBytes salt, NoteBytes bcrypt, NoteBytes... oldValues){
         m_salt = salt;
         m_secretKey = secretKey;
         m_bcryptKey = bcrypt;
+        if(oldValues != null && oldValues.length > 0){
+            m_oldSalt = oldValues[0];
+            if(oldValues.length > 1){
+                m_oldBcrypt = oldValues[1];
+            }
+        }
     }
 
+    public boolean hasOldKey() {
+        return m_oldKey != null && m_oldSalt != null;
+    }
 
    
     public SecretKey getOldKey(){
@@ -101,6 +114,22 @@ public class SettingsData {
 
     public NoteBytes oldSalt(){
         return m_oldSalt;
+    }
+
+    /**
+     * Clear old key/salt (after successful password change completion)
+     */
+    public void clearOldKey() {
+        m_oldKey = null;
+        m_oldSalt = null;
+        m_oldBcrypt = null;
+        try{
+            save();
+        }catch(IOException e){
+            System.err.println("[SettingsData] Old key/salt cleared, but not saved:\n" + e.toString());
+            e.printStackTrace();
+        }
+        System.out.println("[SettingsData] Old key/salt cleared");
     }
 
     public CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password){
@@ -123,12 +152,31 @@ public class SettingsData {
         }, VirtualExecutors.getVirtualExecutor());
     }
 
+
+
+    public CompletableFuture<Boolean> verifyOldPassword(NoteBytesEphemeral password){
+        NoteBytesEphemeral copy = password.copy();
+        return CompletableFuture.supplyAsync(()->{
+            try(copy){
+                if(HashServices.verifyBCryptPassword(copy, m_oldBcrypt)){
+                    m_oldKey = CryptoService.createKey(copy, m_oldSalt);
+                    return true;
+                }
+                return false;
+            }catch(Exception e){
+                throw new CompletionException("Crypto exception", e);
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+
+
+
     public void updatePassword(NoteBytesEphemeral oldPassword, NoteBytesEphemeral newPassword) throws InvalidPasswordException, InvalidKeySpecException, NoSuchAlgorithmException, IOException{
         if(HashServices.verifyBCryptPassword(oldPassword, m_bcryptKey)){
 
             m_oldKey = m_secretKey;
             m_oldSalt = m_salt;
-
+            m_oldBcrypt = m_bcryptKey;
             NoteBytes salt = new NoteBytes(RandomService.getRandomBytes(16));
 
             NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
@@ -146,6 +194,58 @@ public class SettingsData {
 
 
 
+    /**
+     * Rollback to old password state
+     * Swaps current key/salt with old key/salt and saves to disk
+     * 
+     * This is used during recovery when user wants to restore the previous password
+     * after a failed password change operation.
+     * 
+     * Requirements:
+     * - m_oldKey and m_oldSalt must be available (non-null)
+     * - System must not have been restarted since password change
+     * 
+     * Process:
+     * 1. Verify old key/salt exist
+     * 2. Swap: current ↔ old
+     * 3. Save to disk (old password becomes active again)
+     * 
+     * @throws IllegalStateException if old key/salt not available
+     * @throws IOException if save fails
+     */
+    public void rollbackToOldPassword() throws IllegalStateException, IOException {
+        if (m_oldKey == null || m_oldSalt == null || m_oldBcrypt == null) {
+            throw new IllegalStateException(
+                "Cannot rollback: old key and salt not available. " +
+                "Rollback is only possible if system hasn't restarted since password change.");
+        }
+        
+        System.out.println("[SettingsData] Rolling back to old password");
+        
+        // Save current as temporary
+        SecretKey tempKey = m_secretKey;
+        NoteBytes tempSalt = m_salt;
+        NoteBytes tempBcrypt = m_bcryptKey;
+        
+        // Restore old as current
+        m_secretKey = m_oldKey;
+        m_salt = m_oldSalt;
+        m_bcryptKey = m_oldBcrypt;
+
+        m_oldBcrypt = tempBcrypt;
+        m_oldSalt = tempSalt;
+        m_oldKey = tempKey;
+        save();
+    }
+
+    public void loadOldSettings(NoteBytesMap map){
+        
+    }
+
+
+    public NoteBytes getOldBCrypt(){
+        return m_oldBcrypt;
+    }
 
     public SecretKey getSecretKey(){
         return m_secretKey;
@@ -176,16 +276,28 @@ public class SettingsData {
     }
 
     public void save() throws IOException {
-        save(m_bcryptKey, m_salt);
+        if(m_oldBcrypt != null && m_oldSalt != null){
+            save( 
+                new NoteBytesPair(BCRYPT_KEY, m_bcryptKey),
+                new NoteBytesPair(SALT_KEY, m_salt),
+                new NoteBytesPair(OLD_BCRYPT_KEY, m_oldBcrypt),
+                new NoteBytesPair(OLD_SALT_KEY, m_oldSalt)
+            );
+        }else{
+            save( 
+                new NoteBytesPair(BCRYPT_KEY, m_bcryptKey),
+                new NoteBytesPair(SALT_KEY, m_salt)
+            );
+        }
+        
     }
 
-    private static void save( NoteBytes bcryptKey, NoteBytes salt)throws IOException{
+    private static void save( NoteBytesPair... pairs)throws IOException{
         File file = getSettingsFile();
 
-        NoteBytesObject obj = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(BCRYPT_KEY, bcryptKey),
-            new NoteBytesPair(SALT_KEY, salt)
-        });
+        NoteBytesObject obj = new NoteBytesObject(
+           
+        );
 
         FileStreamUtils.writeFileBytes(file, obj.get());
     }
@@ -284,9 +396,18 @@ public class SettingsData {
             try(password){
                 NoteBytes bcryptKey = map.get(BCRYPT_KEY);
                 NoteBytes salt = map.get(SALT_KEY);
+                NoteBytes oldSalt = map.get(OLD_SALT_KEY);
+                NoteBytes oldBcrypt = map.get(OLD_BCRYPT_KEY);
                 if(salt != null && bcryptKey != null){
-                     
-                    return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey);
+                    if(oldSalt != null){
+                        if(oldBcrypt != null){
+                            return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey, oldSalt, oldBcrypt);
+                        }else{
+                            return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey, oldSalt);
+                        }
+                    }else{
+                        return new SettingsData(CryptoService.createKey(password, salt), salt, bcryptKey);
+                    }
                 }else{
                     String saltString = salt == null ? "Salt unavailable file is corrupt" : "";
                     String bcryptString = bcryptKey == null ? "Key is unavailable file is corrupt" : "";

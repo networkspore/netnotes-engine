@@ -89,6 +89,13 @@ public class SystemSessionStates {
      * Secure input device is available
      */
     public static final long SECURE_INPUT_ACTIVE = 1L << 12;
+
+    //Operating states
+    public static final long CHANGING_PASSWORD = 1L << 13;
+    public static final long PERFORMING_RECOVERY = 1L << 14;
+    public static final long RECOVERY_REQUIRED = 1L << 15;
+
+    public static final long ERROR = 1L << 16;
     
     // ===== HELPER METHODS =====
     
@@ -100,7 +107,44 @@ public class SystemSessionStates {
                state.hasState(READY) &&
                !state.hasState(UNLOCKING);
     }
+
+    /**
+     * Check if session can lock
+     */
+    public static boolean canLock(BitFlagStateMachine state) {
+        return state.hasState(UNLOCKED) && 
+               !state.hasState(CHANGING_PASSWORD) &&
+               !state.hasState(PERFORMING_RECOVERY);
+    }
+
+    /**
+     * Check if session can change password
+     */
+    public static boolean canChangePassword(BitFlagStateMachine state) {
+        return state.hasState(UNLOCKED) && 
+               state.hasState(READY) &&
+               !state.hasState(RECOVERY_REQUIRED) &&
+               !state.hasState(CHANGING_PASSWORD);
+    }
     
+    /**
+     * Check if session is operational
+     */
+    public static boolean isOperational(BitFlagStateMachine state) {
+        return state.hasState(READY) && 
+               (state.hasState(LOCKED) || state.hasState(UNLOCKED)) &&
+               !state.hasState(ERROR);
+    }
+
+     /**
+     * Check if session needs attention
+     */
+    public static boolean needsAttention(BitFlagStateMachine state) {
+        return state.hasState(RECOVERY_REQUIRED) || 
+               state.hasState(ERROR) ||
+               state.hasState(FIRST_RUN_SETUP);
+    }
+
     /**
      * Check if system can navigate menus
      */
@@ -130,20 +174,24 @@ public class SystemSessionStates {
     public static String describe(BitFlagStateMachine state) {
         StringBuilder sb = new StringBuilder();
         
-        if (state.hasState(INITIALIZING)) sb.append("INITIALIZING ");
-        if (state.hasState(BOOTSTRAP_LOADED)) sb.append("BOOTSTRAP_LOADED ");
-        if (state.hasState(FIRST_RUN_SETUP)) sb.append("FIRST_RUN_SETUP ");
-        if (state.hasState(SETTINGS_EXIST)) sb.append("SETTINGS_EXIST ");
-        if (state.hasState(SETTINGS_LOADED)) sb.append("SETTINGS_LOADED ");
-        if (state.hasState(READY)) sb.append("READY ");
-        if (state.hasState(LOCKED)) sb.append("LOCKED ");
-        if (state.hasState(UNLOCKING)) sb.append("UNLOCKING ");
-        if (state.hasState(UNLOCKED)) sb.append("UNLOCKED ");
-        if (state.hasState(UI_CONNECTED)) sb.append("UI_CONNECTED ");
-        if (state.hasState(SHOWING_MENU)) sb.append("SHOWING_MENU ");
-        if (state.hasState(PASSWORD_PROMPT)) sb.append("PASSWORD_PROMPT ");
-        if (state.hasState(SECURE_INPUT_ACTIVE)) sb.append("SECURE_INPUT_ACTIVE ");
-        
+        if (state.hasState(INITIALIZING)) sb.append("Initializing... ");
+        if (state.hasState(BOOTSTRAP_LOADED)) sb.append("Bootstrap loaded ");
+        if (state.hasState(FIRST_RUN_SETUP)) sb.append("Firstrun setup ");
+        if (state.hasState(SETTINGS_EXIST)) sb.append("Settings exists ");
+        if (state.hasState(SETTINGS_LOADED)) sb.append("Settings loaded");
+        if (state.hasState(READY)) sb.append("Ready ");
+        if (state.hasState(LOCKED)) sb.append("Locked ");
+        if (state.hasState(UNLOCKING)) sb.append("Unlocking... ");
+        if (state.hasState(UNLOCKED)) sb.append("Unlocked ");
+        if (state.hasState(UI_CONNECTED)) sb.append("UI connected ");
+        if (state.hasState(SHOWING_MENU)) sb.append("Showing menu... ");
+        if (state.hasState(PASSWORD_PROMPT)) sb.append("Password prompt ");
+        if (state.hasState(SECURE_INPUT_ACTIVE)) sb.append("Secure input active ");
+        if (state.hasState(ERROR)) { return "Error State "; }
+        if (state.hasState(RECOVERY_REQUIRED)) {  return "Recovery Required "; }
+        if (state.hasState(CHANGING_PASSWORD)) { return "Changing Password... "; }
+        if (state.hasState(PERFORMING_RECOVERY)) { return "Performing Recovery... "; }
+
         return sb.toString().trim();
     }
 }
