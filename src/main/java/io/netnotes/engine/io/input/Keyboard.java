@@ -1,14 +1,11 @@
 package io.netnotes.engine.io.input;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPairLookup;
 
 public final class Keyboard {
 
@@ -303,30 +300,32 @@ public final class Keyboard {
     }
 
     public final class CodePointCharsByteRegistry{
-        private static NoteBytesPairLookup CODEPOINT_TO_CHAR = null;
-       
-        private static void buildRegistry() {
-            ArrayList<NoteBytesPair> pairs = new ArrayList<>();
+        private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[127];
+        private static final int[] index = new int[0];
+
+        static {
+           
             // Letters: a-z and A-Z
             for (int i = 0; i < 26; i++) {
                 char lower = (char) ('a' + i);
                 char upper = (char) ('A' + i);
 
-                pairs.add(new NoteBytesPair(new NoteBytes((int) lower), new NoteBytes(String.valueOf(lower))));
-                pairs.add(new NoteBytesPair(new NoteBytes((int) upper), new NoteBytes(String.valueOf(upper))));
+                CP_TO_CHAR_TABLE[(int) lower] = new NoteBytes(String.valueOf(lower));
+                CP_TO_CHAR_TABLE[(int) upper] = new NoteBytes(String.valueOf(upper));
             }
 
             // Number row unshifted
             for (int i = 1; i <= 9; i++) {
                 char c = (char) ('0' + i);
-                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
+                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
             }
-            pairs.add(new NoteBytesPair(new NoteBytes((int) '0'), new NoteBytes("0")));
+            CP_TO_CHAR_TABLE[(int) '0'] = new NoteBytes("0");
+
 
             // Number row shifted
             char[] shiftedNums = "!@#$%^&*()".toCharArray();
             for (char c : shiftedNums) {
-                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
+                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
             }
 
             // Unshifted punctuation
@@ -334,7 +333,7 @@ public final class Keyboard {
                     '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/', ' ', '\t', '\n'
             };
             for (char c : unshifted) {
-                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
+                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
             }
 
             // Shifted punctuation
@@ -342,18 +341,20 @@ public final class Keyboard {
                     '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
             };
             for (char c : shifted) {
-                pairs.add(new NoteBytesPair(new NoteBytes((int) c), new NoteBytes(String.valueOf(c))));
+                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
             }
-            CODEPOINT_TO_CHAR = new NoteBytesPairLookup(pairs.toArray(new NoteBytesPair[0]));
-  
         }
+    
         
+
         public static NoteBytes getCharBytes(NoteBytes key){
-            if(CODEPOINT_TO_CHAR == null){
-                buildRegistry();
-            }
-            return CODEPOINT_TO_CHAR.lookup(key);
+            index[0] = key.get()[0] & 0xFF;
+            NoteBytes value = CP_TO_CHAR_TABLE[index[0]];
+            index[0] = 0;
+            return value;
         }
+
+
      
     }
 
@@ -524,4 +525,5 @@ public final class Keyboard {
         public static final NoteBytes RIGHT_META     = new NoteBytes(0xE7);
     }
 
+    
 } 
