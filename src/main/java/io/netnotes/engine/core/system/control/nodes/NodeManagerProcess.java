@@ -1,10 +1,10 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.system.control.MenuContext;
@@ -23,30 +23,30 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 
 /**
- * NodeManagerProcess - Manages plugin/node lifecycle
+ * NodeManagerProcess - Package manager for nodes (like apt-get)
  * 
- * Responsibilities:
- * - Browse available nodes (from registry/marketplace)
- * - Install/uninstall nodes
- * - Enable/disable nodes
- * - Manage node versions
- * - Configure node settings
- * - Monitor node status
+ * SCOPE DEFINITION:
+ * - Manages INSTALLATION metadata (what's available, what's installed)
+ * - Handles REPOSITORIES (multiple sources, like apt sources.list)
+ * - Parses MANIFESTS (JSON format, describes how to load nodes)
+ * - Checks for UPDATES (compares installed vs available versions)
+ * - Downloads/installs/uninstalls packages
+ * 
+ * NOT IN SCOPE:
+ * - Runtime node lifecycle (that's AppData's job)
+ * - OSGi bundle management (AppData coordinates with OSGi)
+ * - Active node instances (AppData manages those)
+ * - Process subscription routing (ProcessRegistry handles)
  * 
  * Architecture:
- * - Uses NodeRegistry for persistence
- * - Uses NodeGroupManager for grouping versions
- * - Uses NodeInstaller for download/installation
- * - Uses MenuContext for UI navigation
- * - GUI-independent (delegates to UIRenderer)
+ * - NodeManager is LAZY - builds up when needed, dies when done
+ * - Installation registry is SEPARATE from runtime registry (AppData)
+ * - User is in FULL CONTROL - can add/remove repositories
+ * - NO central authority - facilitates user choice
  * 
- * States:
- * - INITIALIZING: Loading registry
- * - READY: Operational
- * - BROWSING: Showing available nodes
- * - INSTALLING: Installing a node
- * - UNINSTALLING: Removing a node
- * - CONFIGURING: Adjusting node settings
+ * Analogy: apt-get vs running processes
+ * - NodeManager = apt-get (package management)
+ * - AppData = systemd (service/runtime management)
  */
 public class NodeManagerProcess extends FlowProcess {
     
@@ -54,15 +54,13 @@ public class NodeManagerProcess extends FlowProcess {
     private final AppData appData;
     private final UIRenderer uiRenderer;
     
-    // Node management components
-    private NodeRegistry nodeRegistry;
-    private NodeGroupManager groupManager;
-    private NodeInstaller installer;
-    private NodeMarketplace marketplace;
+    // Package management (installation metadata ONLY)
+    private InstallationRegistry installRegistry;
+    private RepositoryManager repositoryManager;
+    private PackageCache packageCache;
     
     // Current view state
     private MenuContext currentMenu;
-    private NodeGroup selectedGroup;
     
     // Message dispatch
     private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgMap = 
@@ -74,8 +72,7 @@ public class NodeManagerProcess extends FlowProcess {
     public static final long BROWSING = 1L << 2;
     public static final long INSTALLING = 1L << 3;
     public static final long UNINSTALLING = 1L << 4;
-    public static final long CONFIGURING = 1L << 5;
-    public static final long ERROR = 1L << 6;
+    public static final long UPDATING_REPOS = 1L << 5;
     
     public NodeManagerProcess(AppData appData, UIRenderer uiRenderer) {
         super(ProcessType.BIDIRECTIONAL);
@@ -88,38 +85,17 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private void setupMessageMapping() {
-        // Menu navigation
         m_routedMsgMap.put(UICommands.UI_MENU_SELECTED, this::handleMenuSelection);
         m_routedMsgMap.put(UICommands.UI_BACK, this::handleBack);
-        
-        // Node operations
-        m_routedMsgMap.put(new NoteBytesReadOnly("install_node"), this::handleInstallNode);
-        m_routedMsgMap.put(new NoteBytesReadOnly("uninstall_node"), this::handleUninstallNode);
-        m_routedMsgMap.put(new NoteBytesReadOnly("enable_node"), this::handleEnableNode);
-        m_routedMsgMap.put(new NoteBytesReadOnly("disable_node"), this::handleDisableNode);
-        m_routedMsgMap.put(new NoteBytesReadOnly("configure_node"), this::handleConfigureNode);
-        m_routedMsgMap.put(new NoteBytesReadOnly("refresh_marketplace"), this::handleRefreshMarketplace);
     }
     
     private void setupStateTransitions() {
         state.onStateAdded(INITIALIZING, (old, now, bit) -> {
-            System.out.println("[NodeManager] INITIALIZING - Loading node registry");
+            System.out.println("[NodeManager] INITIALIZING - Loading installation registry");
         });
         
         state.onStateAdded(READY, (old, now, bit) -> {
-            System.out.println("[NodeManager] READY - Node manager operational");
-        });
-        
-        state.onStateAdded(BROWSING, (old, now, bit) -> {
-            System.out.println("[NodeManager] BROWSING - Showing available nodes");
-        });
-        
-        state.onStateAdded(INSTALLING, (old, now, bit) -> {
-            System.out.println("[NodeManager] INSTALLING - Installing node");
-        });
-        
-        state.onStateAdded(ERROR, (old, now, bit) -> {
-            System.err.println("[NodeManager] ERROR - Error occurred");
+            System.out.println("[NodeManager] READY - Package manager operational");
         });
     }
     
@@ -131,37 +107,24 @@ public class NodeManagerProcess extends FlowProcess {
             .thenRun(() -> {
                 state.removeState(INITIALIZING);
                 state.addState(READY);
-                
-                // Show main menu
                 showMainMenu();
-            })
-            .exceptionally(ex -> {
-                System.err.println("[NodeManager] Initialization failed: " + ex.getMessage());
-                state.addState(ERROR);
-                return null;
             });
     }
     
     private CompletableFuture<Void> initialize() {
-        // Initialize components
-        nodeRegistry = new NodeRegistry(appData);
-        groupManager = new NodeGroupManager();
-        installer = new NodeInstaller(appData);
-        marketplace = new NodeMarketplace(appData.getExecService());
+        // Initialize installation metadata components
+        installRegistry = new InstallationRegistry(appData);
+        repositoryManager = new RepositoryManager(appData);
+        packageCache = new PackageCache();
         
-        // Load registry
-        return nodeRegistry.initialize()
-            .thenCompose(v -> marketplace.loadAvailableNodes())
-            .thenAccept(availableNodes -> {
-                // Build grouped view
-                groupManager.buildFromRegistry(
-                    nodeRegistry.getAllNodes(),
-                    availableNodes
-                );
-                
+        // Load installation registry (what packages are installed)
+        return installRegistry.initialize()
+            .thenCompose(v -> repositoryManager.initialize())
+            .thenAccept(v -> {
                 System.out.println("[NodeManager] Loaded " + 
-                    availableNodes.size() + " available nodes, " +
-                    nodeRegistry.getAllNodes().size() + " installed");
+                    installRegistry.getInstalledPackages().size() + 
+                    " installed packages from " + 
+                    repositoryManager.getRepositories().size() + " repositories");
             });
     }
     
@@ -172,34 +135,67 @@ public class NodeManagerProcess extends FlowProcess {
         MenuContext menu = new MenuContext(menuPath, "Node Manager", uiRenderer);
         
         // Statistics
-        String stats = String.format(
-            "Available: %d | Installed: %d | Enabled: %d",
-            groupManager.getAvailableCount(),
-            groupManager.getInstalledCount(),
-            groupManager.getEnabledCount()
-        );
-        menu.addInfoItem("stats", stats);
-        menu.addSeparator("Actions");
+        int installed = installRegistry.getInstalledPackages().size();
+        int available = packageCache.getAllPackages().size();
+        int repos = repositoryManager.getRepositories().size();
         
-        // Main actions
-        menu.addItem("browse", "Browse Available Nodes", 
-            "Explore and install new nodes", () -> {
-            state.addState(BROWSING);
-            showBrowseMenu();
+        menu.addInfoItem("stats", String.format(
+            "Installed: %d | Available: %d | Repositories: %d",
+            installed, available, repos
+        ));
+        menu.addSeparator("Package Management");
+        
+        menu.addItem("update", "Update Package Lists",
+            "Fetch latest package information from repositories", () -> {
+            updatePackageLists();
         });
         
-        menu.addItem("installed", "Manage Installed Nodes",
-            "View and configure installed nodes", () -> {
+        menu.addItem("search", "Search Packages",
+            "Find packages by name or description", () -> {
+            showSearchMenu();
+        });
+        
+        menu.addItem("install", "Install Package",
+            "Download and install a package", () -> {
+            showInstallMenu();
+        });
+        
+        menu.addItem("remove", "Remove Package",
+            "Uninstall an installed package", () -> {
+            showRemoveMenu();
+        });
+        
+        menu.addItem("list", "List Installed",
+            "Show all installed packages", () -> {
             showInstalledMenu();
         });
         
-        menu.addItem("refresh", "Refresh Marketplace",
-            "Check for new nodes and updates", () -> {
-            refreshMarketplace();
+        menu.addSeparator("Repository Management");
+        
+        menu.addItem("repos", "Manage Repositories",
+            "Add, remove, or configure repositories", () -> {
+            showRepositoryMenu();
         });
         
+        menu.addSeparator("Runtime Control");
+        
+        menu.addItem("load", "Load Node (Start)",
+            "Request AppData to load a node into runtime", () -> {
+            showLoadMenu();
+        });
+        
+        menu.addItem("unload", "Unload Node (Stop)",
+            "Request AppData to unload a running node", () -> {
+            showUnloadMenu();
+        });
+        
+        menu.addItem("status", "Runtime Status",
+            "View loaded nodes from AppData", () -> {
+            showRuntimeStatus();
+        });
+        
+        menu.addSeparator("");
         menu.addItem("back", "Back to System Menu", () -> {
-            // Notify parent to return to system menu
             notifyParent("close_node_manager");
         });
         
@@ -207,209 +203,147 @@ public class NodeManagerProcess extends FlowProcess {
         menu.display();
     }
     
-    private void showBrowseMenu() {
-        List<NodeGroup> groups = groupManager.getBrowseGroups();
+    // ===== PACKAGE MANAGEMENT =====
+    
+    /**
+     * Update package lists (like apt-get update)
+     * Fetches latest manifests from all repositories
+     */
+    private void updatePackageLists() {
+        state.addState(UPDATING_REPOS);
         
-        if (groups.isEmpty()) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Updating package lists from repositories..."));
+        
+        repositoryManager.updateAllRepositories()
+            .thenAccept(packages -> {
+                // Cache the packages
+                packageCache.updateCache(packages);
+                
+                state.removeState(UPDATING_REPOS);
+                
+                uiRenderer.render(UIProtocol.showMessage(
+                    "✓ Package lists updated - " + packages.size() + 
+                    " packages available"));
+                
+                showMainMenu();
+            })
+            .exceptionally(ex -> {
+                state.removeState(UPDATING_REPOS);
+                
+                uiRenderer.render(UIProtocol.showError(
+                    "Update failed: " + ex.getMessage()));
+                
+                showMainMenu();
+                return null;
+            });
+    }
+    
+    private void showSearchMenu() {
+        // TODO: Implement search with filters
+        uiRenderer.render(UIProtocol.showMessage("Search coming soon"));
+        showMainMenu();
+    }
+    
+    private void showInstallMenu() {
+        List<PackageInfo> available = packageCache.getAllPackages();
+        
+        if (available.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage(
-                "No nodes available. Try refreshing the marketplace."));
+                "No packages available. Run 'Update Package Lists' first."));
             showMainMenu();
             return;
         }
         
-        ContextPath menuPath = contextPath.append("menu", "browse");
-        MenuContext menu = new MenuContext(menuPath, "Browse Nodes", uiRenderer, currentMenu);
+        ContextPath menuPath = contextPath.append("menu", "install");
+        MenuContext menu = new MenuContext(menuPath, "Install Package", 
+            uiRenderer, currentMenu);
         
-        menu.addInfoItem("info", "Select a node to view details");
-        menu.addSeparator("Available Nodes");
+        menu.addInfoItem("info", "Select a package to install");
+        menu.addSeparator("Available Packages");
         
-        // Group nodes by category
-        Map<String, List<NodeGroup>> byCategory = groups.stream()
-            .collect(Collectors.groupingBy(g -> g.getNodeInfo().getCategory()));
+        // Group by category
+        Map<String, List<PackageInfo>> byCategory = 
+            available.stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                    PackageInfo::getCategory));
         
-        for (Map.Entry<String, List<NodeGroup>> entry : byCategory.entrySet()) {
-            String category = entry.getKey();
-            List<NodeGroup> categoryGroups = entry.getValue();
-            
-            menu.addSubMenu(category, category, subMenu -> {
-                for (NodeGroup group : categoryGroups) {
+        for (Map.Entry<String, List<PackageInfo>> entry : byCategory.entrySet()) {
+            menu.addSubMenu(entry.getKey(), entry.getKey(), subMenu -> {
+                for (PackageInfo pkg : entry.getValue()) {
                     subMenu.addItem(
-                        group.getNodeId(),
-                        group.getNodeInfo().getName(),
-                        group.getNodeInfo().getDescription(),
-                        () -> showNodeDetails(group)
+                        pkg.getPackageId(),
+                        pkg.getName() + " (" + pkg.getVersion() + ")",
+                        pkg.getDescription(),
+                        () -> confirmInstall(pkg)
                     );
                 }
                 return subMenu;
             });
         }
         
-        menu.addSeparator("");
-        menu.addItem("back", "Back to Main Menu", () -> showMainMenu());
+        menu.addItem("back", "Back", () -> showMainMenu());
         
         currentMenu = menu;
         menu.display();
     }
     
-    private void showInstalledMenu() {
-        List<NodeGroup> groups = groupManager.getInstalledGroups();
+    private void confirmInstall(PackageInfo pkg) {
+        ContextPath menuPath = contextPath.append("menu", "confirm-install");
+        MenuContext menu = new MenuContext(menuPath, "Confirm Install", 
+            uiRenderer, currentMenu);
         
-        if (groups.isEmpty()) {
-            uiRenderer.render(UIProtocol.showMessage(
-                "No nodes installed. Browse the marketplace to install nodes."));
-            showMainMenu();
-            return;
-        }
-        
-        ContextPath menuPath = contextPath.append("menu", "installed");
-        MenuContext menu = new MenuContext(menuPath, "Installed Nodes", uiRenderer, currentMenu);
-        
-        menu.addInfoItem("info", "Manage your installed nodes");
-        menu.addSeparator("Installed Nodes");
-        
-        for (NodeGroup group : groups) {
-            NodeMetadata enabled = group.getEnabledVersion();
-            String status = enabled != null ? "✓ Enabled" : "○ Disabled";
-            
-            menu.addItem(
-                group.getNodeId(),
-                group.getNodeInfo().getName() + " - " + status,
-                group.getInstalledVersions().size() + " version(s) installed",
-                () -> showInstalledNodeDetails(group)
-            );
-        }
-        
-        menu.addSeparator("");
-        menu.addItem("back", "Back to Main Menu", () -> showMainMenu());
-        
-        currentMenu = menu;
-        menu.display();
-    }
-    
-    private void showNodeDetails(NodeGroup group) {
-        selectedGroup = group;
-        
-        ContextPath menuPath = contextPath.append("menu", "node-details", group.getNodeId());
-        MenuContext menu = new MenuContext(menuPath, 
-            group.getNodeInfo().getName(), uiRenderer, currentMenu);
-        
-        // Node information
-        NodeInformation info = group.getNodeInfo();
-        String description = String.format(
-            "%s\n\nCategory: %s\nAuthor: %s\nVersion: %s",
-            info.getDescription(),
-            info.getCategory(),
-            info.getAuthor(),
-            info.getLatestVersion()
+        String info = String.format(
+            "Package: %s\nVersion: %s\nSize: %d KB\nRepository: %s\n\nInstall this package?",
+            pkg.getName(),
+            pkg.getVersion(),
+            pkg.getSize() / 1024,
+            pkg.getRepository()
         );
-        menu.addInfoItem("description", description);
+        menu.addInfoItem("details", info);
         menu.addSeparator("Actions");
         
-        // Actions based on installation status
-        if (group.hasInstalledVersions()) {
-            menu.addItem("manage", "Manage Versions",
-                "View and configure installed versions", () -> {
-                showInstalledNodeDetails(group);
-            });
-            
-            menu.addItem("uninstall", "Uninstall All Versions",
-                "⚠️ Remove all installed versions", () -> {
-                confirmUninstallAll(group);
-            });
-        } else {
-            menu.addItem("install", "Install Latest Version",
-                "Download and install this node", () -> {
-                installLatestVersion(group);
-            });
-        }
+        menu.addItem("confirm", "Yes, Install", () -> {
+            installPackage(pkg);
+        });
         
-        menu.addItem("back", "Back to Browse", () -> showBrowseMenu());
+        menu.addItem("cancel", "No, Cancel", () -> {
+            showInstallMenu();
+        });
         
         currentMenu = menu;
         menu.display();
     }
     
-    private void showInstalledNodeDetails(NodeGroup group) {
-        selectedGroup = group;
-        
-        ContextPath menuPath = contextPath.append("menu", "installed-details", group.getNodeId());
-        MenuContext menu = new MenuContext(menuPath,
-            group.getNodeInfo().getName() + " - Versions", uiRenderer, currentMenu);
-        
-        List<NodeMetadata> versions = group.getInstalledVersions();
-        NodeMetadata enabled = group.getEnabledVersion();
-        
-        menu.addInfoItem("info", versions.size() + " version(s) installed");
-        menu.addSeparator("Installed Versions");
-        
-        for (NodeMetadata version : versions) {
-            boolean isEnabled = version.equals(enabled);
-            String status = isEnabled ? "✓ Enabled" : "○ Disabled";
-            
-            menu.addSubMenu(
-                version.getNodeId(),
-                version.getVersion() + " - " + status,
-                versionMenu -> {
-                    versionMenu.addInfoItem("details",
-                        "Version: " + version.getVersion() + "\n" +
-                        "Status: " + (isEnabled ? "Enabled" : "Disabled"));
-                    versionMenu.addSeparator("Actions");
-                    
-                    if (!isEnabled) {
-                        versionMenu.addItem("enable", "Enable This Version",
-                            () -> enableVersion(version));
-                    } else {
-                        versionMenu.addItem("disable", "Disable",
-                            () -> disableVersion(version));
-                    }
-                    
-                    versionMenu.addItem("configure", "Configure",
-                        () -> configureNode(version));
-                    
-                    versionMenu.addItem("uninstall", "Uninstall",
-                        "⚠️ Remove this version", () -> {
-                        confirmUninstall(version);
-                    });
-                    
-                    return versionMenu;
-                }
-            );
-        }
-        
-        menu.addSeparator("");
-        menu.addItem("back", "Back to Installed", () -> showInstalledMenu());
-        
-        currentMenu = menu;
-        menu.display();
-    }
-    
-    // ===== NODE OPERATIONS =====
-    
-    private void installLatestVersion(NodeGroup group) {
+    /**
+     * Install a package (like apt-get install)
+     * 1. Download package files
+     * 2. Verify manifest
+     * 3. Store in installation registry
+     * 4. DO NOT load into runtime (user does that separately)
+     */
+    private void installPackage(PackageInfo pkg) {
         state.addState(INSTALLING);
         
         uiRenderer.render(UIProtocol.showMessage(
-            "Installing " + group.getNodeInfo().getName() + "..."));
+            "Installing " + pkg.getName() + "..."));
         
-        marketplace.getLatestRelease(group.getNodeInfo())
-            .thenCompose(release -> {
-                if (release == null) {
-                    throw new RuntimeException("No releases available");
-                }
-                return installer.installNode(release, true);
+        // Download package
+        PackageInstaller installer = new PackageInstaller(appData);
+        
+        installer.installPackage(pkg)
+            .thenCompose(installedPkg -> {
+                // Register in installation registry
+                return installRegistry.registerPackage(installedPkg);
             })
-            .thenAccept(metadata -> {
+            .thenRun(() -> {
                 state.removeState(INSTALLING);
                 
-                // Refresh group manager
-                refreshGroupManager();
-                
                 uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Successfully installed " + metadata.getName() + 
-                    " version " + metadata.getVersion()));
+                    "✓ Package installed: " + pkg.getName() + "\n\n" +
+                    "To use this node, select 'Load Node (Start)' from the main menu."));
                 
-                // Return to browse menu
-                showBrowseMenu();
+                showMainMenu();
             })
             .exceptionally(ex -> {
                 state.removeState(INSTALLING);
@@ -417,216 +351,396 @@ public class NodeManagerProcess extends FlowProcess {
                 uiRenderer.render(UIProtocol.showError(
                     "Installation failed: " + ex.getMessage()));
                 
-                showNodeDetails(group);
+                showInstallMenu();
                 return null;
             });
     }
     
-    private void confirmUninstall(NodeMetadata metadata) {
-        // Show confirmation menu
-        ContextPath menuPath = contextPath.append("menu", "confirm-uninstall");
-        MenuContext menu = new MenuContext(menuPath,
-            "Confirm Uninstall", uiRenderer, currentMenu);
+    private void showRemoveMenu() {
+        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
         
-        menu.addInfoItem("warning",
-            "⚠️ Are you sure you want to uninstall " + 
-            metadata.getName() + " version " + metadata.getVersion() + "?");
+        if (installed.isEmpty()) {
+            uiRenderer.render(UIProtocol.showMessage("No packages installed"));
+            showMainMenu();
+            return;
+        }
+        
+        ContextPath menuPath = contextPath.append("menu", "remove");
+        MenuContext menu = new MenuContext(menuPath, "Remove Package", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("info", "Select a package to remove");
+        menu.addSeparator("Installed Packages");
+        
+        for (InstalledPackage pkg : installed) {
+            menu.addItem(
+                pkg.getPackageId(),
+                pkg.getName() + " (" + pkg.getVersion() + ")",
+                () -> confirmRemove(pkg)
+            );
+        }
+        
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    private void confirmRemove(InstalledPackage pkg) {
+        ContextPath menuPath = contextPath.append("menu", "confirm-remove");
+        MenuContext menu = new MenuContext(menuPath, "Confirm Remove", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("warning", 
+            "⚠️ Remove " + pkg.getName() + "?\n\n" +
+            "This will delete the package files.\n" +
+            "If the node is currently loaded, unload it first.");
         menu.addSeparator("Actions");
         
-        menu.addItem("confirm", "Yes, Uninstall",
-            "This cannot be undone", () -> {
-            uninstallVersion(metadata);
+        menu.addItem("confirm", "Yes, Remove", () -> {
+            removePackage(pkg);
         });
         
         menu.addItem("cancel", "No, Cancel", () -> {
-            showInstalledNodeDetails(selectedGroup);
+            showRemoveMenu();
         });
         
         currentMenu = menu;
         menu.display();
     }
     
-    private void confirmUninstallAll(NodeGroup group) {
-        ContextPath menuPath = contextPath.append("menu", "confirm-uninstall-all");
-        MenuContext menu = new MenuContext(menuPath,
-            "Confirm Uninstall All", uiRenderer, currentMenu);
-        
-        menu.addInfoItem("warning",
-            "⚠️ Are you sure you want to uninstall ALL versions of " + 
-            group.getNodeInfo().getName() + "?\n\n" +
-            "This will remove " + group.getInstalledVersions().size() + " version(s).");
-        menu.addSeparator("Actions");
-        
-        menu.addItem("confirm", "Yes, Uninstall All",
-            "This cannot be undone", () -> {
-            uninstallAllVersions(group);
-        });
-        
-        menu.addItem("cancel", "No, Cancel", () -> {
-            showNodeDetails(group);
-        });
-        
-        currentMenu = menu;
-        menu.display();
-    }
-    
-    private void uninstallVersion(NodeMetadata metadata) {
+    private void removePackage(InstalledPackage pkg) {
         state.addState(UNINSTALLING);
         
         uiRenderer.render(UIProtocol.showMessage(
-            "Uninstalling " + metadata.getName() + "..."));
+            "Removing " + pkg.getName() + "..."));
         
-        nodeRegistry.unregisterNode(metadata.getNodeId())
+        // Check if loaded in runtime
+        appData.nodeRegistry().values().stream()
+            .filter(node -> pkg.getPackageId().equals(
+                node.getNodeId().toString()))
+            .findFirst()
+            .ifPresent(node -> {
+                uiRenderer.render(UIProtocol.showError(
+                    "⚠️ Node is currently loaded in runtime!\n" +
+                    "Unload it first via 'Unload Node (Stop)'."));
+                state.removeState(UNINSTALLING);
+                showRemoveMenu();
+                return;
+            });
+        
+        // Unregister and delete
+        installRegistry.unregisterPackage(pkg.getPackageId())
             .thenCompose(v -> appData.getNoteFileService().deleteNoteFilePath(
-                metadata.getNodePath(), false, null))
+                pkg.getInstallPath(), true, null))
             .thenRun(() -> {
                 state.removeState(UNINSTALLING);
                 
-                // Refresh group manager
-                refreshGroupManager();
-                
                 uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Successfully uninstalled " + metadata.getName()));
-                
-                // Return to installed menu
-                showInstalledMenu();
-            })
-            .exceptionally(ex -> {
-                state.removeState(UNINSTALLING);
-                
-                uiRenderer.render(UIProtocol.showError(
-                    "Uninstall failed: " + ex.getMessage()));
-                
-                showInstalledNodeDetails(selectedGroup);
-                return null;
-            });
-    }
-    
-    private void uninstallAllVersions(NodeGroup group) {
-        state.addState(UNINSTALLING);
-        
-        List<NodeMetadata> versions = group.getInstalledVersions();
-        
-        uiRenderer.render(UIProtocol.showMessage(
-            "Uninstalling " + versions.size() + " version(s) of " + 
-            group.getNodeInfo().getName() + "..."));
-        
-        CompletableFuture<?>[] futures = versions.stream()
-            .map(v -> nodeRegistry.unregisterNode(v.getNodeId())
-                .thenCompose(x -> appData.getNoteFileService().deleteNoteFilePath(
-                    v.getNodePath(), false, null)))
-            .toArray(CompletableFuture[]::new);
-        
-        CompletableFuture.allOf(futures)
-            .thenRun(() -> {
-                state.removeState(UNINSTALLING);
-                
-                // Refresh group manager
-                refreshGroupManager();
-                
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Successfully uninstalled all versions"));
-                
-                // Return to browse menu
-                showBrowseMenu();
-            })
-            .exceptionally(ex -> {
-                state.removeState(UNINSTALLING);
-                
-                uiRenderer.render(UIProtocol.showError(
-                    "Uninstall failed: " + ex.getMessage()));
-                
-                showNodeDetails(group);
-                return null;
-            });
-    }
-    
-    private void enableVersion(NodeMetadata metadata) {
-        nodeRegistry.setNodeEnabled(metadata.getNodeId(), true)
-            .thenRun(() -> {
-                // Refresh group manager
-                refreshGroupManager();
-                
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Enabled " + metadata.getName()));
-                
-                // Refresh current view
-                showInstalledNodeDetails(selectedGroup);
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Enable failed: " + ex.getMessage()));
-                return null;
-            });
-    }
-    
-    private void disableVersion(NodeMetadata metadata) {
-        nodeRegistry.setNodeEnabled(metadata.getNodeId(), false)
-            .thenRun(() -> {
-                // Refresh group manager
-                refreshGroupManager();
-                
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Disabled " + metadata.getName()));
-                
-                // Refresh current view
-                showInstalledNodeDetails(selectedGroup);
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Disable failed: " + ex.getMessage()));
-                return null;
-            });
-    }
-    
-    private void configureNode(NodeMetadata metadata) {
-        state.addState(CONFIGURING);
-        
-        // TODO: Implement node configuration
-        // This would show a configuration menu specific to the node
-        uiRenderer.render(UIProtocol.showMessage(
-            "Node configuration coming soon"));
-        
-        state.removeState(CONFIGURING);
-    }
-    
-    private void refreshMarketplace() {
-        uiRenderer.render(UIProtocol.showMessage(
-            "Refreshing marketplace..."));
-        
-        marketplace.loadAvailableNodes()
-            .thenAccept(availableNodes -> {
-                groupManager.buildFromRegistry(
-                    nodeRegistry.getAllNodes(),
-                    availableNodes
-                );
-                
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Marketplace refreshed - " + 
-                    availableNodes.size() + " nodes available"));
+                    "✓ Package removed: " + pkg.getName()));
                 
                 showMainMenu();
             })
             .exceptionally(ex -> {
+                state.removeState(UNINSTALLING);
+                
                 uiRenderer.render(UIProtocol.showError(
-                    "Refresh failed: " + ex.getMessage()));
+                    "Removal failed: " + ex.getMessage()));
+                
+                showRemoveMenu();
                 return null;
             });
     }
     
-    private void refreshGroupManager() {
-        marketplace.loadAvailableNodes()
-            .thenAccept(availableNodes -> {
-                groupManager.buildFromRegistry(
-                    nodeRegistry.getAllNodes(),
-                    availableNodes
-                );
-            })
-            .exceptionally(ex -> {
-                System.err.println("[NodeManager] Failed to refresh group manager: " + 
-                    ex.getMessage());
-                return null;
+    private void showInstalledMenu() {
+        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
+        
+        if (installed.isEmpty()) {
+            uiRenderer.render(UIProtocol.showMessage("No packages installed"));
+            showMainMenu();
+            return;
+        }
+        
+        ContextPath menuPath = contextPath.append("menu", "installed");
+        MenuContext menu = new MenuContext(menuPath, "Installed Packages", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("info", installed.size() + " package(s) installed");
+        menu.addSeparator("Packages");
+        
+        for (InstalledPackage pkg : installed) {
+            menu.addItem(
+                pkg.getPackageId(),
+                pkg.getName() + " " + pkg.getVersion(),
+                pkg.getDescription(),
+                () -> showPackageDetails(pkg)
+            );
+        }
+        
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    private void showPackageDetails(InstalledPackage pkg) {
+        ContextPath menuPath = contextPath.append("menu", "package-details");
+        MenuContext menu = new MenuContext(menuPath, pkg.getName(), 
+            uiRenderer, currentMenu);
+        
+        String details = String.format(
+            "Name: %s\nVersion: %s\nCategory: %s\nRepository: %s\n\n%s",
+            pkg.getName(),
+            pkg.getVersion(),
+            pkg.getCategory(),
+            pkg.getRepository(),
+            pkg.getDescription()
+        );
+        menu.addInfoItem("details", details);
+        menu.addSeparator("Actions");
+        
+        menu.addItem("remove", "Remove Package", () -> {
+            confirmRemove(pkg);
+        });
+        
+        menu.addItem("back", "Back", () -> showInstalledMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    // ===== REPOSITORY MANAGEMENT =====
+    
+    private void showRepositoryMenu() {
+        List<Repository> repos = repositoryManager.getRepositories();
+        
+        ContextPath menuPath = contextPath.append("menu", "repositories");
+        MenuContext menu = new MenuContext(menuPath, "Repository Management", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("info", repos.size() + " repository(ies) configured");
+        menu.addSeparator("Repositories");
+        
+        for (Repository repo : repos) {
+            String status = repo.isEnabled() ? "✓ " : "○ ";
+            menu.addItem(
+                repo.getId(),
+                status + repo.getName(),
+                repo.getUrl(),
+                () -> showRepositoryDetails(repo)
+            );
+        }
+        
+        menu.addSeparator("Actions");
+        
+        menu.addItem("add", "Add Repository",
+            "Add a new package source", () -> {
+            // TODO: Add repository flow
+            uiRenderer.render(UIProtocol.showMessage("Add repository coming soon"));
+        });
+        
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    private void showRepositoryDetails(Repository repo) {
+        ContextPath menuPath = contextPath.append("menu", "repo-details");
+        MenuContext menu = new MenuContext(menuPath, repo.getName(), 
+            uiRenderer, currentMenu);
+        
+        String details = String.format(
+            "Name: %s\nURL: %s\nStatus: %s\nKey: %s",
+            repo.getName(),
+            repo.getUrl(),
+            repo.isEnabled() ? "Enabled" : "Disabled",
+            repo.hasKey() ? "✓ Verified" : "⚠️ No key"
+        );
+        menu.addInfoItem("details", details);
+        menu.addSeparator("Actions");
+        
+        if (repo.isEnabled()) {
+            menu.addItem("disable", "Disable Repository", () -> {
+                repositoryManager.setRepositoryEnabled(repo.getId(), false);
+                showRepositoryMenu();
             });
+        } else {
+            menu.addItem("enable", "Enable Repository", () -> {
+                repositoryManager.setRepositoryEnabled(repo.getId(), true);
+                showRepositoryMenu();
+            });
+        }
+        
+        menu.addItem("remove", "Remove Repository", () -> {
+            repositoryManager.removeRepository(repo.getId());
+            showRepositoryMenu();
+        });
+        
+        menu.addItem("back", "Back", () -> showRepositoryMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    // ===== RUNTIME CONTROL (Coordinates with AppData) =====
+    
+    /**
+     * Load a node into runtime
+     * This REQUESTS AppData to load the node (doesn't do it directly)
+     */
+    private void showLoadMenu() {
+        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
+        
+        if (installed.isEmpty()) {
+            uiRenderer.render(UIProtocol.showMessage(
+                "No packages installed. Install packages first."));
+            showMainMenu();
+            return;
+        }
+        
+        ContextPath menuPath = contextPath.append("menu", "load");
+        MenuContext menu = new MenuContext(menuPath, "Load Node", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("info", "Select a node to load into runtime");
+        menu.addSeparator("Installed Packages");
+        
+        for (InstalledPackage pkg : installed) {
+            // Check if already loaded
+            boolean loaded = appData.nodeRegistry().values().stream()
+                .anyMatch(node -> pkg.getPackageId().equals(
+                    node.getNodeId().toString()));
+            
+            String label = pkg.getName() + 
+                (loaded ? " (already loaded)" : "");
+            
+            menu.addItem(
+                pkg.getPackageId(),
+                label,
+                () -> {
+                    if (loaded) {
+                        uiRenderer.render(UIProtocol.showMessage(
+                            "Node already loaded in runtime"));
+                        showLoadMenu();
+                    } else {
+                        requestLoadNode(pkg);
+                    }
+                }
+            );
+        }
+        
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    /**
+     * Request AppData to load a node
+     * NodeManager does NOT load nodes - it just requests AppData to do it
+     */
+    private void requestLoadNode(InstalledPackage pkg) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Requesting AppData to load " + pkg.getName() + "..."));
+        
+        // Send message to AppData (via parent SystemSessionProcess)
+        NoteBytesMap request = new NoteBytesMap();
+        request.put(Keys.CMD, new NoteBytes("load_node"));
+        request.put(new NoteBytes("package_id"), new NoteBytes(pkg.getPackageId()));
+        request.put(new NoteBytes("install_path"), 
+            new NoteBytes(pkg.getInstallPath().getAsString()));
+        
+        if (parentPath != null) {
+            emitTo(parentPath, request.getNoteBytesObject());
+        }
+        
+        // Show loading message
+        uiRenderer.render(UIProtocol.showMessage(
+            "Load request sent to AppData.\n" +
+            "Check 'Runtime Status' to see loaded nodes."));
+        
+        showMainMenu();
+    }
+    
+    private void showUnloadMenu() {
+        // Get loaded nodes from AppData
+        var loadedNodes = appData.nodeRegistry();
+        
+        if (loadedNodes.isEmpty()) {
+            uiRenderer.render(UIProtocol.showMessage("No nodes loaded in runtime"));
+            showMainMenu();
+            return;
+        }
+        
+        ContextPath menuPath = contextPath.append("menu", "unload");
+        MenuContext menu = new MenuContext(menuPath, "Unload Node", 
+            uiRenderer, currentMenu);
+        
+        menu.addInfoItem("info", "Select a node to unload from runtime");
+        menu.addSeparator("Loaded Nodes");
+        
+        for (var entry : loadedNodes.entrySet()) {
+            var nodeId = entry.getKey();
+            var node = entry.getValue();
+            
+            menu.addItem(
+                nodeId.getAsString(),
+                "Node: " + nodeId.getAsString(),
+                () -> requestUnloadNode(nodeId)
+            );
+        }
+        
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
+    }
+    
+    private void requestUnloadNode(NoteBytesReadOnly nodeId) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Requesting AppData to unload node..."));
+        
+        // Send message to AppData
+        NoteBytesMap request = new NoteBytesMap();
+        request.put(Keys.CMD, new NoteBytes("unload_node"));
+        request.put(new NoteBytes("node_id"), new NoteBytes(nodeId.getAsString()));
+        
+        if (parentPath != null) {
+            emitTo(parentPath, request.getNoteBytesObject());
+        }
+        
+        uiRenderer.render(UIProtocol.showMessage("Unload request sent to AppData"));
+        showMainMenu();
+    }
+    
+    private void showRuntimeStatus() {
+        var loadedNodes = appData.nodeRegistry();
+        
+        ContextPath menuPath = contextPath.append("menu", "runtime-status");
+        MenuContext menu = new MenuContext(menuPath, "Runtime Status", 
+            uiRenderer, currentMenu);
+        
+        if (loadedNodes.isEmpty()) {
+            menu.addInfoItem("status", "No nodes currently loaded in runtime");
+        } else {
+            menu.addInfoItem("status", 
+                loadedNodes.size() + " node(s) loaded in runtime");
+            menu.addSeparator("Loaded Nodes");
+            
+            for (var entry : loadedNodes.entrySet()) {
+                menu.addInfoItem(
+                    entry.getKey().getAsString(),
+                    "✓ " + entry.getKey().getAsString()
+                );
+            }
+        }
+        
+        menu.addSeparator("");
+        menu.addItem("back", "Back", () -> showMainMenu());
+        
+        currentMenu = menu;
+        menu.display();
     }
     
     // ===== MESSAGE HANDLERS =====
@@ -645,10 +759,9 @@ public class NodeManagerProcess extends FlowProcess {
             RoutedMessageExecutor executor = m_routedMsgMap.get(cmd);
             if (executor != null) {
                 return executor.execute(msg, packet);
-            } else {
-                System.err.println("[NodeManager] Unknown command: " + cmd);
-                return CompletableFuture.completedFuture(null);
             }
+            
+            return CompletableFuture.completedFuture(null);
             
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
@@ -657,10 +770,7 @@ public class NodeManagerProcess extends FlowProcess {
     
     private CompletableFuture<Void> handleMenuSelection(
             NoteBytesMap msg, RoutedPacket packet) {
-        // Delegate to current menu
-        if (currentMenu != null) {
-            // Menu handles its own navigation
-        }
+        // Menu handles navigation
         return CompletableFuture.completedFuture(null);
     }
     
@@ -675,48 +785,10 @@ public class NodeManagerProcess extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
     
-    private CompletableFuture<Void> handleInstallNode(
-            NoteBytesMap msg, RoutedPacket packet) {
-        // TODO: Handle install request from message
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    private CompletableFuture<Void> handleUninstallNode(
-            NoteBytesMap msg, RoutedPacket packet) {
-        // TODO: Handle uninstall request from message
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    private CompletableFuture<Void> handleEnableNode(
-            NoteBytesMap msg, RoutedPacket packet) {
-        // TODO: Handle enable request from message
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    private CompletableFuture<Void> handleDisableNode(
-            NoteBytesMap msg, RoutedPacket packet) {
-        // TODO: Handle disable request from message
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    private CompletableFuture<Void> handleConfigureNode(
-            NoteBytesMap msg, RoutedPacket packet) {
-        // TODO: Handle configure request from message
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    private CompletableFuture<Void> handleRefreshMarketplace(
-            NoteBytesMap msg, RoutedPacket packet) {
-        refreshMarketplace();
-        return CompletableFuture.completedFuture(null);
-    }
-    
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        throw new UnsupportedOperationException("NodeManager does not handle streams");
+        throw new UnsupportedOperationException();
     }
-    
-    // ===== PARENT COMMUNICATION =====
     
     private void notifyParent(String event) {
         if (parentPath != null) {
@@ -726,21 +798,16 @@ public class NodeManagerProcess extends FlowProcess {
         }
     }
     
-    // ===== GETTERS =====
-    
-    public BitFlagStateMachine getState() {
-        return state;
-    }
-    
-    public NodeRegistry getNodeRegistry() {
-        return nodeRegistry;
-    }
-    
-    public NodeGroupManager getGroupManager() {
-        return groupManager;
-    }
-    
-    public boolean isReady() {
-        return state.hasState(READY);
+    /**
+     * Shutdown - NodeManager is lazy, dies when not needed
+     */
+    public void shutdown() {
+        if (installRegistry != null) {
+            installRegistry.shutdown();
+        }
+        if (repositoryManager != null) {
+            repositoryManager.shutdown();
+        }
+        System.out.println("[NodeManager] Shutdown complete");
     }
 }
