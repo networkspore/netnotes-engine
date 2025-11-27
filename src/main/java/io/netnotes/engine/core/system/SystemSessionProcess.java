@@ -4,7 +4,6 @@ import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.*;
 import io.netnotes.engine.core.system.control.ui.*;
-import io.netnotes.engine.crypto.CryptoService;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,10 +15,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import javax.crypto.SecretKey;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -27,10 +22,7 @@ import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
-import io.netnotes.engine.messaging.task.ProgressMessage;
-import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -38,7 +30,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
-import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
 
@@ -1393,77 +1384,6 @@ public class SystemSessionProcess extends FlowProcess {
             "All files have been reverted."));
         
         showMainMenu();
-    }
-
-    /**
-     * Re-encrypt specific files (generic helper)
-     * 
-     * @param filePaths Files to re-encrypt
-     * @param oldKey Key to decrypt with
-     * @param newKey Key to encrypt with
-     * @param batchSize Concurrent batch size
-     * @param progressWriter Progress tracking
-     */
-    private CompletableFuture<Boolean> reEncryptSpecificFiles(
-            List<String> filePaths,
-            SecretKey oldKey,
-            SecretKey newKey,
-            int batchSize,
-            AsyncNoteBytesWriter progressWriter) {
-        
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Semaphore semaphore = new Semaphore(batchSize, true);
-                List<CompletableFuture<Void>> futures = new ArrayList<>();
-                AtomicInteger completed = new AtomicInteger(0);
-                
-                for (String filePath : filePaths) {
-                    File file = new File(filePath);
-                    if (!file.exists() || !file.isFile()) {
-                        System.err.println("[Recovery] File not found: " + filePath);
-                        continue;
-                    }
-                    
-                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                        try {
-                            semaphore.acquire();
-                            try {
-                                File tmpFile = new File(file.getAbsolutePath() + ".tmp");
-                                
-                                ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
-                                    completed.get(), filePaths.size(), filePath, 
-                                    progressWriter);
-                                
-                                FileStreamUtils.updateFileEncryption(
-                                    oldKey, newKey, file, tmpFile, progressWriter);
-                                
-                                completed.incrementAndGet();
-                                
-                                ProgressMessage.writeAsync(ProtocolMesssages.SUCCESS,
-                                    completed.get(), filePaths.size(), filePath, 
-                                    progressWriter);
-                                
-                            } finally {
-                                semaphore.release();
-                            }
-                        } catch (Exception e) {
-                            TaskMessages.writeErrorAsync(ProtocolMesssages.ERROR,
-                                filePath, e, progressWriter);
-                            throw new RuntimeException("Failed: " + filePath, e);
-                        }
-                    }, appData.getExecService());
-                    
-                    futures.add(future);
-                }
-                
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-                return true;
-                
-            } catch (Exception e) {
-                System.err.println("[Recovery] Re-encryption failed: " + e.getMessage());
-                return false;
-            }
-        }, VirtualExecutors.getVirtualExecutor());
     }
 
             // ===== MESSAGE HANDLERS =====

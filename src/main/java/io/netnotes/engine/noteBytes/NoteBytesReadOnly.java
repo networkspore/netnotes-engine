@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.Arrays;
 
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
@@ -127,8 +129,43 @@ public class NoteBytesReadOnly extends NoteBytes {
         super.ruin();
     }
 
+    private int m_hashCode = -1;
+    @Override
+    public int hashCode(){
+        if(m_hashCode == -1){
+            byte[] bytes = getBytesInternal();
+            m_hashCode = bytes.length == 0 ? 0 : HashServices.getHashCode(bytes, getType());
+        }
+        return m_hashCode;
+    }
 
-      public static NoteBytesReadOnly of(Object obj) {
+    @Override
+    public boolean equalsBytes(byte[] bytes){
+        if(isRuined()){
+            return false;
+        }
+        byte[] value = getBytesInternal();
+        if(value.length != bytes.length){
+            return false;
+        }
+        if(value.length == 0 && bytes.length == 0){
+            return true;
+        }
+        return Arrays.equals(value, bytes);
+    }
+
+    @Override
+    public boolean equalsString(String str){
+        if(str == null){
+            throw new NullPointerException("NoteBytes.equalsString str is null");
+        }
+     
+        return getAsString().equals(str);
+    }
+
+
+
+    public static NoteBytesReadOnly of(Object obj) {
         if (obj == null) {
             throw new NullPointerException("Cannot create NoteBytes from null object");
         }else if (obj instanceof Boolean) {

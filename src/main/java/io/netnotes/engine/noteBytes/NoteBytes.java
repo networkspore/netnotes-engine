@@ -403,13 +403,13 @@ public class NoteBytes {
         if(obj == this){
             return true;
         }
-        if(obj != null && obj instanceof NoteBytes){
-            NoteBytes noteBytesObj = (NoteBytes) obj;
+        if(obj != null && obj instanceof NoteBytes noteBytesObj){
+  
             if(noteBytesObj.isRuined()){
                 return false;
             }
             byte objType = noteBytesObj.getType();
-            byte thisType = m_type;
+            byte thisType = getType();
             if(objType != thisType){
                 return false;
             }
@@ -419,11 +419,11 @@ public class NoteBytes {
             }
             return equalsBytes(objValue);
         }
-        if(obj instanceof byte[]){
-            return equalsBytes((byte[]) obj);
+        if(obj instanceof byte[] bytes){
+            return equalsBytes(bytes);
         }
-        if(obj instanceof String){
-            return equalsString((String) obj);
+        if(obj instanceof String str){
+            return equalsString(str);
         }
         return false;
     }
