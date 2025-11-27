@@ -45,7 +45,7 @@ public class EphemeralKeyCharModsEvent extends EphemeralRoutedEvent {
      * secure untraceable UTF8 bytes from registry
      */
     public NoteBytes getUTF8() {
-        return Keyboard.CodePointCharsByteRegistry.getCharBytes(codepointData);
+        return Keyboard.getCharBytes(codepointData);
     }
     
     @Override

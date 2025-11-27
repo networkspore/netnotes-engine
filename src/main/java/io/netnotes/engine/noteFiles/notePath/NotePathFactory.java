@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.io.PipedOutputStream;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
-
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,6 +26,10 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.IntCounter;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteFiles.DiskSpaceValidation;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
@@ -102,7 +106,7 @@ public class NotePathFactory {
         return idDataFile;
     }
 
-    private SettingsData getSettingsData(){
+    public SettingsData getSettingsData(){
         return m_settingsData;
     }
 
@@ -214,5 +218,147 @@ public class NotePathFactory {
                 CompletableFuture.completedFuture(notePath)
             ));
     
+    }
+
+     /**
+     * Parse bucket (nested structure) to collect file paths
+     */
+    public static void parseBucketForFiles(
+            NoteBytesReader reader, 
+            List<File> files, 
+            IntCounter byteCounter,
+            int bucketEnd) throws IOException {
+        
+        while (byteCounter.get() < bucketEnd) {
+            NoteBytes key = reader.nextNoteBytes();
+            
+            if (key == null) {
+                break;
+            }
+            
+            byteCounter.add(key.byteLength());
+            
+            if (key.equals(NotePath.FILE_PATH)) {
+                // Found a file path
+                NoteBytes filePath = reader.nextNoteBytes();
+                if (filePath != null) {
+                    byteCounter.add(filePath.byteLength());
+                    
+                    File file = new File(filePath.getAsString());
+                    if (file.exists() && file.isFile()) {
+                        files.add(file);
+                    }
+                }
+                
+            } else if (key.getType() == NoteBytesMetaData.STRING_TYPE) {
+                // Nested bucket - recurse
+                NoteBytesMetaData metaData = reader.nextMetaData();
+                
+                if (metaData != null && 
+                    metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    
+                    byteCounter.add(NoteBytesMetaData.STANDARD_META_DATA_SIZE);
+                    int nestedEnd = byteCounter.get() + metaData.getLength();
+                    
+                    parseBucketForFiles(reader, files, byteCounter, nestedEnd);
+                }
+            }
+        }
+    }
+
+
+    /**
+     * Calculate disk space requirements based on collected files
+     */
+    public static DiskSpaceValidation calculateDiskSpaceRequirements(
+            List<File> files, 
+            File ledgerFile) {
+        
+        int fileCount = files.size();
+        long totalSize = 0;
+        long[] largestBatchSizes = new long[10];
+        
+        for (File file : files) {
+            long size = file.length();
+            totalSize += size;
+            DiskSpaceValidation.updateLargestBatchSizes(largestBatchSizes, size);
+        }
+        
+        long availableSpace = ledgerFile.getUsableSpace();
+        long requiredSpace = totalSize;
+        long bufferSpace = Math.min(
+            (long) (requiredSpace * 0.20),
+            1024L * 1024 * 1024 // 1GB
+        );
+        
+        boolean isValid = availableSpace >= (requiredSpace + bufferSpace);
+        
+        System.out.println(String.format(
+            "[NoteFileService] Disk space validation:\n" +
+            "  Files found: %d\n" +
+            "  Total size: %.2f MB\n" +
+            "  Required space: %.2f MB\n" +
+            "  Available space: %.2f MB\n" +
+            "  Buffer space: %.2f MB\n" +
+            "  Validation: %s",
+            fileCount,
+            totalSize / (1024.0 * 1024.0),
+            requiredSpace / (1024.0 * 1024.0),
+            availableSpace / (1024.0 * 1024.0),
+            bufferSpace / (1024.0 * 1024.0),
+            isValid ? "PASSED" : "FAILED"
+        ));
+        
+        return new DiskSpaceValidation(
+            isValid,
+            fileCount,
+            totalSize,
+            requiredSpace,
+            availableSpace,
+            bufferSpace
+        );
+    }
+
+    /**
+     * Parse root level of ledger to collect file paths
+     * Similar to NotePathReEncryption.rootLevelParse but only collecting paths
+     */
+    public static void parseRootLevelForFiles(NoteBytesReader reader, List<File> files) 
+            throws IOException {
+        
+        NoteBytes rootKey = reader.nextNoteBytes();
+        
+        while (rootKey != null) {
+            if (rootKey.equals(NotePath.FILE_PATH)) {
+                // Found a file path entry at root level
+                NoteBytes filePath = reader.nextNoteBytes();
+                if (filePath != null) {
+                    File file = new File(filePath.getAsString());
+                    if (file.exists() && file.isFile()) {
+                        files.add(file);
+                    }
+                }
+                
+            } else if (rootKey.getType() == NoteBytesMetaData.STRING_TYPE) {
+                // This is a directory/bucket entry - recurse into it
+                NoteBytesMetaData metaData = reader.nextMetaData();
+                
+                if (metaData != null && 
+                    metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    
+                    // Track position to know bucket boundaries
+                    IntCounter byteCounter = new IntCounter(0);
+                    byteCounter.add(rootKey.byteLength());
+                    byteCounter.add(NoteBytesMetaData.STANDARD_META_DATA_SIZE);
+                    
+                    int bucketEnd = byteCounter.get() + metaData.getLength();
+                    
+                    // Recursively collect file paths within bucket
+                    parseBucketForFiles(reader, files, byteCounter, bucketEnd);
+                }
+            }
+            
+            rootKey = reader.nextNoteBytes();
+        }
     }
 }

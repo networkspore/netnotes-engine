@@ -299,230 +299,296 @@ public final class Keyboard {
         }
     }
 
-    public final class CodePointCharsByteRegistry{
-        private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[127];
-        private static final int[] index = new int[0];
 
-        static {
-           
-            // Letters: a-z and A-Z
-            for (int i = 0; i < 26; i++) {
-                char lower = (char) ('a' + i);
-                char upper = (char) ('A' + i);
-
-                CP_TO_CHAR_TABLE[(int) lower] = new NoteBytes(String.valueOf(lower));
-                CP_TO_CHAR_TABLE[(int) upper] = new NoteBytes(String.valueOf(upper));
-            }
-
-            // Number row unshifted
-            for (int i = 1; i <= 9; i++) {
-                char c = (char) ('0' + i);
-                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
-            }
-            CP_TO_CHAR_TABLE[(int) '0'] = new NoteBytes("0");
-
-
-            // Number row shifted
-            char[] shiftedNums = "!@#$%^&*()".toCharArray();
-            for (char c : shiftedNums) {
-                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
-            }
-
-            // Unshifted punctuation
-            char[] unshifted = {
-                    '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/', ' ', '\t', '\n'
-            };
-            for (char c : unshifted) {
-                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
-            }
-
-            // Shifted punctuation
-            char[] shifted = {
-                    '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
-            };
-            for (char c : shifted) {
-                CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
-            }
-        }
-    
+    private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[127];
+    private static final int[] codepoint = new int[0];
+  
+    static {
         
+        // Letters: a-z and A-Z
+        for (int i = 0; i < 26; i++) {
+            char lower = (char) ('a' + i);
+            char upper = (char) ('A' + i);
 
-        public static NoteBytes getCharBytes(NoteBytes key){
-            index[0] = key.get()[0] & 0xFF;
-            NoteBytes value = CP_TO_CHAR_TABLE[index[0]];
-            index[0] = 0;
-            return value;
+            CP_TO_CHAR_TABLE[(int) lower] = new NoteBytes(String.valueOf(lower));
+            CP_TO_CHAR_TABLE[(int) upper] = new NoteBytes(String.valueOf(upper));
         }
 
+        // Number row unshifted
+        for (int i = 1; i <= 9; i++) {
+            char c = (char) ('0' + i);
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+        }
+        CP_TO_CHAR_TABLE[(int) '0'] = new NoteBytes("0");
 
-     
+
+        // Number row shifted
+        char[] shiftedNums = "!@#$%^&*()".toCharArray();
+        for (char c : shiftedNums) {
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+        }
+
+        // Unshifted punctuation
+        char[] unshifted = {
+                '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/', ' ', '\t', '\n'
+        };
+        for (char c : unshifted) {
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+        }
+
+        // Shifted punctuation
+        char[] shifted = {
+                '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
+        };
+        for (char c : shifted) {
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+        }
     }
+
+    
+
+    public static NoteBytes getCharBytes(NoteBytes key){
+        codepoint[0] = key.get()[0] & 0xFF;
+        NoteBytes value = CP_TO_CHAR_TABLE[codepoint[0]];
+        codepoint[0] = 0;
+        return value;
+    }
+
 
     public final class KeyCodeBytes{
         public static final NoteBytes NONE  = new NoteBytes(0x00);
 
-        public static final NoteBytes ERROR_ROLLOVER    = new NoteBytes(0x01);
-        public static final NoteBytes POST_FAIL         = new NoteBytes(0x02);
-        public static final NoteBytes ERROR_UNDEFINED   = new NoteBytes(0x03);
+        public static final NoteBytes ERROR_ROLLOVER    = new NoteBytes(KeyCode.ERROR_ROLLOVER);
+        public static final NoteBytes POST_FAIL         = new NoteBytes(KeyCode.POST_FAIL);
+        public static final NoteBytes ERROR_UNDEFINED   = new NoteBytes(KeyCode.ERROR_UNDEFINED);
 
         // Letters
-        public static final NoteBytes A  = new NoteBytes(0x04);
-        public static final NoteBytes B  = new NoteBytes(0x05);
-        public static final NoteBytes C  = new NoteBytes(0x06);
-        public static final NoteBytes D  = new NoteBytes(0x07);
-        public static final NoteBytes E  = new NoteBytes(0x08);
-        public static final NoteBytes F  = new NoteBytes(0x09);
-        public static final NoteBytes G  = new NoteBytes(0x0A);
-        public static final NoteBytes H  = new NoteBytes(0x0B);
-        public static final NoteBytes I  = new NoteBytes(0x0C);
-        public static final NoteBytes J  = new NoteBytes(0x0D);
-        public static final NoteBytes K  = new NoteBytes(0x0E);
-        public static final NoteBytes L  = new NoteBytes(0x0F);
-        public static final NoteBytes M  = new NoteBytes(0x10);
-        public static final NoteBytes N  = new NoteBytes(0x11);
-        public static final NoteBytes O  = new NoteBytes(0x12);
-        public static final NoteBytes P  = new NoteBytes(0x13);
-        public static final NoteBytes Q  = new NoteBytes(0x14);
-        public static final NoteBytes R  = new NoteBytes(0x15);
-        public static final NoteBytes S  = new NoteBytes(0x16);
-        public static final NoteBytes T  = new NoteBytes(0x17);
-        public static final NoteBytes U  = new NoteBytes(0x18);
-        public static final NoteBytes V  = new NoteBytes(0x19);
-        public static final NoteBytes W  = new NoteBytes(0x1A);
-        public static final NoteBytes X  = new NoteBytes(0x1B);
-        public static final NoteBytes Y  = new NoteBytes(0x1C);
-        public static final NoteBytes Z  = new NoteBytes(0x1D);
+        public static final NoteBytes A  = new NoteBytes(KeyCode.A);
+        public static final NoteBytes B  = new NoteBytes(KeyCode.B);
+        public static final NoteBytes C  = new NoteBytes(KeyCode.C);
+        public static final NoteBytes D  = new NoteBytes(KeyCode.D);
+        public static final NoteBytes E  = new NoteBytes(KeyCode.E);
+        public static final NoteBytes F  = new NoteBytes(KeyCode.F);
+        public static final NoteBytes G  = new NoteBytes(KeyCode.G);
+        public static final NoteBytes H  = new NoteBytes(KeyCode.H);
+        public static final NoteBytes I  = new NoteBytes(KeyCode.I);
+        public static final NoteBytes J  = new NoteBytes(KeyCode.J);
+        public static final NoteBytes K  = new NoteBytes(KeyCode.K);
+        public static final NoteBytes L  = new NoteBytes(KeyCode.L);
+        public static final NoteBytes M  = new NoteBytes(KeyCode.M);
+        public static final NoteBytes N  = new NoteBytes(KeyCode.N);
+        public static final NoteBytes O  = new NoteBytes(KeyCode.O);
+        public static final NoteBytes P  = new NoteBytes(KeyCode.P);
+        public static final NoteBytes Q  = new NoteBytes(KeyCode.Q);
+        public static final NoteBytes R  = new NoteBytes(KeyCode.R);
+        public static final NoteBytes S  = new NoteBytes(KeyCode.S);
+        public static final NoteBytes T  = new NoteBytes(KeyCode.T);
+        public static final NoteBytes U  = new NoteBytes(KeyCode.U);
+        public static final NoteBytes V  = new NoteBytes(KeyCode.V);
+        public static final NoteBytes W  = new NoteBytes(KeyCode.W);
+        public static final NoteBytes X  = new NoteBytes(KeyCode.X);
+        public static final NoteBytes Y  = new NoteBytes(KeyCode.Y);
+        public static final NoteBytes Z  = new NoteBytes(KeyCode.Z);
 
         // Number row
-        public static final NoteBytes DIGIT_1  = new NoteBytes(0x1E);
-        public static final NoteBytes DIGIT_2  = new NoteBytes(0x1F);
-        public static final NoteBytes DIGIT_3  = new NoteBytes(0x20);
-        public static final NoteBytes DIGIT_4  = new NoteBytes(0x21);
-        public static final NoteBytes DIGIT_5  = new NoteBytes(0x22);
-        public static final NoteBytes DIGIT_6  = new NoteBytes(0x23);
-        public static final NoteBytes DIGIT_7  = new NoteBytes(0x24);
-        public static final NoteBytes DIGIT_8  = new NoteBytes(0x25);
-        public static final NoteBytes DIGIT_9  = new NoteBytes(0x26);
-        public static final NoteBytes DIGIT_0  = new NoteBytes(0x27);
+        public static final NoteBytes DIGIT_1  = new NoteBytes(KeyCode.DIGIT_1);
+        public static final NoteBytes DIGIT_2  = new NoteBytes(KeyCode.DIGIT_2);
+        public static final NoteBytes DIGIT_3  = new NoteBytes(KeyCode.DIGIT_3);
+        public static final NoteBytes DIGIT_4  = new NoteBytes(KeyCode.DIGIT_4);
+        public static final NoteBytes DIGIT_5  = new NoteBytes(KeyCode.DIGIT_5);
+        public static final NoteBytes DIGIT_6  = new NoteBytes(KeyCode.DIGIT_6);
+        public static final NoteBytes DIGIT_7  = new NoteBytes(KeyCode.DIGIT_7);
+        public static final NoteBytes DIGIT_8  = new NoteBytes(KeyCode.DIGIT_8);
+        public static final NoteBytes DIGIT_9  = new NoteBytes(KeyCode.DIGIT_9);
+        public static final NoteBytes DIGIT_0  = new NoteBytes(KeyCode.DIGIT_0);
 
         // Basics
-        public static final NoteBytes ENTER  = new NoteBytes(0x28);
-        public static final NoteBytes ESCAPE  = new NoteBytes(0x29);
-        public static final NoteBytes BACKSPACE  = new NoteBytes(0x2A);
-        public static final NoteBytes TAB  = new NoteBytes(0x2B);
-        public static final NoteBytes SPACE  = new NoteBytes(0x2C);
+        public static final NoteBytes ENTER  = new NoteBytes(KeyCode.ENTER);
+        public static final NoteBytes ESCAPE  = new NoteBytes(KeyCode.ESCAPE);
+        public static final NoteBytes BACKSPACE  = new NoteBytes(KeyCode.BACKSPACE);
+        public static final NoteBytes TAB  = new NoteBytes(KeyCode.TAB);
+        public static final NoteBytes SPACE  = new NoteBytes(KeyCode.SPACE);
 
         // Symbols
-        public static final NoteBytes MINUS  = new NoteBytes(0x2D);
-        public static final NoteBytes EQUALS  = new NoteBytes(0x2E);
-        public static final NoteBytes LEFT_BRACKET  = new NoteBytes(0x2F);
-        public static final NoteBytes RIGHT_BRACKET  = new NoteBytes(0x30);
-        public static final NoteBytes BACKSLASH  = new NoteBytes(0x31);
-        public static final NoteBytes NON_US_HASH  = new NoteBytes(0x32);
-        public static final NoteBytes SEMICOLON  = new NoteBytes(0x33);
-        public static final NoteBytes APOSTROPHE  = new NoteBytes(0x34);
-        public static final NoteBytes GRAVE  = new NoteBytes(0x35);
-        public static final NoteBytes COMMA  = new NoteBytes(0x36);
-        public static final NoteBytes PERIOD  = new NoteBytes(0x37);
-        public static final NoteBytes SLASH  = new NoteBytes(0x38);
+        public static final NoteBytes MINUS  = new NoteBytes(KeyCode.MINUS);
+        public static final NoteBytes EQUALS  = new NoteBytes(KeyCode.EQUALS);
+        public static final NoteBytes LEFT_BRACKET  = new NoteBytes(KeyCode.LEFT_BRACKET);
+        public static final NoteBytes RIGHT_BRACKET  = new NoteBytes(KeyCode.RIGHT_BRACKET);
+        public static final NoteBytes BACKSLASH  = new NoteBytes(KeyCode.BACKSLASH);
+        public static final NoteBytes NON_US_HASH  = new NoteBytes(KeyCode.NON_US_HASH);
+        public static final NoteBytes SEMICOLON  = new NoteBytes(KeyCode.SEMICOLON);
+        public static final NoteBytes APOSTROPHE  = new NoteBytes(KeyCode.APOSTROPHE);
+        public static final NoteBytes GRAVE  = new NoteBytes(KeyCode.GRAVE);
+        public static final NoteBytes COMMA  = new NoteBytes(KeyCode.COMMA);
+        public static final NoteBytes PERIOD  = new NoteBytes(KeyCode.PERIOD);
+        public static final NoteBytes SLASH  = new NoteBytes(KeyCode.SLASH);
 
         // Locks & function keys
-        public static final NoteBytes CAPS_LOCK  = new NoteBytes(0x39);
-        public static final NoteBytes F1  = new NoteBytes(0x3A);
-        public static final NoteBytes F2  = new NoteBytes(0x3B);
-        public static final NoteBytes F3  = new NoteBytes(0x3C);
-        public static final NoteBytes F4  = new NoteBytes(0x3D);
-        public static final NoteBytes F5  = new NoteBytes(0x3E);
-        public static final NoteBytes F6  = new NoteBytes(0x3F);
-        public static final NoteBytes F7  = new NoteBytes(0x40);
-        public static final NoteBytes F8  = new NoteBytes(0x41);
-        public static final NoteBytes F9  = new NoteBytes(0x42);
-        public static final NoteBytes F10  = new NoteBytes(0x43);
-        public static final NoteBytes F11  = new NoteBytes(0x44);
-        public static final NoteBytes F12  = new NoteBytes(0x45);
+        public static final NoteBytes CAPS_LOCK  = new NoteBytes(KeyCode.CAPS_LOCK);
+        public static final NoteBytes F1  = new NoteBytes(KeyCode.F1);
+        public static final NoteBytes F2  = new NoteBytes(KeyCode.F2);
+        public static final NoteBytes F3  = new NoteBytes(KeyCode.F3);
+        public static final NoteBytes F4  = new NoteBytes(KeyCode.F4);
+        public static final NoteBytes F5  = new NoteBytes(KeyCode.F5);
+        public static final NoteBytes F6  = new NoteBytes(KeyCode.F6);
+        public static final NoteBytes F7  = new NoteBytes(KeyCode.F7);
+        public static final NoteBytes F8  = new NoteBytes(KeyCode.F8);
+        public static final NoteBytes F9  = new NoteBytes(KeyCode.F9);
+        public static final NoteBytes F10  = new NoteBytes(KeyCode.F10);
+        public static final NoteBytes F11  = new NoteBytes(KeyCode.F11);
+        public static final NoteBytes F12  = new NoteBytes(KeyCode.F12);
 
-        public static final NoteBytes PRINT_SCREEN  = new NoteBytes(0x46);
-        public static final NoteBytes SCROLL_LOCK   = new NoteBytes(0x47);
-        public static final NoteBytes PAUSE  = new NoteBytes(0x48);
+        public static final NoteBytes PRINT_SCREEN  = new NoteBytes(KeyCode.PRINT_SCREEN);
+        public static final NoteBytes SCROLL_LOCK   = new NoteBytes(KeyCode.SCROLL_LOCK);
+        public static final NoteBytes PAUSE  = new NoteBytes(KeyCode.PAUSE);
 
         // Navigation block
-        public static final NoteBytes INSERT  = new NoteBytes(0x49);
-        public static final NoteBytes HOME  = new NoteBytes(0x4A);
-        public static final NoteBytes PAGE_UP  = new NoteBytes(0x4B);
-        public static final NoteBytes DELETE  = new NoteBytes(0x4C);
-        public static final NoteBytes END  = new NoteBytes(0x4D);
-        public static final NoteBytes PAGE_DOWN  = new NoteBytes(0x4E);
+        public static final NoteBytes INSERT  = new NoteBytes(KeyCode.INSERT);
+        public static final NoteBytes HOME  = new NoteBytes(KeyCode.HOME);
+        public static final NoteBytes PAGE_UP  = new NoteBytes(KeyCode.PAGE_UP);
+        public static final NoteBytes DELETE  = new NoteBytes(KeyCode.DELETE);
+        public static final NoteBytes END  = new NoteBytes(KeyCode.END);
+        public static final NoteBytes PAGE_DOWN  = new NoteBytes(KeyCode.PAGE_DOWN);
 
         // Arrows
-        public static final NoteBytes RIGHT  = new NoteBytes(0x4F);
-        public static final NoteBytes LEFT   = new NoteBytes(0x50);
-        public static final NoteBytes DOWN   = new NoteBytes(0x51);
-        public static final NoteBytes UP     = new NoteBytes(0x52);
+        public static final NoteBytes RIGHT  = new NoteBytes(KeyCode.RIGHT);
+        public static final NoteBytes LEFT   = new NoteBytes(KeyCode.LEFT);
+        public static final NoteBytes DOWN   = new NoteBytes(KeyCode.DOWN);
+        public static final NoteBytes UP     = new NoteBytes(KeyCode.UP);
 
         // Keypad
-        public static final NoteBytes NUM_LOCK  = new NoteBytes(0x53);
-        public static final NoteBytes KP_SLASH  = new NoteBytes(0x54);
-        public static final NoteBytes KP_ASTERISK  = new NoteBytes(0x55);
-        public static final NoteBytes KP_MINUS  = new NoteBytes(0x56);
-        public static final NoteBytes KP_PLUS  = new NoteBytes(0x57);
-        public static final NoteBytes KP_ENTER  = new NoteBytes(0x58);
-        public static final NoteBytes KP_1  = new NoteBytes(0x59);
-        public static final NoteBytes KP_2  = new NoteBytes(0x5A);
-        public static final NoteBytes KP_3  = new NoteBytes(0x5B);
-        public static final NoteBytes KP_4  = new NoteBytes(0x5C);
-        public static final NoteBytes KP_5  = new NoteBytes(0x5D);
-        public static final NoteBytes KP_6  = new NoteBytes(0x5E);
-        public static final NoteBytes KP_7  = new NoteBytes(0x5F);
-        public static final NoteBytes KP_8  = new NoteBytes(0x60);
-        public static final NoteBytes KP_9  = new NoteBytes(0x61);
-        public static final NoteBytes KP_0  = new NoteBytes(0x62);
-        public static final NoteBytes KP_PERIOD  = new NoteBytes(0x63);
+        public static final NoteBytes NUM_LOCK  = new NoteBytes(KeyCode.NUM_LOCK);
+        public static final NoteBytes KP_SLASH  = new NoteBytes(KeyCode.KP_SLASH);
+        public static final NoteBytes KP_ASTERISK  = new NoteBytes(KeyCode.KP_ASTERISK);
+        public static final NoteBytes KP_MINUS  = new NoteBytes(KeyCode.KP_MINUS);
+        public static final NoteBytes KP_PLUS  = new NoteBytes(KeyCode.KP_PLUS);
+        public static final NoteBytes KP_ENTER  = new NoteBytes(KeyCode.KP_ENTER);
+        public static final NoteBytes KP_1  = new NoteBytes(KeyCode.KP_1);
+        public static final NoteBytes KP_2  = new NoteBytes(KeyCode.KP_2);
+        public static final NoteBytes KP_3  = new NoteBytes(KeyCode.KP_3);
+        public static final NoteBytes KP_4  = new NoteBytes(KeyCode.KP_4);
+        public static final NoteBytes KP_5  = new NoteBytes(KeyCode.KP_5);
+        public static final NoteBytes KP_6  = new NoteBytes(KeyCode.KP_6);
+        public static final NoteBytes KP_7  = new NoteBytes(KeyCode.KP_7);
+        public static final NoteBytes KP_8  = new NoteBytes(KeyCode.KP_8);
+        public static final NoteBytes KP_9  = new NoteBytes(KeyCode.KP_9);
+        public static final NoteBytes KP_0  = new NoteBytes(KeyCode.KP_0);
+        public static final NoteBytes KP_PERIOD  = new NoteBytes(KeyCode.KP_PERIOD);
 
         // Extended keys
-        public static final NoteBytes NON_US_BACKSLASH  = new NoteBytes(0x64);
-        public static final NoteBytes APPLICATION  = new NoteBytes(0x65);
-        public static final NoteBytes POWER  = new NoteBytes(0x66);
-        public static final NoteBytes KP_EQUALS  = new NoteBytes(0x67);
+        public static final NoteBytes NON_US_BACKSLASH  = new NoteBytes(KeyCode.NON_US_BACKSLASH);
+        public static final NoteBytes APPLICATION  = new NoteBytes(KeyCode.APPLICATION);
+        public static final NoteBytes POWER  = new NoteBytes(KeyCode.POWER);
+        public static final NoteBytes KP_EQUALS  = new NoteBytes(KeyCode.KP_EQUALS);
 
         // F13–F24
-        public static final NoteBytes F13  = new NoteBytes(0x68);
-        public static final NoteBytes F14  = new NoteBytes(0x69);
-        public static final NoteBytes F15  = new NoteBytes(0x6A);
-        public static final NoteBytes F16  = new NoteBytes(0x6B);
-        public static final NoteBytes F17  = new NoteBytes(0x6C);
-        public static final NoteBytes F18  = new NoteBytes(0x6D);
-        public static final NoteBytes F19  = new NoteBytes(0x6E);
-        public static final NoteBytes F20  = new NoteBytes(0x6F);
-        public static final NoteBytes F21  = new NoteBytes(0x70);
-        public static final NoteBytes F22  = new NoteBytes(0x71);
-        public static final NoteBytes F23  = new NoteBytes(0x72);
-        public static final NoteBytes F24  = new NoteBytes(0x73);
+        public static final NoteBytes F13  = new NoteBytes(KeyCode.F13);
+        public static final NoteBytes F14  = new NoteBytes(KeyCode.F14);
+        public static final NoteBytes F15  = new NoteBytes(KeyCode.F15);
+        public static final NoteBytes F16  = new NoteBytes(KeyCode.F16);
+        public static final NoteBytes F17  = new NoteBytes(KeyCode.F17);
+        public static final NoteBytes F18  = new NoteBytes(KeyCode.F18);
+        public static final NoteBytes F19  = new NoteBytes(KeyCode.F19);
+        public static final NoteBytes F20  = new NoteBytes(KeyCode.F20);
+        public static final NoteBytes F21  = new NoteBytes(KeyCode.F21);
+        public static final NoteBytes F22  = new NoteBytes(KeyCode.F22);
+        public static final NoteBytes F23  = new NoteBytes(KeyCode.F23);
+        public static final NoteBytes F24  = new NoteBytes(KeyCode.F24);
 
         // Media keys
-        public static final NoteBytes EXECUTE  = new NoteBytes(0x74);
-        public static final NoteBytes HELP  = new NoteBytes(0x75);
-        public static final NoteBytes MENU  = new NoteBytes(0x76);
-        public static final NoteBytes SELECT  = new NoteBytes(0x77);
-        public static final NoteBytes STOP  = new NoteBytes(0x78);
-        public static final NoteBytes AGAIN  = new NoteBytes(0x79);
-        public static final NoteBytes UNDO  = new NoteBytes(0x7A);
-        public static final NoteBytes CUT  = new NoteBytes(0x7B);
-        public static final NoteBytes COPY  = new NoteBytes(0x7C);
-        public static final NoteBytes PASTE  = new NoteBytes(0x7D);
-        public static final NoteBytes FIND  = new NoteBytes(0x7E);
-        public static final NoteBytes MUTE  = new NoteBytes(0x7F);
-        public static final NoteBytes VOLUME_UP  = new NoteBytes(0x80);
-        public static final NoteBytes VOLUME_DOWN  = new NoteBytes(0x81);
+        public static final NoteBytes EXECUTE  = new NoteBytes(KeyCode.EXECUTE);
+        public static final NoteBytes HELP  = new NoteBytes(KeyCode.HELP);
+        public static final NoteBytes MENU  = new NoteBytes(KeyCode.MENU);
+        public static final NoteBytes SELECT  = new NoteBytes(KeyCode.SELECT);
+        public static final NoteBytes STOP  = new NoteBytes(KeyCode.STOP);
+        public static final NoteBytes AGAIN  = new NoteBytes(KeyCode.AGAIN);
+        public static final NoteBytes UNDO  = new NoteBytes(KeyCode.UNDO);
+        public static final NoteBytes CUT  = new NoteBytes(KeyCode.CUT);
+        public static final NoteBytes COPY  = new NoteBytes(KeyCode.COPY);
+        public static final NoteBytes PASTE  = new NoteBytes(KeyCode.PASTE);
+        public static final NoteBytes FIND  = new NoteBytes(KeyCode.FIND);
+        public static final NoteBytes MUTE  = new NoteBytes(KeyCode.MUTE);
+        public static final NoteBytes VOLUME_UP  = new NoteBytes(KeyCode.VOLUME_UP);
+        public static final NoteBytes VOLUME_DOWN  = new NoteBytes(KeyCode.VOLUME_DOWN);
 
         // Modifiers (left/right)
-        public static final NoteBytes LEFT_CONTROL   = new NoteBytes(0xE0);
-        public static final NoteBytes LEFT_SHIFT     = new NoteBytes(0xE1);
-        public static final NoteBytes LEFT_ALT       = new NoteBytes(0xE2);
-        public static final NoteBytes LEFT_META      = new NoteBytes(0xE3);
-        public static final NoteBytes RIGHT_CONTROL  = new NoteBytes(0xE4);
-        public static final NoteBytes RIGHT_SHIFT    = new NoteBytes(0xE5);
-        public static final NoteBytes RIGHT_ALT      = new NoteBytes(0xE6);
-        public static final NoteBytes RIGHT_META     = new NoteBytes(0xE7);
+        public static final NoteBytes LEFT_CONTROL   = new NoteBytes(KeyCode.LEFT_CONTROL);
+        public static final NoteBytes LEFT_SHIFT     = new NoteBytes(KeyCode.LEFT_SHIFT);
+        public static final NoteBytes LEFT_ALT       = new NoteBytes(KeyCode.LEFT_ALT);
+        public static final NoteBytes LEFT_META      = new NoteBytes(KeyCode.LEFT_META);
+        public static final NoteBytes RIGHT_CONTROL  = new NoteBytes(KeyCode.RIGHT_CONTROL);
+        public static final NoteBytes RIGHT_SHIFT    = new NoteBytes(KeyCode.RIGHT_SHIFT);
+        public static final NoteBytes RIGHT_ALT      = new NoteBytes(KeyCode.RIGHT_ALT);
+        public static final NoteBytes RIGHT_META     = new NoteBytes(KeyCode.RIGHT_META);
+
+        private final static int[] usage = new int[1];
+        private static final char[] shiftedNums = "!@#$%^&*".toCharArray();
+
+        public static NoteBytes hidUsageToChar(NoteBytes keycode, boolean shift) {
+            usage[0] = keycode.get()[0] & 0xFF;  // HID usage byte
+            codepoint[0] = 0;
+
+            // Letters A-Z
+            if (usage[0] >= KeyCode.A && usage[0] <= KeyCode.Z) {
+                codepoint[0] = shift ? ('A' + usage[0] - KeyCode.A) : ('a' + usage[0] - KeyCode.A);
+            }
+            // Numbers 1-9
+            else if (usage[0] >= KeyCode.DIGIT_1 && usage[0] <= KeyCode.DIGIT_9) {
+                codepoint[0] = shift ?  shiftedNums[usage[0] -KeyCode.DIGIT_1] : '1' + (usage[0] - KeyCode.DIGIT_1);
+            }
+            // Number 0
+            else if (usage[0] == KeyCode.DIGIT_0) {
+                codepoint[0] = shift ? ')' : '0';
+            }
+            if (usage[0] >= KeyCode.KP_1 && usage[0] <= KeyCode.KP_9) {
+                codepoint[0] = '1' + (usage[0] - KeyCode.KP_1);
+            } else if (usage[0] == KeyCode.KP_0) {
+                codepoint[0] = '0';
+            }
+            // Keypad operators
+            else if (usage[0] == KeyCode.KP_SLASH) {
+                codepoint[0] = '/';
+            } else if (usage[0] == KeyCode.KP_ASTERISK) {
+                codepoint[0] = '*';
+            } else if (usage[0] == KeyCode.KP_MINUS) {
+                codepoint[0] = '-';
+            } else if (usage[0] == KeyCode.KP_PLUS) {
+                codepoint[0] = '+';
+            } else if (usage[0] == KeyCode.KP_PERIOD) {
+                codepoint[0] = '.';
+            } else if(usage[0] == KeyCode.KP_ENTER) {
+                codepoint[0] = '\n';
+            }
+            // Punctuation
+            else {
+                switch (usage[0]) {
+                    case KeyCode.MINUS: codepoint[0] = shift ? '_' : '-'; break;
+                    case KeyCode.EQUALS: codepoint[0] = shift ? '+' : '='; break;
+                    case KeyCode.LEFT_BRACKET: codepoint[0] = shift ? '{' : '['; break;
+                    case KeyCode.RIGHT_BRACKET: codepoint[0] = shift ? '}' : ']'; break;
+                    case KeyCode.BACKSLASH: codepoint[0] = shift ? '|' : '\\'; break;
+                    case KeyCode.NON_US_HASH: codepoint[0] = shift ? '|' : '#'; break;
+                    case KeyCode.SEMICOLON: codepoint[0] = shift ? ':' : ';'; break;
+                    case KeyCode.APOSTROPHE: codepoint[0] = shift ? '"' : '\''; break;
+                    case KeyCode.GRAVE: codepoint[0] = shift ? '~' : '`'; break;
+                    case KeyCode.COMMA: codepoint[0] = shift ? '<' : ','; break;
+                    case KeyCode.PERIOD: codepoint[0] = shift ? '>' : '.'; break;
+                    case KeyCode.SLASH: codepoint[0] = shift ? '?' : '/'; break;
+                    case KeyCode.ENTER: codepoint[0] = '\n'; break;
+                    case KeyCode.TAB: codepoint[0] = '\t'; break;
+                    case KeyCode.SPACE: codepoint[0] = ' '; break;
+                    default: codepoint[0] = 0; // unknown
+                }
+            }
+           
+            if (codepoint[0] == 0) return null;
+
+            // Lookup using your index[0] table
+            NoteBytes charBytes = CP_TO_CHAR_TABLE[codepoint[0]];
+            usage[0] = 0;
+            codepoint[0] = 0;
+            return charBytes;
+        }
     }
 
     

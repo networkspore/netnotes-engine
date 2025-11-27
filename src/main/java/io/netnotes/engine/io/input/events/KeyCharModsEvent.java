@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.Keyboard.CodePointCharsByteRegistry;
+import io.netnotes.engine.io.input.Keyboard;
 import io.netnotes.engine.noteBytes.NoteBytes;
 
 public final class KeyCharModsEvent implements RoutedEvent {
@@ -42,7 +42,7 @@ public final class KeyCharModsEvent implements RoutedEvent {
     }
     public int stateFlags() { return stateFlags; }
 
-    public NoteBytes getUTF8() { return CodePointCharsByteRegistry.getCharBytes(codepointBytes); }
+    public NoteBytes getUTF8() { return Keyboard.getCharBytes(codepointBytes); }
 
     @Override 
     public String toString(){

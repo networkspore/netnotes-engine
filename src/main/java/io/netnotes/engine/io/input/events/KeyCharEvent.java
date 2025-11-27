@@ -39,7 +39,7 @@ public final class KeyCharEvent implements RoutedEvent {
         return strCache;
     }
     public int stateFlags() { return stateFlags; }
-    public NoteBytes getUTF8() { return Keyboard.CodePointCharsByteRegistry.getCharBytes(codepointBytes); }
+    public NoteBytes getUTF8() { return Keyboard.getCharBytes(codepointBytes); }
 
     @Override
     public String toString(){

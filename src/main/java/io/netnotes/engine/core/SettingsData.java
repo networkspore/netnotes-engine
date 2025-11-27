@@ -238,10 +238,6 @@ public class SettingsData {
         save();
     }
 
-    public void loadOldSettings(NoteBytesMap map){
-        
-    }
-
 
     public NoteBytes getOldBCrypt(){
         return m_oldBcrypt;

@@ -31,7 +31,7 @@ public class EphemeralKeyCharEvent extends EphemeralRoutedEvent {
     }
 
     public NoteBytes getUTF8() {
-        return Keyboard.CodePointCharsByteRegistry.getCharBytes(codepointData);
+        return Keyboard.getCharBytes(codepointData);
     }
     
     public NoteBytesEphemeral getStateFlagsBytes() {

@@ -5,18 +5,18 @@ import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
-import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
-import io.netnotes.engine.noteBytes.processing.IntCounter;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
+import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.noteFiles.ManagedNoteFileInterface;
 import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.File;
@@ -29,9 +29,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import javax.crypto.SecretKey;
 
+/**
+ * NoteFileService - Encrypted file registry and operations
+ * 
+ * REFACTORED ARCHITECTURE:
+ * - Works with SettingsData through NotePathFactory
+ * - Provides recovery operations for AppData
+ * - Does NOT expose SettingsData to external callers
+ * - Coordinates file operations with password/key management
+ */
 public class NoteFileService extends NotePathFactory {
     private final Map<NoteStringArrayReadOnly, ManagedNoteFileInterface> m_registry = new ConcurrentHashMap<>();
 
@@ -39,8 +51,9 @@ public class NoteFileService extends NotePathFactory {
         super(settingsData);
     }
     
+    // ===== STANDARD FILE OPERATIONS =====
+    
     public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly notePath) {
-
         ManagedNoteFileInterface existing = m_registry.get(notePath);
         if (existing != null) {
             return CompletableFuture.completedFuture(new NoteFile(notePath, existing));
@@ -59,11 +72,11 @@ public class NoteFileService extends NotePathFactory {
     
     // Called by ManagedNoteFileInterface when it has no more references
     public void cleanupInterface(NoteStringArrayReadOnly path, ManagedNoteFileInterface expectedInterface) {
-        // Use atomic remove to ensure we only remove the expected interface
         m_registry.remove(path, expectedInterface);
     }
     
-    // For key updates - acquire locks on all registered interfaces
+    // ===== KEY UPDATE COORDINATION =====
+    
     public CompletableFuture<File> prepareAllForKeyUpdate() {
         return acquireLock()
             .thenCompose(filePathLedger -> {
@@ -83,168 +96,236 @@ public class NoteFileService extends NotePathFactory {
                     .map(ManagedNoteFileInterface::perpareForShutdown)
                     .collect(Collectors.toList());
                 
-                return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0])).thenApply(v-> filePathLedger);
+                return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]))
+                    .thenApply(v-> filePathLedger);
             });
     }
-    
     
     public void completeKeyUpdateForAll() {
         m_registry.values().forEach(ManagedNoteFileInterface::completeKeyUpdate);
         releaseLock();
     }
     
-    // Manual cleanup method to remove unused interfaces (for maintenance)
-    public int cleanupUnusedInterfaces() {
-        int removed = 0;
-        Iterator<Map.Entry<NoteStringArrayReadOnly, ManagedNoteFileInterface>> iterator = 
-            m_registry.entrySet().iterator();
-            
-        while (iterator.hasNext()) {
-            Map.Entry<NoteStringArrayReadOnly, ManagedNoteFileInterface> entry = iterator.next();
-            ManagedNoteFileInterface noteInterface = entry.getValue();
-            
-            if (noteInterface.getReferenceCount() == 0 && !noteInterface.isLocked()) {
-                iterator.remove();
-                removed++;
-            }
-        }
-        return removed;
-    }
+    // ===== PASSWORD CHANGE OPERATIONS =====
     
-    // Get current registry size for monitoring
-    public int getRegistrySize() {
-        return m_registry.size();
-    }
-    
-    // Get reference counts for monitoring
-    public Map<NoteStringArrayReadOnly, Integer> getReferenceCounts() {
-        return m_registry.entrySet().stream()
-            .collect(Collectors.toMap(
-                Map.Entry::getKey,
-                entry -> entry.getValue().getReferenceCount()
-            ));
-    }
-
- 
+    /**
+     * Update file path ledger encryption (normal password change)
+     * 
+     * This is the PRIMARY password change operation.
+     * Coordinates with SettingsData to:
+     * 1. Update SettingsData (BCrypt, salt, keys)
+     * 2. Re-encrypt all files in ledger
+     * 
+     * Called by AppData.changePassword()
+     */
     public CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,
         int batchSize
     ) {
-        ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 0, 4, "Aquiring file locks", 
-            progressWriter);
+        ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 0, 4, 
+            "Acquiring file locks", progressWriter);
 
         return prepareAllForKeyUpdate()
             .thenCompose(filePathLedger->
                 super.updateFilePathLedgerEncryption(filePathLedger, progressWriter, 
-                    oldPassword, newPassword, batchSize)).whenComplete((result, throwable) -> {
-                        ProgressMessage.writeAsync(ProtocolMesssages.STOPPING, 0, -1, "Releasing locks", 
-                            progressWriter);
-                        completeKeyUpdateForAll();
-                        StreamUtils.safeClose(progressWriter);
-                });
+                    oldPassword, newPassword, batchSize))
+            .whenComplete((result, throwable) -> {
+                ProgressMessage.writeAsync(ProtocolMesssages.STOPPING, 0, -1, 
+                    "Releasing locks", progressWriter);
+                completeKeyUpdateForAll();
+                StreamUtils.safeClose(progressWriter);
+            });
+    }
+
+    // ===== RECOVERY OPERATIONS =====
+    /*
+    * Complete password change recovery
+    * Re-encrypts files from OLD key to NEW key (current)
+    * 
+    * Used when password change was interrupted mid-operation.
+    * Files are still encrypted with OLD key and need updating.
+    * 
+    * @param filePaths Files to update (still encrypted with OLD key)
+    * @param oldKey Key to decrypt with (previous encryption key)
+    * @param batchSize Concurrent batch size
+    * @param progressWriter Progress tracking
+    * @return Success/failure
+    */
+    public CompletableFuture<Boolean> completePasswordChangeForFiles(
+            List<String> filePaths,
+            SecretKey oldKey,
+            int batchSize,
+            AsyncNoteBytesWriter progressWriter) {
+        
+        System.out.println(String.format(
+            "[NoteFileService] COMPLETE: Re-encrypting %d files (OLD → NEW key)",
+            filePaths.size()));
+        
+        // Get current (NEW) key from SettingsData
+        SecretKey newKey = getSettingsData().getSecretKey();
+        
+        return reEncryptFiles(
+            filePaths,
+            oldKey,      // Decrypt with OLD
+            newKey,      // Encrypt with NEW (current)
+            "COMPLETE",
+            batchSize,
+            progressWriter
+        );
     }
 
 
-    public CompletableFuture<Void> prepareForShutdown(NoteStringArrayReadOnly path, boolean recursive){
-        List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
-        return prepareForShutdown(path, recursive, interfaceList).thenAccept(v->{
-            for(ManagedNoteFileInterface managedInterface : interfaceList){
-                if(managedInterface.isLocked()){
-                    managedInterface.releaseLock();
-                }
-            }
-        });
+    /**
+     * Rollback password change
+     * Re-encrypts files from NEW key back to OLD key
+     * 
+     * Used when user wants to restore previous password.
+     * Files were successfully updated to NEW key but need reverting.
+     * 
+     * @param filePaths Files to rollback (encrypted with NEW key)
+     * @param oldKey Key to encrypt with (restore to this)
+     * @param batchSize Concurrent batch size
+     * @param progressWriter Progress tracking
+     * @return Success/failure
+     */
+    public CompletableFuture<Boolean> rollbackPasswordChangeForFiles(
+            List<String> filePaths,
+            SecretKey oldKey,
+            int batchSize,
+            AsyncNoteBytesWriter progressWriter) {
+        
+        System.out.println(String.format(
+            "[NoteFileService] ROLLBACK: Re-encrypting %d files (NEW → OLD key)",
+            filePaths.size()));
+        
+        // Get current (was NEW) key from SettingsData
+        SecretKey currentKey = getSettingsData().getSecretKey();
+        
+        return reEncryptFiles(
+            filePaths,
+            currentKey,  // Decrypt with current (was NEW)
+            oldKey,      // Encrypt with OLD (restore)
+            "ROLLBACK",
+            batchSize,
+            progressWriter
+        );
     }
-   
-    public CompletableFuture<Void> prepareForShutdown(NoteStringArrayReadOnly path, boolean recursive, List<ManagedNoteFileInterface> interfaceList){
-   
-        if(recursive){
-            List<CompletableFuture<Void>> list = new ArrayList<>();
-            
-            Iterator<Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface>> iterator = m_registry.entrySet().iterator();
-            while(iterator.hasNext()) {
-                Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry = iterator.next();
-                list.add(entry.getValue().perpareForShutdown());
-                if(interfaceList != null){
-                    interfaceList.add(entry.getValue());
-                }
-                iterator.remove(); 
-            }
-            
-            return CompletableFuture.allOf(list.toArray(new CompletableFuture[0]));
-        }else{
-            ManagedNoteFileInterface managedInterface = m_registry.remove(path);
-            if(managedInterface != null){
-                if(interfaceList != null){
-                    interfaceList.add(managedInterface);
-                }
-                return managedInterface.perpareForShutdown();
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+
+
+    /**
+     * Generic re-encryption operation (PRIVATE)
+     * 
+     * @param operation Label for logging ("COMPLETE" or "ROLLBACK")
+     */
+    private CompletableFuture<Boolean> reEncryptFiles(
+            List<String> filePaths,
+            SecretKey decryptKey,
+            SecretKey encryptKey,
+            String operation,
+            int batchSize,
+            AsyncNoteBytesWriter progressWriter) {
+        
+        if (filePaths == null || filePaths.isEmpty()) {
+            System.out.println("[NoteFileService] No files to re-encrypt");
+            return CompletableFuture.completedFuture(true);
         }
         
-    }
-
-
-    public CompletableFuture<NotePath> deleteNoteFilePath(NoteStringArrayReadOnly path, boolean recursive, 
-        AsyncNoteBytesWriter progressWriter
-     ) {
-
-        if(path == null ||  path.byteLength() == 0 || path.size() == 0){
-            StreamUtils.safeClose(progressWriter);
-            return CompletableFuture.failedFuture(new IllegalArgumentException("Invalid path provided"));
-        }
-
-        if(progressWriter != null){
-            ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
-                    0, 4, "Aquiring lock", progressWriter);
-        }
-         List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
-
-        return acquireLock().thenCompose((filePathLedger)->{
-            
-            if(!filePathLedger.exists() || !filePathLedger.isFile() || 
-                filePathLedger.length() <= CryptoService.AES_IV_SIZE){
-                throw new IllegalArgumentException("Invalid ledger, inaccessible or insufficient size provided");
-            }
-
-            NotePath notePath = new NotePath(filePathLedger, path, recursive, progressWriter);
-
-            notePath.progressMsg(ProtocolMesssages.STARTING,2, 4,
-                "Initial lock aquired, preparing registry interfaces");
-            return prepareForShutdown(path, recursive, interfaceList).thenCompose(v->deleteNoteFilePath(notePath));
-        }).whenComplete((notePath, ex)->{
-            int toRemoveSize = interfaceList.size();
-            for(int i = 0; i < toRemoveSize; i++){
-                ManagedNoteFileInterface managedInterface= interfaceList.get(i);
-                boolean isDeleted = !managedInterface.isFile();
+        System.out.println(String.format(
+            "[NoteFileService] %s: Processing %d files with batch size %d",
+            operation, filePaths.size(), batchSize));
+        
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Semaphore semaphore = new Semaphore(batchSize, true);
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+                AtomicInteger completed = new AtomicInteger(0);
+                AtomicInteger failed = new AtomicInteger(0);
                 
-                if(managedInterface.isLocked()){
-                    managedInterface.releaseLock();
+                for (String filePath : filePaths) {
+                    File file = new File(filePath);
+                    
+                    if (!file.exists() || !file.isFile()) {
+                        System.err.println("[NoteFileService] File not found: " + filePath);
+                        failed.incrementAndGet();
+                        
+                        if (progressWriter != null) {
+                            TaskMessages.writeErrorAsync(operation,
+                                "File not found: " + filePath,
+                                new IOException("File not found"), progressWriter);
+                        }
+                        continue;
+                    }
+                    
+                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                        try {
+                            semaphore.acquire();
+                            try {
+                                File tmpFile = new File(file.getAbsolutePath() + ".tmp");
+                                
+                                if (progressWriter != null) {
+                                    ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
+                                        completed.get(), filePaths.size(), 
+                                        operation + ": " + filePath, 
+                                        progressWriter);
+                                }
+                                
+                                // Re-encrypt: decryptKey → encryptKey
+                                FileStreamUtils.updateFileEncryption(
+                                    decryptKey, encryptKey, file, tmpFile, progressWriter);
+                                
+                                completed.incrementAndGet();
+                                
+                                if (progressWriter != null) {
+                                    ProgressMessage.writeAsync(ProtocolMesssages.SUCCESS,
+                                        completed.get(), filePaths.size(), 
+                                        operation + ": " + filePath, 
+                                        progressWriter);
+                                }
+                                
+                            } finally {
+                                semaphore.release();
+                            }
+                        } catch (Exception e) {
+                            failed.incrementAndGet();
+                            System.err.println("[NoteFileService] " + operation + 
+                                " failed: " + filePath + " - " + e.getMessage());
+                            
+                            if (progressWriter != null) {
+                                TaskMessages.writeErrorAsync(operation,
+                                    filePath, e, progressWriter);
+                            }
+                        }
+                    }, getExecService());
+                    
+                    futures.add(future);
                 }
                 
-                notePath.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, managedInterface.getId().getAsString(), new NoteBytesPair[]{
-                    new NoteBytesPair(Keys.STATUS, 
-                        !managedInterface.isLocked() && isDeleted ? 
-                            ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
-                    )
-                });
+                // Wait for all to complete
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                 
+                int failedCount = failed.get();
+                boolean success = failedCount == 0;
+                
+                System.out.println(String.format(
+                    "[NoteFileService] %s complete: %d succeeded, %d failed",
+                    operation, completed.get(), failedCount));
+                
+                return success;
+                
+            } catch (Exception e) {
+                System.err.println("[NoteFileService] " + operation + 
+                    " operation failed: " + e.getMessage());
+                return false;
             }
-            
-            StreamUtils.safeClose(progressWriter);
-            releaseLock();
-            
-        });
-      
-
+        }, VirtualExecutors.getVirtualExecutor());
     }
-        
+
+
+
+    // ===== DISK SPACE VALIDATION =====
     
-
     /**
      * Validate disk space for re-encryption operation
      * 
@@ -266,9 +347,6 @@ public class NoteFileService extends NotePathFactory {
                 }
             });
     }
-
-    
-
         
     /**
      * Collect all file paths from the encrypted ledger
@@ -309,194 +387,138 @@ public class NoteFileService extends NotePathFactory {
             
         }, getExecService());
     }
-
-
-
         
-    /**
-     * Parse root level of ledger to collect file paths
-     * Similar to NotePathReEncryption.rootLevelParse but only collecting paths
-     * Note: We don't track bytes since we're only reading, not writing
-     */
-    private void parseRootLevelForFiles(NoteBytesReader reader, List<File> files) throws IOException {
+
+   
+    // ===== FILE DELETION =====
+    
+    public CompletableFuture<NotePath> deleteNoteFilePath(
+            NoteStringArrayReadOnly path, 
+            boolean recursive, 
+            AsyncNoteBytesWriter progressWriter) {
+
+        if(path == null || path.byteLength() == 0 || path.size() == 0){
+            StreamUtils.safeClose(progressWriter);
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Invalid path provided"));
+        }
+
+        if(progressWriter != null){
+            ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
+                0, 4, "Acquiring lock", progressWriter);
+        }
         
-        NoteBytes rootKey = reader.nextNoteBytes();
-        
-        while (rootKey != null) {
-            if (rootKey.equals(NotePath.FILE_PATH)) {
-                // Found a file path entry at root level
-                NoteBytes filePath = reader.nextNoteBytes();
-                if (filePath != null) {
-                    File file = new File(filePath.getAsString());
-                    if (file.exists() && file.isFile()) {
-                        files.add(file);
-                    }
+        List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
+
+        return acquireLock().thenCompose((filePathLedger)->{
+            
+            if(!filePathLedger.exists() || !filePathLedger.isFile() || 
+                filePathLedger.length() <= CryptoService.AES_IV_SIZE){
+                throw new IllegalArgumentException(
+                    "Invalid ledger, inaccessible or insufficient size provided");
+            }
+
+            NotePath notePath = new NotePath(filePathLedger, path, recursive, progressWriter);
+
+            notePath.progressMsg(ProtocolMesssages.STARTING, 2, 4,
+                "Initial lock acquired, preparing registry interfaces");
+            
+            return prepareForShutdown(path, recursive, interfaceList)
+                .thenCompose(v->deleteNoteFilePath(notePath));
+                
+        }).whenComplete((notePath, ex)->{
+            int toRemoveSize = interfaceList.size();
+            for(int i = 0; i < toRemoveSize; i++){
+                ManagedNoteFileInterface managedInterface = interfaceList.get(i);
+                boolean isDeleted = !managedInterface.isFile();
+                
+                if(managedInterface.isLocked()){
+                    managedInterface.releaseLock();
                 }
                 
-            } else if (rootKey.getType() == NoteBytesMetaData.STRING_TYPE) {
-                // This is a directory/bucket entry - recurse into it
-                NoteBytesMetaData metaData = reader.nextMetaData();
-                
-                if (metaData != null && 
-                    metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    
-                    // We need to track position manually to know bucket boundaries
-                    IntCounter byteCounter = new IntCounter(0);
-                    
-                    // Account for key and metadata we just read
-                    byteCounter.add(rootKey.byteLength());
-                    byteCounter.add(NoteBytesMetaData.STANDARD_META_DATA_SIZE);
-                    
-                    // Calculate bucket end
-                    int bucketEnd = byteCounter.get() + metaData.getLength();
-                    
-                    // Recursively collect file paths within bucket
-                    parseBucketForFiles(reader, files, byteCounter, bucketEnd);
-                } else {
-                    throw new IllegalStateException(
-                        "Invalid value data detected: " + 
-                        (metaData == null ? "metadata null" : "type: " + (int) metaData.getType())
-                    );
+                notePath.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, 
+                    managedInterface.getId().getAsString(), new NoteBytesPair[]{
+                        new NoteBytesPair(Keys.STATUS, 
+                            !managedInterface.isLocked() && isDeleted ? 
+                                ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
+                        )
+                    });
+            }
+            
+            StreamUtils.safeClose(progressWriter);
+            releaseLock();
+        });
+    }
+    
+    private CompletableFuture<Void> prepareForShutdown(
+            NoteStringArrayReadOnly path, 
+            boolean recursive,
+            List<ManagedNoteFileInterface> interfaceList) {
+   
+        if(recursive){
+            List<CompletableFuture<Void>> list = new ArrayList<>();
+            
+            Iterator<Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface>> iterator = 
+                m_registry.entrySet().iterator();
+            
+            while(iterator.hasNext()) {
+                Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry = 
+                    iterator.next();
+                list.add(entry.getValue().perpareForShutdown());
+                if(interfaceList != null){
+                    interfaceList.add(entry.getValue());
                 }
+                iterator.remove(); 
+            }
+            
+            return CompletableFuture.allOf(list.toArray(new CompletableFuture[0]));
+        } else {
+            ManagedNoteFileInterface managedInterface = m_registry.remove(path);
+            if(managedInterface != null){
+                if(interfaceList != null){
+                    interfaceList.add(managedInterface);
+                }
+                return managedInterface.perpareForShutdown();
             } else {
-                throw new IllegalStateException("Invalid key type: " + (int) rootKey.getType());
-            }
-            
-            rootKey = reader.nextNoteBytes();
-        }
-    }
-
-
-    /**
-     * Parse bucket (nested structure) to collect file paths
-     * Similar to NotePathReEncryption.recursivelyParseQueueEncryption
-     * Uses IntCounter to track position within bucket boundaries
-     */
-    private void parseBucketForFiles(
-            NoteBytesReader reader, 
-            List<File> files, 
-            IntCounter byteCounter,
-            int bucketEnd) throws IOException {
-        
-        while (byteCounter.get() < bucketEnd) {
-            NoteBytes key = reader.nextNoteBytes();
-            
-            if (key == null) {
-                break;
-            }
-            
-            // Track bytes read
-            byteCounter.add(key.byteLength());
-            
-            if (key.equals(NotePath.FILE_PATH)) {
-                // Found a file path
-                NoteBytes filePath = reader.nextNoteBytes();
-                if (filePath != null) {
-                    byteCounter.add(filePath.byteLength());
-                    
-                    File file = new File(filePath.getAsString());
-                    if (file.exists() && file.isFile()) {
-                        files.add(file);
-                    }
-                }
-                
-            } else if (key.getType() == NoteBytesMetaData.STRING_TYPE) {
-                // Nested bucket - recurse
-                NoteBytesMetaData metaData = reader.nextMetaData();
-                
-                if (metaData != null && 
-                    metaData.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    
-                    // Track metadata bytes
-                    byteCounter.add(NoteBytesMetaData.STANDARD_META_DATA_SIZE);
-                    
-                    // Calculate nested bucket end
-                    int nestedEnd = byteCounter.get() + metaData.getLength();
-                    
-                    // Recurse into nested bucket
-                    parseBucketForFiles(reader, files, byteCounter, nestedEnd);
-                } else {
-                    throw new IllegalStateException(
-                        "Invalid value data detected: " + 
-                        (metaData == null ? "metadata null" : "type: " + (int) metaData.getType())
-                    );
-                }
-            } else {
-                throw new IllegalStateException("Invalid key type: " + (int) key.getType());
+                return CompletableFuture.completedFuture(null);
             }
         }
     }
-
-
-
-    /**
-     * Calculate disk space requirements based on collected files
-     */
-    private DiskSpaceValidation calculateDiskSpaceRequirements(
-            List<File> files, 
-            File ledgerFile) {
-        
-        int fileCount = files.size();
-        long totalSize = 0;
-        
-        // Track largest files for batch size calculation
-        long[] largestBatchSizes = new long[10];
-        
-        for (File file : files) {
-            long size = file.length();
-            totalSize += size;
+    
+    // ===== MAINTENANCE =====
+    
+    public int cleanupUnusedInterfaces() {
+        int removed = 0;
+        Iterator<Map.Entry<NoteStringArrayReadOnly, ManagedNoteFileInterface>> iterator = 
+            m_registry.entrySet().iterator();
             
-            // Track largest files
-            DiskSpaceValidation.updateLargestBatchSizes(largestBatchSizes, size);
+        while (iterator.hasNext()) {
+            Map.Entry<NoteStringArrayReadOnly, ManagedNoteFileInterface> entry = 
+                iterator.next();
+            ManagedNoteFileInterface noteInterface = entry.getValue();
+            
+            if (noteInterface.getReferenceCount() == 0 && !noteInterface.isLocked()) {
+                iterator.remove();
+                removed++;
+            }
         }
-        
-        // Get available disk space at ledger location
-        long availableSpace = ledgerFile.getUsableSpace();
-        
-        // Required space = total size (for .tmp copies during re-encryption)
-        long requiredSpace = totalSize;
-        
-        // Buffer space = 20% of required or 1GB, whichever is smaller
-        long bufferSpace = Math.min(
-            (long) (requiredSpace * 0.20),
-            1024L * 1024 * 1024 // 1GB
-        );
-        
-        // Valid if we have required + buffer space
-        boolean isValid = availableSpace >= (requiredSpace + bufferSpace);
-        
-        System.out.println(String.format(
-            "[NoteFileService] Disk space validation:\n" +
-            "  Files found: %d\n" +
-            "  Total size: %.2f MB\n" +
-            "  Required space: %.2f MB\n" +
-            "  Available space: %.2f MB\n" +
-            "  Buffer space: %.2f MB\n" +
-            "  Validation: %s",
-            fileCount,
-            totalSize / (1024.0 * 1024.0),
-            requiredSpace / (1024.0 * 1024.0),
-            availableSpace / (1024.0 * 1024.0),
-            bufferSpace / (1024.0 * 1024.0),
-            isValid ? "PASSED" : "FAILED"
-        ));
-        
-        return new DiskSpaceValidation(
-            isValid,
-            fileCount,
-            totalSize,
-            requiredSpace,
-            availableSpace,
-            bufferSpace
-        );
+        return removed;
+    }
+    
+    public int getRegistrySize() {
+        return m_registry.size();
+    }
+    
+    public Map<NoteStringArrayReadOnly, Integer> getReferenceCounts() {
+        return m_registry.entrySet().stream()
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> entry.getValue().getReferenceCount()
+            ));
     }
 
-    /**
-     * Get file count (convenience method)
-     */
     public CompletableFuture<Integer> getFileCount() {
         return validateDiskSpaceForReEncryption()
             .thenApply(DiskSpaceValidation::getNumberOfFiles);
     }
-
 }

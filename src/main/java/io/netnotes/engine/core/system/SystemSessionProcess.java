@@ -378,10 +378,11 @@ public class SystemSessionProcess extends FlowProcess {
                     .thenCompose(path -> registry.startProcess(path));
             });
     }
-    
+        
+        
     /**
-     * Verify password and load system (ephemeral settingsMap)
-     * settingsMap is function-scoped only, discarded after use
+     * Password verification during initialization
+     * NOW uses AppData instead of SettingsData directly
      */
     private CompletableFuture<AppData> verifyAndLoadSystem(NoteBytesEphemeral password) {
         System.out.println("[SystemSession] Verifying password and loading system");
@@ -402,11 +403,10 @@ public class SystemSessionProcess extends FlowProcess {
                                 .thenApply(settingsData -> {
                                     System.out.println("[SystemSession] SettingsData loaded, creating AppData");
                                     
-                                    // Create AppData
+                                    // Create AppData (SettingsData becomes private)
                                     AppData newAppData = new AppData(settingsData);
                                     
-                                    // settingsMap goes out of scope here (garbage collected)
-                                    System.out.println("[SystemSession] AppData created, settingsMap discarded");
+                                    System.out.println("[SystemSession] AppData created");
                                     
                                     return newAppData;
                                 });
@@ -417,10 +417,11 @@ public class SystemSessionProcess extends FlowProcess {
                     });
             });
     }
+        
     
     /**
      * Unlock from LOCKED state
-     * AppData already exists, just verify password
+     * NOW uses AppData for password verification
      */
     private void startUnlockPasswordSession() {
         getSecureInputDevice()
@@ -429,13 +430,13 @@ public class SystemSessionProcess extends FlowProcess {
                     device,
                     uiRenderer,
                     "Enter password to unlock",
-                    3
+                    0
                 );
                 
                 // Set password verification handler
                 session.onPasswordEntered(password -> {
-                    // Verify using AppData's SettingsData
-                    return appData.getSettingsData().verifyPassword(password)
+                    // Verify using AppData (not SettingsData directly)
+                    return appData.verifyPassword(password)
                         .thenApply(valid -> {
                             if (valid) {
                                 state.removeState(SystemSessionStates.UNLOCKING);
@@ -699,7 +700,7 @@ public class SystemSessionProcess extends FlowProcess {
                 );
                 
                 verifySession.onPasswordEntered(currentPassword -> {
-                    return appData.getSettingsData().verifyPassword(currentPassword)
+                    return appData.verifyPassword(currentPassword)
                         .thenCompose(valid -> {
                             if (valid) {
                                 // Password valid, validate disk space before proceeding
@@ -982,10 +983,11 @@ public class SystemSessionProcess extends FlowProcess {
     }
 
         
+            
         
     /**
-     * Check for incomplete password change and offer recovery
-     * Called during READY state initialization
+     * Check for incomplete password change
+     * checks AppData for old key availability
      */
     private CompletableFuture<Void> checkForIncompletePasswordChange() {
         return CompletableFuture.runAsync(() -> {
@@ -1007,9 +1009,12 @@ public class SystemSessionProcess extends FlowProcess {
                     return;
                 }
                 
+                // Check if old key is available (through AppData)
+                boolean hasOldKey = appData.hasOldKeyForRecovery();
+                
                 // Found incomplete password change - show recovery menu
                 System.err.println("[SystemSession] Incomplete password change detected");
-                showPasswordRecoveryMenu(analysis, logFile);
+                showPasswordRecoveryMenu(analysis, logFile, hasOldKey);
                 
             } catch (IOException e) {
                 System.err.println("[SystemSession] Error checking recovery: " + 
@@ -1019,12 +1024,15 @@ public class SystemSessionProcess extends FlowProcess {
     }
 
 
+        
     /**
-     * Show recovery menu to user
+     * Show recovery menu
+     * Updated to pass hasOldKey from AppData
      */
     private void showPasswordRecoveryMenu(
             PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            File logFile) {
+            File logFile,
+            boolean hasOldKey) {
         
         ContextPath menuPath = contextPath.append("menu", "recovery");
         MenuContext recoveryMenu = new MenuContext(
@@ -1032,9 +1040,6 @@ public class SystemSessionProcess extends FlowProcess {
             "⚠️ Password Change Recovery Required", 
             uiRenderer
         );
-        
-        // Check if old key is still available
-        boolean hasOldKey = appData.getOldKey() != null;
         
         String description = String.format(
             "An incomplete password change was detected.\n\n" +
@@ -1095,9 +1100,10 @@ public class SystemSessionProcess extends FlowProcess {
     }
 
 
+        
     /**
      * Recovery Option 1: Complete re-encryption
-     * Updates remaining files from OLD key to NEW key (current)
+     * NOW delegates to AppData instead of doing file operations directly
      */
     private void recoveryCompleteReEncryption(
             PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
@@ -1110,7 +1116,7 @@ public class SystemSessionProcess extends FlowProcess {
                 "Old encryption key found in memory.\n" +
                 "Re-encrypting remaining files..."));
             
-            performRecoveryReEncryption(analysis, appData.getOldKey(), null, logFile);
+            performRecoveryReEncryption(analysis, null, logFile);
             
         } else {
             // Need user to enter OLD password
@@ -1129,28 +1135,19 @@ public class SystemSessionProcess extends FlowProcess {
                     );
                     
                     session.onPasswordEntered(oldPassword -> {
-                        // Create old key from old password and old salt
-                        NoteBytes oldSalt = appData.getOldSalt();
-                        if (oldSalt == null) {
-                            uiRenderer.render(UIProtocol.showError(
-                                "Old salt not available. Cannot derive old key.\n" +
-                                "Recovery not possible without old key."));
-                            return CompletableFuture.completedFuture(false);
-                        }
-                        
-                        try {
-                            SecretKey oldKey = CryptoService.createKey(oldPassword, oldSalt);
-                            
-                            // Perform recovery with derived old key
-                            performRecoveryReEncryption(analysis, oldKey, oldPassword, logFile);
-                            
-                            return CompletableFuture.completedFuture(true);
-                            
-                        } catch (Exception e) {
-                            uiRenderer.render(UIProtocol.showError(
-                                "Failed to create old key: " + e.getMessage()));
-                            return CompletableFuture.completedFuture(false);
-                        }
+                        // Verify old password through AppData
+                        return appData.verifyOldPassword(oldPassword)
+                            .thenCompose(valid -> {
+                                if (!valid) {
+                                    uiRenderer.render(UIProtocol.showError(
+                                        "Invalid old password"));
+                                    return CompletableFuture.completedFuture(false);
+                                }
+                                
+                                // Perform recovery with old password
+                                performRecoveryReEncryption(analysis, oldPassword, logFile);
+                                return CompletableFuture.completedFuture(true);
+                            });
                     });
                     
                     spawnChild(session, "recovery-old-password")
@@ -1159,18 +1156,11 @@ public class SystemSessionProcess extends FlowProcess {
         }
     }
 
-
     /**
-     * Perform recovery re-encryption with old key
-     * 
-     * @param analysis Recovery analysis with file states
-     * @param oldKey OLD encryption key (from memory or derived)
-     * @param oldPassword OLD password (if user entered it, for verification)
-     * @param logFile Recovery log file
+     * Perform recovery re-encryption using AppData API
      */
     private void performRecoveryReEncryption(
             PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            SecretKey oldKey,
             NoteBytesEphemeral oldPassword,
             File logFile) {
         
@@ -1196,9 +1186,6 @@ public class SystemSessionProcess extends FlowProcess {
             String.format("Re-encrypting %d files from OLD key to NEW key...", 
                 filesToReEncrypt.size())));
         
-        // Get NEW key (current key from SettingsData)
-        SecretKey newKey = appData.getSettingsData().getSecretKey();
-        
         // Create progress tracker
         File continuationLog = new File(logFile.getParent(), 
             "password_change_recovery_continuation.log");
@@ -1216,15 +1203,14 @@ public class SystemSessionProcess extends FlowProcess {
                 AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                     progressChannel.getStream());
                 
-                // Re-encrypt files: OLD key → NEW key
-                return reEncryptSpecificFiles(
+                // DELEGATE to AppData - it handles all the complexity
+                return appData.completePasswordChange(
                     filesToReEncrypt,
-                    oldKey,      // Decrypt with OLD key
-                    newKey,      // Encrypt with NEW key
-                    10,          // batch size
+                    oldPassword,
+                    10,  // batch size
                     progressWriter
                 )
-                .whenComplete((result, ex) -> {
+                .whenComplete((success, ex) -> {
                     try {
                         progressWriter.close();
                         progressChannel.close();
@@ -1235,7 +1221,7 @@ public class SystemSessionProcess extends FlowProcess {
                 });
             })
             .thenCompose(success -> progressTracker.getCompletionFuture()
-                .thenApply(v -> !progressTracker.hasErrors()))
+                .thenApply(v -> success))
             .thenAccept(success -> {
                 if (success) {
                     // Archive logs
@@ -1264,9 +1250,10 @@ public class SystemSessionProcess extends FlowProcess {
             });
     }
 
+        
     /**
      * Recovery Option 2: Rollback to old password
-     * This reverts BOTH SettingsData AND successfully updated files
+     * NOW delegates to AppData instead of doing operations directly
      */
     private void recoveryRollbackToOldPassword(
             PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
@@ -1274,7 +1261,7 @@ public class SystemSessionProcess extends FlowProcess {
             boolean hasOldKey) {
         
         // Validate rollback is possible
-        if (!hasOldKey && appData.getOldSalt() == null) {
+        if (!hasOldKey && !appData.hasOldKeyForRecovery()) {
             uiRenderer.render(UIProtocol.showError(
                 "Cannot rollback: Old key and salt not available.\n\n" +
                 "Rollback is only possible if:\n" +
@@ -1289,148 +1276,109 @@ public class SystemSessionProcess extends FlowProcess {
             "1. Restore SettingsData to OLD password\n" +
             "2. Re-encrypt successfully updated files back to OLD key\n\n" +
             "Files to rollback: " + analysis.filesSucceeded + "\n\n" +
-            (hasOldKey ? 
-                "Old key available - rollback can proceed." : 
-                "You will need to enter the OLD password.")));
+            "You will need to enter the OLD password to confirm."));
         
-        if (hasOldKey) {
-            // Proceed with rollback using available old key
-            performRollback(analysis, appData.getOldKey(), appData.getOldSalt(), 
-                null, logFile);
-        } else {
-            // Ask for old password
-            getSecureInputDevice()
-                .thenAccept(device -> {
-                    PasswordSessionProcess session = new PasswordSessionProcess(
-                        device,
-                        uiRenderer,
-                        "Enter OLD password to confirm rollback",
-                        3
-                    );
-                    
-                    session.onPasswordEntered(oldPassword -> {
-                        NoteBytes oldSalt = appData.getOldSalt();
-                        
-                        try {
-                            SecretKey oldKey = CryptoService.createKey(oldPassword, oldSalt);
-                            performRollback(analysis, oldKey, oldSalt, oldPassword, logFile);
-                            return CompletableFuture.completedFuture(true);
-                        } catch (Exception e) {
-                            uiRenderer.render(UIProtocol.showError(
-                                "Failed to create old key: " + e.getMessage()));
-                            return CompletableFuture.completedFuture(false);
-                        }
-                    });
-                    
-                    spawnChild(session, "rollback-password")
-                        .thenCompose(path -> registry.startProcess(path));
+        // Always ask for old password (for verification)
+        getSecureInputDevice()
+            .thenAccept(device -> {
+                PasswordSessionProcess session = new PasswordSessionProcess(
+                    device,
+                    uiRenderer,
+                    "Enter OLD password to confirm rollback",
+                    3
+                );
+                
+                session.onPasswordEntered(oldPassword -> {
+                    return performRollback(analysis, oldPassword, logFile);
                 });
-        }
+                
+                spawnChild(session, "rollback-password")
+                    .thenCompose(path -> registry.startProcess(path));
+            });
     }
-
+        
     /**
-     * Perform complete rollback: SettingsData + file re-encryption
+     * Perform complete rollback using AppData API
+     * Much simpler - AppData handles coordination
      */
-    private void performRollback(
+    private CompletableFuture<Boolean> performRollback(
             PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            SecretKey oldKey,
-            NoteBytes oldSalt,
             NoteBytesEphemeral oldPassword,
             File logFile) {
         
         uiRenderer.render(UIProtocol.showMessage(
             "Starting rollback...\n\n" +
-            "Step 1: Reverting SettingsData to OLD password"));
+            "AppData will coordinate SettingsData and file rollback"));
         
-        // Step 1: Restore SettingsData
-        // We need the old password to restore settings
-        if (oldPassword == null) {
-            uiRenderer.render(UIProtocol.showError(
-                "Cannot rollback SettingsData without old password.\n" +
-                "Rollback requires user to enter old password."));
-            return;
+        // Collect files that were successfully updated (need rollback)
+        List<String> filesToRollback = new ArrayList<>();
+        for (PasswordChangeRecoveryLog.FileRecoveryState fileState : 
+                analysis.fileStates.values()) {
+            if (fileState.succeeded) {
+                filesToRollback.add(fileState.filePath);
+            }
         }
         
-        try {
-            // Restore old settings (BCrypt hash and salt)
-            appData.getSettingsData().updatePassword(
-                appData.getSettingsData().getCurrentPassword(), // Current (new) password
-                oldPassword  // Target old password
-            );
-            
+        if (filesToRollback.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage(
-                "✓ SettingsData restored\n\n" +
-                "Step 2: Re-encrypting files back to OLD key"));
-            
-            // Step 2: Re-encrypt successfully updated files back
-            List<String> filesToRollback = new ArrayList<>();
-            for (PasswordChangeRecoveryLog.FileRecoveryState fileState : 
-                    analysis.fileStates.values()) {
-                if (fileState.succeeded) {
-                    filesToRollback.add(fileState.filePath);
-                }
-            }
-            
-            if (filesToRollback.isEmpty()) {
-                completeRollback(logFile);
-                return;
-            }
-            
-            // Get current key (which was the NEW key, now needs to decrypt)
-            SecretKey newKey = appData.getSettingsData().getSecretKey();
-            
-            // Create progress tracker
-            File rollbackLog = new File(logFile.getParent(), 
-                "password_change_rollback.log");
-            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
-                uiRenderer, 
-                rollbackLog
-            );
-            
-            // Execute rollback re-encryption
-            spawnChild(progressTracker, "rollback-progress")
-                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-                .thenCompose(v -> registry.requestStreamChannel(
-                    contextPath, progressTracker.getContextPath()))
-                .thenCompose(progressChannel -> {
-                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                        progressChannel.getStream());
-                    
-                    // Re-encrypt: NEW key → OLD key (reverse)
-                    return reEncryptSpecificFiles(
-                        filesToRollback,
-                        newKey,      // Decrypt with NEW key (what they're encrypted with now)
-                        oldKey,      // Encrypt with OLD key (restore)
-                        10,
-                        progressWriter
-                    )
-                    .whenComplete((result, ex) -> {
-                        try {
-                            progressWriter.close();
-                            progressChannel.close();
-                        } catch (IOException e) {
-                            System.err.println("Error closing stream: " + e.getMessage());
-                        }
-                    });
-                })
-                .thenCompose(success -> progressTracker.getCompletionFuture()
-                    .thenApply(v -> !progressTracker.hasErrors()))
-                .thenAccept(success -> {
-                    if (success) {
-                        completeRollback(logFile);
-                        archiveRecoveryLog(rollbackLog);
-                    } else {
-                        uiRenderer.render(UIProtocol.showError(
-                            "Rollback completed with errors.\n" +
-                            "Check rollback log for details."));
+                "No files need rollback (none were updated).\n" +
+                "Only SettingsData will be rolled back."));
+            // Still need to rollback SettingsData
+        }
+        
+        // Create progress tracker
+        File rollbackLog = new File(logFile.getParent(), 
+            "password_change_rollback.log");
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
+            uiRenderer, 
+            rollbackLog
+        );
+        
+        // Execute rollback
+        return spawnChild(progressTracker, "rollback-progress")
+            .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+            .thenCompose(v -> registry.requestStreamChannel(
+                contextPath, progressTracker.getContextPath()))
+            .thenCompose(progressChannel -> {
+                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
+                    progressChannel.getStream());
+                
+                // DELEGATE to AppData - it handles everything
+                return appData.rollbackPasswordChange(
+                    filesToRollback,
+                    oldPassword,
+                    10,
+                    progressWriter
+                )
+                .whenComplete((success, ex) -> {
+                    try {
+                        progressWriter.close();
+                        progressChannel.close();
+                    } catch (IOException e) {
+                        System.err.println("Error closing stream: " + e.getMessage());
                     }
                 });
-                
-        } catch (Exception e) {
-            uiRenderer.render(UIProtocol.showError(
-                "Rollback failed: " + e.getMessage()));
-        }
+            })
+            .thenCompose(success -> progressTracker.getCompletionFuture()
+                .thenApply(v -> success))
+            .thenApply(success -> {
+                if (success) {
+                    completeRollback(logFile);
+                    archiveRecoveryLog(rollbackLog);
+                } else {
+                    uiRenderer.render(UIProtocol.showError(
+                        "Rollback completed with errors.\n" +
+                        "Check rollback log for details."));
+                }
+                return success;
+            })
+            .exceptionally(ex -> {
+                uiRenderer.render(UIProtocol.showError(
+                    "Rollback failed: " + ex.getMessage()));
+                return false;
+            });
     }
+
 
     /**
      * Complete rollback and return to normal operation
