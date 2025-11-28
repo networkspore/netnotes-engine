@@ -333,6 +333,7 @@ public class NotePathFactory {
                 // Found a file path entry at root level
                 NoteBytes filePath = reader.nextNoteBytes();
                 if (filePath != null) {
+                    
                     File file = new File(filePath.getAsString());
                     if (file.exists() && file.isFile()) {
                         files.add(file);

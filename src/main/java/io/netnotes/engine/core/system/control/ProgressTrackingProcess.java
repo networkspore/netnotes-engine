@@ -1,9 +1,6 @@
 package io.netnotes.engine.core.system.control;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +35,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 public class ProgressTrackingProcess extends FlowProcess {
     
     private final UIRenderer uiRenderer;
-    private final File recoveryLogFile;
+
     
     // Tracking
     private final List<String> completedFiles = new CopyOnWriteArrayList<>();
@@ -49,10 +46,9 @@ public class ProgressTrackingProcess extends FlowProcess {
     private static final long UPDATE_INTERVAL_MS = 100;
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
     
-    public ProgressTrackingProcess(UIRenderer uiRenderer, File recoveryLogFile) {
+    public ProgressTrackingProcess(UIRenderer uiRenderer) {
         super(ProcessType.SINK);
         this.uiRenderer = uiRenderer;
-        this.recoveryLogFile = recoveryLogFile;
 
         setupMessageMap();
     }
@@ -68,13 +64,6 @@ public class ProgressTrackingProcess extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> run() {
-        // Initialize recovery log
-        try {
-            initializeRecoveryLog();
-        } catch (IOException e) {
-            System.err.println("[ProgressTracking] Failed to initialize recovery log: " + 
-                e.getMessage());
-        }
         
         return getCompletionFuture();
     }
@@ -91,8 +80,6 @@ public class ProgressTrackingProcess extends FlowProcess {
                     // Parse progress message
                     NoteBytesMap progressMsg = nextBytes.getAsNoteBytesMap();
                     
-                    // Log for recovery
-                    logRecoveryInfo(progressMsg);
                     
                     // Update UI (throttled)
                     updateUI(progressMsg);
@@ -100,16 +87,13 @@ public class ProgressTrackingProcess extends FlowProcess {
                     nextBytes = reader.nextNoteBytesReadOnly();
                 }
                 
-                // Stream complete - finalize log
-                finalizeRecoveryLog();
-                
+
                 System.out.println("[ProgressTracking] Progress stream complete");
                 complete();
                 
             } catch (IOException e) {
                 System.err.println("[ProgressTracking] Progress stream error: " + 
                     e.getMessage());
-                //TODO: onerror
             }
         });
         
@@ -117,63 +101,6 @@ public class ProgressTrackingProcess extends FlowProcess {
         channel.getReadyFuture().complete(null);
     }
     
-    private void initializeRecoveryLog() throws IOException {
-        if (recoveryLogFile.exists()) {
-            // Previous incomplete password change detected
-            System.err.println("[ProgressTracking] WARNING: Found incomplete password change log");
-            File backup = new File(recoveryLogFile.getParentFile(), 
-                "password_change_recovery_" + System.currentTimeMillis() + ".log");
-            Files.move(recoveryLogFile.toPath(), backup.toPath());
-        }
-        
-        Files.createFile(recoveryLogFile.toPath());
-        
-        // Write header
-        Files.writeString(recoveryLogFile.toPath(), 
-            "# Password Change Recovery Log\n" +
-            "# Started: " + new java.util.Date() + "\n" +
-            "# Format: STATUS|TIMESTAMP|FILE_PATH\n",
-            StandardOpenOption.APPEND);
-    }
-    
-    private void logRecoveryInfo(NoteBytesMap progressMsg) {
-        try {
-            // Get message type
-            NoteBytes cmd = progressMsg.get(Keys.CMD);
-            if (cmd == null) return;
-            
-
-            String message = ProgressMessage.getMessage(progressMsg);
-            long timestamp = System.currentTimeMillis();
-            
-            // Track file-specific operations
-            if (cmd.equals(ProtocolMesssages.UPDATED) || cmd.equals(ProtocolMesssages.INFO)) {
-                // Check if this is a file-specific message
-                NoteBytes status = progressMsg.get(Keys.STATUS);
-                if (status != null) {
-                    String statusStr = status.getAsString();
-                    
-                    // Log file status
-                    String logEntry = String.format("%s|%d|%s\n", 
-                        statusStr, timestamp, message);
-                    
-                    Files.writeString(recoveryLogFile.toPath(), logEntry,
-                        StandardOpenOption.APPEND);
-                    
-                    // Track completion
-                    if (status.equals(ProtocolMesssages.SUCCESS)) {
-                        completedFiles.add(message);
-                    } else if (status.equals(ProtocolMesssages.ERROR)) {
-                        failedFiles.add(message);
-                    }
-                }
-            }
-            
-        } catch (IOException e) {
-            System.err.println("[ProgressTracking] Failed to write recovery log: " + 
-                e.getMessage());
-        }
-    }
     
     private void updateUI(NoteBytesMap progressMsg) {
         // Throttle UI updates
@@ -272,35 +199,7 @@ public class ProgressTrackingProcess extends FlowProcess {
         }
     }
     
-    private void finalizeRecoveryLog() {
-        try {
-            // Write completion status
-            String completion = String.format(
-                "# Completed: %s\n" +
-                "# Files completed: %d\n" +
-                "# Files failed: %d\n",
-                new java.util.Date(),
-                completedFiles.size(),
-                failedFiles.size()
-            );
-            
-            Files.writeString(recoveryLogFile.toPath(), completion,
-                StandardOpenOption.APPEND);
-            
-            // If all successful, delete log
-            if (failedFiles.isEmpty()) {
-                Files.deleteIfExists(recoveryLogFile.toPath());
-                System.out.println("[ProgressTracking] Password change completed successfully, " +
-                    "recovery log deleted");
-            } else {
-                System.err.println("[ProgressTracking] Password change completed with errors. " +
-                    "Recovery log kept at: " + recoveryLogFile.getAbsolutePath());
-            }
-        } catch (IOException e) {
-            System.err.println("[ProgressTracking] Error finalizing recovery log: " + 
-                e.getMessage());
-        }
-    }
+   
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {

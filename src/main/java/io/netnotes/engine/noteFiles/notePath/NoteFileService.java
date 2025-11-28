@@ -20,19 +20,28 @@ import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 
 /**
@@ -140,189 +149,572 @@ public class NoteFileService extends NotePathFactory {
     }
 
     // ===== RECOVERY OPERATIONS =====
-    /*
-    * Complete password change recovery
-    * Re-encrypts files from OLD key to NEW key (current)
-    * 
-    * Used when password change was interrupted mid-operation.
-    * Files are still encrypted with OLD key and need updating.
-    * 
-    * @param filePaths Files to update (still encrypted with OLD key)
-    * @param oldKey Key to decrypt with (previous encryption key)
-    * @param batchSize Concurrent batch size
-    * @param progressWriter Progress tracking
-    * @return Success/failure
-    */
-    public CompletableFuture<Boolean> completePasswordChangeForFiles(
-            List<String> filePaths,
-            SecretKey oldKey,
-            int batchSize,
-            AsyncNoteBytesWriter progressWriter) {
+   /*
+    public CompletableFuture<RecoveryAnalysis> analyzeEncryptionState(
+        SecretKey currentKey,
+        SecretKey oldKey) {
+    
+    return collectAllFilePaths()  // From ledger
+        .thenCompose(filePaths -> {
+            List<CompletableFuture<FileEncryptionState>> checks = filePaths.stream()
+                .map(path -> determineFileState(path, currentKey, oldKey))
+                .collect(Collectors.toList());
+            
+            return CompletableFuture.allOf(checks.toArray(new CompletableFuture[0]))
+                .thenApply(v -> {
+                    RecoveryAnalysis analysis = new RecoveryAnalysis();
+                    for (CompletableFuture<FileEncryptionState> check : checks) {
+                        FileEncryptionState state = check.join();
+                        switch (state.state) {
+                            case ACCESSIBLE_WITH_CURRENT_KEY:
+                                analysis.alreadyUpdated.add(state);
+                                break;
+                            case ACCESSIBLE_WITH_OLD_KEY:
+                                analysis.needsReEncryption.add(state);
+                                break;
+                            case INACCESSIBLE:
+                                analysis.corrupted.add(state);
+                                break;
+                        }
+                    }
+                    return analysis;
+                });
+        });
+}
+
+private CompletableFuture<FileEncryptionState> determineFileState(
+        String filePath,
+        SecretKey currentKey,
+        SecretKey oldKey) {
+    
+    return CompletableFuture.supplyAsync(() -> {
+        File file = new File(filePath);
         
-        System.out.println(String.format(
-            "[NoteFileService] COMPLETE: Re-encrypting %d files (OLD → NEW key)",
-            filePaths.size()));
+        if (!file.exists()) {
+            return new FileEncryptionState(file, State.INACCESSIBLE, null);
+        }
         
-        // Get current (NEW) key from SettingsData
-        SecretKey newKey = getSettingsData().getSecretKey();
+        // Try current key first
+        if (canDecryptFile(file, currentKey)) {
+            return new FileEncryptionState(file, State.ACCESSIBLE_WITH_CURRENT_KEY, currentKey);
+        }
         
-        return reEncryptFiles(
-            filePaths,
-            oldKey,      // Decrypt with OLD
-            newKey,      // Encrypt with NEW (current)
-            "COMPLETE",
-            batchSize,
-            progressWriter
-        );
+        // Try old key if available
+        if (oldKey != null && canDecryptFile(file, oldKey)) {
+            return new FileEncryptionState(file, State.ACCESSIBLE_WITH_OLD_KEY, oldKey);
+        }
+        
+        // Neither works
+        return new FileEncryptionState(file, State.INACCESSIBLE, null);
+        
+    }, getExecService());
+}
+
+private boolean canDecryptFile(File file, SecretKey key) {
+    try {
+        // Read just enough to verify decryption
+        // Don't need to read entire file
+        byte[] header = new byte[CryptoService.AES_IV_SIZE + 1024]; // IV + small chunk
+        
+        try (FileInputStream fis = new FileInputStream(file)) {
+            int read = fis.read(header);
+            if (read < CryptoService.AES_IV_SIZE) {
+                return false; // File too small
+            }
+        }
+        
+        // Try to decrypt header
+        byte[] iv = Arrays.copyOfRange(header, 0, CryptoService.AES_IV_SIZE);
+        byte[] encryptedChunk = Arrays.copyOfRange(header, CryptoService.AES_IV_SIZE, header.length);
+        
+        Cipher cipher = CryptoService.createDecryptCipher(key, iv);
+        cipher.doFinal(encryptedChunk); // Will throw if wrong key
+        
+        return true;
+        
+    } catch (Exception e) {
+        return false;
     }
+}*/
 
-
-    /**
-     * Rollback password change
-     * Re-encrypts files from NEW key back to OLD key
-     * 
-     * Used when user wants to restore previous password.
-     * Files were successfully updated to NEW key but need reverting.
-     * 
-     * @param filePaths Files to rollback (encrypted with NEW key)
-     * @param oldKey Key to encrypt with (restore to this)
-     * @param batchSize Concurrent batch size
-     * @param progressWriter Progress tracking
-     * @return Success/failure
-     */
-    public CompletableFuture<Boolean> rollbackPasswordChangeForFiles(
-            List<String> filePaths,
-            SecretKey oldKey,
-            int batchSize,
-            AsyncNoteBytesWriter progressWriter) {
+    // NoteFileService.investigateFileEncryptionState()
+    public CompletableFuture<FileEncryptionAnalysis> investigateFileEncryptionState() {
         
-        System.out.println(String.format(
-            "[NoteFileService] ROLLBACK: Re-encrypting %d files (NEW → OLD key)",
-            filePaths.size()));
-        
-        // Get current (was NEW) key from SettingsData
         SecretKey currentKey = getSettingsData().getSecretKey();
+        SecretKey oldKey = getSettingsData().getOldKey();
         
-        return reEncryptFiles(
-            filePaths,
-            currentKey,  // Decrypt with current (was NEW)
-            oldKey,      // Encrypt with OLD (restore)
-            "ROLLBACK",
-            batchSize,
-            progressWriter
-        );
+        if (oldKey == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Old key not available for investigation"));
+        }
+        
+        return acquireLock()
+            .thenCompose(ledgerFile -> {
+                return collectFilePathsFromLedger(ledgerFile)
+                    .thenCompose(filePaths -> analyzeFiles(filePaths, currentKey, oldKey))
+                    .whenComplete((analysis, ex) -> {
+                        releaseLock();
+                    });
+            });
     }
 
+    private CompletableFuture<FileEncryptionAnalysis> analyzeFiles(
+            List<File> filePaths,
+            SecretKey currentKey,
+            SecretKey oldKey) {
+        
+        return CompletableFuture.supplyAsync(() -> {
+            FileEncryptionAnalysis analysis = new FileEncryptionAnalysis();
+            
+            for (File file : filePaths) {
+                File tmpFile = new File(file.getAbsolutePath() + ".tmp");
+                
+                FileState state = determineFileState(file, tmpFile, currentKey, oldKey);
+                analysis.addFileState(file.getAbsolutePath(), state);
+            }
+            
+            return analysis;
+            
+        }, getExecService());
+    }
+
+    private FileState determineFileState(File file, File tmpFile, 
+                                        SecretKey currentKey, SecretKey oldKey) {
+        
+        // Check if file exists
+        if (!file.exists()) {
+            // File doesn't exist - check for tmp
+            if (tmpFile.exists()) {
+                // Tmp exists - check if it's valid
+                if (canDecryptFile(tmpFile, currentKey)) {
+                    return FileState.TMP_READY_CURRENT_KEY;
+                } else if (canDecryptFile(tmpFile, oldKey)) {
+                    return FileState.TMP_READY_OLD_KEY;
+                } else {
+                    return FileState.TMP_CORRUPT;
+                }
+            } else {
+                // Neither exists - path created but never used
+                return FileState.NEVER_CREATED;
+            }
+        }
+        
+        // File exists - check encryption
+        if (canDecryptFile(file, currentKey)) {
+            // File accessible with current key
+            if (tmpFile.exists()) {
+                // Tmp also exists - cleanup needed
+                return FileState.CURRENT_KEY_WITH_TMP;
+            } else {
+                // File OK
+                return FileState.CURRENT_KEY_OK;
+            }
+        }
+        
+        if (canDecryptFile(file, oldKey)) {
+            // File accessible with old key - needs re-encryption
+            if (tmpFile.exists()) {
+                // Check if tmp has current key
+                if (canDecryptFile(tmpFile, currentKey)) {
+                    // Tmp is re-encrypted version, ready to replace
+                    return FileState.OLD_KEY_WITH_CURRENT_TMP;
+                } else {
+                    // Tmp exists but unclear state
+                    return FileState.OLD_KEY_WITH_TMP;
+                }
+            } else {
+                // Needs re-encryption
+                return FileState.OLD_KEY_NEEDS_UPDATE;
+            }
+        }
+        
+        // Neither key works
+        if (tmpFile.exists()) {
+            return FileState.CORRUPT_WITH_TMP;
+        } else {
+            return FileState.CORRUPT;
+        }
+    }
+
+    private boolean canDecryptFile(File file, SecretKey key) {
+        if (!file.exists() || !file.isFile()) {
+            return false;
+        }
+        
+        if (file.length() < CryptoService.AES_IV_SIZE) {
+            return false;
+        }
+        
+        try {
+            int headerSize = CryptoService.AES_IV_SIZE + 1024;
+            headerSize =  headerSize > file.length() ? (int) file.length() : headerSize;
+            // Read just enough to verify decryption
+            byte[] header = new byte[headerSize];
+            int read = 0;
+            try (NoteBytesReader reader = new NoteBytesReader(new FileInputStream(file));) {
+                read = reader.read(header, 0, headerSize);
+                if (read < CryptoService.AES_IV_SIZE) {
+                    return false;
+                }
+            }
+            
+            // Try to decrypt header
+            byte[] iv = Arrays.copyOfRange(header, 0, CryptoService.AES_IV_SIZE);
+            byte[] encryptedChunk = Arrays.copyOfRange(header, 
+                CryptoService.AES_IV_SIZE, Math.min(header.length, read));
+            
+            Cipher cipher = CryptoService.getAESDecryptCipher(iv, key);
+            cipher.doFinal(encryptedChunk);
+            
+            return true;
+            
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // File state enum
+    public enum FileState {
+        // Good states
+        CURRENT_KEY_OK,              // ✓ File OK with current key
+        NEVER_CREATED,               // ○ Path in ledger but no file (normal)
+        
+        // Needs action
+        OLD_KEY_NEEDS_UPDATE,        // ⚠ File encrypted with old key
+        OLD_KEY_WITH_CURRENT_TMP,    // ⚠ File old key, tmp has current key (finish swap)
+        TMP_READY_CURRENT_KEY,       // ⚠ No file, but tmp has current key (finish swap)
+        
+        // Cleanup needed
+        CURRENT_KEY_WITH_TMP,        // ⚠ File OK but tmp exists (delete tmp)
+        OLD_KEY_WITH_TMP,            // ⚠ File old key, tmp unclear (investigate)
+        TMP_READY_OLD_KEY,           // ⚠ No file, tmp has old key (old state)
+        
+        // Bad states
+        CORRUPT,                     // ✗ File exists but neither key works
+        CORRUPT_WITH_TMP,            // ✗ Both file and tmp corrupt
+        TMP_CORRUPT                  // ✗ Only tmp exists and corrupt
+    }
+
+    // Analysis result
+    public static class FileEncryptionAnalysis {
+        private final Map<String, FileState> fileStates = new LinkedHashMap<>();
+        private final Set<String> completedFiles = Collections.synchronizedSet(new HashSet<>());
+        
+        public void addFileState(String path, FileState state) {
+            fileStates.put(path, state);
+        }
+        
+        public Map<String, FileState> getFileStates() {
+            return Collections.unmodifiableMap(fileStates);
+        }
+        
+        /**
+         * Mark a single file as completed
+         * Thread-safe for concurrent updates
+         */
+        public synchronized void markFileCompleted(String path) {
+            completedFiles.add(path);
+        }
+        
+        /**
+         * Mark multiple files as completed
+         */
+        public synchronized void markFilesCompleted(List<String> paths) {
+            completedFiles.addAll(paths);
+        }
+        
+        /**
+         * Check if a file has been completed
+         */
+        public boolean isFileCompleted(String path) {
+            return completedFiles.contains(path);
+        }
+        
+        /**
+         * Get files that still need updating (excluding completed)
+         */
+        public List<String> getFilesNeedingUpdate() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.OLD_KEY_NEEDS_UPDATE)
+                .map(Map.Entry::getKey)
+                .filter(path -> !completedFiles.contains(path))
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get all files that originally needed updating (before completion tracking)
+         */
+        public List<String> getAllFilesNeedingUpdate() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.OLD_KEY_NEEDS_UPDATE)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get files that need swap (excluding completed)
+         */
+        public List<String> getFilesNeedingSwap() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.OLD_KEY_WITH_CURRENT_TMP ||
+                            e.getValue() == FileState.TMP_READY_CURRENT_KEY)
+                .map(Map.Entry::getKey)
+                .filter(path -> !completedFiles.contains(path))
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get all files that originally needed swap
+         */
+        public List<String> getAllFilesNeedingSwap() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.OLD_KEY_WITH_CURRENT_TMP ||
+                            e.getValue() == FileState.TMP_READY_CURRENT_KEY)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get files that need cleanup (excluding completed)
+         */
+        public List<String> getFilesNeedingCleanup() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.CURRENT_KEY_WITH_TMP)
+                .map(Map.Entry::getKey)
+                .filter(path -> !completedFiles.contains(path))
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get all files that originally needed cleanup
+         */
+        public List<String> getAllFilesNeedingCleanup() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.CURRENT_KEY_WITH_TMP)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Get corrupted files
+         */
+        public List<String> getCorruptedFiles() {
+            return fileStates.entrySet().stream()
+                .filter(e -> e.getValue() == FileState.CORRUPT ||
+                            e.getValue() == FileState.CORRUPT_WITH_TMP ||
+                            e.getValue() == FileState.TMP_CORRUPT)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        }
+        
+        /**
+         * Check if recovery is needed (accounting for completed files)
+         */
+        public boolean needsRecovery() {
+            return !getFilesNeedingUpdate().isEmpty() ||
+                !getFilesNeedingSwap().isEmpty() ||
+                !getFilesNeedingCleanup().isEmpty();
+        }
+        
+        /**
+         * Get progress summary
+         */
+        public String getProgressSummary() {
+            int totalUpdate = getAllFilesNeedingUpdate().size();
+            int completedUpdate = (int) getAllFilesNeedingUpdate().stream()
+                .filter(completedFiles::contains)
+                .count();
+            
+            int totalSwap = getAllFilesNeedingSwap().size();
+            int completedSwap = (int) getAllFilesNeedingSwap().stream()
+                .filter(completedFiles::contains)
+                .count();
+            
+            int totalCleanup = getAllFilesNeedingCleanup().size();
+            int completedCleanup = (int) getAllFilesNeedingCleanup().stream()
+                .filter(completedFiles::contains)
+                .count();
+            
+            return String.format(
+                "Recovery Progress:\n" +
+                "  Re-encryption: %d/%d completed\n" +
+                "  File swaps: %d/%d completed\n" +
+                "  Cleanup: %d/%d completed\n" +
+                "  Total completed: %d files",
+                completedUpdate, totalUpdate,
+                completedSwap, totalSwap,
+                completedCleanup, totalCleanup,
+                completedFiles.size()
+            );
+        }
+        
+        /**
+         * Get current state summary
+         */
+        public String getSummary() {
+            long ok = fileStates.values().stream()
+                .filter(s -> s == FileState.CURRENT_KEY_OK).count();
+            long neverCreated = fileStates.values().stream()
+                .filter(s -> s == FileState.NEVER_CREATED).count();
+            
+            int remainingUpdate = getFilesNeedingUpdate().size();
+            int remainingSwap = getFilesNeedingSwap().size();
+            int remainingCleanup = getFilesNeedingCleanup().size();
+            int corrupted = getCorruptedFiles().size();
+            
+            StringBuilder summary = new StringBuilder();
+            summary.append("File Analysis:\n");
+            summary.append(String.format("  ✓ OK: %d\n", ok));
+            summary.append(String.format("  ○ Never created: %d\n", neverCreated));
+            
+            if (completedFiles.size() > 0) {
+                summary.append(String.format("  ✓ Completed: %d\n", completedFiles.size()));
+            }
+            
+            if (remainingUpdate > 0) {
+                summary.append(String.format("  ⚠ Need update: %d\n", remainingUpdate));
+            }
+            
+            if (remainingSwap > 0) {
+                summary.append(String.format("  ⚠ Need swap: %d\n", remainingSwap));
+            }
+            
+            if (remainingCleanup > 0) {
+                summary.append(String.format("  ⚠ Need cleanup: %d\n", remainingCleanup));
+            }
+            
+            if (corrupted > 0) {
+                summary.append(String.format("  ✗ Corrupted: %d\n", corrupted));
+            }
+            
+            return summary.toString();
+        }
+        
+        /**
+         * Get detailed report with completion status
+         */
+        public String getDetailedReport() {
+            StringBuilder report = new StringBuilder();
+            
+            report.append("═══════════════════════════════════════\n");
+            report.append("  File Encryption State Report\n");
+            report.append("═══════════════════════════════════════\n\n");
+            
+            report.append(getSummary()).append("\n");
+            
+            if (completedFiles.size() > 0) {
+                report.append("─────────────────────────────────────\n");
+                report.append(getProgressSummary()).append("\n");
+            }
+            
+            report.append("═══════════════════════════════════════\n");
+            
+            return report.toString();
+        }
+        
+        /**
+         * Reset completion tracking (for re-analysis)
+         */
+        public void resetCompletionTracking() {
+            completedFiles.clear();
+        }
+        
+        /**
+         * Get completion percentage
+         */
+        public double getCompletionPercentage() {
+            int totalIssues = getAllFilesNeedingUpdate().size() +
+                            getAllFilesNeedingSwap().size() +
+                            getAllFilesNeedingCleanup().size();
+            
+            if (totalIssues == 0) {
+                return 100.0;
+            }
+            
+            return (completedFiles.size() / (double) totalIssues) * 100.0;
+        }
+    }
+
+
+    public CompletableFuture<Boolean> cleanupFiles(List<String> files){
+        return CompletableFuture.supplyAsync(()->{
+            boolean succeeded = true;
+            for (String pathStr : files) {
+                File tmpFile = new File(pathStr + ".tmp");
+                try {
+                    if (tmpFile.exists()) {
+                        Files.delete(tmpFile.toPath());
+                    }
+                } catch (IOException e) {
+                    System.err.println("Failed to delete tmp: " + tmpFile + " - " + 
+                        e.getMessage());
+                    succeeded = false;
+                }
+            }
+        
+            return succeeded;
+        });
+    }
 
     /**
      * Generic re-encryption operation (PRIVATE)
      * 
      * @param operation Label for logging ("COMPLETE" or "ROLLBACK")
      */
-    private CompletableFuture<Boolean> reEncryptFiles(
-            List<String> filePaths,
-            SecretKey decryptKey,
-            SecretKey encryptKey,
-            String operation,
-            int batchSize,
-            AsyncNoteBytesWriter progressWriter) {
+    public CompletableFuture<Boolean> reEncryptFiles(
+        List<String> filePaths,
+        SecretKey decryptKey,
+        SecretKey encryptKey,
+        String operation,
+        int batchSize,
+        AsyncNoteBytesWriter progressWriter
+    ) {
         
-        if (filePaths == null || filePaths.isEmpty()) {
-            System.out.println("[NoteFileService] No files to re-encrypt");
-            return CompletableFuture.completedFuture(true);
-        }
-        
-        System.out.println(String.format(
-            "[NoteFileService] %s: Processing %d files with batch size %d",
-            operation, filePaths.size(), batchSize));
-        
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Semaphore semaphore = new Semaphore(batchSize, true);
-                List<CompletableFuture<Void>> futures = new ArrayList<>();
-                AtomicInteger completed = new AtomicInteger(0);
-                AtomicInteger failed = new AtomicInteger(0);
-                
-                for (String filePath : filePaths) {
-                    File file = new File(filePath);
-                    
-                    if (!file.exists() || !file.isFile()) {
-                        System.err.println("[NoteFileService] File not found: " + filePath);
-                        failed.incrementAndGet();
-                        
-                        if (progressWriter != null) {
-                            TaskMessages.writeErrorAsync(operation,
-                                "File not found: " + filePath,
-                                new IOException("File not found"), progressWriter);
-                        }
-                        continue;
-                    }
-                    
-                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                        try {
-                            semaphore.acquire();
-                            try {
-                                File tmpFile = new File(file.getAbsolutePath() + ".tmp");
-                                
-                                if (progressWriter != null) {
-                                    ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
-                                        completed.get(), filePaths.size(), 
-                                        operation + ": " + filePath, 
-                                        progressWriter);
-                                }
-                                
-                                // Re-encrypt: decryptKey → encryptKey
-                                FileStreamUtils.updateFileEncryption(
-                                    decryptKey, encryptKey, file, tmpFile, progressWriter);
-                                
-                                completed.incrementAndGet();
-                                
-                                if (progressWriter != null) {
-                                    ProgressMessage.writeAsync(ProtocolMesssages.SUCCESS,
-                                        completed.get(), filePaths.size(), 
-                                        operation + ": " + filePath, 
-                                        progressWriter);
-                                }
-                                
-                            } finally {
-                                semaphore.release();
-                            }
-                        } catch (Exception e) {
-                            failed.incrementAndGet();
-                            System.err.println("[NoteFileService] " + operation + 
-                                " failed: " + filePath + " - " + e.getMessage());
-                            
-                            if (progressWriter != null) {
-                                TaskMessages.writeErrorAsync(operation,
-                                    filePath, e, progressWriter);
-                            }
-                        }
-                    }, getExecService());
-                    
-                    futures.add(future);
-                }
-                
-                // Wait for all to complete
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-                
-                int failedCount = failed.get();
-                boolean success = failedCount == 0;
-                
-                System.out.println(String.format(
-                    "[NoteFileService] %s complete: %d succeeded, %d failed",
-                    operation, completed.get(), failedCount));
-                
-                return success;
-                
-            } catch (Exception e) {
-                System.err.println("[NoteFileService] " + operation + 
-                    " operation failed: " + e.getMessage());
-                return false;
-            }
-        }, VirtualExecutors.getVirtualExecutor());
+        // Delegate to adaptive version without analysis tracking
+        return reEncryptFilesAdaptive(
+            filePaths, decryptKey, encryptKey, operation, 
+            batchSize, progressWriter, null);
     }
 
+    public CompletableFuture<Boolean> performFinishSwaps(List<String> files) {
+        
+        return CompletableFuture.supplyAsync(() -> {
 
+           // List<String> failed = new ArrayList<>();
+            boolean isSuccess = true;
+            for (String pathStr : files) {
+                File file = new File(pathStr);
+                File tmpFile = new File(pathStr + ".tmp");
+                
+                try {
+                    if (!file.exists() && tmpFile.exists()) {
+                        // Tmp ready, just rename
+                        Files.move(tmpFile.toPath(), file.toPath(), 
+                            StandardCopyOption.REPLACE_EXISTING);
+                    } else if (file.exists() && tmpFile.exists()) {
+                        // Both exist - verify tmp is newer/correct
+                        SecretKey currentKey = getSettingsData().getSecretKey();
+                        if (canDecryptFile(tmpFile, currentKey)) {
+                            // Tmp is correct, replace file
+                            Files.move(tmpFile.toPath(), file.toPath(), 
+                                StandardCopyOption.REPLACE_EXISTING);
+    
+                        } else {
+                          // failed.add(pathStr);
+                          isSuccess = false;
+                        }
+                    }
+                } catch (IOException e) {
+                   // failed.add(pathStr);
+                    isSuccess = false;
+                    System.err.println("Perform finish swaps failed: " + e.toString());
+                }
+                
+            }
+            return isSuccess;
+        });
+    
+    }
 
     // ===== DISK SPACE VALIDATION =====
     
@@ -520,5 +912,346 @@ public class NoteFileService extends NotePathFactory {
     public CompletableFuture<Integer> getFileCount() {
         return validateDiskSpaceForReEncryption()
             .thenApply(DiskSpaceValidation::getNumberOfFiles);
+    }
+
+    /**
+     * Adaptive re-encryption with resource monitoring
+     * 
+     * Features:
+     * - Monitors disk space before each batch
+     * - Monitors memory availability
+     * - Adjusts batch size dynamically
+     * - Tracks completed files in analysis
+     * - Can pause/resume if resources become scarce
+     * 
+     * @param filePaths Files to re-encrypt
+     * @param decryptKey Key to decrypt with
+     * @param encryptKey Key to encrypt with
+     * @param operation Label for logging
+     * @param initialBatchSize Starting batch size
+     * @param progressWriter Progress feedback
+     * @param analysis Optional analysis to update (can be null)
+     * @return true if all files succeeded
+     */
+    public CompletableFuture<Boolean> reEncryptFilesAdaptive(
+            List<String> filePaths,
+            SecretKey decryptKey,
+            SecretKey encryptKey,
+            String operation,
+            int initialBatchSize,
+            AsyncNoteBytesWriter progressWriter,
+            FileEncryptionAnalysis analysis) {
+        
+        if (filePaths == null || filePaths.isEmpty()) {
+            System.out.println("[NoteFileService] No files to re-encrypt");
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        System.out.println(String.format(
+            "[NoteFileService] %s: Adaptive processing of %d files (initial batch: %d)",
+            operation, filePaths.size(), initialBatchSize));
+        
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                AtomicInteger completed = new AtomicInteger(0);
+                AtomicInteger failed = new AtomicInteger(0);
+                AtomicInteger currentBatchSize = new AtomicInteger(initialBatchSize);
+                
+                File dataDir = SettingsData.getDataDir();
+                
+                // Process in adaptive batches
+                List<String> remainingFiles = new ArrayList<>(filePaths);
+                
+                while (!remainingFiles.isEmpty()) {
+                    // Check resources before each batch
+                    ResourceCheck resourceCheck = checkResourceAvailability(
+                        dataDir, remainingFiles, currentBatchSize.get());
+                    
+                    if (!resourceCheck.canProceed) {
+                        System.err.println("[NoteFileService] Insufficient resources: " + 
+                            resourceCheck.reason);
+                        
+                        if (progressWriter != null) {
+                            TaskMessages.writeErrorAsync(operation,
+                                "Resource check failed: " + resourceCheck.reason,
+                                new RuntimeException(resourceCheck.reason),
+                                progressWriter);
+                        }
+                        
+                        // Return partial success if we completed some files
+                        return completed.get() > 0;
+                    }
+                    
+                    // Adjust batch size if recommended
+                    if (resourceCheck.recommendedBatchSize < currentBatchSize.get()) {
+                        System.out.println(String.format(
+                            "[NoteFileService] Adjusting batch size: %d -> %d",
+                            currentBatchSize.get(), resourceCheck.recommendedBatchSize));
+                        currentBatchSize.set(resourceCheck.recommendedBatchSize);
+                    }
+                    
+                    // Take next batch
+                    int batchSize = Math.min(currentBatchSize.get(), remainingFiles.size());
+                    List<String> currentBatch = remainingFiles.subList(0, batchSize);
+                    List<String> batchCopy = new ArrayList<>(currentBatch);
+                    currentBatch.clear(); // Remove from remaining
+                    
+                    // Process batch
+                    Semaphore semaphore = new Semaphore(batchSize, true);
+                    List<CompletableFuture<Boolean>> batchFutures = new ArrayList<>();
+                    
+                    for (String filePath : batchCopy) {
+                        File file = new File(filePath);
+                        
+                        if (!file.exists() || !file.isFile()) {
+                            System.err.println("[NoteFileService] File not found: " + filePath);
+                            failed.incrementAndGet();
+                            continue;
+                        }
+                        
+                        CompletableFuture<Boolean> fileFuture = CompletableFuture.supplyAsync(() -> {
+                            try {
+                                semaphore.acquire();
+                                try {
+                                    File tmpFile = new File(file.getAbsolutePath() + ".tmp");
+                                    
+                                    if (progressWriter != null) {
+                                        ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
+                                            completed.get(), filePaths.size(),
+                                            operation + ": " + filePath,
+                                            progressWriter);
+                                    }
+                                    
+                                    // Re-encrypt
+                                    FileStreamUtils.updateFileEncryption(
+                                        decryptKey, encryptKey, file, tmpFile, progressWriter);
+                                    
+                                    completed.incrementAndGet();
+                                    
+                                    // Update analysis if provided
+                                    if (analysis != null) {
+                                        analysis.markFileCompleted(filePath);
+                                    }
+                                    
+                                    if (progressWriter != null) {
+                                        ProgressMessage.writeAsync(ProtocolMesssages.SUCCESS,
+                                            completed.get(), filePaths.size(),
+                                            operation + ": " + filePath,
+                                            progressWriter);
+                                    }
+                                    
+                                    return true;
+                                    
+                                } finally {
+                                    semaphore.release();
+                                }
+                            } catch (Exception e) {
+                                failed.incrementAndGet();
+                                System.err.println("[NoteFileService] " + operation +
+                                    " failed: " + filePath + " - " + e.getMessage());
+                                
+                                if (progressWriter != null) {
+                                    TaskMessages.writeErrorAsync(operation,
+                                        filePath, e, progressWriter);
+                                }
+                                
+                                return false;
+                            }
+                        }, getExecService());
+                        
+                        batchFutures.add(fileFuture);
+                    }
+                    
+                    // Wait for batch to complete
+                    CompletableFuture.allOf(batchFutures.toArray(new CompletableFuture[0])).join();
+                    
+                    // Log batch completion
+                    System.out.println(String.format(
+                        "[NoteFileService] Batch complete: %d/%d files remaining",
+                        remainingFiles.size(), filePaths.size()));
+                }
+                
+                boolean success = failed.get() == 0;
+                
+                System.out.println(String.format(
+                    "[NoteFileService] %s complete: %d succeeded, %d failed",
+                    operation, completed.get(), failed.get()));
+                
+                return success;
+                
+            } catch (Exception e) {
+                System.err.println("[NoteFileService] " + operation +
+                    " operation failed: " + e.getMessage());
+                return false;
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+
+
+    /**
+     * Check resource availability before processing batch
+     */
+    private ResourceCheck checkResourceAvailability(
+            File dataDir,
+            List<String> remainingFiles,
+            int proposedBatchSize) {
+        
+        ResourceCheck check = new ResourceCheck();
+        
+        // Check disk space
+        long availableDisk = dataDir.getUsableSpace();
+        long bufferSpace = 100 * 1024 * 1024; // 100MB buffer
+        long safeDiskSpace = availableDisk - bufferSpace;
+        
+        if (safeDiskSpace < 0) {
+            check.canProceed = false;
+            check.reason = "Insufficient disk space (less than 100MB available)";
+            return check;
+        }
+        
+        // Calculate space needed for proposed batch
+        long batchSpaceNeeded = 0;
+        int filesInBatch = Math.min(proposedBatchSize, remainingFiles.size());
+        
+        for (int i = 0; i < filesInBatch; i++) {
+            File file = new File(remainingFiles.get(i));
+            if (file.exists()) {
+                batchSpaceNeeded += file.length();
+            }
+        }
+        
+        // Check if we have enough space for this batch
+        if (batchSpaceNeeded > safeDiskSpace) {
+            // Calculate how many files we CAN process
+            long spaceAccumulator = 0;
+            int maxFiles = 0;
+            
+            for (int i = 0; i < filesInBatch; i++) {
+                File file = new File(remainingFiles.get(i));
+                if (file.exists()) {
+                    long fileSize = file.length();
+                    if (spaceAccumulator + fileSize <= safeDiskSpace) {
+                        spaceAccumulator += fileSize;
+                        maxFiles++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            
+            if (maxFiles == 0) {
+                check.canProceed = false;
+                check.reason = String.format(
+                    "Insufficient disk space. Need %.2f MB, have %.2f MB available",
+                    batchSpaceNeeded / (1024.0 * 1024.0),
+                    safeDiskSpace / (1024.0 * 1024.0));
+                return check;
+            }
+            
+            // Reduce batch size
+            check.canProceed = true;
+            check.recommendedBatchSize = maxFiles;
+            check.reason = String.format(
+                "Disk space constrained. Reducing batch from %d to %d files",
+                proposedBatchSize, maxFiles);
+            
+            System.out.println("[NoteFileService] " + check.reason);
+            return check;
+        }
+        
+        // Check memory availability (estimate based on JVM)
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long allocatedMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long availableMemory = maxMemory - allocatedMemory + freeMemory;
+        
+        // Rough estimate: need ~10% of file size in memory per concurrent operation
+        long memoryNeeded = (long) (batchSpaceNeeded * 0.1);
+        
+        if (memoryNeeded > availableMemory * 0.5) {
+            // Using more than 50% of available memory - reduce batch
+            int memoryBasedBatch = (int) ((availableMemory * 0.5) / 
+                (batchSpaceNeeded / (double) filesInBatch * 0.1));
+            
+            if (memoryBasedBatch < 1) {
+                // Try garbage collection and check again
+                System.gc();
+                
+                long newAvailable = runtime.maxMemory() - runtime.totalMemory() + 
+                    runtime.freeMemory();
+                
+                if (newAvailable < memoryNeeded) {
+                    check.canProceed = false;
+                    check.reason = String.format(
+                        "Insufficient memory. Need ~%.2f MB, have ~%.2f MB available",
+                        memoryNeeded / (1024.0 * 1024.0),
+                        availableMemory / (1024.0 * 1024.0));
+                    return check;
+                }
+            }
+            
+            check.canProceed = true;
+            check.recommendedBatchSize = Math.max(1, memoryBasedBatch);
+            check.reason = String.format(
+                "Memory constrained. Reducing batch from %d to %d files",
+                proposedBatchSize, memoryBasedBatch);
+            
+            System.out.println("[NoteFileService] " + check.reason);
+            return check;
+        }
+        
+        // All checks passed
+        check.canProceed = true;
+        check.recommendedBatchSize = proposedBatchSize;
+        check.reason = "Resources OK";
+        return check;
+    }
+
+    /**
+     * Resource check result
+     */
+    private static class ResourceCheck {
+        boolean canProceed = true;
+        int recommendedBatchSize = 1;
+        String reason = "";
+    }
+
+    /**
+     * Delete corrupted files from disk
+     */
+    public CompletableFuture<Boolean> deleteCorruptedFiles(List<String> corruptedFiles) {
+        if (corruptedFiles == null || corruptedFiles.isEmpty()) {
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        return CompletableFuture.supplyAsync(() -> {
+            boolean allSucceeded = true;
+            
+            for (String filePath : corruptedFiles) {
+                File file = new File(filePath);
+                File tmpFile = new File(filePath + ".tmp");
+                
+                try {
+                    if (file.exists()) {
+                        Files.delete(file.toPath());
+                        System.out.println("[NoteFileService] Deleted corrupted file: " + filePath);
+                    }
+                    
+                    if (tmpFile.exists()) {
+                        Files.delete(tmpFile.toPath());
+                        System.out.println("[NoteFileService] Deleted corrupted tmp: " + 
+                            tmpFile.getName());
+                    }
+                } catch (IOException e) {
+                    System.err.println("[NoteFileService] Failed to delete: " + filePath + 
+                        " - " + e.getMessage());
+                    allSucceeded = false;
+                }
+            }
+            
+            return allSucceeded;
+            
+        }, VirtualExecutors.getVirtualExecutor());
     }
 }

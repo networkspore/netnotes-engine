@@ -12,7 +12,9 @@ import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class NoteBytesReader implements AutoCloseable{
     private final InputStream m_in;
-    
+
+
+        
     public NoteBytesReader(InputStream is){
         m_in = is;
     }
@@ -72,40 +74,57 @@ public class NoteBytesReader implements AutoCloseable{
     }
 
     public byte[] readNextBytes(int size) throws IOException{
+        int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
+        byte[] buf = new byte[size];
 
-            int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
+        if(size <= StreamUtils.BUFFER_SIZE ){
+            int readLength = m_in.read(buf, 0, size);
+           
+            if(readLength != size){
+                throw new EOFException("Reached pre-mature end of stream expected: " + size);
+            }
+            return buf;
+        }else{
             byte[] buffer = new byte[bufferSize];
-            int length = 0;
+
+            int readLength = 0;
             int remaining = size;
-            byte[] byteOutput = new byte[size];
-            int offset = 0;
-            while(remaining > 0 && ((length = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
-                System.arraycopy(buffer, 0, byteOutput, offset, length);
-                offset += length;
-                remaining -= length;
+            int writeOffset = 0;
+            while(remaining > 0 && ((readLength = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
+                System.arraycopy(buffer, 0, buf, writeOffset, readLength);
+                writeOffset += readLength;
+                remaining -= readLength;
             }
             if(remaining > 0){
                 throw new EOFException("Reached pre-mature end of stream expected: " + size);
             }
-            return byteOutput;
-        
+            return buf;
+        }
     }
 
     /****
      * 
      * @param buf buffer to write to
      * @param offset offset of buffer to write to
-     * @param length bytes to write
+     * @param size bytes to write
      * @return offset after writing bytes to buffer
      * @throws IOException
      */
+    public int readNextBytes(byte[] buf, int offset, int size) throws IOException{
+        if(size <= StreamUtils.BUFFER_SIZE ){
 
-    public int readNextBytes(byte[] buf, int offset, int length) throws IOException{
-    
-            int bufferSize = length < StreamUtils.BUFFER_SIZE ? length : StreamUtils.BUFFER_SIZE;
+            int readLength = m_in.read(buf, 0, size);
+           
+            if(readLength != size){
+                throw new EOFException("Reached pre-mature end of stream expected: " + size);
+            }
+            return offset += readLength;
+        }else{
+            int bufferSize = StreamUtils.BUFFER_SIZE;
             byte[] buffer = new byte[bufferSize];
+
             int readLength = 0;
-            int remaining = length;
+            int remaining = size;
             int writeOffset = offset;
             while(remaining > 0 && ((readLength = m_in.read(buffer, 0, remaining < bufferSize ? remaining : bufferSize)) != -1)){
                 System.arraycopy(buffer, 0, buf, writeOffset, readLength);
@@ -113,9 +132,11 @@ public class NoteBytesReader implements AutoCloseable{
                 remaining -= readLength;
             }
             if(remaining > 0){
-                throw new EOFException("Reached pre-mature end of stream expected: " + length);
+                throw new EOFException("Reached pre-mature end of stream expected: " + size);
             }
             return writeOffset;
+        }
+           
         
     }
 
@@ -133,6 +154,14 @@ public class NoteBytesReader implements AutoCloseable{
         return count;
     }
 
+    /**
+     * 
+     * @param buffer
+     * @param off
+     * @param len
+     * @return return bytes read
+     * @throws IOException
+     */
 
     public int read(byte[] buffer, int off, int len) throws IOException{
         return m_in.read(buffer, off, len);

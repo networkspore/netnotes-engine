@@ -1,4 +1,4 @@
-package io.netnotes.engine.core.nodes;
+package io.netnotes.engine.core.system.control.nodes;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;

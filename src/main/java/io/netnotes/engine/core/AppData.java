@@ -3,18 +3,15 @@ package io.netnotes.engine.core;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.core.nodes.INode;
-import io.netnotes.engine.crypto.CryptoService;
+import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -23,6 +20,7 @@ import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
+import io.netnotes.engine.noteFiles.notePath.NoteFileService.FileEncryptionAnalysis;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
@@ -203,147 +201,179 @@ public class AppData {
         return  getSettingsData().hasOldKey();
     }
 
+    public void clearOldKey() {
+        getSettingsData().clearOldKey();
+    }
+
+
     private SettingsData getSettingsData(){
         return m_noteFileRegistry.getSettingsData();
     }
 
-    /**
-     * Complete interrupted password change (recovery option 1)
-     * 
-     * Re-encrypts remaining files from OLD key to NEW key.
-     * Used when password change was interrupted mid-operation.
-     * 
-     * Requirements:
-     * - Old key must be available (hasOldKeyForRecovery() returns true)
-     * - New password is already active in SettingsData
-     * 
-     * @param filePaths Files that need re-encryption
-     * @param oldPassword OLD password (if old key not in memory)
-     * @param batchSize Concurrent batch size
-     * @param progressWriter Progress tracking
-     * @return Success/failure result
-     */
-    public CompletableFuture<Boolean> completePasswordChange(
-        List<String> filePaths,
-        NoteBytesEphemeral oldPassword,
-        int batchSize,
-        AsyncNoteBytesWriter progressWriter) 
-    {
-        
-        if (progressWriter != null) {
-            ProgressMessage.writeAsync("AppData", 0, -1, 
-                "Starting recovery: completing password change", progressWriter);
-        }
-        
-        // Get old key (from memory or derive from password)
-        return getOldKey(oldPassword)
-            .thenCompose(oldKey -> {
-            
-          
-                
-                // EXPLICIT: Complete password change
-                return m_noteFileRegistry.completePasswordChangeForFiles(
-                    filePaths,
-                    oldKey,      // Only pass OLD key - method gets NEW key itself
-                    batchSize,
-                    progressWriter
-                );
-            })
-            .thenApply(success -> {
-                if (success) {
-                    getSettingsData().clearOldKey();
-                    
-                    if (progressWriter != null) {
-                        ProgressMessage.writeAsync("AppData", 0, -1, 
-                            "Recovery complete - all files updated", progressWriter);
-                    }
-                }
-                return success;
-            });
-    }
-
-    /**
-     * Rollback to old password (recovery option 2)
-     * 
-     * This reverts BOTH:
-     * 1. SettingsData to old password/key
-     * 2. Successfully updated files back to old encryption
-     * 
-     * Requirements:
-     * - Old key must be available (hasOldKeyForRecovery() returns true)
-     * - User provides OLD password for verification
-     * 
-     * @param successfulFiles Files that were successfully updated (need rollback)
-     * @param oldPassword OLD password (for verification and rollback)
-     * @param batchSize Concurrent batch size
-     * @param progressWriter Progress tracking
-     * @return Success/failure result
-     */
-    public CompletableFuture<Boolean> rollbackPasswordChange(
-        List<String> successfulFiles,
-        NoteBytesEphemeral oldPassword,
-        int batchSize,
-        AsyncNoteBytesWriter progressWriter
+    public CompletableFuture<Boolean> performRecovery(FileEncryptionAnalysis analysis,AsyncNoteBytesWriter progressWriter,
+        int batchSize
     ) {
-        
-        if (progressWriter != null) {
-            ProgressMessage.writeAsync("AppData", 0, -1, 
-                "Starting rollback to old password", progressWriter);
-        }
-        
-        // Step 1: Verify old password
-        return getSettingsData().verifyOldPassword(oldPassword)
-            .thenCompose(valid -> {
-                if (!valid) {
-                    throw new IllegalArgumentException("Invalid old password");
-                }
-                
-                if (progressWriter != null) {
-                    ProgressMessage.writeAsync("AppData", 0, -1, 
-                        "Old password verified, rolling back SettingsData", progressWriter);
-                }
-                
-                // Step 2: Rollback SettingsData (swap keys back)
-                return rollbackSettingsData();
-            })
-            .thenCompose(v -> {
-                if (progressWriter != null) {
-                    ProgressMessage.writeAsync("AppData", 0, -1, 
-                        "SettingsData rolled back, re-encrypting files", progressWriter);
-                }
-                
-                // Step 3: Get old key for rollback
-                return getOldKey(oldPassword);
-            })
-            .thenCompose(oldKey -> {
-              
-                
-                if (oldKey == null) {
-                    throw new IllegalStateException("Old key not available for rollback");
-                }
-                
-                // EXPLICIT: Rollback files
-                return m_noteFileRegistry.rollbackPasswordChangeForFiles(
-                    successfulFiles,
-                    oldKey,      // Only pass OLD key - method gets current key itself
-                    batchSize,
-                    progressWriter
-                );
-            })
-            .thenApply(success -> {
-                if (success) {
-                    getSettingsData().clearOldKey();
-                    
-                    if (progressWriter != null) {
-                        ProgressMessage.writeAsync("AppData", 0, -1, 
-                            "Rollback complete - system restored to old password", 
-                            progressWriter);
-                    }
-                }
-                return success;
-            });
+        List<String> filesNeedingUpdate = analysis.getFilesNeedingUpdate();
+
+        SecretKey oldKey = getSettingsData().getOldKey();
+        SecretKey currentKey = getSettingsData().getSecretKey();
+
+        return m_noteFileRegistry.reEncryptFiles(
+            filesNeedingUpdate,
+            oldKey,
+            currentKey,
+            "RECOVERY",
+            batchSize,
+            progressWriter
+        );
+    
     }
 
+    public CompletableFuture<Boolean> performTempFileCleanup(FileEncryptionAnalysis analysis){
+        return m_noteFileRegistry.cleanupFiles(analysis.getFilesNeedingCleanup());
+    }
+
+    public CompletableFuture<Boolean> performSwap(FileEncryptionAnalysis analysis, AsyncNoteBytesWriter progressWriter
+    ) {
+        return m_noteFileRegistry.performFinishSwaps( analysis.getFilesNeedingSwap());
+    }
+
+
+    /**
+     * Perform rollback re-encryption
+     * Re-encrypts files that were updated back to old key
+     * 
+     * Used when user chooses to revert to old password
+     */
+    public CompletableFuture<Boolean> performRollback(
+            FileEncryptionAnalysis analysis,
+            AsyncNoteBytesWriter progressWriter,
+            int batchSize) {
+        
+        // After rollbackSettingsData(), keys are swapped:
+        // - currentKey is now the OLD password's key
+        // - oldKey is now the NEW password's key (that we want to revert from)
+        
+        List<String> filesToRevert = analysis.getFilesNeedingUpdate();
+        
+        if (filesToRevert.isEmpty()) {
+            System.out.println("[AppData] No files to revert");
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        SecretKey fromKey = getSettingsData().getOldKey(); // Actually the NEW key now
+        SecretKey toKey = getSettingsData().getSecretKey(); // Actually the OLD key now
+        
+        return m_noteFileRegistry.reEncryptFiles(
+            filesToRevert,
+            fromKey,
+            toKey,
+            "ROLLBACK",
+            batchSize,
+            progressWriter
+        );
+    }
+
+    /**
+     * Perform comprehensive recovery (all actions)
+     * 
+     * Executes recovery operations in optimal order with resource monitoring:
+     * 1. Complete re-encryption (adaptive batching)
+     * 2. Finish file swaps
+     * 3. Clean up temporary files
+     * 
+     * Tracks progress and updates analysis as operations complete
+     */
+    public CompletableFuture<Boolean> performComprehensiveRecovery(
+            FileEncryptionAnalysis analysis,
+            AsyncNoteBytesWriter progressWriter,
+            int initialBatchSize) {
+        
+        System.out.println("[AppData] Starting comprehensive recovery");
+        
+        // Track which operations succeeded
+        CompletableFuture<Boolean> recoveryChain = CompletableFuture.completedFuture(true);
+        
+        // Step 1: Complete re-encryption (if needed)
+        if (!analysis.getFilesNeedingUpdate().isEmpty()) {
+            recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
+                if (!prevSuccess) {
+                    return CompletableFuture.completedFuture(false);
+                }
+                
+                ProgressMessage.writeAsync("ComprehensiveRecovery", 0, 3,
+                    "Step 1/3: Re-encrypting files", progressWriter);
+                
+                return performRecovery(analysis, progressWriter, initialBatchSize)
+                    .thenApply(success -> {
+                        if (success) {
+                            // Mark files as completed in analysis
+                            analysis.markFilesCompleted(analysis.getFilesNeedingUpdate());
+                        }
+                        return success;
+                    });
+            });
+        }
+        
+        // Step 2: Finish file swaps (if needed)
+        if (!analysis.getFilesNeedingSwap().isEmpty()) {
+            recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
+                if (!prevSuccess) {
+                    return CompletableFuture.completedFuture(false);
+                }
+                
+                ProgressMessage.writeAsync("ComprehensiveRecovery", 1, 3,
+                    "Step 2/3: Finishing file swaps", progressWriter);
+                
+                return performSwap(analysis, progressWriter)
+                    .thenApply(success -> {
+                        if (success) {
+                            analysis.markFilesCompleted(analysis.getFilesNeedingSwap());
+                        }
+                        return success;
+                    });
+            });
+        }
+        
+        // Step 3: Clean up temporary files (if needed)
+        if (!analysis.getFilesNeedingCleanup().isEmpty()) {
+            recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
+                if (!prevSuccess) {
+                    return CompletableFuture.completedFuture(false);
+                }
+                
+                ProgressMessage.writeAsync("ComprehensiveRecovery", 2, 3,
+                    "Step 3/3: Cleaning up temporary files", progressWriter);
+                
+                return performTempFileCleanup(analysis)
+                    .thenApply(success -> {
+                        if (success) {
+                            analysis.markFilesCompleted(analysis.getFilesNeedingCleanup());
+                        }
+                        return success;
+                    });
+            });
+        }
+        
+        return recoveryChain.thenApply(finalSuccess -> {
+            System.out.println("[AppData] Comprehensive recovery " + 
+                (finalSuccess ? "succeeded" : "completed with errors"));
+            return finalSuccess;
+        });
+    }
+
+    /**
+     * Delete corrupted files from disk and ledger
+     */
+    public CompletableFuture<Boolean> deleteCorruptedFiles(List<String> corruptedFiles) {
+        if (corruptedFiles == null || corruptedFiles.isEmpty()) {
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        return m_noteFileRegistry.deleteCorruptedFiles(corruptedFiles);
+    }
+
+    
     /**
      * Verify old password (for recovery operations)
      * Used when system was restarted and old key needs to be derived
@@ -355,10 +385,9 @@ public class AppData {
     // ===== INTERNAL HELPERS =====
 
     /**
-     * Rollback SettingsData to old password state
-     * This is an internal operation coordinated by AppData
+     * swaps current key with old key, reverses recovery direction
      */
-    private CompletableFuture<Void> rollbackSettingsData() {
+    public CompletableFuture<Void> rollbackSettingsData() {
         return CompletableFuture.runAsync(() -> {
             try {
                 getSettingsData().rollbackToOldPassword();
@@ -367,37 +396,6 @@ public class AppData {
                 System.err.println("[AppData] Failed to rollback SettingsData: " + e.getMessage());
                 throw new RuntimeException("SettingsData rollback failed", e);
             }
-        }, VirtualExecutors.getVirtualExecutor());
-    }
-
-    /**
-     * Get recovery keys for file operations
-     * Returns both old and new keys for re-encryption operations
-     */
-    private CompletableFuture<SecretKey> getOldKey(NoteBytesEphemeral oldPassword) {
-        return CompletableFuture.supplyAsync(() -> {
-     
-            // Old key - check if in memory
-            SecretKey oldKey = getSettingsData().getOldKey();
-            
-            // If old key not in memory and password provided, derive it
-            if (oldKey == null && oldPassword != null) {
-                NoteBytes oldSalt = getSettingsData().oldSalt();
-                if (oldSalt != null) {
-                    try {
-                        oldKey = CryptoService.createKey(
-                            oldPassword, oldSalt);
-                        System.out.println("[AppData] Old key derived from password");
-                    } catch (Exception e) {
-                        System.err.println("[AppData] Failed to derive old key: " + e.getMessage());
-                        throw new CompletionException("cannot complete password change", new IllegalStateException(
-                           "Old key not available"));
-                    }
-                }
-            }
-            
-            return oldKey;
-            
         }, VirtualExecutors.getVirtualExecutor());
     }
 

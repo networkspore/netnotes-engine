@@ -20,6 +20,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 
+import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
@@ -117,6 +118,20 @@ public class StreamUtils {
             } catch (Exception e) {
                 // Log but don't throw - we're cleaning up
                 System.err.println("Warning: Error closing resource: " + e.getMessage());
+                return false;
+            }
+        }
+        return false;
+    }
+
+    public static boolean safeClose(StreamChannel streamChannel) {
+        if (streamChannel != null) {
+            try {
+                streamChannel.close();
+                return true;
+            } catch (Exception e) {
+                // Log but don't throw - we're cleaning up
+                System.err.println("Warning: Error closing streamChannel: " + e.getMessage());
                 return false;
             }
         }

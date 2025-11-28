@@ -3,6 +3,7 @@ package io.netnotes.engine.core.system;
 import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.*;
+import io.netnotes.engine.core.system.control.recovery.RecoveryFlags;
 import io.netnotes.engine.core.system.control.ui.*;
 
 import java.io.File;
@@ -10,11 +11,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -30,8 +33,11 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
+import io.netnotes.engine.noteFiles.notePath.NoteFileService;
+import io.netnotes.engine.noteFiles.notePath.NoteFileService.FileEncryptionAnalysis;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 /**
  * SystemSessionProcess - Manages user session lifecycle
@@ -779,9 +785,10 @@ public class SystemSessionProcess extends FlowProcess {
      * Start password creation session after validation passes
      */
     private CompletableFuture<Boolean> startPasswordCreationForChange(
-            InputDevice device,
-            NoteBytesEphemeral currentPassword,
-            DiskSpaceValidation validation) {
+        InputDevice device,
+        NoteBytesEphemeral currentPassword,
+        DiskSpaceValidation validation
+    ) {
         
         PasswordCreationSession newPasswordSession = new PasswordCreationSession(
             device,
@@ -791,115 +798,58 @@ public class SystemSessionProcess extends FlowProcess {
         );
         
         newPasswordSession.onPasswordCreated(newPassword -> {
-            // Calculate optimal batch size from validation
             int batchSize = calculateOptimalBatchSize(validation);
             
             System.out.println("[SystemSession] Starting password change with batch size: " + 
                 batchSize);
             
-            // Show starting message
             uiRenderer.render(UIProtocol.showMessage(
                 "Starting password change. This may take a while..."));
             
-            // Create progress tracking process
-            File dataDir = SettingsData.getDataDir();
-            File recoveryLog = new File(dataDir, "password_change_recovery.log");
-            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
-                uiRenderer, 
-                recoveryLog
-            );
+            // Create progress tracker (UI feedback only)
+            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
             
-            // Spawn and start progress tracker
             return spawnChild(progressTracker, "progress-tracker")
-                .thenCompose(trackerPath -> {
-                    // Start the tracker process
-                    return registry.startProcess(trackerPath)
-                        .thenApply(v -> trackerPath);
-                })
-                .thenCompose(trackerPath -> {
-                    // Request stream channel to progress tracker
-                    return registry.requestStreamChannel(contextPath, trackerPath)
-                        .thenCompose(progressChannel -> {
-                            
-                            // Create AsyncNoteBytesWriter with the stream channel
-                            AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                                progressChannel.getStream()
-                            );
-                            
-                            // Start password change
-                            return appData.changePassword(
-                                currentPassword, 
-                                newPassword, 
-                                batchSize, 
-                                progressWriter
-                            )
-                            .thenApply(result -> {
-                                System.out.println("[SystemSession] Password change operation completed");
-                                return new PasswordChangeResult(progressWriter, progressChannel, progressTracker);
-                            })
-                            .exceptionally(ex -> {
-                                // Password change failed
-                                System.err.println("[SystemSession] Password change operation failed: " + 
-                                    ex.getMessage());
-                                return new PasswordChangeResult(progressWriter, progressChannel, progressTracker, ex);
-                            });
-                        });
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> registry.requestStreamChannel(contextPath, 
+                    progressTracker.getContextPath()))
+                .thenCompose(progressChannel -> {
+                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
+                        progressChannel.getStream()
+                    );
+                    
+                    // Execute password change
+                    return appData.changePassword(
+                        currentPassword, 
+                        newPassword, 
+                        batchSize, 
+                        progressWriter
+                    )
+                    .handle((result, exception) -> {
+                        // Close resources
+                        try {
+                            progressWriter.close();
+                            progressChannel.close();
+                        } catch (IOException e) {
+                            System.err.println("[SystemSession] Error closing progress: " + 
+                                e.getMessage());
+                        }
+                        
+                        // Return result with exception info
+                        return new PasswordChangeResult(
+                            progressTracker, 
+                            exception
+                        );
+                    });
                 })
                 .thenCompose(result -> {
-                    // Close the writer and channel
-                    try {
-                        if (result.progressWriter != null) {
-                            result.progressWriter.close();
-                        }
-                        if (result.progressChannel != null) {
-                            result.progressChannel.close();
-                        }
-                    } catch (IOException e) {
-                        System.err.println("[SystemSession] Error closing progress stream: " + 
-                            e.getMessage());
-                    }
-                    
-                    // Wait for progress tracker to complete reading and processing
+                    // Wait for progress tracker to finish
                     return result.progressTracker.getCompletionFuture()
                         .thenApply(v -> result);
                 })
                 .thenApply(result -> {
-                    // Check results
-                    if (result.exception != null) {
-                        // Operation failed
-                        System.err.println("[SystemSession] Password change failed: " + 
-                            result.exception.getMessage());
-                        result.exception.printStackTrace();
-                        
-                        uiRenderer.render(UIProtocol.showError(
-                            "Password change failed: " + result.exception.getMessage() + 
-                            "\n\nYour data may be in an inconsistent state.\n" +
-                            "Check recovery log for details."));
-                        
-                    } else if (result.progressTracker.hasErrors()) {
-                        // Operation completed but with errors
-                        System.err.println("[SystemSession] Password change completed with errors");
-                        
-                        uiRenderer.render(UIProtocol.showError(
-                            "Password change completed with errors.\n\n" +
-                            "Files completed: " + result.progressTracker.getCompletedFiles().size() + "\n" +
-                            "Files failed: " + result.progressTracker.getFailedFiles().size() + "\n\n" +
-                            "Your data may be in an inconsistent state.\n" +
-                            "Check recovery log for details."));
-                        
-                    } else {
-                        // Success!
-                        System.out.println("[SystemSession] Password change completed successfully");
-                        
-                        uiRenderer.render(UIProtocol.showMessage(
-                            "Master password changed successfully!\n\n" +
-                            "All " + result.progressTracker.getCompletedFiles().size() + 
-                            " files have been re-encrypted."));
-                    }
-                    
-                    // Return to main menu
-                    showMainMenu();
-                    return null;
+                    // Analyze results
+                    return handlePasswordChangeCompletion(result);
                 });
         });
         
@@ -914,6 +864,74 @@ public class SystemSessionProcess extends FlowProcess {
     }
 
 
+    private Void handlePasswordChangeCompletion(PasswordChangeResult result) {
+        
+        if (result.exception != null) {
+            // CRITICAL: Exception during password change
+            System.err.println("[SystemSession] Password change FAILED: " + 
+                result.exception.getMessage());
+            
+            // Set recovery flag
+            RecoveryFlags.setRecoveryNeeded("password_change_exception: " + 
+                result.exception.getMessage());
+            
+            // Enter recovery mode IMMEDIATELY
+            state.addState(SystemSessionStates.RECOVERY_REQUIRED);
+            
+            uiRenderer.render(UIProtocol.showError(
+                "Password change failed with error.\n\n" +
+                "The system will now enter recovery mode to assess the situation."));
+            
+            // Trigger recovery investigation
+            investigateAndShowRecoveryMenu();
+            
+            return null;
+        }
+        
+        // Check progress tracker for partial failures
+        if (result.progressTracker != null && result.progressTracker.hasErrors()) {
+            // PARTIAL SUCCESS: Some files failed
+            int succeeded = result.progressTracker.getCompletedFiles().size();
+            int failed = result.progressTracker.getFailedFiles().size();
+            
+            System.err.println(String.format(
+                "[SystemSession] Password change PARTIAL: %d succeeded, %d failed",
+                succeeded, failed));
+            
+            // Set recovery flag
+            RecoveryFlags.setRecoveryNeeded(String.format(
+                "password_change_partial: %d files failed", failed));
+            
+            // Enter recovery mode
+            state.addState(SystemSessionStates.RECOVERY_REQUIRED);
+            
+            uiRenderer.render(UIProtocol.showError(
+                "Password change completed with errors.\n\n" +
+                "Files completed: " + succeeded + "\n" +
+                "Files failed: " + failed + "\n\n" +
+                "Entering recovery mode to assess file encryption state."));
+            
+            // Trigger recovery investigation
+            investigateAndShowRecoveryMenu();
+            
+            return null;
+        }
+        
+        // FULL SUCCESS
+        System.out.println("[SystemSession] Password change completed successfully");
+        
+        // Clear any existing recovery flag
+        RecoveryFlags.clearRecoveryFlag();
+        
+        uiRenderer.render(UIProtocol.showMessage(
+            "Master password changed successfully!\n\n" +
+            "All files have been re-encrypted."));
+        
+        showMainMenu();
+        return null;
+    }
+
+   
         
     /**
      * Calculate optimal batch size from disk space validation
@@ -978,355 +996,1040 @@ public class SystemSessionProcess extends FlowProcess {
         
     /**
      * Check for incomplete password change
-     * checks AppData for old key availability
      */
-    private CompletableFuture<Void> checkForIncompletePasswordChange() {
+     private CompletableFuture<Void> checkForIncompletePasswordChange() {
         return CompletableFuture.runAsync(() -> {
-            try {
-                File dataDir = SettingsData.getDataDir();
-                File logFile = new File(dataDir, "password_change_recovery.log");
-                
-                if (!logFile.exists() || logFile.length() == 0) {
-                    return; // No recovery needed
-                }
-                
-                // Parse recovery log
-                PasswordChangeRecoveryLog.RecoveryAnalysis analysis = 
-                    PasswordChangeRecoveryLog.parseLog(logFile);
-                
-                if (analysis == null || !analysis.needsRecovery()) {
-                    // Clean up completed log
-                    archiveRecoveryLog(logFile);
-                    return;
-                }
-                
-                // Check if old key is available (through AppData)
-                boolean hasOldKey = appData.hasOldKeyForRecovery();
-                
-                // Found incomplete password change - show recovery menu
-                System.err.println("[SystemSession] Incomplete password change detected");
-                showPasswordRecoveryMenu(analysis, logFile, hasOldKey);
-                
-            } catch (IOException e) {
-                System.err.println("[SystemSession] Error checking recovery: " + 
-                    e.getMessage());
+            
+            // Check for recovery flag
+            if (!RecoveryFlags.isRecoveryNeeded()) {
+                // No flag, no recovery needed
+                return;
             }
+            
+            String reason = RecoveryFlags.getRecoveryReason();
+            System.err.println("[SystemSession] Recovery flag detected: " + reason);
+            
+            // Show recovery UI
+            uiRenderer.render(UIProtocol.showMessage(
+                "⚠️ System requires recovery\n\n" +
+                "Reason: " + reason + "\n\n" +
+                "Investigating file encryption state..."));
+            
+            // Enter recovery mode
+            state.addState(SystemSessionStates.RECOVERY_REQUIRED);
+            
+            // Investigate and show options
+            investigateAndShowRecoveryMenu();
+            
         }, VirtualExecutors.getVirtualExecutor());
     }
 
-
+    private void investigateAndShowRecoveryMenu() {
         
-    /**
-     * Show recovery menu
-     * Updated to pass hasOldKey from AppData
-     */
-    private void showPasswordRecoveryMenu(
-            PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            File logFile,
-            boolean hasOldKey) {
+        uiRenderer.render(UIProtocol.showMessage("Analyzing file encryption state..."));
         
-        ContextPath menuPath = contextPath.append("menu", "recovery");
-        MenuContext recoveryMenu = new MenuContext(
-            menuPath, 
-            "⚠️ Password Change Recovery Required", 
-            uiRenderer
-        );
+        // Check if old key available
+        boolean hasOldKey = appData.hasOldKeyForRecovery();
         
-        String description = String.format(
-            "An incomplete password change was detected.\n\n" +
-            "Password Status: NEW password is active\n" +
-            "Files successfully updated: %d\n" +
-            "Files failed: %d\n" +
-            "Files interrupted: %d\n\n" +
-            "Old encryption key: %s\n\n" +
-            "Choose a recovery option:",
-            analysis.filesSucceeded,
-            analysis.filesFailed,
-            analysis.filesInterrupted,
-            hasOldKey ? "✓ Available in memory" : "✗ Not available (system was restarted)"
-        );
-        
-        recoveryMenu.addInfoItem("summary", description);
-        recoveryMenu.addSeparator("Recovery Options");
-        
-        // Option 1: Complete re-encryption (finish the job)
-        recoveryMenu.addItem(
-            "complete",
-            "Complete Re-encryption",
-            "Finish updating remaining files to NEW password",
-            () -> recoveryCompleteReEncryption(analysis, logFile, hasOldKey)
-        );
-        
-        // Option 2: Rollback (restore to old password)
-        recoveryMenu.addItem(
-            "rollback",
-            "Rollback to OLD Password",
-            "⚠️ Revert SettingsData and re-encrypt all files back",
-            () -> recoveryRollbackToOldPassword(analysis, logFile, hasOldKey)
-        );
-        
-        // Option 3: View details
-        recoveryMenu.addItem(
-            "details",
-            "View Detailed Status",
-            () -> showRecoveryDetails(analysis)
-        );
-        
-        // Option 4: Export log and continue (risky)
-        recoveryMenu.addItem(
-            "export",
-            "Export Log and Continue",
-            "⚠️ Proceed without recovery (data may be inconsistent)",
-            () -> exportLogAndContinue(logFile)
-        );
-        
-        // Create navigator if needed
-        if (menuNavigator == null) {
-            createMenuNavigator();
-        }
-        
-        // Block other operations until recovery is handled
-        state.addState(SystemSessionStates.RECOVERY_REQUIRED);
-        menuNavigator.showMenu(recoveryMenu);
-    }
-
-
-        
-    /**
-     * Recovery Option 1: Complete re-encryption
-     * NOW delegates to AppData instead of doing file operations directly
-     */
-    private void recoveryCompleteReEncryption(
-            PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            File logFile,
-            boolean hasOldKey) {
-        
-        if (hasOldKey) {
-            // Old key available in memory - proceed directly
-            uiRenderer.render(UIProtocol.showMessage(
-                "Old encryption key found in memory.\n" +
-                "Re-encrypting remaining files..."));
-            
-            performRecoveryReEncryption(analysis, null, logFile);
-            
-        } else {
-            // Need user to enter OLD password
-            uiRenderer.render(UIProtocol.showMessage(
-                "Old encryption key not available.\n\n" +
-                "Please enter the OLD password (before the failed change).\n" +
-                "This will be used to decrypt files that haven't been updated yet."));
-            
-            getSecureInputDevice()
-                .thenAccept(device -> {
-                    PasswordSessionProcess session = new PasswordSessionProcess(
-                        device,
-                        uiRenderer,
-                        "Enter OLD password (before password change)",
-                        3
-                    );
-                    
-                    session.onPasswordEntered(oldPassword -> {
-                        // Verify old password through AppData
-                        return appData.verifyOldPassword(oldPassword)
-                            .thenCompose(valid -> {
-                                if (!valid) {
-                                    uiRenderer.render(UIProtocol.showError(
-                                        "Invalid old password"));
-                                    return CompletableFuture.completedFuture(false);
-                                }
-                                
-                                // Perform recovery with old password
-                                performRecoveryReEncryption(analysis, oldPassword, logFile);
-                                return CompletableFuture.completedFuture(true);
-                            });
-                    });
-                    
-                    spawnChild(session, "recovery-old-password")
-                        .thenCompose(path -> registry.startProcess(path));
-                });
-        }
-    }
-
-    /**
-     * Perform recovery re-encryption using AppData API
-     */
-    private void performRecoveryReEncryption(
-            PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            NoteBytesEphemeral oldPassword,
-            File logFile) {
-        
-        // Collect files that need re-encryption
-        List<String> filesToReEncrypt = new ArrayList<>();
-        for (PasswordChangeRecoveryLog.FileRecoveryState fileState : 
-                analysis.fileStates.values()) {
-            if (fileState.isInterrupted() || fileState.failed) {
-                filesToReEncrypt.add(fileState.filePath);
-            }
-        }
-        
-        if (filesToReEncrypt.isEmpty()) {
-            uiRenderer.render(UIProtocol.showMessage(
-                "No files need re-encryption. Recovery complete."));
-            archiveRecoveryLog(logFile);
-            state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
-            showMainMenu();
+        if (!hasOldKey) {
+            // No old key - offer to provide password or skip
+            showRecoveryMenuNoOldKey();
             return;
         }
         
-        uiRenderer.render(UIProtocol.showMessage(
-            String.format("Re-encrypting %d files from OLD key to NEW key...", 
-                filesToReEncrypt.size())));
-        
-        // Create progress tracker
-        File continuationLog = new File(logFile.getParent(), 
-            "password_change_recovery_continuation.log");
-        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
-            uiRenderer, 
-            continuationLog
-        );
-        
-        // Spawn and execute
-        spawnChild(progressTracker, "recovery-progress")
-            .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-            .thenCompose(v -> registry.requestStreamChannel(
-                contextPath, progressTracker.getContextPath()))
-            .thenCompose(progressChannel -> {
-                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                    progressChannel.getStream());
-                
-                // DELEGATE to AppData - it handles all the complexity
-                return appData.completePasswordChange(
-                    filesToReEncrypt,
-                    oldPassword,
-                    10,  // batch size
-                    progressWriter
-                )
-                .whenComplete((success, ex) -> {
-                    try {
-                        progressWriter.close();
-                        progressChannel.close();
-                    } catch (IOException e) {
-                        System.err.println("Error closing progress stream: " + 
-                            e.getMessage());
-                    }
-                });
-            })
-            .thenCompose(success -> progressTracker.getCompletionFuture()
-                .thenApply(v -> success))
-            .thenAccept(success -> {
-                if (success) {
-                    // Archive logs
-                    archiveRecoveryLog(logFile);
-                    archiveRecoveryLog(continuationLog);
-                    
-                    state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
-                    
-                    uiRenderer.render(UIProtocol.showMessage(
-                        "✓ Recovery completed successfully!\n\n" +
-                        "All files have been updated to the new password."));
-                    
-                    showMainMenu();
-                    
-                } else {
-                    uiRenderer.render(UIProtocol.showError(
-                        "Recovery completed with errors.\n\n" +
-                        "Some files may not have been updated.\n" +
-                        "Check recovery log for details."));
-                }
+        // Old key available - analyze files
+        appData.getNoteFileService().investigateFileEncryptionState()
+            .thenAccept(analysis -> {
+                showRecoveryMenu(analysis, true);
             })
             .exceptionally(ex -> {
+                System.err.println("[SystemSession] Investigation failed: " + ex.getMessage());
+                
                 uiRenderer.render(UIProtocol.showError(
-                    "Recovery failed: " + ex.getMessage()));
+                    "Failed to investigate file state: " + ex.getMessage()));
+                
+                // Offer basic options without analysis
+                showRecoveryMenuNoAnalysis();
                 return null;
             });
     }
 
         
-    /**
-     * Recovery Option 2: Rollback to old password
-     * NOW delegates to AppData instead of doing operations directly
-     */
-    private void recoveryRollbackToOldPassword(
-            PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            File logFile,
-            boolean hasOldKey) {
+    private void showRecoveryMenu(FileEncryptionAnalysis analysis, boolean hasOldKey) {
         
-        // Validate rollback is possible
-        if (!hasOldKey && !appData.hasOldKeyForRecovery()) {
-            uiRenderer.render(UIProtocol.showError(
-                "Cannot rollback: Old key and salt not available.\n\n" +
-                "Rollback is only possible if:\n" +
-                "1. System hasn't been restarted, OR\n" +
-                "2. You can provide the old password"));
-            return;
+        ContextPath menuPath = contextPath.append("menu", "recovery");
+        MenuContext recoveryMenu = new MenuContext(
+            menuPath, 
+            "⚠️ Recovery Mode", 
+            uiRenderer
+        );
+        
+        // Show current state
+        recoveryMenu.addInfoItem("summary", analysis.getSummary());
+        
+        // Show progress if any operations completed
+        if (analysis.getCompletionPercentage() > 0) {
+            recoveryMenu.addInfoItem("progress", 
+                String.format("\nProgress: %.1f%% complete\n", 
+                    analysis.getCompletionPercentage()));
         }
         
-        uiRenderer.render(UIProtocol.showMessage(
-            "⚠️ ROLLBACK WARNING\n\n" +
-            "This will:\n" +
-            "1. Restore SettingsData to OLD password\n" +
-            "2. Re-encrypt successfully updated files back to OLD key\n\n" +
-            "Files to rollback: " + analysis.filesSucceeded + "\n\n" +
-            "You will need to enter the OLD password to confirm."));
+        recoveryMenu.addSeparator("Recovery Actions");
         
-        // Always ask for old password (for verification)
+        // OPTION 0: Perform ALL actions at once (if multiple issues exist)
+        int issueCount = 0;
+        if (!analysis.getFilesNeedingUpdate().isEmpty()) issueCount++;
+        if (!analysis.getFilesNeedingSwap().isEmpty()) issueCount++;
+        if (!analysis.getFilesNeedingCleanup().isEmpty()) issueCount++;
+        
+        if (issueCount > 1) {
+            recoveryMenu.addItem(
+                "do-all",
+                "⚡ Perform All Recovery Actions",
+                String.format("Recommended: Fix all %d issues at once", issueCount),
+                () -> performAllRecoveryActions(analysis)
+            );
+            
+            recoveryMenu.addSeparator("Individual Actions");
+        }
+        
+        // Action 1: Complete partial updates
+        if (!analysis.getFilesNeedingUpdate().isEmpty()) {
+            recoveryMenu.addItem(
+                "complete-update",
+                "Complete Re-encryption",
+                String.format("Update %d files to current key", 
+                    analysis.getFilesNeedingUpdate().size()),
+                () -> performCompleteUpdate(analysis)
+            );
+        }
+        
+        // Action 2: Finish interrupted swaps
+        if (!analysis.getFilesNeedingSwap().isEmpty()) {
+            recoveryMenu.addItem(
+                "finish-swap",
+                "Finish File Swaps",
+                String.format("Complete %d interrupted swaps", 
+                    analysis.getFilesNeedingSwap().size()),
+                () -> performFinishSwaps(analysis)
+            );
+        }
+        
+        // Action 3: Cleanup tmp files
+        if (!analysis.getFilesNeedingCleanup().isEmpty()) {
+            recoveryMenu.addItem(
+                "cleanup",
+                "Clean Up Temporary Files",
+                String.format("Delete %d tmp files", 
+                    analysis.getFilesNeedingCleanup().size()),
+                () -> performCleanup(analysis)
+            );
+        }
+        
+        recoveryMenu.addSeparator("Advanced Options");
+        
+        // Action 4: Rollback (if old key available)
+        if (hasOldKey && !analysis.getAllFilesNeedingUpdate().isEmpty()) {
+            recoveryMenu.addItem(
+                "rollback",
+                "⚠️ Rollback to Old Password",
+                "Revert all changes to previous password",
+                () -> confirmAndPerformRollback(analysis)
+            );
+        }
+        
+        // Action 5: Handle corrupted files
+        if (!analysis.getCorruptedFiles().isEmpty()) {
+            recoveryMenu.addItem(
+                "corrupted",
+                "Handle Corrupted Files",
+                String.format("Deal with %d corrupted files", 
+                    analysis.getCorruptedFiles().size()),
+                () -> showCorruptedFilesMenu(analysis)
+            );
+        }
+        
+        // Action 6: Re-analyze
+        recoveryMenu.addItem(
+            "re-analyze",
+            "Re-analyze File States",
+            "Check current status after manual changes",
+            () -> {
+                analysis.resetCompletionTracking();
+                investigateAndShowRecoveryMenu();
+            }
+        );
+        
+        // Action 7: View detailed state
+        recoveryMenu.addItem(
+            "details",
+            "View Detailed File States",
+            () -> showDetailedFileStates(analysis)
+        );
+        
+        recoveryMenu.addSeparator("Exit Recovery");
+        
+        // Action 8: Clear flag if no issues remain
+        if (!analysis.needsRecovery()) {
+            recoveryMenu.addItem(
+                "complete",
+                "✓ Complete Recovery",
+                "All issues resolved - exit recovery mode",
+                () -> {
+                    RecoveryFlags.clearRecoveryFlag();
+                    appData.clearOldKey();
+                    state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                    
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "✓ Recovery Complete!\n\n" +
+                        "All file encryption issues have been resolved.\n" +
+                        "System is now in a consistent state."));
+                    
+                    showMainMenu();
+                }
+            );
+        } else {
+            // Action 9: Clear flag and continue (dangerous)
+            recoveryMenu.addItem(
+                "ignore",
+                "Clear Flag and Continue",
+                "⚠️ Exit recovery mode with unresolved issues",
+                () -> confirmClearFlagWithIssues(analysis)
+            );
+        }
+        
+        menuNavigator.showMenu(recoveryMenu);
+    }
+
+    private void performCleanup(FileEncryptionAnalysis analysis) {
+        
+        uiRenderer.render(UIProtocol.showMessage(
+            String.format("Deleting %d temporary files...", analysis.getFilesNeedingCleanup().size())));
+        
+      
+        appData.performTempFileCleanup(analysis).thenAccept(success->{
+            
+            uiRenderer.render(UIProtocol.showMessage(
+                String.format(success ? "✓ Deleted temporary files" : "x Unable to delete all temp files")));
+            
+            recheckAndClearFlagIfResolved();
+            
+        });
+    }
+
+    /**
+     * Confirm rollback action with user
+     */
+    private void confirmAndPerformRollback(FileEncryptionAnalysis analysis) {
+        ContextPath menuPath = contextPath.append("menu", "confirm-rollback");
+        MenuContext confirmMenu = new MenuContext(
+            menuPath,
+            "⚠️ Confirm Rollback",
+            uiRenderer,
+            menuNavigator.getCurrentMenu()
+        );
+        
+        confirmMenu.addInfoItem("warning",
+            "⚠️ WARNING: ROLLBACK TO OLD PASSWORD ⚠️\n\n" +
+            "This action will:\n" +
+            "  1. Restore the OLD password as active\n" +
+            "  2. Re-encrypt updated files back to old key\n" +
+            "  3. Discard the NEW password\n\n" +
+            String.format("Files to revert: %d\n\n", 
+                analysis.getAllFilesNeedingUpdate().size()) +
+            "This operation CANNOT be undone.\n" +
+            "You will need to use the OLD password after rollback.\n\n" +
+            "Are you sure you want to proceed?");
+        
+        confirmMenu.addSeparator("Confirmation");
+        
+        confirmMenu.addItem(
+            "yes-rollback",
+            "⚠️ YES - Perform Rollback",
+            () -> performRollback(analysis)
+        );
+        
+        confirmMenu.addItem(
+            "no-cancel",
+            "NO - Cancel",
+            () -> showRecoveryMenu(analysis, true)
+        );
+        
+        menuNavigator.showMenu(confirmMenu);
+    }
+
+
+    /**
+     * Confirm clearing recovery flag with unresolved issues
+     */
+    private void confirmClearFlagWithIssues(FileEncryptionAnalysis analysis) {
+        ContextPath menuPath = contextPath.append("menu", "confirm-clear");
+        MenuContext confirmMenu = new MenuContext(
+            menuPath,
+            "⚠️ Confirm Exit Recovery",
+            uiRenderer,
+            menuNavigator.getCurrentMenu()
+        );
+        
+        StringBuilder warning = new StringBuilder();
+        warning.append("⚠️ WARNING: UNRESOLVED ISSUES ⚠️\n\n");
+        warning.append("The following issues remain:\n");
+        
+        if (!analysis.getFilesNeedingUpdate().isEmpty()) {
+            warning.append(String.format("  • %d files need re-encryption\n",
+                analysis.getFilesNeedingUpdate().size()));
+        }
+        
+        if (!analysis.getFilesNeedingSwap().isEmpty()) {
+            warning.append(String.format("  • %d files need swap completion\n",
+                analysis.getFilesNeedingSwap().size()));
+        }
+        
+        if (!analysis.getFilesNeedingCleanup().isEmpty()) {
+            warning.append(String.format("  • %d temporary files need cleanup\n",
+                analysis.getFilesNeedingCleanup().size()));
+        }
+        
+        if (!analysis.getCorruptedFiles().isEmpty()) {
+            warning.append(String.format("  • %d corrupted files detected\n",
+                analysis.getCorruptedFiles().size()));
+        }
+        
+        warning.append("\nExiting recovery mode with unresolved issues means:\n");
+        warning.append("  • Some files may be inaccessible\n");
+        warning.append("  • File encryption is in an inconsistent state\n");
+        warning.append("  • You will need to manually fix these issues\n\n");
+        warning.append("Are you sure you want to exit recovery mode?");
+        
+        confirmMenu.addInfoItem("warning", warning.toString());
+        
+        confirmMenu.addSeparator("Confirmation");
+        
+        confirmMenu.addItem(
+            "yes-exit",
+            "⚠️ YES - Exit Recovery Mode",
+            () -> {
+                RecoveryFlags.clearRecoveryFlag();
+                state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                
+                uiRenderer.render(UIProtocol.showError(
+                    "Recovery flag cleared.\n\n" +
+                    "⚠️ Files remain in inconsistent state.\n" +
+                    "Some files may be inaccessible."));
+                
+                showMainMenu();
+            }
+        );
+        
+        confirmMenu.addItem(
+            "no-back",
+            "NO - Return to Recovery",
+            () -> showRecoveryMenu(analysis, appData.hasOldKeyForRecovery())
+        );
+        
+        menuNavigator.showMenu(confirmMenu);
+    }
+
+
+    private void performCompleteUpdate(FileEncryptionAnalysis analysis) {
+        
+
+        uiRenderer.render(UIProtocol.showMessage("Performing recover"));
+
+        int batchSize = 1;
+        
+        // Create progress tracker
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+            
+            spawnChild(progressTracker, "recovery-progress")
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> registry.requestStreamChannel(
+                    contextPath, progressTracker.getContextPath()))
+                .thenCompose(progressChannel -> {
+                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
+                    return appData.performRecovery(analysis, progressWriter, batchSize)
+                        .whenComplete((v, ex)->{
+                            StreamUtils.safeClose(progressWriter);
+                            StreamUtils.safeClose(progressChannel);
+                        });
+                })
+                .thenCompose(success -> progressTracker.getCompletionFuture()
+                    .thenApply(v -> success))
+                .thenAccept(success -> {
+                    if (success) {
+                        uiRenderer.render(UIProtocol.showMessage(
+                            "✓ Re-encryption completed successfully"));
+                        
+                        // Clear recovery flag if no more issues
+                        recheckAndClearFlagIfResolved();
+                    } else {
+                        uiRenderer.render(UIProtocol.showError(
+                            "Re-encryption completed with errors"));
+                        
+                        // Re-investigate
+                        investigateAndShowRecoveryMenu();
+                    }
+                })
+                .exceptionally(ex -> {
+                    uiRenderer.render(UIProtocol.showError(
+                        "Re-encryption failed: " + ex.getMessage()));
+                    
+                    investigateAndShowRecoveryMenu();
+                    return null;
+                });
+    }
+
+    private void performFinishSwaps(FileEncryptionAnalysis analysis) {
+
+        uiRenderer.render(UIProtocol.showMessage("Finishing file swaps"));
+
+        
+        // Create progress tracker
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+            
+            spawnChild(progressTracker, "swap-progress")
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> registry.requestStreamChannel(
+                    contextPath, progressTracker.getContextPath()))
+                .thenCompose(progressChannel -> {
+                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
+                    return appData.performSwap(analysis, progressWriter)
+                        .whenComplete((v, ex)->{
+                            StreamUtils.safeClose(progressWriter);
+                            StreamUtils.safeClose(progressChannel);
+                        });
+                })
+                .thenCompose(success -> progressTracker.getCompletionFuture()
+                    .thenApply(v -> success))
+                .thenAccept(success -> {
+                    if (success) {
+                        uiRenderer.render(UIProtocol.showMessage(
+                            "✓ File swaps completed successfully"));
+                        
+                        // Clear recovery flag if no more issues
+                        recheckAndClearFlagIfResolved();
+                    } else {
+                        uiRenderer.render(UIProtocol.showError(
+                            "Re-encryption completed with errors"));
+                        
+                        // Re-investigate
+                        investigateAndShowRecoveryMenu();
+                    }
+                })
+                .exceptionally(ex -> {
+                    uiRenderer.render(UIProtocol.showError(
+                        "File swaps failed: " + ex.getMessage()));
+                    
+                    investigateAndShowRecoveryMenu();
+                    return null;
+                });
+    }
+
+
+    /**
+     * Show recovery menu when old key is not available
+     * Limited options - requires user to provide old password
+     */
+    private void showRecoveryMenuNoOldKey() {
+        ContextPath menuPath = contextPath.append("menu", "recovery-no-key");
+        MenuContext recoveryMenu = new MenuContext(
+            menuPath, 
+            "⚠️ Recovery Mode - Old Key Required", 
+            uiRenderer
+        );
+        
+        recoveryMenu.addInfoItem("warning", 
+            "Recovery flag is set, but the old encryption key is not available.\n\n" +
+            "This happens when:\n" +
+            "  • System restarted after incomplete password change\n" +
+            "  • Old key was cleared from memory\n\n" +
+            "To recover, you must provide the OLD password.");
+        
+        recoveryMenu.addSeparator("Recovery Actions");
+        
+        // Action 1: Provide old password
+        recoveryMenu.addItem(
+            "provide-old-password",
+            "Provide Old Password",
+            "Enter previous password to unlock recovery",
+            () -> requestOldPasswordForRecovery()
+        );
+        
+        // Action 2: Clear flag and continue (dangerous)
+        recoveryMenu.addItem(
+            "clear-flag",
+            "Clear Flag and Continue",
+            "⚠️ WARNING: Files may be inaccessible",
+            () -> {
+                RecoveryFlags.clearRecoveryFlag();
+                state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                
+                uiRenderer.render(UIProtocol.showError(
+                    "Recovery flag cleared.\n\n" +
+                    "WARNING: Encrypted files may be in an inconsistent state.\n" +
+                    "Some files may be inaccessible."));
+                
+                showMainMenu();
+            }
+        );
+        
+        menuNavigator.showMenu(recoveryMenu);
+    }
+
+    /**
+     * Request old password to derive old key for recovery
+     */
+    private void requestOldPasswordForRecovery() {
         getSecureInputDevice()
             .thenAccept(device -> {
                 PasswordSessionProcess session = new PasswordSessionProcess(
                     device,
                     uiRenderer,
-                    "Enter OLD password to confirm rollback",
+                    "Enter OLD password (before change)",
                     3
                 );
                 
                 session.onPasswordEntered(oldPassword -> {
-                    return performRollback(analysis, oldPassword, logFile);
+                    return appData.verifyOldPassword(oldPassword)
+                        .thenApply(valid -> {
+                            if (valid) {
+                                uiRenderer.render(UIProtocol.showMessage(
+                                    "Old password verified. Analyzing file state..."));
+                                
+                                // Now we can investigate
+                                investigateAndShowRecoveryMenu();
+                                return true;
+                            } else {
+                                uiRenderer.render(UIProtocol.showError(
+                                    "Invalid old password. Please try again."));
+                                return false;
+                            }
+                        });
                 });
                 
-                spawnChild(session, "rollback-password")
+                spawnChild(session, "verify-old-password")
                     .thenCompose(path -> registry.startProcess(path));
             });
     }
-        
+
     /**
-     * Perform complete rollback using AppData API
-     * Much simpler - AppData handles coordination
+     * Show recovery menu when analysis failed
      */
-    private CompletableFuture<Boolean> performRollback(
-            PasswordChangeRecoveryLog.RecoveryAnalysis analysis,
-            NoteBytesEphemeral oldPassword,
-            File logFile) {
-        
-        uiRenderer.render(UIProtocol.showMessage(
-            "Starting rollback...\n\n" +
-            "AppData will coordinate SettingsData and file rollback"));
-        
-        // Collect files that were successfully updated (need rollback)
-        List<String> filesToRollback = new ArrayList<>();
-        for (PasswordChangeRecoveryLog.FileRecoveryState fileState : 
-                analysis.fileStates.values()) {
-            if (fileState.succeeded) {
-                filesToRollback.add(fileState.filePath);
-            }
-        }
-        
-        if (filesToRollback.isEmpty()) {
-            uiRenderer.render(UIProtocol.showMessage(
-                "No files need rollback (none were updated).\n" +
-                "Only SettingsData will be rolled back."));
-            // Still need to rollback SettingsData
-        }
-        
-        // Create progress tracker
-        File rollbackLog = new File(logFile.getParent(), 
-            "password_change_rollback.log");
-        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(
-            uiRenderer, 
-            rollbackLog
+    private void showRecoveryMenuNoAnalysis() {
+        ContextPath menuPath = contextPath.append("menu", "recovery-no-analysis");
+        MenuContext recoveryMenu = new MenuContext(
+            menuPath, 
+            "⚠️ Recovery Mode - Analysis Failed", 
+            uiRenderer
         );
         
-        // Execute rollback
-        return spawnChild(progressTracker, "rollback-progress")
+        recoveryMenu.addInfoItem("error", 
+            "Unable to analyze file encryption state.\n\n" +
+            "This may be due to:\n" +
+            "  • Corrupted file ledger\n" +
+            "  • Disk read errors\n" +
+            "  • Insufficient permissions");
+        
+        recoveryMenu.addSeparator("Recovery Actions");
+        
+        // Action 1: Retry analysis
+        recoveryMenu.addItem(
+            "retry-analysis",
+            "Retry Analysis",
+            () -> investigateAndShowRecoveryMenu()
+        );
+        
+        // Action 2: Manual inspection
+        recoveryMenu.addItem(
+            "manual-inspection",
+            "Manual File Inspection",
+            "Advanced: Check files directly",
+            () -> showManualInspectionMenu()
+        );
+        
+        // Action 3: Clear flag
+        recoveryMenu.addItem(
+            "clear-flag",
+            "Clear Flag and Continue",
+            "⚠️ Accept current state",
+            () -> {
+                RecoveryFlags.clearRecoveryFlag();
+                state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                
+                uiRenderer.render(UIProtocol.showMessage(
+                    "Recovery flag cleared.\n\n" +
+                    "Files remain in unknown state."));
+                
+                showMainMenu();
+            }
+        );
+        
+        menuNavigator.showMenu(recoveryMenu);
+    }
+
+    /**
+     * Show corrupted files submenu
+     */
+    private void showCorruptedFilesMenu(FileEncryptionAnalysis analysis) {
+        ContextPath menuPath = contextPath.append("menu", "corrupted-files");
+        MenuContext menu = new MenuContext(
+            menuPath,
+            "Corrupted Files",
+            uiRenderer,
+            menuNavigator.getCurrentMenu()
+        );
+        
+        List<String> corruptedFiles = analysis.getCorruptedFiles();
+        
+        menu.addInfoItem("summary",
+            String.format("Found %d corrupted files:\n\n", corruptedFiles.size()) +
+            "These files cannot be decrypted with either the current or old key.\n\n" +
+            "Possible causes:\n" +
+            "  • Disk corruption\n" +
+            "  • Incomplete write operations\n" +
+            "  • External file modification");
+        
+        menu.addSeparator("Corrupted Files");
+        
+        // Show corrupted files (limited display)
+        int displayLimit = 10;
+        for (int i = 0; i < Math.min(displayLimit, corruptedFiles.size()); i++) {
+            String path = corruptedFiles.get(i);
+            menu.addInfoItem("file-" + i, "  ✗ " + shortenPath(path));
+        }
+        
+        if (corruptedFiles.size() > displayLimit) {
+            menu.addInfoItem("more", 
+                String.format("  ... and %d more files", 
+                    corruptedFiles.size() - displayLimit));
+        }
+        
+        menu.addSeparator("Actions");
+        
+        // Action 1: Export list
+        menu.addItem(
+            "export-list",
+            "Export Corrupted Files List",
+            () -> exportCorruptedFilesList(corruptedFiles)
+        );
+        
+        // Action 2: Attempt repair
+        menu.addItem(
+            "attempt-repair",
+            "Attempt Automatic Repair",
+            "⚠️ May delete unrecoverable files",
+            () -> attemptCorruptedFilesRepair(corruptedFiles)
+        );
+        
+        // Action 3: Delete corrupted
+        menu.addItem(
+            "delete-corrupted",
+            "Delete Corrupted Files",
+            "⚠️ Permanent deletion",
+            () -> deleteCorruptedFiles(corruptedFiles)
+        );
+        
+        menu.addItem("back", "Back to Recovery Menu", () -> {
+            investigateAndShowRecoveryMenu();
+        });
+        
+        menuNavigator.showMenu(menu);
+    }
+
+    /**
+     * Export corrupted files list to a file
+     */
+    private void exportCorruptedFilesList(List<String> corruptedFiles) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                File exportFile = new File(SettingsData.getDataDir(), 
+                    "corrupted_files_" + System.currentTimeMillis() + ".txt");
+                
+                StringBuilder content = new StringBuilder();
+                content.append("Corrupted Files Report\n");
+                content.append("Generated: ").append(new java.util.Date()).append("\n");
+                content.append("Total: ").append(corruptedFiles.size()).append("\n\n");
+                
+                for (String path : corruptedFiles) {
+                    content.append(path).append("\n");
+                }
+                
+                Files.write(exportFile.toPath(), content.toString().getBytes());
+                
+                uiRenderer.render(UIProtocol.showMessage(
+                    "Corrupted files list exported to:\n" + exportFile.getAbsolutePath()));
+                
+            } catch (IOException e) {
+                uiRenderer.render(UIProtocol.showError(
+                    "Failed to export list: " + e.getMessage()));
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+
+    /**
+     * Attempt to repair corrupted files
+     */
+    private void attemptCorruptedFilesRepair(List<String> corruptedFiles) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Corrupted file repair not yet implemented.\n\n" +
+            "Please use manual recovery tools or delete the files."));
+    }
+
+    /**
+     * Delete corrupted files
+     */
+    private void deleteCorruptedFiles(List<String> corruptedFiles) {
+        uiRenderer.render(UIProtocol.showMessage(
+            String.format("Deleting %d corrupted files...", corruptedFiles.size())));
+        
+        appData.getNoteFileService().deleteCorruptedFiles(corruptedFiles)
+            .thenAccept(success -> {
+                if (success) {
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "✓ Corrupted files deleted successfully"));
+                    
+                    recheckAndClearFlagIfResolved();
+                } else {
+                    uiRenderer.render(UIProtocol.showError(
+                        "Some corrupted files could not be deleted"));
+                    
+                    investigateAndShowRecoveryMenu();
+                }
+            })
+            .exceptionally(ex -> {
+                uiRenderer.render(UIProtocol.showError(
+                    "Failed to delete corrupted files: " + ex.getMessage()));
+                return null;
+            });
+    }
+
+    /**
+     * Show manual inspection menu
+     */
+    private void showManualInspectionMenu() {
+        ContextPath menuPath = contextPath.append("menu", "manual-inspection");
+        MenuContext menu = new MenuContext(
+            menuPath,
+            "Manual File Inspection",
+            uiRenderer,
+            menuNavigator.getCurrentMenu()
+        );
+        
+        menu.addInfoItem("info",
+            "Advanced file inspection tools.\n\n" +
+            "Use these tools to manually examine file encryption state.");
+        
+        menu.addItem(
+            "list-files",
+            "List All Registered Files",
+            () -> listAllRegisteredFiles()
+        );
+        
+        menu.addItem(
+            "check-file",
+            "Check Specific File",
+            () -> checkSpecificFile()
+        );
+        
+        menu.addItem("back", "Back", () -> {
+            showRecoveryMenuNoAnalysis();
+        });
+        
+        menuNavigator.showMenu(menu);
+    }
+
+    /**
+     * List all files registered in the ledger
+     */
+    private void listAllRegisteredFiles() {
+        uiRenderer.render(UIProtocol.showMessage("Listing registered files..."));
+        
+        appData.getNoteFileService().getFileCount()
+            .thenAccept(count -> {
+                uiRenderer.render(UIProtocol.showMessage(
+                    String.format("Total registered files: %d\n\n" +
+                        "Use recovery analysis for detailed information.", count)));
+            })
+            .exceptionally(ex -> {
+                uiRenderer.render(UIProtocol.showError(
+                    "Failed to list files: " + ex.getMessage()));
+                return null;
+            });
+    }
+
+    /**
+     * Check a specific file's encryption state
+     */
+    private void checkSpecificFile() {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Specific file checking not yet implemented.\n\n" +
+            "Use the main recovery analysis instead."));
+    }
+
+    /**
+     * Perform rollback to old password
+     */
+    private void performRollback(FileEncryptionAnalysis analysis) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "⚠️ ROLLBACK TO OLD PASSWORD\n\n" +
+            "This will:\n" +
+            "  1. Swap current/old keys in SettingsData\n" +
+            "  2. Re-encrypt files that were updated\n" +
+            "  3. Restore system to OLD password\n\n" +
+            "Processing..."));
+        
+        // Step 1: Rollback SettingsData (swap keys)
+        appData.rollbackSettingsData()
+            .thenCompose(v -> {
+                uiRenderer.render(UIProtocol.showMessage(
+                    "✓ SettingsData rolled back\n\n" +
+                    "Re-encrypting files back to old password..."));
+                
+                // Step 2: Re-encrypt files back to old key
+                // Now the keys are swapped: current=old, old=current
+                List<String> filesToRevert = analysis.getFilesNeedingUpdate();
+                
+                if (filesToRevert.isEmpty()) {
+                    return CompletableFuture.completedFuture(true);
+                }
+                
+                int batchSize = calculateAdaptiveBatchSize(analysis, 1024 * 1024); // 1MB mem limit
+                
+                ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+                
+                return spawnChild(progressTracker, "rollback-progress")
+                    .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                    .thenCompose(voidResult -> registry.requestStreamChannel(
+                        contextPath, progressTracker.getContextPath()))
+                    .thenCompose(progressChannel -> {
+                        AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
+                            progressChannel.getStream());
+                        
+                        // Revert: newKey (now old) -> oldKey (now current)
+                        return appData.performRollback(analysis, progressWriter, batchSize)
+                            .whenComplete((result, ex) -> {
+                                StreamUtils.safeClose(progressWriter);
+                                StreamUtils.safeClose(progressChannel);
+                            });
+                    })
+                    .thenCompose(success -> progressTracker.getCompletionFuture()
+                        .thenApply(v1 -> success));
+            })
+            .thenAccept(success -> {
+                if (success) {
+                    // Clear recovery state
+                    RecoveryFlags.clearRecoveryFlag();
+                    appData.clearOldKey();
+                    state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                    
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "✓ ROLLBACK COMPLETE\n\n" +
+                        "System restored to OLD password.\n" +
+                        "All files have been reverted."));
+                    
+                    showMainMenu();
+                } else {
+                    uiRenderer.render(UIProtocol.showError(
+                        "Rollback completed with errors.\n\n" +
+                        "Some files may still be encrypted with the new password."));
+                    
+                    investigateAndShowRecoveryMenu();
+                }
+            })
+            .exceptionally(ex -> {
+                uiRenderer.render(UIProtocol.showError(
+                    "Rollback failed: " + ex.getMessage() + "\n\n" +
+                    "System may be in an inconsistent state."));
+                
+                investigateAndShowRecoveryMenu();
+                return null;
+            });
+    }
+
+    /**
+     * Show detailed file states
+     */
+    private void showDetailedFileStates(FileEncryptionAnalysis analysis) {
+        StringBuilder details = new StringBuilder();
+        
+        details.append("╔════════════════════════════════════════╗\n");
+        details.append("  Detailed File Encryption States\n");
+        details.append("╚════════════════════════════════════════╝\n\n");
+        
+        Map<String, NoteFileService.FileState> fileStates = analysis.getFileStates();
+        
+        // Group by state
+        Map<NoteFileService.FileState, List<String>> grouped = new LinkedHashMap<>();
+        for (Map.Entry<String, NoteFileService.FileState> entry : fileStates.entrySet()) {
+            grouped.computeIfAbsent(entry.getValue(), k -> new ArrayList<>())
+                .add(entry.getKey());
+        }
+        
+        // Display each group
+        for (Map.Entry<NoteFileService.FileState, List<String>> group : grouped.entrySet()) {
+            NoteFileService.FileState state = group.getKey();
+            List<String> files = group.getValue();
+            
+            details.append(getStateDescription(state))
+                .append(" (").append(files.size()).append(" files)\n");
+            details.append("────────────────────────────────────────\n");
+            
+            // Show first 5 files of each state
+            int limit = Math.min(5, files.size());
+            for (int i = 0; i < limit; i++) {
+                details.append("  ").append(shortenPath(files.get(i))).append("\n");
+            }
+            
+            if (files.size() > limit) {
+                details.append("  ... and ").append(files.size() - limit)
+                    .append(" more\n");
+            }
+            
+            details.append("\n");
+        }
+        
+        details.append("════════════════════════════════════════\n");
+        details.append("Total files: ").append(fileStates.size()).append("\n");
+        
+        uiRenderer.render(UIProtocol.showMessage(details.toString()));
+    }
+
+    /**
+     * Get human-readable description of file state
+     */
+    private String getStateDescription(NoteFileService.FileState state) {
+        switch (state) {
+            case CURRENT_KEY_OK:
+                return "✓ OK - Current Key";
+            case NEVER_CREATED:
+                return "○ Never Created";
+            case OLD_KEY_NEEDS_UPDATE:
+                return "⚠ Needs Update - Old Key";
+            case OLD_KEY_WITH_CURRENT_TMP:
+                return "⚠ Needs Swap - Tmp Ready";
+            case TMP_READY_CURRENT_KEY:
+                return "⚠ Needs Finalization - Tmp Only";
+            case CURRENT_KEY_WITH_TMP:
+                return "⚠ Needs Cleanup - Extra Tmp";
+            case OLD_KEY_WITH_TMP:
+                return "⚠ Needs Investigation - Unclear State";
+            case TMP_READY_OLD_KEY:
+                return "⚠ Old State - Tmp Old Key";
+            case CORRUPT:
+                return "✗ CORRUPTED";
+            case CORRUPT_WITH_TMP:
+                return "✗ CORRUPTED (with tmp)";
+            case TMP_CORRUPT:
+                return "✗ CORRUPTED (tmp only)";
+            default:
+                return "? Unknown State";
+        }
+    }
+
+    /**
+     * Calculate adaptive batch size based on available resources
+     * 
+     * Considers:
+     * - Disk space availability
+     * - Memory constraints
+     * - File sizes in the batch
+     * 
+     * @param analysis File encryption analysis with sizes
+     * @param maxMemoryPerBatch Maximum memory to use per batch (bytes)
+     * @return Optimal batch size
+     */
+    private int calculateAdaptiveBatchSize(
+            FileEncryptionAnalysis analysis, 
+            long maxMemoryPerBatch) {
+        
+        // Get files that need processing
+        List<String> filesToProcess = new ArrayList<>();
+        filesToProcess.addAll(analysis.getFilesNeedingUpdate());
+        filesToProcess.addAll(analysis.getFilesNeedingSwap());
+        
+        if (filesToProcess.isEmpty()) {
+            return 1;
+        }
+        
+        // Get file sizes
+        List<Long> fileSizes = filesToProcess.stream()
+            .map(path -> {
+                File file = new File(path);
+                return file.exists() ? file.length() : 0L;
+            })
+            .filter(size -> size > 0)
+            .sorted()
+            .collect(Collectors.toList());
+        
+        if (fileSizes.isEmpty()) {
+            return 1;
+        }
+        
+        // Calculate average file size
+        long totalSize = fileSizes.stream().mapToLong(Long::longValue).sum();
+        long avgSize = totalSize / fileSizes.size();
+        
+        // Get available disk space
+        File dataDir = SettingsData.getDataDir();
+        long availableDiskSpace = dataDir.getUsableSpace();
+        long bufferSpace = 100 * 1024 * 1024; // 100MB buffer
+        long safeDiskSpace = availableDiskSpace - bufferSpace;
+        
+        // Calculate batch size based on disk space
+        // Each file needs space for .tmp copy
+        int diskBasedBatch = (int) (safeDiskSpace / avgSize);
+        
+        // Calculate batch size based on memory
+        // Assume each concurrent operation uses memory proportional to file size
+        int memoryBasedBatch = (int) (maxMemoryPerBatch / avgSize);
+        
+        // Take the minimum (most conservative)
+        int optimalBatch = Math.min(diskBasedBatch, memoryBasedBatch);
+        
+        // Clamp to reasonable bounds
+        int minBatch = 1;
+        int maxBatch = 50;
+        int finalBatch = Math.max(minBatch, Math.min(maxBatch, optimalBatch));
+        
+        System.out.println(String.format(
+            "[SystemSession] Adaptive batch calculation:\n" +
+            "  Files to process: %d\n" +
+            "  Avg file size: %.2f MB\n" +
+            "  Available disk: %.2f MB\n" +
+            "  Memory limit: %.2f MB\n" +
+            "  Disk-based batch: %d\n" +
+            "  Memory-based batch: %d\n" +
+            "  Final batch size: %d",
+            filesToProcess.size(),
+            avgSize / (1024.0 * 1024.0),
+            availableDiskSpace / (1024.0 * 1024.0),
+            maxMemoryPerBatch / (1024.0 * 1024.0),
+            diskBasedBatch,
+            memoryBasedBatch,
+            finalBatch
+        ));
+        
+        return finalBatch;
+    }
+
+    /**
+     * Perform ALL recovery actions at once
+     */
+    private void performAllRecoveryActions(FileEncryptionAnalysis analysis) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Starting comprehensive recovery...\n\n" +
+            "This will perform ALL recommended actions:\n" +
+            "  1. Complete re-encryption\n" +
+            "  2. Finish file swaps\n" +
+            "  3. Clean up temporary files\n\n" +
+            "Processing..."));
+        
+        int batchSize = calculateAdaptiveBatchSize(analysis, 2 * 1024 * 1024); // 2MB
+        
+        // Create progress tracker
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+        
+        spawnChild(progressTracker, "comprehensive-recovery")
             .thenCompose(trackerPath -> registry.startProcess(trackerPath))
             .thenCompose(v -> registry.requestStreamChannel(
                 contextPath, progressTracker.getContextPath()))
@@ -1334,57 +2037,70 @@ public class SystemSessionProcess extends FlowProcess {
                 AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                     progressChannel.getStream());
                 
-                // DELEGATE to AppData - it handles everything
-                return appData.rollbackPasswordChange(
-                    filesToRollback,
-                    oldPassword,
-                    10,
-                    progressWriter
-                )
-                .whenComplete((success, ex) -> {
-                    try {
-                        progressWriter.close();
-                        progressChannel.close();
-                    } catch (IOException e) {
-                        System.err.println("Error closing stream: " + e.getMessage());
-                    }
-                });
+                return appData.performComprehensiveRecovery(
+                    analysis, progressWriter, batchSize)
+                    .whenComplete((result, ex) -> {
+                        StreamUtils.safeClose(progressWriter);
+                        StreamUtils.safeClose(progressChannel);
+                    });
             })
             .thenCompose(success -> progressTracker.getCompletionFuture()
                 .thenApply(v -> success))
-            .thenApply(success -> {
+            .thenAccept(success -> {
                 if (success) {
-                    completeRollback(logFile);
-                    archiveRecoveryLog(rollbackLog);
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "✓ Comprehensive recovery completed!\n\n" +
+                        "Verifying final state..."));
+                    
+                    recheckAndClearFlagIfResolved();
                 } else {
                     uiRenderer.render(UIProtocol.showError(
-                        "Rollback completed with errors.\n" +
-                        "Check rollback log for details."));
+                        "Recovery completed with errors.\n\n" +
+                        "Review individual recovery options."));
+                    
+                    investigateAndShowRecoveryMenu();
                 }
-                return success;
             })
             .exceptionally(ex -> {
                 uiRenderer.render(UIProtocol.showError(
-                    "Rollback failed: " + ex.getMessage()));
-                return false;
+                    "Comprehensive recovery failed: " + ex.getMessage()));
+                
+                investigateAndShowRecoveryMenu();
+                return null;
             });
     }
 
-
-    /**
-     * Complete rollback and return to normal operation
-     */
-    private void completeRollback(File logFile) {
-        archiveRecoveryLog(logFile);
-        state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+        private void recheckAndClearFlagIfResolved() {
         
-        uiRenderer.render(UIProtocol.showMessage(
-            "✓ Rollback completed successfully!\n\n" +
-            "System has been restored to the previous password.\n" +
-            "All files have been reverted."));
-        
-        showMainMenu();
+        // Re-investigate to see if issues remain
+        appData.getNoteFileService().investigateFileEncryptionState()
+            .thenAccept(analysis -> {
+                if (!analysis.needsRecovery() && analysis.getCorruptedFiles().isEmpty()) {
+                    // All resolved!
+                    RecoveryFlags.clearRecoveryFlag();
+                    appData.clearOldKey();
+                    
+                    state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
+                    
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "✓ All issues resolved!\n\nSystem is now in consistent state."));
+                    
+                    showMainMenu();
+                } else {
+                    // Still have issues
+                    uiRenderer.render(UIProtocol.showMessage(
+                        "Some issues remain. Review recovery options."));
+                    
+                    showRecoveryMenu(analysis, appData.hasOldKeyForRecovery());
+                }
+            })
+            .exceptionally(ex -> {
+                System.err.println("Recheck failed: " + ex.getMessage());
+                showRecoveryMenu(null, appData.hasOldKeyForRecovery());
+                return null;
+            });
     }
+        
 
             // ===== MESSAGE HANDLERS =====
     
@@ -1515,158 +2231,6 @@ public class SystemSessionProcess extends FlowProcess {
     }
 
     /**
-     * Recovery Helper Methods
-     * Location: SystemSessionProcess.java
-     */
-
-    /**
-     * Archive completed recovery log
-     * Renames log file with timestamp for historical tracking
-     * 
-     * @param logFile Recovery log to archive
-     */
-    private void archiveRecoveryLog(File logFile) {
-        if (logFile == null || !logFile.exists()) {
-            return;
-        }
-        
-        try {
-            String timestamp = String.valueOf(System.currentTimeMillis());
-            String baseName = logFile.getName().replace(".log", "");
-            String archivedName = baseName + "_completed_" + timestamp + ".log";
-            
-            File archivedLog = new File(logFile.getParent(), archivedName);
-            
-            Files.move(logFile.toPath(), archivedLog.toPath());
-            
-            System.out.println("[SystemSession] Recovery log archived: " + 
-                archivedLog.getName());
-            
-        } catch (IOException e) {
-            System.err.println("[SystemSession] Failed to archive recovery log: " + 
-                e.getMessage());
-            
-            // Try to delete if move failed
-            try {
-                Files.deleteIfExists(logFile.toPath());
-            } catch (IOException deleteEx) {
-                System.err.println("[SystemSession] Failed to delete recovery log: " + 
-                    deleteEx.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Show detailed recovery information to user
-     * Displays file-by-file status from recovery analysis
-     * 
-     * @param analysis Recovery analysis with file states
-     */
-    private void showRecoveryDetails(PasswordChangeRecoveryLog.RecoveryAnalysis analysis) {
-        StringBuilder details = new StringBuilder();
-        
-        // Header
-        details.append("═══════════════════════════════════════\n");
-        details.append("  Password Change Recovery Details\n");
-        details.append("═══════════════════════════════════════\n\n");
-        
-        // Summary
-        details.append(analysis.getSummary()).append("\n");
-        
-        // Separator
-        details.append("───────────────────────────────────────\n");
-        details.append("File Status:\n");
-        details.append("───────────────────────────────────────\n\n");
-        
-        // Group files by status
-        List<PasswordChangeRecoveryLog.FileRecoveryState> successFiles = new ArrayList<>();
-        List<PasswordChangeRecoveryLog.FileRecoveryState> failedFiles = new ArrayList<>();
-        List<PasswordChangeRecoveryLog.FileRecoveryState> interruptedFiles = new ArrayList<>();
-        
-        for (PasswordChangeRecoveryLog.FileRecoveryState state : 
-                analysis.fileStates.values()) {
-            if (state.succeeded) {
-                successFiles.add(state);
-            } else if (state.failed) {
-                failedFiles.add(state);
-            } else if (state.isInterrupted()) {
-                interruptedFiles.add(state);
-            }
-        }
-        
-        // Show successful files (collapsed if many)
-        if (!successFiles.isEmpty()) {
-            details.append("✓ Successfully Updated (").append(successFiles.size())
-                .append(" files):\n");
-            
-            if (successFiles.size() <= 10) {
-                for (PasswordChangeRecoveryLog.FileRecoveryState state : successFiles) {
-                    details.append("  ✓ ").append(shortenPath(state.filePath))
-                        .append(" (").append(formatFileSize(state.fileSize)).append(")\n");
-                }
-            } else {
-                // Show first 5 and last 5
-                for (int i = 0; i < Math.min(5, successFiles.size()); i++) {
-                    PasswordChangeRecoveryLog.FileRecoveryState state = successFiles.get(i);
-                    details.append("  ✓ ").append(shortenPath(state.filePath))
-                        .append(" (").append(formatFileSize(state.fileSize)).append(")\n");
-                }
-                
-                if (successFiles.size() > 10) {
-                    details.append("  ... (").append(successFiles.size() - 10)
-                        .append(" more files)\n");
-                }
-                
-                for (int i = Math.max(5, successFiles.size() - 5); 
-                    i < successFiles.size(); i++) {
-                    PasswordChangeRecoveryLog.FileRecoveryState state = successFiles.get(i);
-                    details.append("  ✓ ").append(shortenPath(state.filePath))
-                        .append(" (").append(formatFileSize(state.fileSize)).append(")\n");
-                }
-            }
-            details.append("\n");
-        }
-        
-        // Show failed files (always show all - important!)
-        if (!failedFiles.isEmpty()) {
-            details.append("✗ Failed (").append(failedFiles.size()).append(" files):\n");
-            
-            for (PasswordChangeRecoveryLog.FileRecoveryState state : failedFiles) {
-                details.append("  ✗ ").append(shortenPath(state.filePath))
-                    .append(" (").append(formatFileSize(state.fileSize)).append(")\n");
-                
-                if (state.errorMessage != null && !state.errorMessage.isEmpty()) {
-                    details.append("     Error: ").append(state.errorMessage).append("\n");
-                }
-            }
-            details.append("\n");
-        }
-        
-        // Show interrupted files (always show all - important!)
-        if (!interruptedFiles.isEmpty()) {
-            details.append("⚠ Interrupted (").append(interruptedFiles.size())
-                .append(" files):\n");
-            
-            for (PasswordChangeRecoveryLog.FileRecoveryState state : interruptedFiles) {
-                details.append("  ⚠ ").append(shortenPath(state.filePath))
-                    .append(" (").append(formatFileSize(state.fileSize)).append(")\n");
-                details.append("     Status: Started but not completed\n");
-            }
-            details.append("\n");
-        }
-        
-        // Footer
-        details.append("───────────────────────────────────────\n");
-        details.append("Recovery Actions:\n");
-        details.append("  • Complete: Update remaining files to NEW password\n");
-        details.append("  • Rollback: Restore all files to OLD password\n");
-        details.append("═══════════════════════════════════════\n");
-        
-        // Display via UI
-        uiRenderer.render(UIProtocol.showMessage(details.toString()));
-    }
-
-    /**
      * Shorten file path for display (show basename and parent)
      * Example: /very/long/path/to/file.dat → .../to/file.dat
      */
@@ -1687,96 +2251,16 @@ public class SystemSessionProcess extends FlowProcess {
         }
     }
 
-    /**
-     * Format file size for human-readable display
-     */
-    private String formatFileSize(long bytes) {
-        if (bytes < 1024) {
-            return bytes + " B";
-        } else if (bytes < 1024 * 1024) {
-            return String.format("%.1f KB", bytes / 1024.0);
-        } else if (bytes < 1024 * 1024 * 1024) {
-            return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-        } else {
-            return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
-        }
-    }
-
-    /**
-     * Export log and continue (manual recovery path)
-     * Archives log and allows system to proceed despite inconsistency
-     */
-    private void exportLogAndContinue(File logFile) {
-        if (logFile == null || !logFile.exists()) {
-            uiRenderer.render(UIProtocol.showError("Recovery log not found"));
-            return;
-        }
-        
-        try {
-            // Archive with special name indicating manual intervention needed
-            String timestamp = String.valueOf(System.currentTimeMillis());
-            String archivedName = "password_change_MANUAL_RECOVERY_" + timestamp + ".log";
-            File archivedLog = new File(logFile.getParent(), archivedName);
-            
-            Files.move(logFile.toPath(), archivedLog.toPath());
-            
-            // Clear recovery state
-            state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
-            
-            // Show warning message
-            String message = String.format(
-                "⚠️ Recovery log exported for manual intervention\n\n" +
-                "Location: %s\n\n" +
-                "WARNING: Your encrypted files are in an inconsistent state.\n" +
-                "Some files use the OLD password, others use the NEW password.\n\n" +
-                "Manual Recovery Steps:\n" +
-                "1. Review the exported log file\n" +
-                "2. Identify which files failed/interrupted\n" +
-                "3. Manually re-encrypt using appropriate tools\n\n" +
-                "The system will now continue with the NEW password active.\n" +
-                "Files that were not updated may be inaccessible.",
-                archivedLog.getAbsolutePath()
-            );
-            
-            uiRenderer.render(UIProtocol.showError(message));
-            
-            // Log the decision
-            System.err.println("[SystemSession] User chose manual recovery path");
-            System.err.println("[SystemSession] Log exported to: " + archivedLog.getAbsolutePath());
-            
-            // Return to main menu
-            showMainMenu();
-            
-        } catch (IOException e) {
-            uiRenderer.render(UIProtocol.showError(
-                "Failed to export recovery log: " + e.getMessage()));
-            
-            System.err.println("[SystemSession] Failed to export log: " + e.getMessage());
-        }
-    }
 
     /**
      * Helper class to pass password change result through completion chain
      */
     private static class PasswordChangeResult {
-        final AsyncNoteBytesWriter progressWriter;
-        final StreamChannel progressChannel;
         final ProgressTrackingProcess progressTracker;
         final Throwable exception;
         
-        PasswordChangeResult(AsyncNoteBytesWriter progressWriter, 
-                            StreamChannel progressChannel,
-                            ProgressTrackingProcess progressTracker) {
-            this(progressWriter, progressChannel, progressTracker, null);
-        }
-        
-        PasswordChangeResult(AsyncNoteBytesWriter progressWriter,
-                            StreamChannel progressChannel,
-                            ProgressTrackingProcess progressTracker,
-                            Throwable exception) {
-            this.progressWriter = progressWriter;
-            this.progressChannel = progressChannel;
-            this.progressTracker = progressTracker;
+        PasswordChangeResult(ProgressTrackingProcess tracker, Throwable exception) {
+            this.progressTracker = tracker;
             this.exception = exception;
         }
     }
