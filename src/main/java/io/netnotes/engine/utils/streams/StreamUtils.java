@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -23,6 +24,7 @@ import com.google.gson.JsonSyntaxException;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 public class StreamUtils {
 
@@ -90,24 +92,33 @@ public class StreamUtils {
         }
     }
 
-    public static void duplicateEntireStream(PipedOutputStream pipedOutput, PipedOutputStream output1,
-            PipedOutputStream output2,
-            StreamProgressTracker progressTracker) throws IOException {
-        byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
-        int length = 0;
+    public static CompletableFuture<Void> duplicateEntireStream(PipedOutputStream pipedOutput, PipedOutputStream output1,
+        PipedOutputStream output2,
+        StreamProgressTracker progressTracker)
+    {
+        return CompletableFuture.runAsync(()->{
+            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+            int length = 0;
 
-        try (PipedInputStream input = new PipedInputStream(pipedOutput, PIPE_BUFFER_SIZE)) {
-            while ((length = input.read(buffer)) != -1) {
-                if (progressTracker != null && progressTracker.isCancelled()) {
-                    throw new IOException("Operation cancelled");
+            try (PipedInputStream input = new PipedInputStream(pipedOutput, PIPE_BUFFER_SIZE)) {
+                while ((length = input.read(buffer)) != -1) {
+                    if (progressTracker != null && progressTracker.isCancelled()) {
+                        throw new IOException("Operation cancelled");
+                    }
+                    output1.write(buffer, 0, length);
+                    output2.write(buffer, 0, length);
+                    if (progressTracker != null) {
+                        progressTracker.addBytesProcessed(length);
+                    }
                 }
-                output1.write(buffer, 0, length);
-                output2.write(buffer, 0, length);
-                if (progressTracker != null) {
-                    progressTracker.addBytesProcessed(length);
-                }
+            }catch(IOException e){
+                throw new RuntimeException("readOnly: Duplication failed", e);
+            }finally{
+                safeClose(output1);
+                safeClose(output2);
             }
-        }
+
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
     public static boolean safeClose(AutoCloseable resource) {

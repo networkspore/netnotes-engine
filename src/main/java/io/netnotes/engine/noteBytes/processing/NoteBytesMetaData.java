@@ -30,7 +30,7 @@ public class NoteBytesMetaData {
     public final static byte VIDEO_TYPE = (byte) 24;
     public final static byte SERIALIZABLE_OBJECT_TYPE = (byte) 25;
     public final static byte NOTE_BYTES_ENCRYPTED_TYPE = (byte) 26;
-    
+    public final static byte NULL_TYPE = (byte) 27;
 
     private byte m_type;
     private int m_len;

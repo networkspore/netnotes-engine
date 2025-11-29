@@ -329,7 +329,7 @@ public class NodeManagerProcess extends FlowProcess {
             "Installing " + pkg.getName() + "..."));
         
         // Download package
-        PackageInstaller installer = new PackageInstaller(appData);
+        PackageInstaller installer = new PackageInstaller(appData.getAppDataInterface(InstallationRegistry.INSTALLATION_REGISTRY_PATH));
         
         installer.installPackage(pkg)
             .thenCompose(installedPkg -> {
@@ -648,8 +648,7 @@ public class NodeManagerProcess extends FlowProcess {
         NoteBytesMap request = new NoteBytesMap();
         request.put(Keys.CMD, new NoteBytes("load_node"));
         request.put(new NoteBytes("package_id"), new NoteBytes(pkg.getPackageId()));
-        request.put(new NoteBytes("install_path"), 
-            new NoteBytes(pkg.getInstallPath().getAsString()));
+        request.put(new NoteBytes("install_path"), pkg.getInstallPath().getSegments());
         
         if (parentPath != null) {
             emitTo(parentPath, request.getNoteBytesObject());

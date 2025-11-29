@@ -1,18 +1,28 @@
 package io.netnotes.engine.noteFiles;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.URL;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
+import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
+
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 
 import io.netnotes.engine.utils.CollectionHelpers;
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 
@@ -81,26 +91,72 @@ public class NoteFile implements AutoCloseable  {
         closed.set(true);
     }
 
-    public CompletableFuture<NoteBytesObject> readOnly(PipedOutputStream readOutput) {
+    public CompletableFuture<Void> readOnly(PipedOutputStream readOutput) {
         checkNotClosed();
         return m_noteFileInterface.acquireLock()
-            .thenCompose(v -> {
+            .thenApply(v -> {
                 PipedOutputStream decryptedOutput = new PipedOutputStream();
-                m_noteFileInterface.decryptFile(decryptedOutput);
+                CompletableFuture<NoteBytesObject> decryptFuture = m_noteFileInterface.decryptFile(decryptedOutput);
 
                 PipedOutputStream encryptOutput = new PipedOutputStream();
-                try{
+              
+                CompletableFuture<Void> voidFuture = 
                     StreamUtils.duplicateEntireStream(decryptedOutput, readOutput, encryptOutput, null);
-
-                    return m_noteFileInterface.saveEncryptedFileSwap(encryptOutput);
-                }catch(IOException e){
-                    throw new RuntimeException("readOnly: Duplication failed", e);
-                }finally{
-                    StreamUtils.safeClose(readOutput);
-                }
-            }).whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
+                    
+                CompletableFuture<NoteBytesObject> encryptFuture = 
+                    m_noteFileInterface.saveEncryptedFileSwap(encryptOutput);
+           
+                return CompletableFuture.allOf(decryptFuture,voidFuture, encryptFuture);
+               
+            }).thenAccept(v -> m_noteFileInterface.releaseLock());
     }
 
+    /**
+     * retrieves entire bucket if written with CompletableFuture<Void> write(NoteBytes noteBytes) 
+     * otherwise retrieves first notebytes in bucket, based on initial 5 bytes metadata 
+     * Note: write(NoteBytes.get()) will not write initial metadata
+     * @return next NoteBytes
+     */
+    public CompletableFuture<NoteBytes> nextNoteBytes() {
+        PipedOutputStream outputStream = new PipedOutputStream();
+        CompletableFuture<Void> readFuture = readOnly(outputStream);
+
+        CompletableFuture<NoteBytes> readNoteBytesFuture = CompletableFuture.supplyAsync(()->{
+            try(
+                NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(outputStream, StreamUtils.PIPE_BUFFER_SIZE));
+            ){
+                return reader.nextNoteBytes();
+            } catch (IOException e) {
+                throw new CompletionException("Failed to read", e);
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+
+        return CompletableFuture.allOf(readFuture, readNoteBytesFuture).thenCompose((v)->readNoteBytesFuture);
+    }
+
+
+    /***
+     * reads all bytes from file
+     * @return 
+     */
+    public CompletableFuture<byte[]> readBytes() {
+        PipedOutputStream outputStream = new PipedOutputStream();
+        CompletableFuture<Void> readFuture = readOnly(outputStream);
+
+         CompletableFuture<byte[]> readByteFuture = CompletableFuture.supplyAsync(()->{
+            try(
+                PipedInputStream inputStream = new PipedInputStream(outputStream, StreamUtils.PIPE_BUFFER_SIZE);
+                UnsynchronizedByteArrayOutputStream byteStream = new UnsynchronizedByteArrayOutputStream((int)m_noteFileInterface.fileSize());
+            ){
+                inputStream.transferTo(byteStream);
+                return byteStream.toByteArray();
+            } catch (IOException e) {
+                throw new CompletionException("Failed to read", e);
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+
+        return CompletableFuture.allOf(readFuture, readByteFuture).thenCompose((v)->readByteFuture);
+    }
  
 
 
@@ -111,6 +167,45 @@ public class NoteFile implements AutoCloseable  {
             .whenComplete((result, throwable) -> m_noteFileInterface.releaseLock());
     }
 
+    public CompletableFuture<Void> write(NoteBytesMap noteBytesMap) {
+        return write(noteBytesMap.getNoteBytesObject());
+    }
+    /**
+     * Appends initial 5 bytes of metadata, then writes value
+     * @param noteBytes
+     * @return
+     */
+    public CompletableFuture<Void> write(NoteBytes noteBytes) {
+        PipedOutputStream outputStream = new PipedOutputStream();
+        
+        CompletableFuture<Void> writeFuture = CompletableFuture.runAsync(()->{
+            try(NoteBytesWriter writer = new NoteBytesWriter(outputStream)){
+                writer.write(noteBytes);
+            }catch(IOException e){
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+
+        CompletableFuture<NoteBytesObject> writeOnlyFuture = writeOnly(outputStream);
+
+        return CompletableFuture.allOf(writeFuture, writeOnlyFuture);
+    }
+
+    public CompletableFuture<Void> write(byte[] bytes) {
+        PipedOutputStream outputStream = new PipedOutputStream();
+        
+        CompletableFuture<Void> writeFuture = CompletableFuture.runAsync(()->{
+            try {
+                outputStream.write(bytes);
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+
+        CompletableFuture<NoteBytesObject> writeOnlyFuture = writeOnly(outputStream);
+
+        return CompletableFuture.allOf(writeFuture, writeOnlyFuture);
+    }
 
 
     public CompletableFuture<NoteBytesObject> readWriteNoLock(PipedOutputStream inParseStream, PipedOutputStream modifiedInParseStream) {
@@ -313,7 +408,7 @@ public class NoteFile implements AutoCloseable  {
         void releaseLock();
         boolean isLocked();
         boolean isClosed();
-        CompletableFuture<Void> perpareForShutdown();
+        CompletableFuture<Void> perpareForShutdown(AsyncNoteBytesWriter progressWriter);
         CompletableFuture<Void> prepareForKeyUpdate();
         void completeKeyUpdate();
     }

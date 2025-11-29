@@ -50,6 +50,12 @@ public class TaskMessages {
         return result;
     }
 
+     public static NoteBytesObject createSuccessResult(String scope, NoteBytesReadOnly message) {
+        NoteBytesObject result = getTaskMessage(new NoteBytesReadOnly(scope), ProtocolMesssages.SUCCESS, message);
+        return result;
+    }
+
+
  
 
     public static NoteBytesObject createErrorMessage(String scope, String message, Throwable e)  {

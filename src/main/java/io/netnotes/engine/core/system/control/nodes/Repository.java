@@ -1,14 +1,35 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
  * Repository - A source of packages (like apt repository)
  * 
- * Example:
- * - Official Netnotes repo
- * - User's GitHub repo
+ * STORAGE:
+ * Stored in /system/nodes/repositories/sources as NoteBytesMap
+ * 
+ * Examples:
+ * - Official Netnotes repo (GitHub)
+ * - User's personal GitHub repo
  * - Local file repository
  * - Third-party community repo
+ * 
+ * The repository URL points to a packages.json file with this structure:
+ * {
+ *   "repository": "Official Netnotes",
+ *   "packages": [
+ *     {
+ *       "id": "example-node",
+ *       "name": "Example Node",
+ *       "version": "1.0.0",
+ *       "download_url": "https://github.com/.../package.jar",
+ *       "manifest": { ... }
+ *     }
+ *   ]
+ * }
  */
 public class Repository {
     private final String id;
@@ -25,6 +46,8 @@ public class Repository {
         this.enabled = enabled;
     }
     
+    // ===== GETTERS =====
+    
     public String getId() { return id; }
     public String getName() { return name; }
     public String getUrl() { return url; }
@@ -34,5 +57,71 @@ public class Repository {
     
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+    
+    // ===== INTERNAL SERIALIZATION (NoteBytes) =====
+    
+    /**
+     * Serialize to NoteBytes format for internal storage
+     */
+    public NoteBytesObject toNoteBytes() {
+        NoteBytesMap map = new NoteBytesMap();
+        
+        map.put(Keys.ID, id);
+        map.put(Keys.NAME, name);
+        map.put(Keys.URL, url);
+        
+        if (keyUrl != null && !keyUrl.isEmpty()) {
+            map.put(new NoteBytes("key_url"), new NoteBytes(keyUrl));
+        }
+        
+        map.put(Keys.ENABLED, new NoteBytes(enabled));
+        
+        return map.getNoteBytesObject();
+    }
+    
+    /**
+     * Deserialize from NoteBytes format
+     */
+    public static Repository fromNoteBytes(NoteBytesMap map) {
+        try {
+            String id = map.get(Keys.ID).getAsString();
+            String name = map.get(Keys.NAME).getAsString();
+            String url = map.get(Keys.URL).getAsString();
+            
+            String keyUrl = null;
+            var keyUrlBytes = map.get(new NoteBytes("key_url"));
+            if (keyUrlBytes != null) {
+                keyUrl = keyUrlBytes.getAsString();
+            }
+            
+            boolean enabled = map.get(Keys.ENABLED).getAsBoolean();
+            
+            return new Repository(id, name, url, keyUrl, enabled);
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize Repository from NoteBytes", e);
+        }
+    }
+    
+    @Override
+    public String toString() {
+        return String.format(
+            "Repository[id=%s, name=%s, enabled=%s]",
+            id, name, enabled
+        );
+    }
+    
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof Repository)) return false;
+        Repository other = (Repository) obj;
+        return id.equals(other.id);
+    }
+    
+    @Override
+    public int hashCode() {
+        return id.hashCode();
     }
 }

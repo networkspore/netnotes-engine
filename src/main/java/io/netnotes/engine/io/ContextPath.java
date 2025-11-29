@@ -3,6 +3,7 @@ package io.netnotes.engine.io;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
@@ -21,6 +22,13 @@ public final class ContextPath {
     private ContextPath(NoteStringArrayReadOnly segments) {
         this.segments = segments;
         this.pathString = buildPathString();
+    }
+
+    public static ContextPath fromNoteBytes(NoteBytes noteBytes){
+        if(noteBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+            throw new IllegalArgumentException("ContextPath must be constructed from Array NoteBytes");
+        }
+        return new ContextPath(new NoteStringArrayReadOnly(noteBytes.get())); 
     }
 
     public static ContextPath parseExternal(String path, boolean urlEncoded) {
@@ -127,6 +135,10 @@ public final class ContextPath {
         return segments.size();
     }
 
+     public int size() {
+        return segments.size();
+    }
+
     public boolean isRoot() {
         return segments.isEmpty();
     }
@@ -183,6 +195,11 @@ public final class ContextPath {
     public ContextPath subPath(int start, int end) {
         return new ContextPath(segments.subPath(start, end));
     }
+
+    public String getSegment(int segmentIndex) {
+        return segments.getString(segmentIndex);
+    }
+
 
     public List<ContextPath> ancestors() {
         List<ContextPath> result = new ArrayList<>();
@@ -283,9 +300,12 @@ public final class ContextPath {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof ContextPath)) return false;
-        ContextPath other = (ContextPath) o;
-        return segments.equals(other.segments);
+        if (o instanceof ContextPath other ){
+            return segments.equals(other.segments);
+        }else if(o instanceof NoteBytes noteBytes){
+            return segments.equals(noteBytes);
+        }
+        return false;
     }
 
     @Override
@@ -296,6 +316,10 @@ public final class ContextPath {
     @Override
     public String toString() {
         return pathString;
+    }
+
+    public NoteStringArrayReadOnly toNoteBytes(){
+        return segments;
     }
 
     /** Builder */

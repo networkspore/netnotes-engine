@@ -2,6 +2,7 @@ package io.netnotes.engine.noteFiles.notePath;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.crypto.CryptoService;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -99,10 +100,19 @@ public class NoteFileService extends NotePathFactory {
     }
 
     public CompletableFuture<File> prepareAllForShutdown() {
+        return prepareAllForShutdown(null);
+    }
+
+    public CompletableFuture<File> prepareAllForShutdown(AsyncNoteBytesWriter progressWriter) {
+        if(progressWriter != null){
+
+            ProgressMessage.writeAsync("[NoteFileService]", 0, -1, "Preparing for shutdown", 
+                progressWriter);
+        }
         return acquireLock()
             .thenCompose(filePathLedger -> {
                 List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
-                    .map(ManagedNoteFileInterface::perpareForShutdown)
+                    .map(managedInterface -> managedInterface.perpareForShutdown(progressWriter) )
                     .collect(Collectors.toList());
                 
                 return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]))
@@ -785,14 +795,21 @@ private boolean canDecryptFile(File file, SecretKey key) {
     // ===== FILE DELETION =====
     
     public CompletableFuture<NotePath> deleteNoteFilePath(
-            NoteStringArrayReadOnly path, 
-            boolean recursive, 
-            AsyncNoteBytesWriter progressWriter) {
-
-        if(path == null || path.byteLength() == 0 || path.size() == 0){
+        ContextPath contextPath, 
+        boolean recursive, 
+        AsyncNoteBytesWriter progressWriter
+    ) {
+        NoteStringArrayReadOnly path = contextPath.getSegments();
+        if(path == null){
             StreamUtils.safeClose(progressWriter);
             return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Invalid path provided"));
+                new IllegalArgumentException("Null path provided"));
+        }
+
+        if(path.byteLength() == 0 || path.size() == 0){
+            StreamUtils.safeClose(progressWriter);
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Null path provided"));
         }
 
         if(progressWriter != null){
@@ -1253,5 +1270,21 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return allSucceeded;
             
         }, VirtualExecutors.getVirtualExecutor());
+    }
+
+    public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter){
+        return prepareAllForShutdown().whenComplete((v, ex)->{
+                if(ex != null){
+                    Throwable cause = ex.getCause();
+                    String msg = "Error shutting down note file service: " + 
+                        (cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString());
+                    System.err.println(msg);
+                    ex.printStackTrace();
+                    if(progressWriter != null){
+                        TaskMessages.writeErrorAsync("AppData", msg, ex, progressWriter);
+                    }
+                }
+                //return null;
+            }).thenApply((v)->null);
     }
 }

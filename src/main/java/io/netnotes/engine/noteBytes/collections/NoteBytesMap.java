@@ -165,6 +165,17 @@ public class NoteBytesMap{
         return new NoteBytesObject(bytes);
     }
 
+    public NoteBytesReadOnly readOnlyObject() {
+
+        byte[] bytes = new byte[byteLength_w_MetaData()];
+        int offset = 0;
+        for(Map.Entry<NoteBytes, NoteBytes> entry : m_pairs.entrySet()) {
+            offset = NoteBytes.writeNote(entry.getKey(), bytes, offset);
+            offset = NoteBytes.writeNote(entry.getValue(), bytes, offset);
+        }
+        return new NoteBytesReadOnly(bytes, NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE);
+    }
+
 
 
     public NoteBytes get(NoteBytes key) {
@@ -336,6 +347,10 @@ public class NoteBytesMap{
     
     public NoteBytes remove(Object key) {
         return m_pairs.remove(key);
+    }
+
+    public boolean has(NoteBytes noteBytes){
+        return m_pairs.containsKey(noteBytes);
     }
 
     

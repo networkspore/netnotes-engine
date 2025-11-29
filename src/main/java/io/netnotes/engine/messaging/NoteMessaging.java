@@ -146,6 +146,13 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly STATE_TYPE    = new NoteBytesReadOnly("state_type");
         public static final NoteBytesReadOnly ALIVE         = new NoteBytesReadOnly("alive");
         public static final NoteBytesReadOnly SERVICE       = new NoteBytesReadOnly("service");
+        public static final NoteBytesReadOnly URL           = new NoteBytesReadOnly("url");
+        public static final NoteBytesReadOnly ENABLED       = new NoteBytesReadOnly("enabled");
+        public static final NoteBytesReadOnly ENTRY         = new NoteBytesReadOnly("entry");
+        public static final NoteBytesReadOnly DEPENDENCIES  = new NoteBytesReadOnly("dependencies");
+        public static final NoteBytesReadOnly AUTOLOAD      = new NoteBytesReadOnly("autoload");
+        
+        
         // Metadata
         public static final NoteBytesReadOnly NAME          = new NoteBytesReadOnly("name");
         public static final NoteBytesReadOnly TIMESTAMP     = new NoteBytesReadOnly("time_stamp");
@@ -391,6 +398,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly FAILED        = new NoteBytesReadOnly("failed");
         public static final NoteBytesReadOnly CANCELLED     = new NoteBytesReadOnly("cancelled");
         public static final NoteBytesReadOnly ACTIVE        = new NoteBytesReadOnly("active");
+        public static final NoteBytesReadOnly CLOSED        = new NoteBytesReadOnly("closed");
     }
     
     

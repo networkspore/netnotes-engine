@@ -13,10 +13,13 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.task.TaskMessages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
@@ -27,12 +30,14 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final Map<NoteUUID, NoteFile> m_activeReferences = new ConcurrentHashMap<>();
     private final NoteFileService m_noteFileService;
     private final NoteStringArrayReadOnly m_pathKey;
+    private final String path;
     private AtomicBoolean m_isClosed = new AtomicBoolean(false);
     
    public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileService noteFileService ) {
         this.m_file = new File(noteFilePath.getAsString());
         this.m_noteFileService = noteFileService;
-        this.m_pathKey = pathKey;   
+        this.m_pathKey = pathKey;
+        this.path = pathKey.getAsString();   
     }
 
     public NoteStringArrayReadOnly getId(){
@@ -192,21 +197,33 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         return acquireLock(); // For key updates, we need exclusive access
     }
 
-    @Override
     public CompletableFuture<Void> perpareForShutdown(){
-      
+        return perpareForShutdown(null);
+    }
+
+    @Override
+    public CompletableFuture<Void> perpareForShutdown(AsyncNoteBytesWriter writer){
+
         return acquireLock()
             .exceptionally(ex -> {
-                System.err.println("Aquiring a lock failed for " + getId().getAsString()  + ": " + ex.getMessage());
+                String msg = "Aquiring a lock failed";
+                if(writer != null){
+                    TaskMessages.writeErrorAsync(path, msg, ex, writer);
+                }
+                System.err.println(msg + " for " + path);
                 ex.printStackTrace();
                 return null;
             }).thenApply((v)->{
             m_isClosed.set(true);
+          
             Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = m_activeReferences.entrySet().iterator();
             while(iterator.hasNext()) {
                 Map.Entry<NoteUUID, NoteFile> entry = iterator.next();
                 entry.getValue().forceClose();
                 iterator.remove(); 
+            }
+            if(writer != null){
+                writer.writeAsync(TaskMessages.createSuccessResult(path, NoteMessaging.Status.CLOSED));
             }
             return null;
         });

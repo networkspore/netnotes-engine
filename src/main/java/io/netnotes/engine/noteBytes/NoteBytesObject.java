@@ -464,8 +464,9 @@ public class NoteBytesObject extends NoteBytes{
             return jsonObject;
         }
         return null;
-            
     }
+
+    
 
     @Override 
     public String toString(){

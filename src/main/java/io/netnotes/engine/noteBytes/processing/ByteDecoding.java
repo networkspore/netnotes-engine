@@ -245,6 +245,41 @@ public class ByteDecoding{
         }
     }
 
+    public static boolean isNoteBytesType(byte type){
+        switch(type){
+            case NoteBytesMetaData.RAW_BYTES_TYPE:
+            case NoteBytesMetaData.BYTE_TYPE:
+            case NoteBytesMetaData.SHORT_TYPE:
+            case NoteBytesMetaData.INTEGER_TYPE:
+            case NoteBytesMetaData.FLOAT_TYPE:
+            case NoteBytesMetaData.DOUBLE_TYPE:
+            case NoteBytesMetaData.LONG_TYPE:
+            case NoteBytesMetaData.BOOLEAN_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_TYPE:
+            case NoteBytesMetaData.STRING_ISO_8859_1_TYPE:
+            case NoteBytesMetaData.STRING_US_ASCII_TYPE:
+            case NoteBytesMetaData.STRING_TYPE:
+            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
+            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
+            case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+            case NoteBytesMetaData.BIG_INTEGER_TYPE:
+            case NoteBytesMetaData.BIG_DECIMAL_TYPE:
+            case NoteBytesMetaData.SHORT_LE_TYPE:
+            case NoteBytesMetaData.INTEGER_LE_TYPE:
+            case NoteBytesMetaData.FLOAT_LE_TYPE:
+            case NoteBytesMetaData.DOUBLE_LE_TYPE:
+            case NoteBytesMetaData.LONG_LE_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
+            case NoteBytesMetaData.IMAGE_TYPE:
+            case NoteBytesMetaData.VIDEO_TYPE:
+            case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE:
+            case NoteBytesMetaData.NOTE_BYTES_ENCRYPTED_TYPE: 
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public static boolean containsBytes(byte[] array, byte[] target) {
         if (target.length == 0) return true;
         if (target.length > array.length) return false;
@@ -1328,4 +1363,44 @@ public class ByteDecoding{
             }
         }
     }
+
+    public static NoteBytes downScaleBigDecimal(BigDecimal big) {
+
+        BigDecimal stripped = big.stripTrailingZeros();
+
+        // ---------------------------
+        // CASE 1: integer (no fraction)
+        // ---------------------------
+        if (stripped.scale() <= 0) {
+
+            // fits int
+            if (stripped.compareTo(BigDecimal.valueOf(Integer.MIN_VALUE)) >= 0 &&
+                stripped.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0) {
+                return new NoteBytes(stripped.intValue());
+            }
+
+            // fits long
+            if (stripped.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) >= 0 &&
+                stripped.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) <= 0) {
+                return new NoteBytes(stripped.longValue());
+            }
+
+            // otherwise BigInteger
+            return new NoteBytes(stripped.toBigIntegerExact());
+        }
+
+        // ---------------------------
+        // CASE 2: decimal (fractional)
+        // ---------------------------
+        double d = stripped.doubleValue();
+
+        // exact representation?
+        if (new BigDecimal(d).compareTo(stripped) == 0) {
+            return new NoteBytes(d);   // exact double
+        }
+
+        // fallback → keep as BigDecimal
+        return new NoteBytes(stripped);
+    }
+
 }

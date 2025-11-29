@@ -4,11 +4,11 @@ package io.netnotes.engine.core.system.control.nodes;
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.AppData;
-import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
 /**
@@ -23,24 +23,24 @@ import io.netnotes.engine.utils.streams.UrlStreamHelpers;
  * Does NOT load into runtime - that's AppData's job
  */
 public class PackageInstaller {
-    private final AppData appData;
-    
-    public PackageInstaller(AppData appData) {
-        this.appData = appData;
+
+    private final AppDataInterface appDataInterface;
+    public PackageInstaller(AppDataInterface appDataInteface) {
+        this.appDataInterface = appDataInteface;
     }
     
     public CompletableFuture<InstalledPackage> installPackage(PackageInfo pkg) {
         System.out.println("[PackageInstaller] Installing " + pkg.getName());
         
         // Build install path: node-packages/{name}/{version}/
-        NoteStringArrayReadOnly installPath = new NoteStringArrayReadOnly(
+        ContextPath installPath = ContextPath.of(
             "node-packages",
             pkg.getName(),
             pkg.getVersion()
         );
         
-        return appData.getAppDataInterface(new NoteBytesReadOnly("node-packages"))
-            .getNoteFile(installPath.append("package.jar"))
+        return appDataInterface
+            .getNoteFile( installPath.append("package.jar"))
             .thenCompose(noteFile -> downloadToNoteFile(pkg.getDownloadUrl(), noteFile))
             .thenApply(v -> {
                 // Create InstalledPackage metadata
@@ -70,7 +70,7 @@ public class PackageInstaller {
         PipedOutputStream outputStream = new PipedOutputStream();
         
         CompletableFuture<Void> downloadFuture = UrlStreamHelpers.transferUrlStream(
-            downloadUrl, outputStream, null, appData.getExecService());
+            downloadUrl, outputStream, null, VirtualExecutors.getVirtualExecutor());
         
         CompletableFuture<NoteBytesObject> writeFuture = 
             noteFile.writeOnly(outputStream);
