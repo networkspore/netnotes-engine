@@ -44,7 +44,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly GET_ITEM_INFO     = new NoteBytesReadOnly("get_item_info");
         public static final NoteBytesReadOnly ITEM_INFO         = new NoteBytesReadOnly("item_info");
         public static final NoteBytesReadOnly GET_CAPABILITIES  = new NoteBytesReadOnly("get_capabilities");
-       
+        public static final NoteBytesReadOnly NODE_LIST         = new NoteBytesReadOnly("node_list");
 
          // Claim
         public static final NoteBytesReadOnly CLAIM_ITEM            = new NoteBytesReadOnly("claim_item");
@@ -125,6 +125,7 @@ public class NoteMessaging {
         void execute(NoteBytesMap message);
     }
 
+    @FunctionalInterface
     public interface RoutedMessageExecutor {
         CompletableFuture<Void> execute(NoteBytesMap message, RoutedPacket packet);
     }
@@ -138,6 +139,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly SOURCE_ID     = new NoteBytesReadOnly("source_id");
         public static final NoteBytesReadOnly DEVICE_ID     = new NoteBytesReadOnly("device_id");
         public static final NoteBytesReadOnly SESSION_ID    = new NoteBytesReadOnly("session_id");
+        public static final NoteBytesReadOnly PACKAGE_ID    = new NoteBytesReadOnly("package_id");
+        public static final NoteBytesReadOnly NODE_ID       = new NoteBytesReadOnly("node_id");
         public static final NoteBytesReadOnly PID           = new NoteBytesReadOnly("pid");
         public static final NoteBytesReadOnly RECEIVER_ID   = new NoteBytesReadOnly("receiver_id");
         public static final NoteBytesReadOnly SENDER_ID     = new NoteBytesReadOnly("sender_id");
@@ -249,6 +252,7 @@ public class NoteMessaging {
 
         public static final NoteBytesReadOnly SCOPE         = new NoteBytesReadOnly("scope");
         public static final NoteBytesReadOnly STATE         = new NoteBytesReadOnly("state");
+        public static final NoteBytesReadOnly ACTIVE        = new NoteBytesReadOnly("active");
     }
 
      public static class ItemTypes {

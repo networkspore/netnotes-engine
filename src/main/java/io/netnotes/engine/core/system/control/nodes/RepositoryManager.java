@@ -5,70 +5,92 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
 
 /**
- * RepositoryManager - Manages repository list (like /etc/apt/sources.list)
+ * RepositoryManager - Manages repository list (System Service)
  * 
- * STORAGE FORMAT:
- * Path: /system/nodes/repositories/sources
- * Format: NoteBytesMap where:
- *   - Key: repositoryId (String)
- *   - Value: Repository.toNoteBytes() (NoteBytesMap)
+ * LIFECYCLE:
+ * - Created by AppData during system initialization
+ * - Lives for entire application lifetime
+ * - Maintains NoteFile reference for efficient access
+ * - Closed during AppData shutdown
+ * 
+ * STORAGE:
+ * - Path: /system/nodes/repositories/sources
+ * - Format: NoteBytesMap { repositoryId -> Repository }
+ * - NoteFile cached as instance field (no repeated ledger access)
  * 
  * EXTERNAL FORMAT (from GitHub):
  * Fetches packages.json from each repository URL:
  * {
  *   "repository": "Official Netnotes",
- *   "packages": [
- *     {
- *       "id": "example-node",
- *       "name": "Example Node",
- *       "version": "1.0.0",
- *       "category": "utilities",
- *       "description": "Example node package",
- *       "download_url": "https://github.com/.../package.jar",
- *       "size": 1024000,
- *       "manifest": { ... }
- *     }
- *   ]
+ *   "packages": [...]
  * }
  */
 public class RepositoryManager {
+    
+    private final AppData appData;
     private final AppDataInterface systemInterface;
-    private final ExecutorService executor;
     private final ConcurrentHashMap<String, Repository> repositories;
+    
+    // Cached NoteFile - expensive to get, cheap to keep
+    // should last the duration of RepositoryManager and then be closed
+    private NoteFile sourcesFile;
     
     private static final ContextPath SOURCES_PATH = 
         NodePaths.REPOSITORIES.append("sources");
     
-    public RepositoryManager(AppDataInterface systemInterface, ExecutorService executor) {
-        this.systemInterface = systemInterface;
-        this.executor = executor;
+    /**
+     * Constructor - called by AppData
+     */
+    public RepositoryManager(AppData appData) {
+        this.appData = appData;
+        this.systemInterface = appData.getSystemInterface("repository-manager");
         this.repositories = new ConcurrentHashMap<>();
     }
     
     /**
      * Initialize - load repositories from NoteFile
+     * 
+     * Gets NoteFile ONCE and stores for entire lifecycle.
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[RepositoryManager] Loading from: " + SOURCES_PATH);
+        System.out.println("[RepositoryManager] Initializing from: " + SOURCES_PATH);
         
         return systemInterface.getNoteFile(SOURCES_PATH)
-            .thenCompose(file -> file.nextNoteBytes())
+            .thenAccept(file -> {
+                // ✅ Store NoteFile for reuse
+                this.sourcesFile = file;
+                System.out.println("[RepositoryManager] NoteFile acquired and cached");
+            })
+            .thenCompose(v -> loadRepositories())
+            .exceptionally(ex -> {
+                // First run - add default repository
+                System.out.println("[RepositoryManager] No existing sources found, adding defaults");
+                addDefaultRepository();
+                return saveRepositories().join();
+            });
+    }
+    
+    /**
+     * Load repositories from cached NoteFile
+     */
+    private CompletableFuture<Void> loadRepositories() {
+        return sourcesFile.nextNoteBytes()
             .thenAccept(noteBytesObj -> {
                 // Deserialize from NoteBytes format
                 NoteBytesMap reposMap = noteBytesObj.getAsNoteBytesMap();
@@ -90,12 +112,6 @@ public class RepositoryManager {
                             repoId.getAsString() + ": " + e.getMessage());
                     }
                 }
-            })
-            .exceptionally(ex -> {
-                // First run - add default repository
-                System.out.println("[RepositoryManager] No existing sources found, adding defaults");
-                addDefaultRepository();
-                return saveRepositories().join();
             });
     }
     
@@ -198,100 +214,91 @@ public class RepositoryManager {
      * 
      * This is where JSON comes in - repositories serve packages.json externally
      */
-    private CompletableFuture<List<PackageInfo>> fetchPackagesFromRepository(
-            Repository repo) {
+    private CompletableFuture<List<PackageInfo>> fetchPackagesFromRepository(Repository repo) {
         
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                System.out.println("[RepositoryManager] Fetching from: " + repo.getName());
-                
-                // Fetch JSON from URL (EXTERNAL format)
-                String jsonString = fetchUrlAsString(repo.getUrl());
-                JsonObject repoData = JsonParser.parseString(jsonString).getAsJsonObject();
-                
-                // Get packages array
-                JsonArray packagesArray = repoData.getAsJsonArray("packages");
-                
-                List<PackageInfo> packages = new ArrayList<>();
-                
-                // Convert each package from JSON to internal PackageInfo
-                for (JsonElement elem : packagesArray) {
-                    JsonObject pkgJson = elem.getAsJsonObject();
-                    
+        return UrlStreamHelpers.getUrlContentAsString(repo.getUrl())
+            .thenCompose(jsonString ->
+                CompletableFuture.supplyAsync(() -> {
                     try {
-                        // Create PackageInfo from external JSON
-                        String packageId = pkgJson.get("id").getAsString();
-                        String name = pkgJson.get("name").getAsString();
-                        String version = pkgJson.get("version").getAsString();
-                        String category = pkgJson.has("category") ? 
-                            pkgJson.get("category").getAsString() : "uncategorized";
-                        String description = pkgJson.has("description") ? 
-                            pkgJson.get("description").getAsString() : "";
-                        String downloadUrl = pkgJson.get("download_url").getAsString();
-                        long size = pkgJson.has("size") ? 
-                            pkgJson.get("size").getAsLong() : 0;
+                        System.out.println("[RepositoryManager] Fetching from: " + repo.getName());
                         
-                        // Parse manifest
-                        JsonObject manifestJson = pkgJson.getAsJsonObject("manifest");
-                        PackageManifest manifest = PackageManifest.fromJson(manifestJson);
+                        // Fetch JSON from URL (EXTERNAL format)
+                        JsonObject repoData = JsonParser.parseString(jsonString).getAsJsonObject();
                         
-                        PackageInfo pkg = new PackageInfo(
-                            packageId,
-                            name,
-                            version,
-                            category,
-                            description,
-                            repo.getName(), // Which repo it came from
-                            downloadUrl,
-                            size,
-                            manifest
-                        );
+                        // Get packages array
+                        JsonArray packagesArray = repoData.getAsJsonArray("packages");
                         
-                        packages.add(pkg);
+                        List<PackageInfo> packages = new ArrayList<>();
+                        
+                        // Convert each package from JSON to internal PackageInfo
+                        for (JsonElement elem : packagesArray) {
+                            JsonObject pkgJson = elem.getAsJsonObject();
+                            
+                            try {
+                                // Create PackageInfo from external JSON
+                                String packageId = pkgJson.get("id").getAsString();
+                                String name = pkgJson.get("name").getAsString();
+                                String version = pkgJson.get("version").getAsString();
+                                String category = pkgJson.has("category") ? 
+                                    pkgJson.get("category").getAsString() : "uncategorized";
+                                String description = pkgJson.has("description") ? 
+                                    pkgJson.get("description").getAsString() : "";
+                                String downloadUrl = pkgJson.get("download_url").getAsString();
+                                long size = pkgJson.has("size") ? 
+                                    pkgJson.get("size").getAsLong() : 0;
+                                
+                                // Parse manifest
+                                JsonObject manifestJson = pkgJson.getAsJsonObject("manifest");
+                                PackageManifest manifest = PackageManifest.fromJson(manifestJson);
+                                
+                                PackageInfo pkg = new PackageInfo(
+                                    new NoteBytesReadOnly(packageId),
+                                    name,
+                                    version,
+                                    category,
+                                    description,
+                                    repo.getName(), // Which repo it came from
+                                    downloadUrl,
+                                    size,
+                                    manifest
+                                );
+                                
+                                packages.add(pkg);
+                                
+                            } catch (Exception e) {
+                                System.err.println("[RepositoryManager] Failed to parse package in " + 
+                                    repo.getName() + ": " + e.getMessage());
+                            }
+                        }
+                        
+                        System.out.println("[RepositoryManager] " + repo.getName() + 
+                            " provided " + packages.size() + " packages");
+                        
+                        return packages;
                         
                     } catch (Exception e) {
-                        System.err.println("[RepositoryManager] Failed to parse package in " + 
+                        System.err.println("[RepositoryManager] Failed to fetch from " + 
                             repo.getName() + ": " + e.getMessage());
+                        return new ArrayList<>();
                     }
-                }
-                
-                System.out.println("[RepositoryManager] " + repo.getName() + 
-                    " provided " + packages.size() + " packages");
-                
-                return packages;
-                
-            } catch (Exception e) {
-                System.err.println("[RepositoryManager] Failed to fetch from " + 
-                    repo.getName() + ": " + e.getMessage());
-                return new ArrayList<>();
-            }
-            
-        }, executor);
+                    
+                }, VirtualExecutors.getVirtualExecutor())
+            );
     }
     
     /**
-     * Fetch URL content as string
-     */
-    private String fetchUrlAsString(String urlString) throws Exception {
-        URL url = new URL(urlString);
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(url.openStream()))) {
-            
-            StringBuilder content = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                content.append(line).append('\n');
-            }
-            return content.toString();
-        }
-    }
-    
-    /**
-     * Save repositories to NoteFile
+     * Save repositories to cached NoteFile
+     * 
+     * ✅ Uses cached NoteFile - no ledger access!
      * 
      * Format: NoteBytesMap { repositoryId -> Repository.toNoteBytes() }
      */
     private CompletableFuture<Void> saveRepositories() {
+        if (sourcesFile == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("RepositoryManager not initialized - sourcesFile is null"));
+        }
+        
         NoteBytesMap reposMap = new NoteBytesMap();
         
         // Serialize each repository
@@ -302,10 +309,8 @@ public class RepositoryManager {
             );
         }
         
-        // Write to NoteFile
-        return systemInterface.getNoteFile(SOURCES_PATH)
-            .thenCompose(file -> file.writeOnly(reposMap.getNoteBytesObject()))
-            .thenApply(v -> null)
+        // Write to cached NoteFile (no ledger access!)
+        return sourcesFile.write(reposMap.getNoteBytesObject())
             .exceptionally(ex -> {
                 System.err.println("[RepositoryManager] Failed to save: " + 
                     ex.getMessage());
@@ -314,11 +319,24 @@ public class RepositoryManager {
     }
     
     /**
-     * Shutdown - ensure sources are saved
+     * Shutdown - ensure sources are saved and NoteFile closed
      */
     public CompletableFuture<Void> shutdown() {
         System.out.println("[RepositoryManager] Shutting down, saving sources");
+        
         return saveRepositories()
+            .whenComplete((v, ex) -> {
+                if (ex != null) {
+                    System.err.println("[RepositoryManager] Error during shutdown save: " + 
+                        ex.getMessage());
+                }
+                
+                // ✅ Close cached NoteFile
+                if (sourcesFile != null) {
+                    sourcesFile.close();
+                    System.out.println("[RepositoryManager] NoteFile closed");
+                }
+            })
             .thenRun(() -> {
                 System.out.println("[RepositoryManager] Shutdown complete");
             });
@@ -337,5 +355,12 @@ public class RepositoryManager {
             repositories.size(),
             enabled
         );
+    }
+    
+    /**
+     * Get AppData reference
+     */
+    public AppData getAppData() {
+        return appData;
     }
 }

@@ -5,12 +5,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+
 /**
  * PackageCache - In-memory cache of available packages
  * Built from repository updates (like apt-cache)
  */
 public class PackageCache {
-    private final ConcurrentHashMap<String, PackageInfo> cache;
+    private final ConcurrentHashMap<NoteBytesReadOnly, PackageInfo> cache;
     
     public PackageCache() {
         this.cache = new ConcurrentHashMap<>();

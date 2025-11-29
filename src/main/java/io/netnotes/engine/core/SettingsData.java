@@ -21,6 +21,7 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteRandom;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
@@ -288,14 +289,8 @@ public class SettingsData {
         
     }
 
-    private static void save( NoteBytesPair... pairs)throws IOException{
-        File file = getSettingsFile();
-
-        NoteBytesObject obj = new NoteBytesObject(
-           
-        );
-
-        FileStreamUtils.writeFileBytes(file, obj.get());
+    private static void save( NoteBytesPair... pairs) throws IOException{
+        FileStreamUtils.writeFileNoteBytes( getSettingsFile(), new NoteBytesObject(pairs));
     }
 
     public void shutdown(){
@@ -334,7 +329,7 @@ public class SettingsData {
     public static void saveBootstrapConfig( NoteBytesObject nbo) throws IOException{
         File file = getBootstrapFile();
 
-        FileStreamUtils.writeFileBytes(file, nbo.get());
+        FileStreamUtils.writeFileNoteBytes(file, nbo);
     }
     
 
@@ -364,7 +359,11 @@ public class SettingsData {
         return CompletableFuture.supplyAsync(()->{
             try{
                 File settingsFile = getSettingsFile();
-                return FileStreamUtils.readFileToMap(settingsFile);
+                NoteBytes noteBytes = FileStreamUtils.readFileNextNoteBytes(settingsFile);
+                if(noteBytes != null && noteBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                    return noteBytes.getAsMap();
+                }
+                throw new IllegalStateException("File is invalid");
             }catch(Exception e){
                 throw new CompletionException("Settings could not be read", e);
             }
@@ -377,7 +376,11 @@ public class SettingsData {
         return CompletableFuture.supplyAsync(()->{
             try{
                 File bootStrapFile = getBootstrapFile();
-                return FileStreamUtils.readFileToMap(bootStrapFile);
+                NoteBytes noteBytes = FileStreamUtils.readFileNextNoteBytes(bootStrapFile);
+                if(noteBytes != null && noteBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                    return noteBytes.getAsMap();
+                }
+                throw new IllegalStateException("File is invalid");
             }catch(Exception e){
                 throw new CompletionException("Settings could not be read", e);
             }

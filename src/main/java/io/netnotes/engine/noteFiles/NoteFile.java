@@ -1,6 +1,8 @@
 package io.netnotes.engine.noteFiles;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.URL;
@@ -290,11 +292,228 @@ public class NoteFile implements AutoCloseable  {
 
 
 
-    /*public Future<?> getFileBytes(){
+    /**
+     * Get InputStream for reading file contents
+     * 
+     * This enables stream-based access for consumers like OSGi that need
+     * to read bundles without materializing entire file in memory.
+     * 
+     * The stream is decrypted on-the-fly as bytes are read.
+     * 
+     * LIFECYCLE:
+     * - Caller MUST close the returned InputStream when done
+     * - Closing the stream also closes internal pipes and waits for decryption
+     * - If error occurs during read, IOException is thrown to caller
+     * 
+     * RESOURCE MANAGEMENT:
+     * - PipedOutputStream/InputStream are created and linked
+     * - readOnly() starts async decryption in background
+     * - Stream wrapper ensures proper cleanup in close()
+     * 
+     * @return InputStream that reads decrypted file contents
+     * @throws IOException if stream setup fails
+     */
+    public InputStream getInputStream() throws IOException {
+        checkNotClosed();
+        
+        // Create piped streams for async decryption
+        PipedOutputStream decryptOutput = new PipedOutputStream();
+        PipedInputStream decryptInput = new PipedInputStream(
+            decryptOutput,
+            StreamUtils.PIPE_BUFFER_SIZE
+        );
+        
+        // Start async decryption in background
+        // readOnly() handles: decrypt → duplicate → re-encrypt → swap
+        CompletableFuture<Void> decryptFuture = readOnly(decryptOutput)
+            .exceptionally(ex -> {
+                // On decryption error, close streams to signal failure
+                StreamUtils.safeClose(decryptInput);
+                StreamUtils.safeClose(decryptOutput);
+                System.err.println("[NoteFile] Decryption error for " + 
+                    pathString + ": " + ex.getMessage());
+                return null;
+            });
+        
+        // Wrap in InputStream that ensures proper cleanup
+        return new InputStream() {
+            private final AtomicBoolean streamClosed = new AtomicBoolean(false);
+            
+            @Override
+            public int read() throws IOException {
+                if (streamClosed.get()) {
+                    throw new IOException("Stream closed");
+                }
+                
+                try {
+                    return decryptInput.read();
+                } catch (IOException e) {
+                    // Check if decryption failed
+                    if (decryptFuture.isCompletedExceptionally()) {
+                        throw new IOException("Decryption failed", 
+                            decryptFuture.handle((v, ex) -> ex).join());
+                    }
+                    throw e;
+                }
+            }
+            
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                if (streamClosed.get()) {
+                    throw new IOException("Stream closed");
+                }
+                
+                try {
+                    return decryptInput.read(b, off, len);
+                } catch (IOException e) {
+                    // Check if decryption failed
+                    if (decryptFuture.isCompletedExceptionally()) {
+                        throw new IOException("Decryption failed", 
+                            decryptFuture.handle((v, ex) -> ex).join());
+                    }
+                    throw e;
+                }
+            }
+            
+            @Override
+            public void close() throws IOException {
+                if (streamClosed.compareAndSet(false, true)) {
+                    try {
+                        // Close input stream first (stops reading)
+                        decryptInput.close();
+                        
+                        // Close output stream (stops writing)
+                        decryptOutput.close();
+                        
+                        // Wait for background decryption to complete
+                        // This ensures file swap completes properly
+                        try {
+                            decryptFuture.join();
+                        } catch (Exception e) {
+                            // If decryption failed, wrap in IOException
+                            Throwable cause = e.getCause() != null ? e.getCause() : e;
+                            throw new IOException("Decryption did not complete successfully", cause);
+                        }
+                        
+                    } catch (IOException e) {
+                        // Ensure streams are closed even if error occurs
+                        StreamUtils.safeClose(decryptInput);
+                        StreamUtils.safeClose(decryptOutput);
+                        throw e;
+                    }
+                }
+            }
+            
+            @Override
+            public int available() throws IOException {
+                if (streamClosed.get()) {
+                    return 0;
+                }
+                return decryptInput.available();
+            }
+            
+            @Override
+            public long skip(long n) throws IOException {
+                if (streamClosed.get()) {
+                    throw new IOException("Stream closed");
+                }
+                return decryptInput.skip(n);
+            }
+            
+            @Override
+            public synchronized void mark(int readlimit) {
+                // PipedInputStream doesn't support mark/reset
+            }
+            
+            @Override
+            public synchronized void reset() throws IOException {
+                throw new IOException("mark/reset not supported");
+            }
+            
+            @Override
+            public boolean markSupported() {
+                return false;
+            }
+        };
+    }
 
-    }*/
-    
-    // Getters
+    public OutputStream getOutputStream() throws IOException {
+        checkNotClosed();
+
+
+        PipedOutputStream pipeOut = new PipedOutputStream();
+
+        // Launch async write pipeline
+        CompletableFuture<NoteBytesObject> writeFuture = writeOnly(pipeOut)
+            .exceptionally(ex -> {
+                StreamUtils.safeClose(pipeOut);
+                System.err.println("[NoteFile] Write/encrypt error for " +
+                    pathString + ": " + ex.getMessage());
+                return null;
+            });
+
+        // Wrap output so we can intercept close() and errors
+        return new OutputStream() {
+            private final AtomicBoolean closed = new AtomicBoolean(false);
+
+            @Override
+            public void write(int b) throws IOException {
+                ensureOpen();
+                try {
+                    pipeOut.write(b);
+                } catch (IOException e) {
+                    rethrowWriteError(e);
+                }
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                ensureOpen();
+                try {
+                    pipeOut.write(b, off, len);
+                } catch (IOException e) {
+                    rethrowWriteError(e);
+                }
+            }
+
+            private void rethrowWriteError(IOException e) throws IOException {
+                if (writeFuture.isCompletedExceptionally()) {
+                    Throwable cause = writeFuture.handle((v, ex) -> ex).join();
+                    throw new IOException("Async write failed", cause);
+                }
+                throw e;
+            }
+
+            private void ensureOpen() throws IOException {
+                if (closed.get()) {
+                    throw new IOException("Stream closed");
+                }
+            }
+
+            @Override
+            public void flush() throws IOException {
+                ensureOpen();
+                pipeOut.flush();
+            }
+
+            @Override
+            public void close() throws IOException {
+                if (closed.compareAndSet(false, true)) {
+                    try {
+                        pipeOut.close(); // signals EOF to writer
+                        try {
+                            writeFuture.join();
+                        } catch (Exception e) {
+                            Throwable cause = e.getCause() != null ? e.getCause() : e;
+                            throw new IOException("Async write did not complete successfully", cause);
+                        }
+                    } finally {
+                        StreamUtils.safeClose(pipeOut);
+                    }
+                }
+            }
+        };
+    }
 
 
     public boolean isClosed() { return closed.get(); }

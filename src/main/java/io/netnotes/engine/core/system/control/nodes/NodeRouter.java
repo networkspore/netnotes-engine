@@ -4,6 +4,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
  * NodeRouter - Routes messages between nodes
@@ -31,8 +32,8 @@ class NodeRouter {
      * Route message from one node to another
      */
     public CompletableFuture<Void> routeMessage(
-            String fromNodeId,
-            String toNodeId,
+            NoteBytesReadOnly fromNodeId,
+            NoteBytesReadOnly toNodeId,
             RoutedPacket packet) {
         
         // Get nodes
@@ -58,7 +59,7 @@ class NodeRouter {
      * Request stream channel between nodes
      */
     public CompletableFuture<StreamChannel> 
-            requestStreamChannel(String fromNodeId, String toNodeId) {
+            requestStreamChannel(NoteBytesReadOnly fromNodeId, NoteBytesReadOnly toNodeId) {
         
         // Check permissions
         if (!canCommunicate(fromNodeId, toNodeId)) {
@@ -90,7 +91,7 @@ class NodeRouter {
      * - Global communication policies
      * - Category-based permissions
      */
-    private boolean canCommunicate(String fromNodeId, String toNodeId) {
+    private boolean canCommunicate(NoteBytesReadOnly fromNodeId, NoteBytesReadOnly toNodeId) {
         // For now, allow all communication
         return true;
     }

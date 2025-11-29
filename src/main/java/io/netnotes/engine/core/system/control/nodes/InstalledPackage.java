@@ -1,8 +1,11 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import com.google.gson.JsonObject;
+
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
@@ -15,7 +18,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * This is stored in /system/nodes/registry/installed as NoteBytesMap
  */
 public class InstalledPackage {
-    private final String packageId;
+    private final NoteBytesReadOnly packageId;
     private final String name;
     private final String version;
     private final String category;
@@ -26,7 +29,7 @@ public class InstalledPackage {
     private final long installedDate;
     
     public InstalledPackage(
-            String packageId,
+            NoteBytesReadOnly packageId,
             String name,
             String version,
             String category,
@@ -49,7 +52,7 @@ public class InstalledPackage {
     
     // ===== GETTERS =====
     
-    public String getPackageId() { return packageId; }
+    public NoteBytesReadOnly getPackageId() { return packageId; }
     public String getName() { return name; }
     public String getVersion() { return version; }
     public String getCategory() { return category; }
@@ -67,7 +70,7 @@ public class InstalledPackage {
     public NoteBytesObject toNoteBytes() {
         NoteBytesMap map = new NoteBytesMap();
         
-        map.put(new NoteBytes("package_id"), new NoteBytes(packageId));
+        map.put(new NoteBytes("package_id"), packageId);
         map.put(new NoteBytes("name"), new NoteBytes(name));
         map.put(new NoteBytes("version"), new NoteBytes(version));
         map.put(new NoteBytes("category"), new NoteBytes(category));
@@ -84,7 +87,7 @@ public class InstalledPackage {
      */
     public static InstalledPackage fromNoteBytes(NoteBytesMap map) {
         try {
-            String packageId = map.get(new NoteBytes("package_id")).getAsString();
+            NoteBytesReadOnly packageId = map.get(new NoteBytes("package_id")).readOnly();
             String name = map.get(new NoteBytes("name")).getAsString();
             String version = map.get(new NoteBytes("version")).getAsString();
             String category = map.get(new NoteBytes("category")).getAsString();
@@ -117,7 +120,7 @@ public class InstalledPackage {
      * Create from external JSON (when installing from repository)
      * This converts external format → internal format
      */
-    public static InstalledPackage fromJson(com.google.gson.JsonObject json, 
+    public static InstalledPackage fromJson(JsonObject json, 
                                            ContextPath installPath,
                                            long installedDate) {
         try {
@@ -136,7 +139,7 @@ public class InstalledPackage {
             PackageManifest manifest = PackageManifest.fromJson(manifestJson);
             
             return new InstalledPackage(
-                packageId, name, version, category, description,
+                new NoteBytesReadOnly(packageId), name, version, category, description,
                 repository, installPath, manifest, installedDate
             );
             

@@ -6,80 +6,41 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
+import io.netnotes.engine.core.system.PathArchitecture;
 import io.netnotes.engine.core.system.control.nodes.INode;
+import io.netnotes.engine.core.system.control.nodes.InstallationRegistry;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
-import io.netnotes.engine.core.system.control.nodes.NodePaths;
+import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.process.FlowProcessRegistry;
-import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
- * AppData - Enhanced with proper node system integration
+ * AppData - System-level resource manager
  * 
- * ARCHITECTURE CLARIFICATION:
- * 
- * AppData is the CENTRAL HUB that:
- * 1. Manages SettingsData (passwords, encryption keys)
- * 2. Manages NoteFileService (encrypted file system)
- * 3. Coordinates NodeController (runtime node lifecycle)
- * 4. Provides sandboxed AppDataInterface to nodes
- * 
- * SEPARATION OF CONCERNS:
- * 
- * - AppData: System-wide coordination and resource management
- *   - Holds SettingsData (never exposed)
- *   - Holds NoteFileService (file system)
- *   - Holds NodeController (node lifecycle)
- *   - Creates sandboxed interfaces for nodes
- * 
- * - NodeController: Runtime node lifecycle (like systemd)
- *   - Load/unload nodes
- *   - Monitor health
- *   - Inter-node routing
- *   - Enforces runtime policies
- * 
- * - NodeManagerProcess: Package management UI (like apt-get)
- *   - Browse repositories
- *   - Install/uninstall packages
- *   - Update package lists
- *   - REQUEST AppData to load/unload nodes (doesn't do it directly)
- * 
- * - InstallationRegistry: Installation metadata (what's installed)
- *   - Stored in NoteFiles via NoteFileService
- *   - Managed by NodeManagerProcess
- *   - Read by NodeController when loading
- * 
- * DATA FLOW EXAMPLES:
- * 
- * INSTALL A PACKAGE:
- * User → NodeManagerProcess → Download files → NoteFileService.save()
- *      → InstallationRegistry.register() → Done
- * 
- * LOAD A NODE:
- * User → NodeManagerProcess → Request to AppData
- *      → AppData.loadNode() → NodeController.loadNode()
- *      → NodeLoader reads from NoteFileService
- *      → Node initialized with sandboxed AppDataInterface
- *      → Done
- * 
- * NODE ACCESSES FILE:
- * Node → AppDataInterface.getNoteFile(path)
- *      → Validate path via NodePaths.canAccess()
- *      → If allowed: NoteFileService.getNoteFile(validatedPath)
- *      → Return NoteFile to node
+ * KEY ARCHITECTURAL CHANGES:
+ * 1. Path structure unified via PathArchitecture
+ * 2. AppDataInterface creation uses factory methods
+ * 3. Sandboxing enforced at interface creation
+ * 4. Node registry uses INSTANCE IDs (not package IDs)
  */
 public class AppData {
 
     private final NoteFileService m_noteFileRegistry;
+    
+    // Node registry: instanceId → INode
+    // Uses NoteBytesReadOnly for IDs (more efficient than String, provides type info)
+    // Changed from packageId to instanceId to support multiple instances
     private final Map<NoteBytesReadOnly, INode> m_nodeRegistry = new ConcurrentHashMap<>();
+    
+    // System Services (Always Available)
+    private InstallationRegistry installationRegistry;
+    private RepositoryManager repositoryManager;
     
     // Node system coordination
     private NodeController nodeController;
-    private FlowProcessRegistry processRegistry;
 
     public AppData(SettingsData settingsData){
         if (settingsData == null) {
@@ -87,30 +48,62 @@ public class AppData {
         }
 
         m_noteFileRegistry = new NoteFileService(settingsData);
+        
+        // Initialize system services (but don't load data yet)
+        this.installationRegistry = new InstallationRegistry(this);
+        this.repositoryManager = new RepositoryManager(this);
     }
 
     // ===== INITIALIZATION =====
     
     /**
      * Initialize AppData with node system support
-     * Call this after constructing AppData
+     * 
+     * @param processRegistry FlowProcessRegistry for node registration
      */
-    public CompletableFuture<Void> initializeNodeSystem(FlowProcessRegistry processRegistry) {
-        this.processRegistry = processRegistry;
-        this.nodeController = new NodeController(this, processRegistry);
+    public CompletableFuture<Void> initializeNodeSystem(
+            io.netnotes.engine.io.process.FlowProcessRegistry processRegistry) {
         
-        // Register NodeController in the ProcessRegistry
-        ContextPath controllerPath = ContextPath.of("system", "controller");
-        processRegistry.registerProcess(nodeController, controllerPath);
+        if (processRegistry == null) {
+            throw new IllegalArgumentException("FlowProcessRegistry cannot be null");
+        }
         
-        // Start NodeController (loads auto-start nodes)
-        return nodeController.run()
+        System.out.println("[AppData] Initializing node system...");
+        
+        // 1. Initialize system services first
+        return installationRegistry.initialize()
+            .thenCompose(v -> repositoryManager.initialize())
+            .thenCompose(v -> {
+                System.out.println("[AppData] System services initialized");
+                
+                // 2. Create node controller (pass processRegistry to it)
+                this.nodeController = new NodeController(
+                    this,
+                    processRegistry,
+                    installationRegistry
+                );
+                
+                // 3. Register NodeController in ProcessRegistry
+                ContextPath controllerPath = PathArchitecture.FlowPaths.CONTROLLER;
+                processRegistry.registerProcess(nodeController, controllerPath);
+                
+                // 4. Start NodeController
+                return nodeController.run();
+            })
             .thenRun(() -> {
-                System.out.println("[AppData] Node system initialized");
+                System.out.println("[AppData] Node system initialized - " +
+                    "Registry: " + installationRegistry.getStatistics() + ", " +
+                    "Repositories: " + repositoryManager.getStatistics());
+            })
+            .exceptionally(ex -> {
+                System.err.println("[AppData] Node system initialization failed: " + 
+                    ex.getMessage());
+                ex.printStackTrace();
+                throw new RuntimeException("Node system initialization failed", ex);
             });
     }
 
-    // ===== PUBLIC API (NO SettingsData exposure) =====
+    // ===== PUBLIC API =====
 
     public ExecutorService getExecService(){
         return VirtualExecutors.getVirtualExecutor();
@@ -120,6 +113,17 @@ public class AppData {
         return VirtualExecutors.getVirtualSchedualedExecutor();
     }
 
+    /**
+     * Get node registry (by instance ID)
+     * 
+     * Uses NoteBytesReadOnly for IDs instead of String:
+     * - More efficient (no String object overhead)
+     * - Type information preserved
+     * - Better interop with messaging system
+     * 
+     * CHANGED: Now uses instance IDs instead of package IDs
+     * This allows multiple instances of the same package
+     */
     public Map<NoteBytesReadOnly, INode> nodeRegistry(){
         return m_nodeRegistry;
     }
@@ -128,21 +132,22 @@ public class AppData {
         return m_noteFileRegistry;
     }
     
-    /**
-     * Get the NodeController
-     * Used by SystemSessionProcess to coordinate with node system
-     */
     public NodeController getNodeController() {
         return nodeController;
     }
+    
+    public InstallationRegistry getInstallationRegistry() {
+        return installationRegistry;
+    }
+    
+    public RepositoryManager getRepositoryManager() {
+        return repositoryManager;
+    }
 
-    // ===== SANDBOXED INTERFACES =====
+    // ===== SANDBOXED INTERFACES (NEW APPROACH) =====
     
     /**
-     * Get scoped interface for a specific path
-     * This provides isolated access to the file system with automatic path scoping
-     * 
-     * @deprecated Use getNodeInterface() for nodes, or getSystemInterface() for system code
+     * @deprecated Use specific interface creation methods
      */
     @Deprecated
     public AppDataInterface getAppDataInterface(String... path){
@@ -150,126 +155,120 @@ public class AppData {
     }
     
     /**
-     * @deprecated Use getNodeInterface() for nodes, or getSystemInterface() for system code
+     * @deprecated Use getSystemInterface(), getSessionInterface(), or getNodeInterface()
      */
     @Deprecated
     public AppDataInterface getAppDataInterface(ContextPath scopedPath){
-        if(scopedPath == null){
-            throw new IllegalArgumentException("scopedPath cannot be null");
-        }
-        return new AppDataInterface(){
-
-            @Override
-            public void shutdown() {
-                AppData.this.shutdown(null);
-            }
-
-            @Override
-            public CompletableFuture<io.netnotes.engine.noteFiles.NoteFile> getNoteFile(ContextPath path) {
-                if(path == null ){
-                    return CompletableFuture.failedFuture(new NullPointerException("Path is null"));
-                }
-                return CompletableFuture.supplyAsync(()->{
-                    if(path.startsWith(scopedPath)){
-            
-                        return path.getSegments();
-                    
-                    }else{
-                        return scopedPath.append(path).getSegments();
-                    }
-                }, io.netnotes.engine.utils.VirtualExecutors.getVirtualExecutor())
-                    .thenCompose(scopedPath->AppData.this.m_noteFileRegistry.getNoteFile(scopedPath));
-            }
-        };
+        throw new UnsupportedOperationException(
+            "Use getSystemInterface(), getSessionInterface(), or getNodeInterface()");
     }
     
     /**
-     * Create a sandboxed AppDataInterface for a node
+     * Create interface for system code (unrestricted access)
      * 
-     * This enforces access control rules defined in NodePaths:
-     * - Nodes can access /system/nodes/runtime/{packageId}/
-     * - Nodes can access /user/nodes/{packageId}/
-     * - Nodes can READ (not write) /system/nodes/packages/
-     * - Nodes CANNOT access other nodes' paths
+     * Used by:
+     * - InstallationRegistry
+     * - RepositoryManager
+     * - NodeController
+     * - SystemSessionProcess
      * 
-     * @param packageId The node's package identifier
-     * @return Sandboxed interface with enforced access control
-     */
-    public AppDataInterface getNodeInterface(String packageId) {
-        if (packageId == null || packageId.isEmpty()) {
-            throw new IllegalArgumentException("packageId cannot be null or empty");
-        }
-        
-        NodePaths.NodeSandbox sandbox = new NodePaths.NodeSandbox(packageId);
-        
-        return new AppDataInterface() {
-            
-            @Override
-            public void shutdown() {
-                // Nodes cannot shutdown the entire system
-                throw new UnsupportedOperationException(
-                    "Nodes cannot shutdown AppData - use node.shutdown() instead");
-            }
-            
-            @Override
-            public CompletableFuture<io.netnotes.engine.noteFiles.NoteFile> getNoteFile(ContextPath path) {
-                if (path == null) {
-                    return CompletableFuture.failedFuture(
-                        new NullPointerException("Path is null"));
-                }
-                
-                return CompletableFuture.supplyAsync(() -> {
-                    // Validate access (assuming read for now, write will be checked by NoteFile)
-                    ContextPath validatedPath = sandbox.validateAndResolve(path, false);
-                    
-                    if (validatedPath == null) {
-                        throw new SecurityException(
-                            "Node '" + packageId + "' cannot access path: " + path);
-                    }
-                    
-                    return validatedPath.getSegments();
-                    
-                }, io.netnotes.engine.utils.VirtualExecutors.getVirtualExecutor())
-                .thenCompose(segments -> m_noteFileRegistry.getNoteFile(segments));
-            }
-        };
-    }
-    
-    /**
-     * Create an AppDataInterface for system code (not sandboxed)
-     * Used by NodeManagerProcess, InstallationRegistry, etc.
-     * 
-     * @param systemArea System area identifier (e.g., "node-manager", "installation-registry")
-     * @return Interface with access to system paths
+     * @param systemArea Identifier for debugging (e.g., "installation-registry")
      */
     public AppDataInterface getSystemInterface(String systemArea) {
         if (systemArea == null || systemArea.isEmpty()) {
             throw new IllegalArgumentException("systemArea cannot be null or empty");
         }
         
-        return new AppDataInterface() {
-            
-            @Override
-            public void shutdown() {
-                AppData.this.shutdown(null);
-            }
-            
-            @Override
-            public CompletableFuture<io.netnotes.engine.noteFiles.NoteFile> getNoteFile(ContextPath path) {
-                if (path == null) {
-                    return CompletableFuture.failedFuture(
-                        new NullPointerException("Path is null"));
-                }
-                
-                // System code has unrestricted access
-                return m_noteFileRegistry.getNoteFile(path.getSegments());
-            }
-        };
+        return ScopedAppDataInterface.createSystemInterface(
+            systemArea,
+            m_noteFileRegistry
+        );
+    }
+    
+    /**
+     * Create interface for a session (scoped to session path)
+     * 
+     * Sessions can:
+     * - Read/write to /system/sessions/{sessionId}/
+     * - Read from /system/ (not write)
+     * 
+     * @param sessionId Unique session identifier (as NoteBytesReadOnly)
+     */
+    public AppDataInterface getSessionInterface(NoteBytesReadOnly sessionId) {
+        if (sessionId == null || sessionId.isEmpty()) {
+            throw new IllegalArgumentException("sessionId cannot be null or empty");
+        }
+        
+        String sessionIdStr = sessionId.getAsString();
+        
+        // Validate session ID format
+        if (!PathArchitecture.Identifiers.isValidInstanceId(sessionIdStr)) {
+            throw new IllegalArgumentException("Invalid session ID format: " + sessionIdStr);
+        }
+        
+        return ScopedAppDataInterface.createSessionInterface(
+            sessionIdStr,
+            m_noteFileRegistry
+        );
+    }
+    
+    /**
+     * Create interface for a session (scoped to session path)
+     * 
+     * @param sessionId Unique session identifier (as String)
+     * @deprecated Use getSessionInterface(NoteBytesReadOnly) for better performance
+     */
+    @Deprecated
+    public AppDataInterface getSessionInterface(String sessionId) {
+        return getSessionInterface(new NoteBytesReadOnly(sessionId));
+    }
+    
+    /**
+     * Create interface for a node instance (scoped to runtime + user paths)
+     * 
+     * Nodes can:
+     * - Read/write to /system/nodes/runtime/{instanceId}/
+     * - Read/write to /user/nodes/{instanceId}/
+     * - Read from /system/nodes/packages/ (not write)
+     * 
+     * IMPORTANT: instanceId is the RUNNING INSTANCE identifier,
+     * not the package ID. This allows multiple instances of the same package.
+     * 
+     * @param instanceId Unique node instance identifier (as NoteBytesReadOnly)
+     */
+    public AppDataInterface getNodeInterface(NoteBytesReadOnly instanceId) {
+        if (instanceId == null || instanceId.isEmpty()) {
+            throw new IllegalArgumentException("instanceId cannot be null or empty");
+        }
+        
+        String instanceIdStr = instanceId.getAsString();
+        
+        // Validate instance ID format
+        if (!PathArchitecture.Identifiers.isValidInstanceId(instanceIdStr)) {
+            throw new IllegalArgumentException("Invalid instance ID format: " + instanceIdStr);
+        }
+        
+        return ScopedAppDataInterface.createNodeInterface(
+            instanceIdStr,
+            m_noteFileRegistry
+        );
+    }
+    
+    /**
+     * Create interface for a node instance (scoped to runtime + user paths)
+     * 
+     * @param instanceId Unique node instance identifier (as String)
+     * @deprecated Use getNodeInterface(NoteBytesReadOnly) for better performance
+     */
+    @Deprecated
+    public AppDataInterface getNodeInterface(String instanceId) {
+        return getNodeInterface(new NoteBytesReadOnly(instanceId));
     }
 
-    // ===== PASSWORD OPERATIONS (no SettingsData exposure) =====
+    // ===== PASSWORD OPERATIONS =====
 
-    public CompletableFuture<Boolean> verifyPassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
+    public CompletableFuture<Boolean> verifyPassword(
+            io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
         return getSettingsData().verifyPassword(password);
     }
 
@@ -280,17 +279,21 @@ public class AppData {
             AsyncNoteBytesWriter progressWriter) {
         
         if (oldPassword == null || newPassword == null) {
-            CompletableFuture<io.netnotes.engine.noteBytes.NoteBytesObject> failed = CompletableFuture.failedFuture(
-                new IllegalArgumentException("Passwords cannot be null"));
+            CompletableFuture<io.netnotes.engine.noteBytes.NoteBytesObject> failed = 
+                CompletableFuture.failedFuture(
+                    new IllegalArgumentException("Passwords cannot be null"));
             if (progressWriter != null) {
-                io.netnotes.engine.messaging.task.TaskMessages.writeErrorAsync("AppData", "Invalid password parameters", 
-                    new IllegalArgumentException("Passwords cannot be null"), progressWriter);
+                io.netnotes.engine.messaging.task.TaskMessages.writeErrorAsync(
+                    "AppData", "Invalid password parameters", 
+                    new IllegalArgumentException("Passwords cannot be null"), 
+                    progressWriter);
             }
             return failed;
         }
         
         if (progressWriter != null) {
-            io.netnotes.engine.messaging.task.ProgressMessage.writeAsync("AppData", 0, -1, "Starting password change", progressWriter);
+            io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
+                "AppData", 0, -1, "Starting password change", progressWriter);
         }
         
         return m_noteFileRegistry.updateFilePathLedgerEncryption(
@@ -301,7 +304,8 @@ public class AppData {
         )
         .thenApply(result -> {
             if (progressWriter != null) {
-                io.netnotes.engine.messaging.task.ProgressMessage.writeAsync("AppData", 0, -1, "Password change complete", progressWriter);
+                io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
+                    "AppData", 0, -1, "Password change complete", progressWriter);
             }
             System.out.println("[AppData] Password change completed successfully");
             return result;
@@ -309,7 +313,8 @@ public class AppData {
         .exceptionally(ex -> {
             System.err.println("[AppData] Password change failed: " + ex.getMessage());
             if (progressWriter != null) {
-                io.netnotes.engine.messaging.task.TaskMessages.writeErrorAsync("AppData", "Password change failed: " + ex.getMessage(), 
+                io.netnotes.engine.messaging.task.TaskMessages.writeErrorAsync(
+                    "AppData", "Password change failed: " + ex.getMessage(), 
                     ex, progressWriter);
             }
             throw new RuntimeException("Password change failed", ex);
@@ -397,9 +402,7 @@ public class AppData {
         
         if (!analysis.getFilesNeedingUpdate().isEmpty()) {
             recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
-                if (!prevSuccess) {
-                    return CompletableFuture.completedFuture(false);
-                }
+                if (!prevSuccess) return CompletableFuture.completedFuture(false);
                 
                 io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
                     "ComprehensiveRecovery", 0, 3,
@@ -417,9 +420,7 @@ public class AppData {
         
         if (!analysis.getFilesNeedingSwap().isEmpty()) {
             recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
-                if (!prevSuccess) {
-                    return CompletableFuture.completedFuture(false);
-                }
+                if (!prevSuccess) return CompletableFuture.completedFuture(false);
                 
                 io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
                     "ComprehensiveRecovery", 1, 3,
@@ -437,9 +438,7 @@ public class AppData {
         
         if (!analysis.getFilesNeedingCleanup().isEmpty()) {
             recoveryChain = recoveryChain.thenCompose(prevSuccess -> {
-                if (!prevSuccess) {
-                    return CompletableFuture.completedFuture(false);
-                }
+                if (!prevSuccess) return CompletableFuture.completedFuture(false);
                 
                 io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
                     "ComprehensiveRecovery", 2, 3,
@@ -462,7 +461,8 @@ public class AppData {
         });
     }
 
-    public CompletableFuture<Boolean> deleteCorruptedFiles(java.util.List<String> corruptedFiles) {
+    public CompletableFuture<Boolean> deleteCorruptedFiles(
+            java.util.List<String> corruptedFiles) {
         if (corruptedFiles == null || corruptedFiles.isEmpty()) {
             return CompletableFuture.completedFuture(true);
         }
@@ -470,7 +470,8 @@ public class AppData {
         return m_noteFileRegistry.deleteCorruptedFiles(corruptedFiles);
     }
 
-    public CompletableFuture<Boolean> verifyOldPassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral oldPassword) {
+    public CompletableFuture<Boolean> verifyOldPassword(
+            io.netnotes.engine.noteBytes.NoteBytesEphemeral oldPassword) {
         return getSettingsData().verifyOldPassword(oldPassword);
     }
 
@@ -480,42 +481,64 @@ public class AppData {
                 getSettingsData().rollbackToOldPassword();
                 System.out.println("[AppData] SettingsData rolled back to old password");
             } catch (Exception e) {
-                System.err.println("[AppData] Failed to rollback SettingsData: " + e.getMessage());
+                System.err.println("[AppData] Failed to rollback SettingsData: " + 
+                    e.getMessage());
                 throw new RuntimeException("SettingsData rollback failed", e);
             }
-        }, io.netnotes.engine.utils.VirtualExecutors.getVirtualExecutor());
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
     // ===== SHUTDOWN =====
 
+    public CompletableFuture<Void> shutdown(){
+        return shutdown(null);
+    }
+
     public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter){
         if(progressWriter != null){
             io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
-                "AppData", 0, -1, "Shutting down node system", progressWriter);
+                "AppData", 0, -1, "Shutting down system services", progressWriter);
         }
         
-        // Shutdown node system first
+        // Shutdown in reverse order of initialization
+        
+        // 1. Shutdown node system
         CompletableFuture<Void> nodeShutdown = nodeController != null 
             ? nodeController.shutdown()
             : CompletableFuture.completedFuture(null);
         
         return nodeShutdown.thenCompose(v -> {
             if(progressWriter != null){
-                ProgressMessage.writeAsync(
-                    "AppData", 0, -1, "Closing any open files", progressWriter);
+                io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
+                    "AppData", 0, -1, "Shutting down system services", progressWriter);
             }
             
-            // Shutdown SettingsData
+            // 2. Shutdown system services
+            return CompletableFuture.allOf(
+                installationRegistry != null ? 
+                    installationRegistry.shutdown() : CompletableFuture.completedFuture(null),
+                repositoryManager != null ? 
+                    repositoryManager.shutdown() : CompletableFuture.completedFuture(null)
+            );
+        })
+        .thenCompose(v -> {
+            if(progressWriter != null){
+                io.netnotes.engine.messaging.task.ProgressMessage.writeAsync(
+                    "AppData", 0, -1, "Closing encrypted file system", progressWriter);
+            }
+            
+            // 3. Shutdown SettingsData
             getSettingsData().shutdown();
             
-            // Prepare all NoteFiles for shutdown
-            return getNoteFileService().shutdown();
+            // 4. Prepare all NoteFiles for shutdown
+            return getNoteFileService().shutdown(progressWriter);
         })
         .exceptionally((ex)->{
             if(ex != null){
                 Throwable cause = ex.getCause();
                 String msg = "Error shutting down: " + 
-                    (cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString());
+                    (cause == null ? ex.getMessage() : 
+                        ex.getMessage() + ": " + cause.toString());
                 System.err.println(msg);
                 ex.printStackTrace();
                 if(progressWriter != null){
@@ -524,7 +547,6 @@ public class AppData {
                 }
             }
             return null;
-        })
-        .thenApply((v)->null);
+        });
     }
 }

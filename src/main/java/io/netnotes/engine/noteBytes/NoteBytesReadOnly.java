@@ -99,6 +99,12 @@ public class NoteBytesReadOnly extends NoteBytes {
         return new NoteBytesReadOnly(get(), getType());
     }
 
+    
+    public boolean containsBytes(NoteBytesReadOnly bytes){
+        return ByteDecoding.containsBytes(getBytesInternal(), bytes.getBytesInternal());
+    }
+
+
     @Override
     public void set(byte[] disabled){
 

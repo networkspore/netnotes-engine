@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils.StreamProgressTracker;
 
 public class UrlStreamHelpers {
@@ -210,7 +211,7 @@ public class UrlStreamHelpers {
     }
 
  
-    public static CompletableFuture<String> getUrlContentAsString(String urlString, ExecutorService execService){
+    public static CompletableFuture<String> getUrlContentAsString(String urlString){
         return CompletableFuture.supplyAsync(() -> {
             try (Reader reader = new InputStreamReader(newUrlStream(urlString), StandardCharsets.UTF_8)) {
                 StringBuilder builder = new StringBuilder();
@@ -225,7 +226,7 @@ public class UrlStreamHelpers {
             } catch (URISyntaxException e) {
                 throw new CompletionException("Malformed url", e);
             }
-        }, execService);
+        }, VirtualExecutors.getVirtualExecutor());
     }
 
 }

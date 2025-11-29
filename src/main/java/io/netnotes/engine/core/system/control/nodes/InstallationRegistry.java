@@ -5,49 +5,90 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteFiles.NoteFile;
 
 /**
- * InstallationRegistry - Tracks INSTALLED packages
+ * InstallationRegistry - Tracks INSTALLED packages (System Service)
  * 
- * STORAGE FORMAT:
- * Path: /system/nodes/registry/installed
- * Format: NoteBytesMap where:
- *   - Key: packageId (String)
- *   - Value: InstalledPackage.toNoteBytes() (NoteBytesMap)
+ * LIFECYCLE:
+ * - Created by AppData during system initialization
+ * - Lives for entire application lifetime
+ * - Maintains NoteFile reference for efficient access
+ * - Closed during AppData shutdown
  * 
- * This is SEPARATE from AppData's runtime node registry:
- * - InstallationRegistry: What packages are installed (files on disk)
- * - AppData.nodeRegistry(): What nodes are loaded (active in runtime)
+ * STORAGE:
+ * - Path: /system/nodes/registry/installed
+ * - Format: NoteBytesMap { packageId -> InstalledPackage }
+ * - NoteFile cached as instance field (no repeated ledger access)
+ * 
+ * SEPARATION:
+ * - InstallationRegistry: What packages are installed (metadata)
+ * - NodeController: What nodes are loaded (runtime)
  * 
  * A package can be installed but not loaded.
  * A package must be installed before it can be loaded.
  */
 public class InstallationRegistry {
     
+    private final AppData appData;
     private final AppDataInterface systemInterface;
-    private final ConcurrentHashMap<String, InstalledPackage> installed;
+    private final ConcurrentHashMap<NoteBytesReadOnly, InstalledPackage> installed;
+    
+    // Cached NoteFile - expensive to get, cheap to keep
+    // Lasts for lifecycle of InstalltionRegistry
+    private NoteFile registryFile;
     
     // Path where registry is stored
     private static final ContextPath REGISTRY_PATH = 
         NodePaths.REGISTRY.append("installed");
     
-    public InstallationRegistry(AppDataInterface systemInterface) {
-        this.systemInterface = systemInterface;
+    /**
+     * Constructor - called by AppData
+     * 
+     * @param appData Parent AppData instance
+     */
+    public InstallationRegistry(AppData appData) {
+        this.appData = appData;
+        this.systemInterface = appData.getSystemInterface("installation-registry");
         this.installed = new ConcurrentHashMap<>();
     }
     
     /**
      * Initialize - load installation registry from NoteFile
+     * 
+     * Gets NoteFile ONCE and stores for entire lifecycle.
+     * This avoids repeated ledger access on every save.
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[InstallationRegistry] Loading from: " + REGISTRY_PATH);
+        System.out.println("[InstallationRegistry] Initializing from: " + REGISTRY_PATH);
         
         return systemInterface.getNoteFile(REGISTRY_PATH)
-            .thenCompose(file -> file.nextNoteBytes())
+            .thenAccept(file -> {
+                // ✅ Store NoteFile for reuse
+                this.registryFile = file;
+                System.out.println("[InstallationRegistry] NoteFile acquired and cached");
+            })
+            .thenCompose(v -> loadInstalledPackages())
+            .exceptionally(ex -> {
+                // First run - registry doesn't exist yet
+                System.out.println("[InstallationRegistry] No existing registry found, starting fresh");
+                
+                // Create empty registry file
+                return saveToFile().join();
+            });
+    }
+    
+    /**
+     * Load installed packages from cached NoteFile
+     */
+    private CompletableFuture<Void> loadInstalledPackages() {
+        return registryFile.nextNoteBytes()
             .thenAccept(noteBytesObj -> {
                 // Deserialize from NoteBytes format
                 NoteBytesMap packagesMap = noteBytesObj.getAsNoteBytesMap();
@@ -60,7 +101,7 @@ public class InstallationRegistry {
                     try {
                         NoteBytesMap pkgData = packagesMap.get(pkgId).getAsNoteBytesMap();
                         InstalledPackage pkg = InstalledPackage.fromNoteBytes(pkgData);
-                        installed.put(pkgId.getAsString(), pkg);
+                        installed.put(pkgId.readOnly(), pkg);
                         
                         System.out.println("[InstallationRegistry] Loaded: " + 
                             pkg.getName() + " v" + pkg.getVersion());
@@ -70,11 +111,6 @@ public class InstallationRegistry {
                             pkgId.getAsString() + ": " + e.getMessage());
                     }
                 }
-            })
-            .exceptionally(ex -> {
-                // First run - registry doesn't exist yet
-                System.out.println("[InstallationRegistry] No existing registry found, starting fresh");
-                return null;
             });
     }
     
@@ -87,7 +123,7 @@ public class InstallationRegistry {
         
         return saveToFile()
             .thenRun(() -> {
-                System.out.println("[InstallationRegistry] Saved registry with " + 
+                System.out.println("[InstallationRegistry] Registry saved with " + 
                     installed.size() + " packages");
             });
     }
@@ -95,7 +131,7 @@ public class InstallationRegistry {
     /**
      * Unregister a package (before deletion)
      */
-    public CompletableFuture<Void> unregisterPackage(String packageId) {
+    public CompletableFuture<Void> unregisterPackage(NoteBytesReadOnly packageId) {
         InstalledPackage removed = installed.remove(packageId);
         
         if (removed != null) {
@@ -116,23 +152,31 @@ public class InstallationRegistry {
     /**
      * Get specific package
      */
-    public InstalledPackage getPackage(String packageId) {
+    public InstalledPackage getPackage(NoteBytesReadOnly packageId) {
         return installed.get(packageId);
     }
     
     /**
      * Check if package is installed
      */
-    public boolean isInstalled(String packageId) {
+    public boolean isInstalled(NoteBytesReadOnly packageId) {
         return installed.containsKey(packageId);
     }
     
     /**
-     * Save registry to NoteFile
+     * Save registry to cached NoteFile
+     * 
+     * ✅ Uses cached NoteFile - no ledger access!
+     * This is called frequently (every install/uninstall).
      * 
      * Format: NoteBytesMap { packageId -> InstalledPackage.toNoteBytes() }
      */
     private CompletableFuture<Void> saveToFile() {
+        if (registryFile == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Registry not initialized - registryFile is null"));
+        }
+        
         NoteBytesMap packagesMap = new NoteBytesMap();
         
         // Serialize each package
@@ -143,9 +187,8 @@ public class InstallationRegistry {
             );
         }
         
-        // Write to NoteFile
-        return systemInterface.getNoteFile(REGISTRY_PATH)
-            .thenCompose(file -> file.write(packagesMap.getNoteBytesObject()))
+        // Write to cached NoteFile (no ledger access!)
+        return registryFile.write(packagesMap.getNoteBytesObject())
             .exceptionally(ex -> {
                 System.err.println("[InstallationRegistry] Failed to save: " + 
                     ex.getMessage());
@@ -154,11 +197,24 @@ public class InstallationRegistry {
     }
     
     /**
-     * Shutdown - ensure registry is saved
+     * Shutdown - ensure registry is saved and NoteFile closed
      */
     public CompletableFuture<Void> shutdown() {
         System.out.println("[InstallationRegistry] Shutting down, saving registry");
+        
         return saveToFile()
+            .whenComplete((v, ex) -> {
+                if (ex != null) {
+                    System.err.println("[InstallationRegistry] Error during shutdown save: " + 
+                        ex.getMessage());
+                }
+                
+                // ✅ Close cached NoteFile
+                if (registryFile != null) {
+                    registryFile.close();
+                    System.out.println("[InstallationRegistry] NoteFile closed");
+                }
+            })
             .thenRun(() -> {
                 System.out.println("[InstallationRegistry] Shutdown complete");
             });
@@ -172,5 +228,12 @@ public class InstallationRegistry {
             "Installed packages: %d",
             installed.size()
         );
+    }
+    
+    /**
+     * Get AppData reference (for package operations)
+     */
+    public AppData getAppData() {
+        return appData;
     }
 }

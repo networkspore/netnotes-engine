@@ -443,6 +443,10 @@ public class NoteBytes {
         return ByteDecoding.containsBytes(m_value, bytes);
     }
 
+    public boolean containsBytes(NoteBytes bytes){
+        return ByteDecoding.containsBytes(m_value, bytes.get());
+    }
+
     public int compare(NoteBytes noteBytes){
         byte[] bytes = noteBytes.get();
         return compareBytes(bytes);

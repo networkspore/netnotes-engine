@@ -1,12 +1,13 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
  * PackageInfo - Metadata about an AVAILABLE package (from repository)
  * This is NOT installed yet - just information about what's available
  */
 public class PackageInfo {
-    private final String packageId;
+    private final NoteBytesReadOnly packageId;
     private final String name;
     private final String version;
     private final String category;
@@ -17,7 +18,7 @@ public class PackageInfo {
     private final PackageManifest manifest;  // JSON manifest
     
     public PackageInfo(
-            String packageId,
+            NoteBytesReadOnly packageId,
             String name,
             String version,
             String category,
@@ -38,7 +39,7 @@ public class PackageInfo {
         this.manifest = manifest;
     }
     
-    public String getPackageId() { return packageId; }
+    public NoteBytesReadOnly getPackageId() { return packageId; }
     public String getName() { return name; }
     public String getVersion() { return version; }
     public String getCategory() { return category; }

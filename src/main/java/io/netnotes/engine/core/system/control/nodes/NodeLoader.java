@@ -3,6 +3,7 @@ package io.netnotes.engine.core.system.control.nodes;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
 
 /**
  * NodeLoader - Loads nodes from packages (OSGi integration)
@@ -17,9 +18,11 @@ import io.netnotes.engine.core.AppData;
 class NodeLoader {
     
     private final AppData appData;
+    private final OSGiBundleLoader osgiBundleLoader;
     
     public NodeLoader(AppData appData) {
         this.appData = appData;
+        this.osgiBundleLoader = new OSGiBundleLoader(appData);
     }
     
     /**
@@ -60,18 +63,23 @@ class NodeLoader {
     /**
      * Load OSGi bundle
      * 
-     * TODO: Integrate with OSGi framework
-     * - Install bundle from NoteFile
-     * - Start bundle
-     * - Get service reference
-     * - Return INode service
+     * Delegates to OSGiBundleLoader which:
+     * 1. Initializes OSGi framework (if needed)
+     * 2. Extracts bundle JAR from NoteFile
+     * 3. Installs bundle in framework
+     * 4. Starts bundle
+     * 5. Waits for INode service registration
+     * 6. Returns INode instance
      */
-    private java.util.concurrent.CompletableFuture<INode> loadOSGiBundle(
-            InstalledPackage pkg) {
-        
-        return java.util.concurrent.CompletableFuture.failedFuture(
-            new UnsupportedOperationException(
-                "OSGi bundle loading not yet implemented"));
+    private CompletableFuture<INode> loadOSGiBundle(InstalledPackage pkg) {
+        return osgiBundleLoader.loadBundle(pkg);
+    }
+    
+    /**
+     * Unload OSGi bundle
+     */
+    public CompletableFuture<Void> unloadOSGiBundle(String packageId) {
+        return osgiBundleLoader.unloadBundle(packageId);
     }
     
     /**
@@ -83,10 +91,8 @@ class NodeLoader {
      * - Wrap in INode adapter
      * - Return adapter
      */
-    private java.util.concurrent.CompletableFuture<INode> loadScript(
-            InstalledPackage pkg) {
-        
-        return java.util.concurrent.CompletableFuture.failedFuture(
+    private CompletableFuture<INode> loadScript(InstalledPackage pkg) {
+        return CompletableFuture.failedFuture(
             new UnsupportedOperationException(
                 "Script loading not yet implemented"));
     }
@@ -100,11 +106,23 @@ class NodeLoader {
      * - Wrap in INode adapter
      * - Return adapter
      */
-    private java.util.concurrent.CompletableFuture<INode> loadNative(
-            InstalledPackage pkg) {
-        
-        return java.util.concurrent.CompletableFuture.failedFuture(
+    private CompletableFuture<INode> loadNative(InstalledPackage pkg) {
+        return CompletableFuture.failedFuture(
             new UnsupportedOperationException(
                 "Native library loading not yet implemented"));
+    }
+    
+    /**
+     * Shutdown loader (shuts down OSGi framework)
+     */
+    public CompletableFuture<Void> shutdown() {
+        return osgiBundleLoader.shutdown();
+    }
+    
+    /**
+     * Get OSGi bundle loader (for diagnostics)
+     */
+    public OSGiBundleLoader getOSGiBundleLoader() {
+        return osgiBundleLoader;
     }
 }

@@ -2,6 +2,7 @@ package io.netnotes.engine.core.system.control.nodes;
 
 
 import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
  * NodeInstance - Wrapper around INode with lifecycle state
@@ -17,7 +18,7 @@ import io.netnotes.engine.core.AppDataInterface;
  */
 public class NodeInstance {
     
-    private final String packageId;
+    private final NoteBytesReadOnly packageId;
     private final InstalledPackage installedPackage;
     private final INode node;
     
@@ -29,7 +30,7 @@ public class NodeInstance {
     private int crashCount = 0;
     
     public NodeInstance(
-            String packageId,
+            NoteBytesReadOnly packageId,
             InstalledPackage installedPackage,
             INode node,
             NodeState initialState) {
@@ -43,7 +44,7 @@ public class NodeInstance {
     
     // ===== GETTERS =====
     
-    public String getPackageId() {
+    public NoteBytesReadOnly getPackageId() {
         return packageId;
     }
     

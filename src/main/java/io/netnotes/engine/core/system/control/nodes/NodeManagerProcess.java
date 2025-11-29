@@ -1,6 +1,5 @@
 package io.netnotes.engine.core.system.control.nodes;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -55,8 +54,7 @@ public class NodeManagerProcess extends FlowProcess {
     private final UIRenderer uiRenderer;
     
     // Package management (installation metadata ONLY)
-    private InstallationRegistry installRegistry;
-    private RepositoryManager repositoryManager;
+
     private PackageCache packageCache;
     
     // Current view state
@@ -82,6 +80,14 @@ public class NodeManagerProcess extends FlowProcess {
         
         setupMessageMapping();
         setupStateTransitions();
+    }
+
+    private InstallationRegistry getInstallationRegistry() {
+        return appData.getInstallationRegistry();
+    }
+
+    private RepositoryManager getRepositoryManager() {
+        return appData.getRepositoryManager();
     }
     
     private void setupMessageMapping() {
@@ -112,20 +118,9 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private CompletableFuture<Void> initialize() {
-        // Initialize installation metadata components
-        installRegistry = new InstallationRegistry(appData);
-        repositoryManager = new RepositoryManager(appData);
-        packageCache = new PackageCache();
-        
-        // Load installation registry (what packages are installed)
-        return installRegistry.initialize()
-            .thenCompose(v -> repositoryManager.initialize())
-            .thenAccept(v -> {
-                System.out.println("[NodeManager] Loaded " + 
-                    installRegistry.getInstalledPackages().size() + 
-                    " installed packages from " + 
-                    repositoryManager.getRepositories().size() + " repositories");
-            });
+        // Build UI
+        showMainMenu();
+        return CompletableFuture.completedFuture(null);
     }
     
     // ===== MENU SYSTEM =====
@@ -135,9 +130,9 @@ public class NodeManagerProcess extends FlowProcess {
         MenuContext menu = new MenuContext(menuPath, "Node Manager", uiRenderer);
         
         // Statistics
-        int installed = installRegistry.getInstalledPackages().size();
+        int installed = getInstallationRegistry().getInstalledPackages().size();
         int available = packageCache.getAllPackages().size();
-        int repos = repositoryManager.getRepositories().size();
+        int repos = getRepositoryManager().getRepositories().size();
         
         menu.addInfoItem("stats", String.format(
             "Installed: %d | Available: %d | Repositories: %d",
@@ -215,7 +210,7 @@ public class NodeManagerProcess extends FlowProcess {
         uiRenderer.render(UIProtocol.showMessage(
             "Updating package lists from repositories..."));
         
-        repositoryManager.updateAllRepositories()
+        getRepositoryManager().updateAllRepositories()
             .thenAccept(packages -> {
                 // Cache the packages
                 packageCache.updateCache(packages);
@@ -272,7 +267,7 @@ public class NodeManagerProcess extends FlowProcess {
             menu.addSubMenu(entry.getKey(), entry.getKey(), subMenu -> {
                 for (PackageInfo pkg : entry.getValue()) {
                     subMenu.addItem(
-                        pkg.getPackageId(),
+                        pkg.getPackageId().getAsString(),
                         pkg.getName() + " (" + pkg.getVersion() + ")",
                         pkg.getDescription(),
                         () -> confirmInstall(pkg)
@@ -329,12 +324,12 @@ public class NodeManagerProcess extends FlowProcess {
             "Installing " + pkg.getName() + "..."));
         
         // Download package
-        PackageInstaller installer = new PackageInstaller(appData.getAppDataInterface(InstallationRegistry.INSTALLATION_REGISTRY_PATH));
+        PackageInstaller installer = new PackageInstaller(appData.getSystemInterface("packages"));
         
         installer.installPackage(pkg)
             .thenCompose(installedPkg -> {
                 // Register in installation registry
-                return installRegistry.registerPackage(installedPkg);
+                return getInstallationRegistry().registerPackage(installedPkg);
             })
             .thenRun(() -> {
                 state.removeState(INSTALLING);
@@ -357,7 +352,7 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private void showRemoveMenu() {
-        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
+        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage("No packages installed"));
@@ -374,7 +369,7 @@ public class NodeManagerProcess extends FlowProcess {
         
         for (InstalledPackage pkg : installed) {
             menu.addItem(
-                pkg.getPackageId(),
+                pkg.getPackageId().getAsString(),
                 pkg.getName() + " (" + pkg.getVersion() + ")",
                 () -> confirmRemove(pkg)
             );
@@ -430,7 +425,7 @@ public class NodeManagerProcess extends FlowProcess {
             });
         
         // Unregister and delete
-        installRegistry.unregisterPackage(pkg.getPackageId())
+        getInstallationRegistry().unregisterPackage(pkg.getPackageId())
             .thenCompose(v -> appData.getNoteFileService().deleteNoteFilePath(
                 pkg.getInstallPath(), true, null))
             .thenRun(() -> {
@@ -453,7 +448,7 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private void showInstalledMenu() {
-        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
+        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage("No packages installed"));
@@ -470,7 +465,7 @@ public class NodeManagerProcess extends FlowProcess {
         
         for (InstalledPackage pkg : installed) {
             menu.addItem(
-                pkg.getPackageId(),
+                pkg.getPackageId().getAsString(),
                 pkg.getName() + " " + pkg.getVersion(),
                 pkg.getDescription(),
                 () -> showPackageDetails(pkg)
@@ -512,7 +507,7 @@ public class NodeManagerProcess extends FlowProcess {
     // ===== REPOSITORY MANAGEMENT =====
     
     private void showRepositoryMenu() {
-        List<Repository> repos = repositoryManager.getRepositories();
+        List<Repository> repos = getRepositoryManager().getRepositories();
         
         ContextPath menuPath = contextPath.append("menu", "repositories");
         MenuContext menu = new MenuContext(menuPath, "Repository Management", 
@@ -562,18 +557,18 @@ public class NodeManagerProcess extends FlowProcess {
         
         if (repo.isEnabled()) {
             menu.addItem("disable", "Disable Repository", () -> {
-                repositoryManager.setRepositoryEnabled(repo.getId(), false);
+                getRepositoryManager().setRepositoryEnabled(repo.getId(), false);
                 showRepositoryMenu();
             });
         } else {
             menu.addItem("enable", "Enable Repository", () -> {
-                repositoryManager.setRepositoryEnabled(repo.getId(), true);
+                getRepositoryManager().setRepositoryEnabled(repo.getId(), true);
                 showRepositoryMenu();
             });
         }
         
         menu.addItem("remove", "Remove Repository", () -> {
-            repositoryManager.removeRepository(repo.getId());
+            getRepositoryManager().removeRepository(repo.getId());
             showRepositoryMenu();
         });
         
@@ -590,7 +585,7 @@ public class NodeManagerProcess extends FlowProcess {
      * This REQUESTS AppData to load the node (doesn't do it directly)
      */
     private void showLoadMenu() {
-        List<InstalledPackage> installed = installRegistry.getInstalledPackages();
+        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage(
@@ -609,14 +604,13 @@ public class NodeManagerProcess extends FlowProcess {
         for (InstalledPackage pkg : installed) {
             // Check if already loaded
             boolean loaded = appData.nodeRegistry().values().stream()
-                .anyMatch(node -> pkg.getPackageId().equals(
-                    node.getNodeId().toString()));
+                .anyMatch(node -> pkg.getPackageId().equals(node.getNodeId()));
             
             String label = pkg.getName() + 
                 (loaded ? " (already loaded)" : "");
             
             menu.addItem(
-                pkg.getPackageId(),
+                pkg.getPackageId().getAsString(),
                 label,
                 () -> {
                     if (loaded) {
@@ -679,10 +673,8 @@ public class NodeManagerProcess extends FlowProcess {
         menu.addInfoItem("info", "Select a node to unload from runtime");
         menu.addSeparator("Loaded Nodes");
         
-        for (var entry : loadedNodes.entrySet()) {
-            var nodeId = entry.getKey();
-            var node = entry.getValue();
-            
+        for (NoteBytesReadOnly nodeId : loadedNodes.keySet()) {
+      
             menu.addItem(
                 nodeId.getAsString(),
                 "Node: " + nodeId.getAsString(),
@@ -801,12 +793,6 @@ public class NodeManagerProcess extends FlowProcess {
      * Shutdown - NodeManager is lazy, dies when not needed
      */
     public void shutdown() {
-        if (installRegistry != null) {
-            installRegistry.shutdown();
-        }
-        if (repositoryManager != null) {
-            repositoryManager.shutdown();
-        }
-        System.out.println("[NodeManager] Shutdown complete");
+        //TODO: shudown?
     }
 }

@@ -1,12 +1,11 @@
 package io.netnotes.engine.core.system.control.nodes;
 
-import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Flow;
 
 import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.AppDataInterface;
@@ -16,55 +15,45 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.FlowProcessRegistry;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
  * NodeController - Central node lifecycle manager
  * 
- * ARCHITECTURE:
- * - Runs as a FlowProcess child of SystemSessionProcess
- * - Provides sandboxed access to system resources
- * - Manages node loading/unloading (coordinates with OSGi)
- * - Tracks node state (starting, running, stopping)
- * - Enforces resource quotas and permissions
- * - Routes inter-node communication
- * 
- * SANDBOXING:
- * - Each node gets a scoped AppDataInterface (limited file access)
- * - Nodes communicate via FlowProcess messages (controlled routing)
- * - Direct streams for bulk data transfer (with permission checks)
- * - Resource quotas enforced at controller level
- * 
- * NODE LIFECYCLE:
- * 1. Load Request → Load from package → Initialize → Running
- * 2. Running → Shutdown Request → Cleanup → Unloaded
- * 3. Crash Detection → Auto-restart (if configured)
- * 
- * SEPARATION OF CONCERNS:
- * - NodeManagerProcess: Package installation/removal (apt-get)
- * - NodeController: Runtime lifecycle (systemd)
- * - AppData: System-level registry and resources
- * - INode: Individual node implementation
+ * KEY CHANGES:
+ * - Uses NoteBytesReadOnly for instance IDs (not String)
+ * - Manages node instances (not packages)
+ * - FlowProcessRegistry injected (not stored in AppData)
  */
 public class NodeController extends FlowProcess {
-    
+    public static final class CMDS{
+        public static final NoteBytesReadOnly LOAD_NODE = new NoteBytesReadOnly("load_node");
+        public static final NoteBytesReadOnly UNLOAD_NODE = new NoteBytesReadOnly("unload_node");
+        public static final NoteBytesReadOnly LIST_NODES = ProtocolMesssages.ITEM_LIST;
+        public static final NoteBytesReadOnly NODE_STATUS = ProtocolMesssages.STATUS;
+    }
+
+ 
     private final BitFlagStateMachine state;
     private final AppData appData;
     private final FlowProcessRegistry processRegistry;
+    private final InstallationRegistry installationRegistry;
+
+    // Node registry (runtime instances): instanceId → NodeInstance
+    // Uses NoteBytesReadOnly for IDs
+    private final Map<NoteBytesReadOnly, NodeInstance> nodes = new ConcurrentHashMap<>();
     
-    // Node registry (runtime instances)
-    private final Map<String, NodeInstance> nodes = new ConcurrentHashMap<>();
-    
+     private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgExecutorMap = new HashMap<>();
+
     // Node loader (OSGi integration)
     private final NodeLoader nodeLoader;
-    
-
     
     // Inter-node routing
     private final NodeRouter nodeRouter;
@@ -75,16 +64,29 @@ public class NodeController extends FlowProcess {
     private static final long LOADING_NODE = 1L << 2;
     private static final long UNLOADING_NODE = 1L << 3;
     
-    public NodeController(AppData appData, FlowProcessRegistry processRegistry) {
+    public NodeController(
+            AppData appData,
+            FlowProcessRegistry processRegistry,
+            InstallationRegistry installationRegistry) {
+
         super(ProcessType.BIDIRECTIONAL);
         this.appData = appData;
         this.processRegistry = processRegistry;
+        this.installationRegistry = installationRegistry;
         this.state = new BitFlagStateMachine("node-controller");
-        
+        setupMsgExecutorMap();
         this.nodeLoader = new NodeLoader(appData);
         this.nodeRouter = new NodeRouter(this);
     }
     
+    private void setupMsgExecutorMap(){
+        m_routedMsgExecutorMap.put(CMDS.LOAD_NODE,      (map, packet)-> handleLoadNodeRequest(map));
+        m_routedMsgExecutorMap.put(CMDS.UNLOAD_NODE,    (map, packet)-> handleUnloadNodeRequest(map));
+        m_routedMsgExecutorMap.put(CMDS.LIST_NODES,     (map, packet)-> handleListNodesRequest(packet));
+        m_routedMsgExecutorMap.put(CMDS.NODE_STATUS,    (map, packet)-> handleNodeStatusRequest(map, packet));
+    }
+    
+
     // ===== LIFECYCLE =====
     
     @Override
@@ -122,45 +124,43 @@ public class NodeController extends FlowProcess {
     /**
      * Load a node from an installed package
      * 
-     * Process:
-     * 1. Read package manifest
-     * 2. Load JAR/bundle via NodeLoader (OSGi)
-     * 3. Create sandboxed AppDataInterface
-     * 4. Initialize node with sandbox
-     * 5. Register in FlowProcess network
-     * 6. Start node background tasks
-     * 
-     * @param packageId Installed package identifier
-     * @param installPath Path to package files
+     * @param instanceId Unique instance identifier (NoteBytesReadOnly)
+     * @param installedPackage Package metadata
      * @return NodeInstance wrapper
      */
     public CompletableFuture<NodeInstance> loadNode(
-            String packageId,
+            NoteBytesReadOnly instanceId,
             InstalledPackage installedPackage) {
         
-        if (nodes.containsKey(packageId)) {
+        if (nodes.containsKey(instanceId)) {
             return CompletableFuture.failedFuture(
-                new IllegalStateException("Node already loaded: " + packageId));
+                new IllegalStateException("Node already loaded: " + instanceId.getAsString()));
         }
         
         state.addState(LOADING_NODE);
         
-        System.out.println("[NodeController] Loading node: " + packageId);
+        String instanceIdStr = instanceId.getAsString();
+        System.out.println("[NodeController] Loading node: " + instanceIdStr);
         
-        return nodeLoader.loadNodeFromPackage(installedPackage)
+        InstalledPackage pkg = installedPackage == null ? 
+            installationRegistry.getPackage(instanceId) : 
+            installedPackage;
+        
+        return nodeLoader.loadNodeFromPackage(pkg)
             .thenCompose(inode -> {
                 // Create node instance wrapper
                 NodeInstance instance = new NodeInstance(
-                    packageId,
-                    installedPackage,
+                    instanceId,
+                    pkg,
                     inode,
                     NodeState.LOADING
                 );
-                ContextPath packagePath = ContextPath.of("nodes", packageId);
-                nodes.put(packageId, instance);
                 
-                // Create sandboxed interface
-                AppDataInterface sandboxedInterface = appData.getAppDataInterface(packagePath);
+                ContextPath packagePath = ContextPath.of("nodes", instanceIdStr);
+                nodes.put(instanceId, instance);
+                
+                // Create sandboxed interface using NoteBytesReadOnly
+                AppDataInterface sandboxedInterface = appData.getNodeInterface(instanceId);
                 
                 instance.setDataInterface(sandboxedInterface);
                 
@@ -188,32 +188,26 @@ public class NodeController extends FlowProcess {
                 
                 if (ex != null) {
                     System.err.println("[NodeController] Failed to load node: " + 
-                        packageId + " - " + ex.getMessage());
-                    nodes.remove(packageId);
+                        instanceIdStr + " - " + ex.getMessage());
+                    nodes.remove(instanceId);
                 } else {
                     System.out.println("[NodeController] Node loaded successfully: " + 
-                        packageId);
+                        instanceIdStr);
                     
                     // Register in AppData's registry
-                    appData.nodeRegistry().put(
-                        new NoteBytesReadOnly(packageId), 
-                        instance.getNode()
-                    );
+                    appData.nodeRegistry().put(instanceId, instance.getNode());
                 }
             });
     }
     
-
-    
     /**
      * Register node in FlowProcess network
-     * Sets up routing and subscriptions
      */
     private CompletableFuture<Void> registerNodeInNetwork(NodeInstance instance) {
         INode node = instance.getNode();
         
         // Build context path: /system/controller/nodes/{packageId}
-        ContextPath nodePath = contextPath.append("nodes", instance.getPackageId());
+        ContextPath nodePath = contextPath.append("nodes", instance.getPackageId().getAsString());
         
         // Create FlowProcess adapter for the node
         NodeFlowAdapter adapter = new NodeFlowAdapter(node, nodePath, this);
@@ -232,25 +226,20 @@ public class NodeController extends FlowProcess {
     /**
      * Unload a running node
      * 
-     * Process:
-     * 1. Notify subscribers of shutdown
-     * 2. Stop background tasks
-     * 3. Close all streams
-     * 4. Call node.shutdown()
-     * 5. Unregister from network
-     * 6. Remove from registry
+     * @param instanceId Instance identifier (NoteBytesReadOnly)
      */
-    public CompletableFuture<Void> unloadNode(String packageId) {
-        NodeInstance instance = nodes.get(packageId);
+    public CompletableFuture<Void> unloadNode(NoteBytesReadOnly instanceId) {
+        NodeInstance instance = nodes.get(instanceId);
         
         if (instance == null) {
             return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Node not loaded: " + packageId));
+                new IllegalArgumentException("Node not loaded: " + instanceId.getAsString()));
         }
         
         state.addState(UNLOADING_NODE);
         
-        System.out.println("[NodeController] Unloading node: " + packageId);
+        String instanceIdStr = instanceId.getAsString();
+        System.out.println("[NodeController] Unloading node: " + instanceIdStr);
         
         instance.setState(NodeState.STOPPING);
         
@@ -261,9 +250,9 @@ public class NodeController extends FlowProcess {
             // Notify subscribers
             if (node.hasFlowSubscribers()) {
                 NoteBytesMap shutdownEvent = new NoteBytesMap();
-                shutdownEvent.put(Keys.CMD, new NoteBytes("node_shutdown"));
-                shutdownEvent.put(new NoteBytes("node_id"), 
-                    new NoteBytes(packageId));
+                shutdownEvent.put(Keys.CMD, ProtocolMesssages.SHUTDOWN);
+                shutdownEvent.put(Keys.NODE_ID, 
+                    new NoteBytes(instanceIdStr));
                 
                 // Emit shutdown event
                 RoutedPacket packet = new RoutedPacket(
@@ -286,19 +275,19 @@ public class NodeController extends FlowProcess {
             }
             
             // Remove from registries
-            nodes.remove(packageId);
-            appData.nodeRegistry().remove(new NoteBytesReadOnly(packageId));
+            nodes.remove(instanceId);
+            appData.nodeRegistry().remove(instanceId);
             
             instance.setState(NodeState.STOPPED);
             
-            System.out.println("[NodeController] Node unloaded: " + packageId);
+            System.out.println("[NodeController] Node unloaded: " + instanceIdStr);
         })
         .whenComplete((result, ex) -> {
             state.removeState(UNLOADING_NODE);
             
             if (ex != null) {
                 System.err.println("[NodeController] Error unloading node: " + 
-                    packageId + " - " + ex.getMessage());
+                    instanceIdStr + " - " + ex.getMessage());
             }
         });
     }
@@ -306,10 +295,19 @@ public class NodeController extends FlowProcess {
     // ===== NODE QUERIES =====
     
     /**
-     * Get node instance by package ID
+     * Get node instance by ID (NoteBytesReadOnly)
      */
-    public NodeInstance getNode(String packageId) {
-        return nodes.get(packageId);
+    public NodeInstance getNode(NoteBytesReadOnly instanceId) {
+        return nodes.get(instanceId);
+    }
+    
+    /**
+     * Get node instance by ID (String)
+     * @deprecated Use getNode(NoteBytesReadOnly)
+     */
+    @Deprecated
+    public NodeInstance getNode(String instanceId) {
+        return getNode(new NoteBytesReadOnly(instanceId));
     }
     
     /**
@@ -331,19 +329,27 @@ public class NodeController extends FlowProcess {
     /**
      * Check if node is loaded
      */
-    public boolean isNodeLoaded(String packageId) {
-        return nodes.containsKey(packageId);
+    public boolean isNodeLoaded(NoteBytesReadOnly instanceId) {
+        return nodes.containsKey(instanceId);
+    }
+    
+    /**
+     * Check if node is loaded
+     * @deprecated Use isNodeLoaded(NoteBytesReadOnly)
+     */
+    @Deprecated
+    public boolean isNodeLoaded(String instanceId) {
+        return isNodeLoaded(new NoteBytesReadOnly(instanceId));
     }
     
     // ===== INTER-NODE ROUTING =====
     
     /**
      * Route message from one node to another
-     * Enforces permissions and quotas
      */
     public CompletableFuture<Void> routeNodeMessage(
-            String fromNodeId,
-            String toNodeId,
+            NoteBytesReadOnly fromNodeId,
+            NoteBytesReadOnly toNodeId,
             RoutedPacket packet) {
         
         return nodeRouter.routeMessage(fromNodeId, toNodeId, packet);
@@ -353,12 +359,11 @@ public class NodeController extends FlowProcess {
      * Request stream channel between nodes
      */
     public CompletableFuture<StreamChannel> requestNodeStreamChannel(
-            String fromNodeId,
-            String toNodeId) {
+            NoteBytesReadOnly fromNodeId,
+            NoteBytesReadOnly toNodeId) {
         
         return nodeRouter.requestStreamChannel(fromNodeId, toNodeId);
     }
-
 
     // ===== MESSAGE HANDLING =====
     
@@ -373,33 +378,23 @@ public class NodeController extends FlowProcess {
                     new IllegalArgumentException("'cmd' required"));
             }
             
-            String cmdStr = cmd.getAsString();
-            
-            switch (cmdStr) {
-                case "load_node":
-                    return handleLoadNodeRequest(msg);
-                    
-                case "unload_node":
-                    return handleUnloadNodeRequest(msg);
-                    
-                case "list_nodes":
-                    return handleListNodesRequest(packet);
-                    
-                case "node_status":
-                    return handleNodeStatusRequest(msg, packet);
-                    
-                default:
-                    return CompletableFuture.failedFuture(
-                        new IllegalArgumentException("Unknown command: " + cmdStr));
+            RoutedMessageExecutor msgExec = m_routedMsgExecutorMap.get(cmd);
+            if(msgExec != null){
+                return msgExec.execute(msg, packet);
+            }else{
+                return CompletableFuture.failedFuture(
+                        new IllegalArgumentException("Unknown command: " + cmd.getAsString()));
             }
+          
             
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
         }
     }
-    
+
+  
     private CompletableFuture<Void> handleLoadNodeRequest(NoteBytesMap msg) {
-        String packageId = msg.get(new NoteBytes("package_id")).getAsString();
+        NoteBytesReadOnly packageId = msg.getReadOnly(Keys.PACKAGE_ID);
         
         // TODO: Get InstalledPackage from InstallationRegistry
         // For now, just fail
@@ -408,15 +403,15 @@ public class NodeController extends FlowProcess {
     }
     
     private CompletableFuture<Void> handleUnloadNodeRequest(NoteBytesMap msg) {
-        String packageId = msg.get(new NoteBytes("node_id")).getAsString();
-        return unloadNode(packageId);
+        NoteBytesReadOnly instanceId = msg.getReadOnly(Keys.NODE_ID);
+        return unloadNode(instanceId);
     }
     
     private CompletableFuture<Void> handleListNodesRequest(RoutedPacket original) {
         List<NodeInstance> allNodes = getAllNodes();
         
         NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.CMD, new NoteBytes("node_list"));
+        response.put(Keys.CMD, ProtocolMesssages.NODE_LIST);
         response.put(Keys.ITEM_COUNT, new NoteBytes(allNodes.size()));
         
         // Build node info list
@@ -431,25 +426,25 @@ public class NodeController extends FlowProcess {
             NoteBytesMap msg, 
             RoutedPacket original) {
         
-        String packageId = msg.get(new NoteBytes("node_id")).getAsString();
-        NodeInstance instance = nodes.get(packageId);
+        NoteBytesReadOnly instanceId = msg.getReadOnly(Keys.NODE_ID);
+        NodeInstance instance = nodes.get(instanceId);
         
         if (instance == null) {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.CMD, ProtocolMesssages.ERROR);
             error.put(ProtocolMesssages.ERROR, 
-                new NoteBytes("Node not found: " + packageId));
+                new NoteBytes("Node not found: " + instanceId.getAsString()));
             
             reply(original, error.getNoteBytesObject());
             return CompletableFuture.completedFuture(null);
         }
     
         NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.CMD, new NoteBytes("node_status"));
-        response.put(new NoteBytes("node_id"), new NoteBytes(packageId));
+        response.put(Keys.CMD, ProtocolMesssages.STATUS);
+        response.put(Keys.NODE_ID, instanceId);
         response.put(Keys.STATE, 
             new NoteBytes(instance.getState().toString()));
-        response.put(new NoteBytes("active"), 
+        response.put(Keys.ACTIVE, 
             new NoteBytes(instance.getNode().isActive()));
         
         reply(original, response.getNoteBytesObject());
@@ -472,8 +467,8 @@ public class NodeController extends FlowProcess {
         
         List<CompletableFuture<Void>> shutdownFutures = new ArrayList<>();
         
-        for (String packageId : new ArrayList<>(nodes.keySet())) {
-            shutdownFutures.add(unloadNode(packageId));
+        for (NoteBytesReadOnly instanceId : new ArrayList<>(nodes.keySet())) {
+            shutdownFutures.add(unloadNode(instanceId));
         }
         
         return CompletableFuture.allOf(

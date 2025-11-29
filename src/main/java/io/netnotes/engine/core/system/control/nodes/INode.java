@@ -27,7 +27,7 @@ public interface INode {
     /**
      * Unique Node identifier
      */
-    ContextPath getNodeId();
+    NoteBytesReadOnly getNodeId();
     
     /**
      * Context path in the FlowProcess network

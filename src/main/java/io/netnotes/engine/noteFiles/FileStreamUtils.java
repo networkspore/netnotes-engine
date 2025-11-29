@@ -26,7 +26,6 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
@@ -86,6 +85,14 @@ public class FileStreamUtils {
                 offset += length;
                 remaining -= length;
             }
+        }
+    }
+
+    public static void writeFileNoteBytes(File file, NoteBytes noteBytes) throws IOException{
+        try(
+           NoteBytesWriter writer = new NoteBytesWriter(Files.newOutputStream(file.toPath()));
+        ){
+            writer.write(noteBytes);
         }
     }
     
@@ -431,25 +438,13 @@ public class FileStreamUtils {
     }
 
 
-    public static NoteBytesMap readFileToMap(File file) throws FileNotFoundException, IOException{
-        NoteBytesMap map = new NoteBytesMap();
+    public static NoteBytes readFileNextNoteBytes(File file) throws FileNotFoundException, IOException{
+      
         try(
             NoteBytesReader reader = new NoteBytesReader(new FileInputStream(file));    
         ){
-            NoteBytes nextNoteBytes = null;
-            nextNoteBytes = reader.nextNoteBytes();
-            while(nextNoteBytes != null){
-                NoteBytes value = reader.nextNoteBytes();
-                if(value != null){
-                    map.put( nextNoteBytes, value);
-                    nextNoteBytes = reader.nextNoteBytes();
-                }else{
-                    throw new IllegalStateException("File is corrupted: Key has no value");
-                }
-            }
-
+            return reader.nextNoteBytes();
         }
-        return map;
        
     }
 
