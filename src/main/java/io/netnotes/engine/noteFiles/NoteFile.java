@@ -119,7 +119,7 @@ public class NoteFile implements AutoCloseable  {
      * Note: write(NoteBytes.get()) will not write initial metadata
      * @return next NoteBytes
      */
-    public CompletableFuture<NoteBytes> nextNoteBytes() {
+    public CompletableFuture<NoteBytes> readNoteBytes() {
         PipedOutputStream outputStream = new PipedOutputStream();
         CompletableFuture<Void> readFuture = readOnly(outputStream);
 

@@ -3,6 +3,7 @@ package io.netnotes.engine.core.system.control.nodes;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
 
 /**
@@ -17,12 +18,12 @@ import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
  */
 class NodeLoader {
     
-    private final AppData appData;
+    private final AppDataInterface appDataInterface;
     private final OSGiBundleLoader osgiBundleLoader;
     
-    public NodeLoader(AppData appData) {
-        this.appData = appData;
-        this.osgiBundleLoader = new OSGiBundleLoader(appData);
+    public NodeLoader(AppDataInterface appDataInterface) {
+        this.appDataInterface = appDataInterface;
+        this.osgiBundleLoader = new OSGiBundleLoader(appDataInterface);
     }
     
     /**

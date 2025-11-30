@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.core.AppData;
 import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -35,27 +34,33 @@ import io.netnotes.engine.noteFiles.NoteFile;
  * A package must be installed before it can be loaded.
  */
 public class InstallationRegistry {
-    
-    private final AppData appData;
-    private final AppDataInterface systemInterface;
+    private final ContextPath myPath;
+    private final AppDataInterface dataInterface;
+
+
     private final ConcurrentHashMap<NoteBytesReadOnly, InstalledPackage> installed;
     
     // Cached NoteFile - expensive to get, cheap to keep
     // Lasts for lifecycle of InstalltionRegistry
-    private NoteFile registryFile;
-    
-    // Path where registry is stored
-    private static final ContextPath REGISTRY_PATH = 
-        NodePaths.REGISTRY.append("installed");
-    
+    private NoteFile registryFile = null;
     /**
      * Constructor - called by AppData
      * 
      * @param appData Parent AppData instance
      */
-    public InstallationRegistry(AppData appData) {
-        this.appData = appData;
-        this.systemInterface = appData.getSystemInterface("installation-registry");
+    public InstallationRegistry(
+            ContextPath myPath,
+            AppDataInterface dataInterface) {
+        if (myPath == null) {
+            throw new IllegalArgumentException("myPath cannot be null");
+        }
+        
+        if (dataInterface == null) {
+            throw new IllegalArgumentException("dataInterface cannot be null");
+        }
+
+        this.myPath = myPath;  // Parent tells me where I live
+        this.dataInterface = dataInterface;
         this.installed = new ConcurrentHashMap<>();
     }
     
@@ -66,30 +71,32 @@ public class InstallationRegistry {
      * This avoids repeated ledger access on every save.
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[InstallationRegistry] Initializing from: " + REGISTRY_PATH);
         
-        return systemInterface.getNoteFile(REGISTRY_PATH)
+        
+         // I know MY path, so I create files under ME
+        ContextPath installedFile = myPath.append("installed");
+        
+        return dataInterface.getNoteFile(installedFile)
             .thenAccept(file -> {
-                // ✅ Store NoteFile for reuse
                 this.registryFile = file;
                 System.out.println("[InstallationRegistry] NoteFile acquired and cached");
             })
             .thenCompose(v -> loadInstalledPackages())
-            .exceptionally(ex -> {
-                // First run - registry doesn't exist yet
-                System.out.println("[InstallationRegistry] No existing registry found, starting fresh");
-                
-                // Create empty registry file
-                return saveToFile().join();
-            });
+            .exceptionallyCompose(ex -> saveToFile().thenRun(()->{
+                System.out.println("[InstallationRegistry] Initial registry file created");
+            }));
+              
     }
     
     /**
      * Load installed packages from cached NoteFile
      */
     private CompletableFuture<Void> loadInstalledPackages() {
-        return registryFile.nextNoteBytes()
+        return registryFile.readNoteBytes()
             .thenAccept(noteBytesObj -> {
+                if(noteBytesObj == null) {
+                    throw new IllegalStateException("Registry file does not exist");
+                }
                 // Deserialize from NoteBytes format
                 NoteBytesMap packagesMap = noteBytesObj.getAsNoteBytesMap();
                 
@@ -174,7 +181,7 @@ public class InstallationRegistry {
     private CompletableFuture<Void> saveToFile() {
         if (registryFile == null) {
             return CompletableFuture.failedFuture(
-                new IllegalStateException("Registry not initialized - registryFile is null"));
+                new IllegalStateException("Registry not initialized - NoteFile: registryFile is null"));
         }
         
         NoteBytesMap packagesMap = new NoteBytesMap();
@@ -182,7 +189,7 @@ public class InstallationRegistry {
         // Serialize each package
         for (InstalledPackage pkg : installed.values()) {
             packagesMap.put(
-                new NoteBytes(pkg.getPackageId()),
+                pkg.getPackageId(),
                 pkg.toNoteBytes()
             );
         }
@@ -208,8 +215,7 @@ public class InstallationRegistry {
                     System.err.println("[InstallationRegistry] Error during shutdown save: " + 
                         ex.getMessage());
                 }
-                
-                // ✅ Close cached NoteFile
+            
                 if (registryFile != null) {
                     registryFile.close();
                     System.out.println("[InstallationRegistry] NoteFile closed");
@@ -229,11 +235,12 @@ public class InstallationRegistry {
             installed.size()
         );
     }
-    
+
     /**
-     * Get AppData reference (for package operations)
+     * Get my path (for debugging)
      */
-    public AppData getAppData() {
-        return appData;
+    public ContextPath getPath() {
+        return myPath;
     }
+   
 }

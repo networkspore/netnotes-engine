@@ -5,16 +5,16 @@ import org.osgi.framework.launch.Framework;
 import org.osgi.framework.launch.FrameworkFactory;
 import org.osgi.util.tracker.ServiceTracker;
 
-import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteFiles.NoteFile;
 
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -45,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class OSGiBundleLoader {
     
-    private final AppData appData;
+    private final AppDataInterface appDataInterface;
     private Framework framework;
     private final Map<String, Bundle> installedBundles = new ConcurrentHashMap<>();
     
@@ -53,8 +53,8 @@ public class OSGiBundleLoader {
     private volatile boolean frameworkInitialized = false;
     private final Object frameworkLock = new Object();
     
-    public OSGiBundleLoader(AppData appData) {
-        this.appData = appData;
+    public OSGiBundleLoader(AppDataInterface appDataInterface) {
+        this.appDataInterface = appDataInterface;
     }
     
     /**
@@ -142,33 +142,37 @@ public class OSGiBundleLoader {
     private CompletableFuture<Bundle> installBundleFromNoteFile(
         NoteBytesReadOnly packageId,
         InstalledPackage pkg) {
-        
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Get JAR path
-                ContextPath jarPath = pkg.getInstallPath().append("package.jar");
-                
-                // Get NoteFile
-                NoteFile jarFile = appData.getNoteFileService()
-                    .getNoteFile(jarPath.getSegments())
-                    .join();
-                
-                // Load directly from stream
-                BundleContext context = framework.getBundleContext();
-                
-                String location = "notefile://" + packageId;
-                
-                // Install from encrypted stream - no temp file!
-                try (InputStream stream = jarFile.getInputStream()) {
-                    Bundle bundle = context.installBundle(location, stream);
-                    bundle.start();
-                    return bundle;
+        ContextPath jarPath = pkg.getInstallPath().append("package.jar");
+
+        return appDataInterface
+            .getNoteFile(jarPath).thenCompose(jarFile->
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    System.out.println("[OSGiBundleLoader] Installing bundle: " + 
+                        pkg.getName() + " from " + jarPath);
+                    if(!jarFile.isFile()){
+                        throw new CompletionException("Note file is not written", new FileNotFoundException("Bundle JAR not found: " + jarPath));
+                    }
+                    // Load directly from stream
+                    BundleContext context = framework.getBundleContext();
+                    
+                    String location = "notefile://" + packageId;
+                    
+                    // Install from encrypted stream
+                    try (InputStream stream = jarFile.getInputStream()) {
+                        Bundle bundle = context.installBundle(location, stream);
+                        //TODO: Consider verifying bundle signature here if needed
+                        //verify if we should start() here
+                        bundle.start();
+                        return bundle;
+                    }
+                    
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to install bundle", e);
                 }
-                
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to install bundle", e);
-            }
-        });
+            }).whenComplete((bundle, ex)->{
+                jarFile.close();
+            }));
     }
     
     /**

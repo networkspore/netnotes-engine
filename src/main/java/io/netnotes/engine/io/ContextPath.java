@@ -529,6 +529,265 @@ public final class ContextPath {
         return new ContextPath(segments.subPath(0, common), resultAbsolute);
     }
 
+    /**
+     * Can I reach targetPath from this path?
+     * 
+     * Uses hop-based validation:
+     * 1. Find common ancestor
+     * 2. Validate each hop UP to ancestor
+     * 3. Validate each hop DOWN to target
+     * 
+     * Example:
+     *   from: /system/nodes/runtime/database-node
+     *   to:   /user/nodes/database-node/config.json
+     *   
+     *   Common ancestor: / (root)
+     *   
+     *   Hops UP:
+     *     /system/nodes/runtime/database-node → /system/nodes/runtime ✓
+     *     /system/nodes/runtime → /system/nodes ✓
+     *     /system/nodes → /system ✓
+     *     /system → / ✓
+     *   
+     *   Hops DOWN:
+     *     / → /user ✓
+     *     /user → /user/nodes ✓
+     *     /user/nodes → /user/nodes/database-node (check ownership) ✓
+     *     /user/nodes/database-node → .../config.json ✓
+     * 
+     * @param target Target path to reach
+     * @return true if all hops allow traversal
+     */
+    public boolean canReach(ContextPath target) {
+        if (target == null) {
+            return false;
+        }
+        
+        // Same path - always reachable
+        if (this.equals(target)) {
+            return true;
+        }
+        
+        // Both must be absolute for hop validation
+        if (!this.isAbsolute() || !target.isAbsolute()) {
+            return false;
+        }
+        
+        // Find common ancestor
+        ContextPath ancestor = this.commonAncestor(target);
+        
+        // Build path UP from this to ancestor
+        List<ContextPath> upPath = buildPathToAncestor(this, ancestor);
+        
+        // Build path DOWN from ancestor to target
+        List<ContextPath> downPath = buildPathFromAncestor(ancestor, target);
+        
+        // Validate each hop UP
+        for (int i = 0; i < upPath.size() - 1; i++) {
+            ContextPath current = upPath.get(i);
+            ContextPath parent = upPath.get(i + 1);
+            
+            if (!current.canTraverseToParent(parent, this)) {
+                return false;
+            }
+        }
+        
+        // Validate each hop DOWN
+        for (int i = 0; i < downPath.size() - 1; i++) {
+            ContextPath current = downPath.get(i);
+            ContextPath child = downPath.get(i + 1);
+            
+            if (!current.canTraverseToChild(child, this)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Build path from current to ancestor (going UP)
+     * Returns list: [current, parent, grandparent, ..., ancestor]
+     */
+    private List<ContextPath> buildPathToAncestor(ContextPath current, ContextPath ancestor) {
+        List<ContextPath> path = new ArrayList<>();
+        
+        ContextPath node = current;
+        while (node != null && !node.equals(ancestor)) {
+            path.add(node);
+            node = node.parent();
+        }
+        
+        // Add ancestor
+        if (node != null) {
+            path.add(node);
+        }
+        
+        return path;
+    }
+    
+    /**
+     * Build path from ancestor to target (going DOWN)
+     * Returns list: [ancestor, child, grandchild, ..., target]
+     */
+    private List<ContextPath> buildPathFromAncestor(ContextPath ancestor, ContextPath target) {
+        List<ContextPath> path = new ArrayList<>();
+        
+        // Build from ancestor down to target
+        if (ancestor.equals(target)) {
+            path.add(ancestor);
+            return path;
+        }
+        
+        // Get relative path from ancestor to target
+        ContextPath relative = target.relativeTo(ancestor);
+        if (relative == null || relative.isRoot()) {
+            path.add(ancestor);
+            return path;
+        }
+        
+        // Build each step down
+        path.add(ancestor);
+        ContextPath current = ancestor;
+        
+        for (int i = 0; i < relative.size(); i++) {
+            current = current.append(relative.getSegment(i));
+            path.add(current);
+        }
+        
+        return path;
+    }
+    
+    /**
+     * Can I leave this location to go to parent?
+     * 
+     * Rules:
+     * 1. System paths: generally can traverse up
+     * 2. Node runtime: can go up within node system, but not to other nodes
+     * 3. User paths: generally can traverse up
+     * 
+     * @param parent The parent path we want to traverse to
+     * @param origin Where the traversal started (for context)
+     * @return true if traversal allowed
+     */
+    private boolean canTraverseToParent(ContextPath parent, ContextPath origin) {
+        // Root can always be reached
+        if (parent.isRoot()) {
+            return true;
+        }
+        
+        // Check if we're in a node's runtime area
+        if (this.startsWith(ContextPath.of("system", "nodes", "runtime"))) {
+            String myNodeId = extractNodeId(this);
+            String parentNodeId = extractNodeId(parent);
+            
+            // Can leave our node's runtime if going to general runtime area
+            // or higher (not to another node's runtime)
+            if (parentNodeId != null && !parentNodeId.equals(myNodeId)) {
+                return false;  // Cannot traverse to other node's runtime
+            }
+        }
+        
+        // Check if we're in a node's user area
+        if (this.startsWith(ContextPath.of("user", "nodes"))) {
+            String myNodeId = extractNodeIdFromUser(this);
+            String parentNodeId = extractNodeIdFromUser(parent);
+            
+            // Can leave our node's user area if going to general /user/nodes
+            // or higher (not to another node's user area)
+            if (parentNodeId != null && !parentNodeId.equals(myNodeId)) {
+                return false;  // Cannot traverse to other node's user area
+            }
+        }
+        
+        // Default: can traverse up
+        return true;
+    }
+    
+    /**
+     * Can I enter this child from current location?
+     * 
+     * Rules:
+     * 1. Entering node runtime: only if origin owns it
+     * 2. Entering node user area: only if origin owns it
+     * 3. Entering packages: read-only allowed
+     * 4. Other paths: generally allowed
+     * 
+     * @param child The child path we want to traverse to
+     * @param origin Where the traversal started (for ownership checks)
+     * @return true if traversal allowed
+     */
+    private boolean canTraverseToChild(ContextPath child, ContextPath origin) {
+        // Entering another node's runtime area?
+        if (child.startsWith(ContextPath.of("system", "nodes", "runtime"))) {
+            String originNodeId = extractNodeId(origin);
+            String targetNodeId = extractNodeId(child);
+            
+            // Only owner can enter
+            if (targetNodeId != null) {
+                if (originNodeId == null || !originNodeId.equals(targetNodeId)) {
+                    return false;
+                }
+            }
+        }
+        
+        // Entering another node's user area?
+        if (child.startsWith(ContextPath.of("user", "nodes"))) {
+            String originNodeId = extractNodeIdFromUser(origin);
+            String targetNodeId = extractNodeIdFromUser(child);
+            
+            // Only owner can enter
+            if (targetNodeId != null) {
+                if (originNodeId == null || !originNodeId.equals(targetNodeId)) {
+                    return false;
+                }
+            }
+        }
+        
+        // Entering packages area - read-only allowed
+        if (child.startsWith(ContextPath.of("system", "nodes", "packages"))) {
+            // TODO: Could add write protection here
+            return true;
+        }
+        
+        // Default: can traverse down
+        return true;
+    }
+    
+    /**
+     * Extract node ID from runtime path
+     * /system/nodes/runtime/database-node/... → "database-node"
+     */
+    private String extractNodeId(ContextPath path) {
+        if (!path.startsWith(ContextPath.of("system", "nodes", "runtime"))) {
+            return null;
+        }
+        
+        // Path: [system, nodes, runtime, <nodeId>, ...]
+        if (path.size() > 3) {
+            return path.getSegment(3);
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract node ID from user path
+     * /user/nodes/database-node/... → "database-node"
+     */
+    private String extractNodeIdFromUser(ContextPath path) {
+        if (!path.startsWith(ContextPath.of("user", "nodes"))) {
+            return null;
+        }
+        
+        // Path: [user, nodes, <nodeId>, ...]
+        if (path.size() > 2) {
+            return path.getSegment(2);
+        }
+        
+        return null;
+    }
+
     /** Wildcard matching (* and **) */
     public boolean matches(String pattern) {
         return matches(parse(pattern));

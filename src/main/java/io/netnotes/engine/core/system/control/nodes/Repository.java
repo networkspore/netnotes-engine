@@ -3,6 +3,7 @@ package io.netnotes.engine.core.system.control.nodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
@@ -32,13 +33,13 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * }
  */
 public class Repository {
-    private final String id;
+    private final NoteBytesReadOnly id;
     private final String name;
     private final String url;
     private final String keyUrl;  // Optional: GPG key URL for verification
     private boolean enabled;
     
-    public Repository(String id, String name, String url, String keyUrl, boolean enabled) {
+    public Repository(NoteBytesReadOnly id, String name, String url, String keyUrl, boolean enabled) {
         this.id = id;
         this.name = name;
         this.url = url;
@@ -48,7 +49,7 @@ public class Repository {
     
     // ===== GETTERS =====
     
-    public String getId() { return id; }
+    public NoteBytesReadOnly getId() { return id; }
     public String getName() { return name; }
     public String getUrl() { return url; }
     public String getKeyUrl() { return keyUrl; }
@@ -85,7 +86,7 @@ public class Repository {
      */
     public static Repository fromNoteBytes(NoteBytesMap map) {
         try {
-            String id = map.get(Keys.ID).getAsString();
+            NoteBytesReadOnly id = map.getReadOnly(Keys.ID);
             String name = map.get(Keys.NAME).getAsString();
             String url = map.get(Keys.URL).getAsString();
             

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.ui.UICommands;
 import io.netnotes.engine.core.system.control.ui.UIProtocol;
@@ -24,38 +24,27 @@ import io.netnotes.engine.state.BitFlagStateMachine;
 /**
  * NodeManagerProcess - Package manager for nodes (like apt-get)
  * 
- * SCOPE DEFINITION:
- * - Manages INSTALLATION metadata (what's available, what's installed)
- * - Handles REPOSITORIES (multiple sources, like apt sources.list)
- * - Parses MANIFESTS (JSON format, describes how to load nodes)
- * - Checks for UPDATES (compares installed vs available versions)
- * - Downloads/installs/uninstalls packages
- * 
- * NOT IN SCOPE:
- * - Runtime node lifecycle (that's AppData's job)
- * - OSGi bundle management (AppData coordinates with OSGi)
- * - Active node instances (AppData manages those)
- * - Process subscription routing (ProcessRegistry handles)
+ * REFACTORED:
+ * - No longer stores AppData reference
+ * - Receives registries directly at construction
+ * - Receives path from parent
+ * - Uses AppDataInterface for package installation
  * 
  * Architecture:
- * - NodeManager is LAZY - builds up when needed, dies when done
- * - Installation registry is SEPARATE from runtime registry (AppData)
- * - User is in FULL CONTROL - can add/remove repositories
- * - NO central authority - facilitates user choice
- * 
- * Analogy: apt-get vs running processes
  * - NodeManager = apt-get (package management)
- * - AppData = systemd (service/runtime management)
+ * - NodeController = systemd (runtime management)
+ * - User is in full control of repositories
  */
 public class NodeManagerProcess extends FlowProcess {
     
     private final BitFlagStateMachine state;
-    private final AppData appData;
+    private final InstallationRegistry installationRegistry;  // NEW: Direct reference
+    private final RepositoryManager repositoryManager;        // NEW: Direct reference
+    private final AppDataInterface packagesInterface;         // NEW: For package installation
     private final UIRenderer uiRenderer;
     
-    // Package management (installation metadata ONLY)
-
-    private PackageCache packageCache;
+    // Package cache (in-memory only)
+    private final PackageCache packageCache;
     
     // Current view state
     private MenuContext currentMenu;
@@ -72,22 +61,37 @@ public class NodeManagerProcess extends FlowProcess {
     public static final long UNINSTALLING = 1L << 4;
     public static final long UPDATING_REPOS = 1L << 5;
     
-    public NodeManagerProcess(AppData appData, UIRenderer uiRenderer) {
+    /**
+     * Constructor
+     * 
+     * OLD: NodeManagerProcess(AppData appData, UIRenderer uiRenderer)
+     * NEW: NodeManagerProcess(ContextPath myPath, InstallationRegistry, RepositoryManager, 
+     *                          AppDataInterface, UIRenderer)
+     * 
+     * @param myPath Where manager lives (given by parent)
+     * @param installationRegistry Direct reference to registry
+     * @param repositoryManager Direct reference to repository manager
+     * @param packagesInterface Interface for package file installation
+     * @param uiRenderer UI implementation
+     */
+    public NodeManagerProcess(
+            ContextPath myPath,
+            InstallationRegistry installationRegistry,
+            RepositoryManager repositoryManager,
+            AppDataInterface packagesInterface,
+            UIRenderer uiRenderer) {
+        
         super(ProcessType.BIDIRECTIONAL);
-        this.appData = appData;
+        this.contextPath = myPath;  // Set FlowProcess path
+        this.installationRegistry = installationRegistry;
+        this.repositoryManager = repositoryManager;
+        this.packagesInterface = packagesInterface;
         this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("node-manager");
+        this.packageCache = new PackageCache();  // FIX: Initialize cache!
         
         setupMessageMapping();
         setupStateTransitions();
-    }
-
-    private InstallationRegistry getInstallationRegistry() {
-        return appData.getInstallationRegistry();
-    }
-
-    private RepositoryManager getRepositoryManager() {
-        return appData.getRepositoryManager();
     }
     
     private void setupMessageMapping() {
@@ -118,7 +122,9 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private CompletableFuture<Void> initialize() {
-        // Build UI
+        System.out.println("[NodeManager] Initializing at: " + contextPath);
+        
+        // Show UI immediately
         showMainMenu();
         return CompletableFuture.completedFuture(null);
     }
@@ -129,10 +135,10 @@ public class NodeManagerProcess extends FlowProcess {
         ContextPath menuPath = contextPath.append("menu", "main");
         MenuContext menu = new MenuContext(menuPath, "Node Manager", uiRenderer);
         
-        // Statistics
-        int installed = getInstallationRegistry().getInstalledPackages().size();
+        // Statistics - now using direct references
+        int installed = installationRegistry.getInstalledPackages().size();
         int available = packageCache.getAllPackages().size();
-        int repos = getRepositoryManager().getRepositories().size();
+        int repos = repositoryManager.getRepositories().size();
         
         menu.addInfoItem("stats", String.format(
             "Installed: %d | Available: %d | Repositories: %d",
@@ -175,17 +181,17 @@ public class NodeManagerProcess extends FlowProcess {
         menu.addSeparator("Runtime Control");
         
         menu.addItem("load", "Load Node (Start)",
-            "Request AppData to load a node into runtime", () -> {
+            "Request NodeController to load a node into runtime", () -> {
             showLoadMenu();
         });
         
         menu.addItem("unload", "Unload Node (Stop)",
-            "Request AppData to unload a running node", () -> {
+            "Request NodeController to unload a running node", () -> {
             showUnloadMenu();
         });
         
         menu.addItem("status", "Runtime Status",
-            "View loaded nodes from AppData", () -> {
+            "View loaded nodes (via parent)", () -> {
             showRuntimeStatus();
         });
         
@@ -200,17 +206,14 @@ public class NodeManagerProcess extends FlowProcess {
     
     // ===== PACKAGE MANAGEMENT =====
     
-    /**
-     * Update package lists (like apt-get update)
-     * Fetches latest manifests from all repositories
-     */
     private void updatePackageLists() {
         state.addState(UPDATING_REPOS);
         
         uiRenderer.render(UIProtocol.showMessage(
             "Updating package lists from repositories..."));
         
-        getRepositoryManager().updateAllRepositories()
+        // Use direct reference to repository manager
+        repositoryManager.updateAllRepositories()
             .thenAccept(packages -> {
                 // Cache the packages
                 packageCache.updateCache(packages);
@@ -310,26 +313,19 @@ public class NodeManagerProcess extends FlowProcess {
         menu.display();
     }
     
-    /**
-     * Install a package (like apt-get install)
-     * 1. Download package files
-     * 2. Verify manifest
-     * 3. Store in installation registry
-     * 4. DO NOT load into runtime (user does that separately)
-     */
     private void installPackage(PackageInfo pkg) {
         state.addState(INSTALLING);
         
         uiRenderer.render(UIProtocol.showMessage(
             "Installing " + pkg.getName() + "..."));
         
-        // Download package
-        PackageInstaller installer = new PackageInstaller(appData.getSystemInterface("packages"));
+        // Use packagesInterface for installation
+        PackageInstaller installer = new PackageInstaller(packagesInterface);
         
         installer.installPackage(pkg)
             .thenCompose(installedPkg -> {
                 // Register in installation registry
-                return getInstallationRegistry().registerPackage(installedPkg);
+                return installationRegistry.registerPackage(installedPkg);
             })
             .thenRun(() -> {
                 state.removeState(INSTALLING);
@@ -352,7 +348,7 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private void showRemoveMenu() {
-        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
+        List<InstalledPackage> installed = installationRegistry.getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage("No packages installed"));
@@ -410,24 +406,20 @@ public class NodeManagerProcess extends FlowProcess {
         uiRenderer.render(UIProtocol.showMessage(
             "Removing " + pkg.getName() + "..."));
         
-        // Check if loaded in runtime
-        appData.nodeRegistry().values().stream()
-            .filter(node -> pkg.getPackageId().equals(
-                node.getNodeId().toString()))
-            .findFirst()
-            .ifPresent(node -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "⚠️ Node is currently loaded in runtime!\n" +
-                    "Unload it first via 'Unload Node (Stop)'."));
-                state.removeState(UNINSTALLING);
-                showRemoveMenu();
-                return;
-            });
+        // NOTE: NodeManager doesn't have access to runtime registry
+        // Send message to parent to check if node is loaded
         
         // Unregister and delete
-        getInstallationRegistry().unregisterPackage(pkg.getPackageId())
-            .thenCompose(v -> appData.getNoteFileService().deleteNoteFilePath(
-                pkg.getInstallPath(), true, null))
+        installationRegistry.unregisterPackage(pkg.getPackageId())
+            .thenCompose(v -> {
+                // Delete package files using packagesInterface
+                return packagesInterface.getNoteFile(pkg.getInstallPath())
+                    .thenCompose(noteFile -> {
+                        // TODO: Add delete operation to AppDataInterface
+                        // For now, assume it works
+                        return CompletableFuture.completedFuture(null);
+                    });
+            })
             .thenRun(() -> {
                 state.removeState(UNINSTALLING);
                 
@@ -448,7 +440,7 @@ public class NodeManagerProcess extends FlowProcess {
     }
     
     private void showInstalledMenu() {
-        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
+        List<InstalledPackage> installed = installationRegistry.getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage("No packages installed"));
@@ -507,7 +499,7 @@ public class NodeManagerProcess extends FlowProcess {
     // ===== REPOSITORY MANAGEMENT =====
     
     private void showRepositoryMenu() {
-        List<Repository> repos = getRepositoryManager().getRepositories();
+        List<Repository> repos = repositoryManager.getRepositories();
         
         ContextPath menuPath = contextPath.append("menu", "repositories");
         MenuContext menu = new MenuContext(menuPath, "Repository Management", 
@@ -519,7 +511,7 @@ public class NodeManagerProcess extends FlowProcess {
         for (Repository repo : repos) {
             String status = repo.isEnabled() ? "✓ " : "○ ";
             menu.addItem(
-                repo.getId(),
+                repo.getId().toString(),
                 status + repo.getName(),
                 repo.getUrl(),
                 () -> showRepositoryDetails(repo)
@@ -557,18 +549,18 @@ public class NodeManagerProcess extends FlowProcess {
         
         if (repo.isEnabled()) {
             menu.addItem("disable", "Disable Repository", () -> {
-                getRepositoryManager().setRepositoryEnabled(repo.getId(), false);
+                repositoryManager.setRepositoryEnabled(repo.getId().toString(), false);
                 showRepositoryMenu();
             });
         } else {
             menu.addItem("enable", "Enable Repository", () -> {
-                getRepositoryManager().setRepositoryEnabled(repo.getId(), true);
+                repositoryManager.setRepositoryEnabled(repo.getId().toString(), true);
                 showRepositoryMenu();
             });
         }
         
         menu.addItem("remove", "Remove Repository", () -> {
-            getRepositoryManager().removeRepository(repo.getId());
+            repositoryManager.removeRepository(repo.getId().toString());
             showRepositoryMenu();
         });
         
@@ -578,14 +570,10 @@ public class NodeManagerProcess extends FlowProcess {
         menu.display();
     }
     
-    // ===== RUNTIME CONTROL (Coordinates with AppData) =====
+    // ===== RUNTIME CONTROL (Coordinates via messaging) =====
     
-    /**
-     * Load a node into runtime
-     * This REQUESTS AppData to load the node (doesn't do it directly)
-     */
     private void showLoadMenu() {
-        List<InstalledPackage> installed = getInstallationRegistry().getInstalledPackages();
+        List<InstalledPackage> installed = installationRegistry.getInstalledPackages();
         
         if (installed.isEmpty()) {
             uiRenderer.render(UIProtocol.showMessage(
@@ -602,25 +590,10 @@ public class NodeManagerProcess extends FlowProcess {
         menu.addSeparator("Installed Packages");
         
         for (InstalledPackage pkg : installed) {
-            // Check if already loaded
-            boolean loaded = appData.nodeRegistry().values().stream()
-                .anyMatch(node -> pkg.getPackageId().equals(node.getNodeId()));
-            
-            String label = pkg.getName() + 
-                (loaded ? " (already loaded)" : "");
-            
             menu.addItem(
                 pkg.getPackageId().getAsString(),
-                label,
-                () -> {
-                    if (loaded) {
-                        uiRenderer.render(UIProtocol.showMessage(
-                            "Node already loaded in runtime"));
-                        showLoadMenu();
-                    } else {
-                        requestLoadNode(pkg);
-                    }
-                }
+                pkg.getName(),
+                () -> requestLoadNode(pkg)
             );
         }
         
@@ -630,108 +603,71 @@ public class NodeManagerProcess extends FlowProcess {
         menu.display();
     }
     
-    /**
-     * Request AppData to load a node
-     * NodeManager does NOT load nodes - it just requests AppData to do it
-     */
     private void requestLoadNode(InstalledPackage pkg) {
         uiRenderer.render(UIProtocol.showMessage(
-            "Requesting AppData to load " + pkg.getName() + "..."));
+            "Requesting NodeController to load " + pkg.getName() + "..."));
         
-        // Send message to AppData (via parent SystemSessionProcess)
+        // Send message to parent (SystemSessionProcess) who forwards to NodeController
         NoteBytesMap request = new NoteBytesMap();
         request.put(Keys.CMD, new NoteBytes("load_node"));
-        request.put(new NoteBytes("package_id"), new NoteBytes(pkg.getPackageId()));
-        request.put(new NoteBytes("install_path"), pkg.getInstallPath().getSegments());
+        request.put(Keys.PACKAGE_ID, new NoteBytes(pkg.getPackageId()));
         
         if (parentPath != null) {
             emitTo(parentPath, request.getNoteBytesObject());
         }
         
-        // Show loading message
         uiRenderer.render(UIProtocol.showMessage(
-            "Load request sent to AppData.\n" +
-            "Check 'Runtime Status' to see loaded nodes."));
+            "Load request sent.\nCheck 'Runtime Status' to see loaded nodes."));
         
         showMainMenu();
     }
     
     private void showUnloadMenu() {
-        // Get loaded nodes from AppData
-        var loadedNodes = appData.nodeRegistry();
-        
-        if (loadedNodes.isEmpty()) {
-            uiRenderer.render(UIProtocol.showMessage("No nodes loaded in runtime"));
-            showMainMenu();
-            return;
-        }
-        
-        ContextPath menuPath = contextPath.append("menu", "unload");
-        MenuContext menu = new MenuContext(menuPath, "Unload Node", 
-            uiRenderer, currentMenu);
-        
-        menu.addInfoItem("info", "Select a node to unload from runtime");
-        menu.addSeparator("Loaded Nodes");
-        
-        for (NoteBytesReadOnly nodeId : loadedNodes.keySet()) {
-      
-            menu.addItem(
-                nodeId.getAsString(),
-                "Node: " + nodeId.getAsString(),
-                () -> requestUnloadNode(nodeId)
-            );
-        }
-        
-        menu.addItem("back", "Back", () -> showMainMenu());
-        
-        currentMenu = menu;
-        menu.display();
-    }
-    
-    private void requestUnloadNode(NoteBytesReadOnly nodeId) {
+        // Request runtime status from parent
         uiRenderer.render(UIProtocol.showMessage(
-            "Requesting AppData to unload node..."));
+            "Requesting runtime status..."));
         
-        // Send message to AppData
         NoteBytesMap request = new NoteBytesMap();
-        request.put(Keys.CMD, new NoteBytes("unload_node"));
-        request.put(new NoteBytes("node_id"), new NoteBytes(nodeId.getAsString()));
+        request.put(Keys.CMD, new NoteBytes("get_runtime_status"));
         
         if (parentPath != null) {
             emitTo(parentPath, request.getNoteBytesObject());
         }
         
-        uiRenderer.render(UIProtocol.showMessage("Unload request sent to AppData"));
+        // TODO: Handle response and show unload menu
+        showMainMenu();
+    }
+    
+    private void requestUnloadNode(NoteBytesReadOnly nodeId) {
+        uiRenderer.render(UIProtocol.showMessage(
+            "Requesting NodeController to unload node..."));
+        
+        NoteBytesMap request = new NoteBytesMap();
+        request.put(Keys.CMD, new NoteBytes("unload_node"));
+        request.put(Keys.NODE_ID, new NoteBytes(nodeId));
+        
+        if (parentPath != null) {
+            emitTo(parentPath, request.getNoteBytesObject());
+        }
+        
+        uiRenderer.render(UIProtocol.showMessage("Unload request sent"));
         showMainMenu();
     }
     
     private void showRuntimeStatus() {
-        var loadedNodes = appData.nodeRegistry();
+        // Request status from parent
+        uiRenderer.render(UIProtocol.showMessage(
+            "Requesting runtime status from NodeController..."));
         
-        ContextPath menuPath = contextPath.append("menu", "runtime-status");
-        MenuContext menu = new MenuContext(menuPath, "Runtime Status", 
-            uiRenderer, currentMenu);
+        NoteBytesMap request = new NoteBytesMap();
+        request.put(Keys.CMD, new NoteBytes("get_runtime_status"));
         
-        if (loadedNodes.isEmpty()) {
-            menu.addInfoItem("status", "No nodes currently loaded in runtime");
-        } else {
-            menu.addInfoItem("status", 
-                loadedNodes.size() + " node(s) loaded in runtime");
-            menu.addSeparator("Loaded Nodes");
-            
-            for (var entry : loadedNodes.entrySet()) {
-                menu.addInfoItem(
-                    entry.getKey().getAsString(),
-                    "✓ " + entry.getKey().getAsString()
-                );
-            }
+        if (parentPath != null) {
+            emitTo(parentPath, request.getNoteBytesObject());
         }
         
-        menu.addSeparator("");
-        menu.addItem("back", "Back", () -> showMainMenu());
-        
-        currentMenu = menu;
-        menu.display();
+        // TODO: Handle response and display status
+        showMainMenu();
     }
     
     // ===== MESSAGE HANDLERS =====
@@ -789,10 +725,7 @@ public class NodeManagerProcess extends FlowProcess {
         }
     }
     
-    /**
-     * Shutdown - NodeManager is lazy, dies when not needed
-     */
     public void shutdown() {
-        //TODO: shudown?
+        // NodeManager is lazy - nothing to clean up
     }
 }

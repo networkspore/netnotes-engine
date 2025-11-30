@@ -6,12 +6,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
-import io.netnotes.engine.core.system.PathArchitecture;
 import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstallationRegistry;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
 import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.process.FlowProcessRegistry;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
@@ -27,7 +27,7 @@ import io.netnotes.engine.utils.VirtualExecutors;
  * 4. Node registry uses INSTANCE IDs (not package IDs)
  */
 public class AppData {
-
+    private final ContextPath myPath;
     private final NoteFileService m_noteFileRegistry;
     
     // Node registry: instanceId → INode
@@ -46,23 +46,36 @@ public class AppData {
         if (settingsData == null) {
             throw new IllegalArgumentException("SettingsData cannot be null");
         }
-
+        this.myPath = ContextPath.of("system");
         m_noteFileRegistry = new NoteFileService(settingsData);
         
-        // Initialize system services (but don't load data yet)
-        this.installationRegistry = new InstallationRegistry(this);
-        this.repositoryManager = new RepositoryManager(this);
+        initializeSystemServices();
+        initializeNodeSystem(FlowProcessRegistry.getInstance());
     }
 
-    // ===== INITIALIZATION =====
-    
+    private void initializeSystemServices() {
+        // InstallationRegistry lives under me
+        ContextPath registryPath = myPath.append("registry");
+        AppDataInterface registryInterface = createScopedInterface(registryPath);
+        this.installationRegistry = new InstallationRegistry(
+            registryPath,
+            registryInterface
+        );
+        
+        // RepositoryManager lives under me
+        ContextPath repoPath = myPath.append("repositories");
+        AppDataInterface repoInterface = createScopedInterface(repoPath);
+        this.repositoryManager = new RepositoryManager(
+            repoPath,
+            repoInterface
+        );
+    }
+
     /**
-     * Initialize AppData with node system support
-     * 
-     * @param processRegistry FlowProcessRegistry for node registration
+     * Initialize node system
      */
     public CompletableFuture<Void> initializeNodeSystem(
-            io.netnotes.engine.io.process.FlowProcessRegistry processRegistry) {
+            FlowProcessRegistry processRegistry) {
         
         if (processRegistry == null) {
             throw new IllegalArgumentException("FlowProcessRegistry cannot be null");
@@ -70,39 +83,38 @@ public class AppData {
         
         System.out.println("[AppData] Initializing node system...");
         
-        // 1. Initialize system services first
+        // Initialize system services first
         return installationRegistry.initialize()
             .thenCompose(v -> repositoryManager.initialize())
             .thenCompose(v -> {
                 System.out.println("[AppData] System services initialized");
                 
-                // 2. Create node controller (pass processRegistry to it)
+                // Create NodeController under /system/controller
+                ContextPath controllerPath = myPath.append("controller");
+                
+                // NodeLoader needs interface to read package files
+                ContextPath packagesPath = myPath.append("nodes", "packages");
+                AppDataInterface loaderInterface = createScopedInterface(packagesPath);
+                
                 this.nodeController = new NodeController(
-                    this,
+                    controllerPath,      // Where controller lives
+                    this,                // For creating node interfaces
                     processRegistry,
                     installationRegistry
                 );
                 
-                // 3. Register NodeController in ProcessRegistry
-                ContextPath controllerPath = PathArchitecture.FlowPaths.CONTROLLER;
+                // Register in ProcessRegistry
                 processRegistry.registerProcess(nodeController, controllerPath);
                 
-                // 4. Start NodeController
+                // Start NodeController
                 return nodeController.run();
             })
             .thenRun(() -> {
-                System.out.println("[AppData] Node system initialized - " +
-                    "Registry: " + installationRegistry.getStatistics() + ", " +
-                    "Repositories: " + repositoryManager.getStatistics());
-            })
-            .exceptionally(ex -> {
-                System.err.println("[AppData] Node system initialization failed: " + 
-                    ex.getMessage());
-                ex.printStackTrace();
-                throw new RuntimeException("Node system initialization failed", ex);
+                System.out.println("[AppData] Node system initialized");
             });
     }
 
+    
     // ===== PUBLIC API =====
 
     public ExecutorService getExecService(){
@@ -144,125 +156,54 @@ public class AppData {
         return repositoryManager;
     }
 
-    // ===== SANDBOXED INTERFACES (NEW APPROACH) =====
-    
+    // ===== INTERFACE =====
     /**
-     * @deprecated Use specific interface creation methods
-     */
-    @Deprecated
-    public AppDataInterface getAppDataInterface(String... path){
-        return getAppDataInterface(ContextPath.of(path));
-    }
-    
-    /**
-     * @deprecated Use getSystemInterface(), getSessionInterface(), or getNodeInterface()
-     */
-    @Deprecated
-    public AppDataInterface getAppDataInterface(ContextPath scopedPath){
-        throw new UnsupportedOperationException(
-            "Use getSystemInterface(), getSessionInterface(), or getNodeInterface()");
-    }
-    
-    /**
-     * Create interface for system code (unrestricted access)
+     * Create scoped interface for given paths
      * 
-     * Used by:
-     * - InstallationRegistry
-     * - RepositoryManager
-     * - NodeController
-     * - SystemSessionProcess
-     * 
-     * @param systemArea Identifier for debugging (e.g., "installation-registry")
+     * @param primaryPath Primary location (where interface "lives")
+     * @param altPath Alternative location (optional, can be null)
+     * @return Scoped interface
      */
-    public AppDataInterface getSystemInterface(String systemArea) {
-        if (systemArea == null || systemArea.isEmpty()) {
-            throw new IllegalArgumentException("systemArea cannot be null or empty");
+    /**
+     * Create scoped interface for given paths
+     * No identity, just paths
+     * 
+     * @param primaryPath Primary location
+     * @param altPath Alternative location (optional)
+     * @return Scoped interface
+     */
+    public AppDataInterface createScopedInterface(
+            ContextPath primaryPath,
+            ContextPath altPath) {
+        
+        if (primaryPath == null) {
+            throw new IllegalArgumentException("primaryPath cannot be null");
         }
         
-        return ScopedAppDataInterface.createSystemInterface(
-            systemArea,
-            m_noteFileRegistry
+        if (!primaryPath.isAbsolute()) {
+            throw new IllegalArgumentException("primaryPath must be absolute");
+        }
+        
+        if (altPath != null && !altPath.isAbsolute()) {
+            throw new IllegalArgumentException("altPath must be absolute");
+        }
+        
+        return new ScopedAppDataInterface(
+            m_noteFileRegistry,
+            primaryPath,
+            altPath
         );
     }
-    
+
     /**
-     * Create interface for a session (scoped to session path)
-     * 
-     * Sessions can:
-     * - Read/write to /system/sessions/{sessionId}/
-     * - Read from /system/ (not write)
-     * 
-     * @param sessionId Unique session identifier (as NoteBytesReadOnly)
+     * Create scoped interface for single path
      */
-    public AppDataInterface getSessionInterface(NoteBytesReadOnly sessionId) {
-        if (sessionId == null || sessionId.isEmpty()) {
-            throw new IllegalArgumentException("sessionId cannot be null or empty");
-        }
-        
-        String sessionIdStr = sessionId.getAsString();
-        
-        // Validate session ID format
-        if (!PathArchitecture.Identifiers.isValidInstanceId(sessionIdStr)) {
-            throw new IllegalArgumentException("Invalid session ID format: " + sessionIdStr);
-        }
-        
-        return ScopedAppDataInterface.createSessionInterface(
-            sessionIdStr,
-            m_noteFileRegistry
-        );
+    public AppDataInterface createScopedInterface(ContextPath path) {
+        return createScopedInterface(path, null);
     }
-    
-    /**
-     * Create interface for a session (scoped to session path)
-     * 
-     * @param sessionId Unique session identifier (as String)
-     * @deprecated Use getSessionInterface(NoteBytesReadOnly) for better performance
-     */
-    @Deprecated
-    public AppDataInterface getSessionInterface(String sessionId) {
-        return getSessionInterface(new NoteBytesReadOnly(sessionId));
-    }
-    
-    /**
-     * Create interface for a node instance (scoped to runtime + user paths)
-     * 
-     * Nodes can:
-     * - Read/write to /system/nodes/runtime/{instanceId}/
-     * - Read/write to /user/nodes/{instanceId}/
-     * - Read from /system/nodes/packages/ (not write)
-     * 
-     * IMPORTANT: instanceId is the RUNNING INSTANCE identifier,
-     * not the package ID. This allows multiple instances of the same package.
-     * 
-     * @param instanceId Unique node instance identifier (as NoteBytesReadOnly)
-     */
-    public AppDataInterface getNodeInterface(NoteBytesReadOnly instanceId) {
-        if (instanceId == null || instanceId.isEmpty()) {
-            throw new IllegalArgumentException("instanceId cannot be null or empty");
-        }
-        
-        String instanceIdStr = instanceId.getAsString();
-        
-        // Validate instance ID format
-        if (!PathArchitecture.Identifiers.isValidInstanceId(instanceIdStr)) {
-            throw new IllegalArgumentException("Invalid instance ID format: " + instanceIdStr);
-        }
-        
-        return ScopedAppDataInterface.createNodeInterface(
-            instanceIdStr,
-            m_noteFileRegistry
-        );
-    }
-    
-    /**
-     * Create interface for a node instance (scoped to runtime + user paths)
-     * 
-     * @param instanceId Unique node instance identifier (as String)
-     * @deprecated Use getNodeInterface(NoteBytesReadOnly) for better performance
-     */
-    @Deprecated
-    public AppDataInterface getNodeInterface(String instanceId) {
-        return getNodeInterface(new NoteBytesReadOnly(instanceId));
+
+    public ContextPath getPath() {
+        return myPath;
     }
 
     // ===== PASSWORD OPERATIONS =====

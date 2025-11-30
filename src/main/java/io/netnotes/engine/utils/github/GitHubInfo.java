@@ -13,11 +13,19 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 public class GitHubInfo {
 
     private final String m_user;
-    private final  String m_project;
+    private final String m_project;
+    private final String m_branch;
 
     public GitHubInfo(String user, String project){
         m_user = user;
         m_project = project;
+        m_branch = "main";
+    }
+
+    public GitHubInfo(String user, String project, String branch){
+        m_user = user;
+        m_project = project;
+        m_branch = branch;
     }
 
     public String getUser() {
@@ -29,11 +37,15 @@ public class GitHubInfo {
         return m_project;
     }
 
+    public String getBranch() {
+        return m_branch;
+    }
 
     public JsonObject getJsonObject(){
         JsonObject json = new JsonObject();
         json.addProperty("user", m_user);
         json.addProperty("project", m_project);
+        json.addProperty("branch", m_branch);
         return json;
     }
 
@@ -41,7 +53,8 @@ public class GitHubInfo {
      public NoteBytesObject getNoteBytesObject(){
         return new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair("user", m_user),
-            new NoteBytesPair("project", m_project)
+            new NoteBytesPair("project", m_project),
+            new NoteBytesPair("branch", m_branch)
         });
     }
 
@@ -50,9 +63,9 @@ public class GitHubInfo {
 
         String user = json.has("user") ? json.getByString("user").getAsString() : null;
         String info = json.has("project") ? json.getByString("project").getAsString() : null;
-        
+        String branch = json.has("branch") ? json.getByString("branch").getAsString() : "main";
         if(user != null && info != null){
-            return new GitHubInfo(user, info);
+            return new GitHubInfo(user, info, branch);
         }
         throw new IllegalStateException("Github info values corrupt");
     }
@@ -64,9 +77,9 @@ public class GitHubInfo {
 
         String user = json.has("user") && !json.get("user").isJsonNull() ? json.get("user").getAsString() : "null";
         String project = json.has("project") && !json.get("project").isJsonNull() ? json.get("project").getAsString() : "null";
-        
+        String branch = json.has("branch") && !json.get("branch").isJsonNull() ? json.get("branch").getAsString() : "main";
         if(user != null && project != null){
-            new GitHubInfo(user, project); 
+            new GitHubInfo(user, project, branch); 
         }
             
         throw new IllegalStateException("Values cannot be null");
@@ -76,7 +89,7 @@ public class GitHubInfo {
     public static GitHubInfo read(JsonReader reader) throws IOException {
         String user = null;
         String project = null;
-
+        String branch = "main";
         reader.beginObject();
         while (reader.hasNext()) {
             String name = reader.nextName();
@@ -87,6 +100,9 @@ public class GitHubInfo {
                 case "project":
                     project = reader.nextString();
                     break;
+                case "branch":
+                    branch = reader.nextString();
+                    break;
                 default:
                     reader.skipValue();
                     break;
@@ -94,13 +110,14 @@ public class GitHubInfo {
         }
         reader.endObject();
 
-        return new GitHubInfo(user, project);
+        return new GitHubInfo(user, project, branch);
     }
 
      public void write(JsonWriter writer) throws IOException {
         writer.beginObject();
         writer.name("user").value(m_user);
         writer.name("project").value(m_project);
+        writer.name("branch").value(m_branch);
         writer.endObject();
     }
 }
