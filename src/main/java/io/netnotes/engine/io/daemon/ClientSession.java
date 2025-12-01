@@ -55,7 +55,7 @@ public class ClientSession extends FlowProcess {
     public long heartbeatTimeoutMs = 15000;
     
     public ClientSession(String sessionId, int clientPid) {
-        super(ProcessType.BIDIRECTIONAL);
+        super(sessionId, ProcessType.BIDIRECTIONAL);
         this.sessionId = sessionId;
         this.clientPid = clientPid;
         this.state = new BitFlagStateMachine("client-" + sessionId);
@@ -266,12 +266,12 @@ public class ClientSession extends FlowProcess {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Failed to enable mode: " + requestedMode));
         }
-        
+        //FlowProcess process, ContextPath path, ContextPath parentPath
         // Register as child
-        registry.registerProcess(claimedDevice, claimedDevicePath, contextPath);
+        registryInterface.registerChild(claimedDevice);
         
         // Setup stream channel between IODaemon and ClaimedDevice
-        return registry.requestStreamChannel(parentPath, claimedDevicePath)
+        return registryInterface.requestStreamChannel(claimedDevicePath)
             .thenCompose(channel -> {
                 return channel.getReadyFuture()
                     .thenCompose(v -> {
@@ -287,7 +287,7 @@ public class ClientSession extends FlowProcess {
                         discoveredDevices.markClaimed(deviceId);
                         state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
                         
-                        registry.startProcess(claimedDevicePath);
+                        registryInterface.startProcess(claimedDevicePath);
                         
                         System.out.println("Claimed device: " + deviceId + 
                                         " at " + claimedDevicePath +
@@ -331,7 +331,7 @@ public class ClientSession extends FlowProcess {
         ).thenRun(() -> {
             discoveredDevices.markReleased(deviceId);
             if (claimedDevice != null) {
-                registry.unregisterProcess(claimedDevice.getContextPath());
+                registryInterface.unregisterProcess(claimedDevice.getContextPath());
             }
             System.out.println("Released device: " + deviceId);
         });
@@ -339,11 +339,11 @@ public class ClientSession extends FlowProcess {
     
     private void releaseAllDevices() {
         List<ClaimedDevice> devices = 
-            registry.findChildrenByType(contextPath, ClaimedDevice.class);
+            registryInterface.findChildrenByType(ClaimedDevice.class);
         
         for (ClaimedDevice device : devices) {
             device.release();
-            registry.unregisterProcess(device.getContextPath());
+            registryInterface.unregisterProcess(device.getContextPath());
         }
     }
     
@@ -419,7 +419,7 @@ public class ClientSession extends FlowProcess {
     // ===== HELPERS =====
     
     public ClaimedDevice getClaimedDevice(String deviceId) {
-        return (ClaimedDevice) registry.getChildProcess(contextPath, deviceId);
+        return (ClaimedDevice) registryInterface.getChildProcess(deviceId);
     }
     
     public DiscoveredDeviceRegistry getDiscoveredDevices() {

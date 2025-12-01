@@ -7,12 +7,12 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.core.AppData;
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
+import io.netnotes.engine.core.ScopedNoteFilenterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
-import io.netnotes.engine.io.process.FlowProcessRegistry;
+import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
@@ -21,7 +21,6 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
-import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
  * NodeController - Central node lifecycle manager
@@ -40,21 +39,23 @@ public class NodeController extends FlowProcess {
         public static final NoteBytesReadOnly NODE_STATUS = ProtocolMesssages.STATUS;
     }
 
+    public static final String registryName = "node-registry";
+    public static final String loaderName = "node-loader";
+    public static final String NODES = "nodes";
+    public static final String RUNTIME = "runtime";
+
     private final BitFlagStateMachine state;
-    private final AppData appData;  // Still need for creating interfaces
-    private final FlowProcessRegistry processRegistry;
-    private final InstallationRegistry installationRegistry;
+    private final NoteFileServiceInterface noteFilenterface;
+    private InstallationRegistry installationRegistry;
 
     // Node registry: packageId → NodeInstance (ONE instance per package)
     private final Map<NoteBytesReadOnly, NodeInstance> nodes = new ConcurrentHashMap<>();
-    
+
     private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgExecutorMap = new HashMap<>();
 
     // Node loader (OSGi integration)
-    private final NodeLoader nodeLoader;
-    
-    // Inter-node routing
-    private final NodeRouter nodeRouter;
+    private NodeLoader nodeLoader;
+    private final ContextPath nodesPath;
     
     // States
     private static final long INITIALIZING = 1L << 0;
@@ -65,36 +66,25 @@ public class NodeController extends FlowProcess {
     /**
      * Constructor
      * 
-     * OLD: NodeController(AppData, FlowProcessRegistry, InstallationRegistry)
-     * NEW: NodeController(ContextPath, AppData, FlowProcessRegistry, InstallationRegistry)
      * 
-     * @param myPath Where controller lives (given by parent)
+     * @param name Where controller lives (given by parent)
      * @param appData For creating node interfaces
-     * @param processRegistry For registering nodes in network
+     * @param processService For registering nodes in network
      * @param installationRegistry For package metadata
      */
     public NodeController(
-            ContextPath myPath,
-            AppData appData,
-            FlowProcessRegistry processRegistry,
-            InstallationRegistry installationRegistry) {
-
-        super(ProcessType.BIDIRECTIONAL);
-        this.contextPath = myPath;  // Set FlowProcess path
-        this.appData = appData;
-        this.processRegistry = processRegistry;
-        this.installationRegistry = installationRegistry;
-        this.state = new BitFlagStateMachine("node-controller");
-        
+        String name,
+        NoteFileServiceInterface noteFilenterface,
+        ContextPath nodesPath
+    ) {
+        super(name, ProcessType.BIDIRECTIONAL);
+        this.noteFilenterface = noteFilenterface;
+        this.state = new BitFlagStateMachine(name + "-state");
+        this.nodesPath = nodesPath;
         setupMsgExecutorMap();
-        
-        // NodeLoader needs interface to read package files
-        ContextPath packagesPath = ContextPath.of("system", "nodes", "packages");
-        AppDataInterface loaderInterface = appData.createScopedInterface(packagesPath);
-        this.nodeLoader = new NodeLoader(loaderInterface);
-        
-        this.nodeRouter = new NodeRouter(this);
     }
+
+
     
     private void setupMsgExecutorMap() {
         m_routedMsgExecutorMap.put(CMDS.LOAD_NODE, (map, packet) -> handleLoadNodeRequest(map));
@@ -123,12 +113,54 @@ public class NodeController extends FlowProcess {
     private CompletableFuture<Void> initialize() {
         System.out.println("[NodeController] Initializing at: " + contextPath);
         
-        // Load auto-start nodes from configuration
-        return loadAutoStartNodes()
+        return initializeInstallationRegistry()
+            .thenCompose(v -> initializeNodeLoader())
+            .thenCompose(v -> loadAutoStartNodes())
             .thenRun(() -> {
                 System.out.println("[NodeController] Initialized with " + 
                     nodes.size() + " auto-start nodes");
             });
+    }
+
+    private CompletableFuture<Void> initializeInstallationRegistry() {
+   
+        // Create child interface scoped to registry subtree
+        ContextPath installedFilePath = noteFilenterface.getBasePath().append(registryName);
+        
+        return noteFilenterface.getNoteFile(installedFilePath)
+            .thenCompose(registryFile->{
+    
+                this.installationRegistry = new InstallationRegistry(registryName, registryFile );
+                ContextPath path = registryInterface.registerChild(installationRegistry);
+                System.out.println("[SystemRuntime] Registered InstallationRegistry at: " + path);
+                return registryInterface.startChild(path)
+                    .thenCompose(v -> installationRegistry.initialize());
+            });
+            
+    }
+
+    /**
+     * Initialize NodeLoader with scoped interface
+     */
+    private CompletableFuture<Void> initializeNodeLoader() {
+  
+        ContextPath packagesProcessesPath = contextPath.append(loaderName);
+        ContextPath packagesFilePath = noteFilenterface.getBasePath().append(loaderName);
+        // Create interface using our parent's createChildInterface
+        ProcessRegistryInterface loaderProcessInterface = 
+            registryInterface.createChildInterface(
+                contextPath.append(contextPath),
+                (caller, target) -> target.startsWith(packagesProcessesPath)
+            );
+                // NodeLoader needs interface to read package files
+   
+        NoteFileServiceInterface loaderFileInterface = new ScopedNoteFilenterface(noteFilenterface,
+            packagesFilePath,
+            null  // No alt path
+        );
+        this.nodeLoader = new NodeLoader(loaderProcessInterface, loaderFileInterface);
+        
+        return CompletableFuture.completedFuture(null);
     }
     
     private CompletableFuture<Void> loadAutoStartNodes() {
@@ -176,11 +208,9 @@ public class NodeController extends FlowProcess {
         // === PATHS: Parent decides where node lives ===
         
         // FlowProcess path (for routing in network)
-        ContextPath nodeFlowPath = contextPath.append("nodes", pkgIdStr);
-        
-        // Storage paths (following conventions)
-        ContextPath runtimePath = ContextPath.of("system", "nodes", "runtime", pkgIdStr);
-        ContextPath userPath = ContextPath.of("user", "nodes", pkgIdStr);
+        ContextPath nodeFlowPath = nodesPath.append(pkgIdStr);
+        ContextPath runtimePath = noteFilenterface.getBasePath().append(RUNTIME, pkgIdStr);
+        ContextPath userPath = noteFilenterface.getAltPath().append(pkgIdStr);
         
         System.out.println("[NodeController] Node paths:");
         System.out.println("  Flow:    " + nodeFlowPath);
@@ -201,33 +231,37 @@ public class NodeController extends FlowProcess {
                 
                 // === CREATE SCOPED INTERFACE ===
                 // Node gets access to runtime + user paths
-                AppDataInterface nodeInterface = appData.createScopedInterface(
+                NoteFileServiceInterface nodeDataInterface = new ScopedNoteFilenterface(
+                    noteFilenterface,
                     runtimePath,  // Primary: system runtime data
                     userPath      // Alternative: user data
                 );
                 
-                instance.setDataInterface(nodeInterface);
-                
+                instance.setDataInterface(nodeDataInterface);
+                ProcessRegistryInterface nodeProcessInterface = 
+                    registryInterface.createChildInterface(
+                        nodeFlowPath,
+                        (caller, target) -> {
+                            // Node can reach:
+                            // - Its own children
+                            // - Its parent (controller)
+                            // - Other nodes (if controller allows)
+                            return target.startsWith(nodeFlowPath) ||  // Own children
+                                   target.equals(contextPath) ||        // Parent (controller)
+                                   target.startsWith(nodesPath); // Sibling nodes
+                        }
+                    );
+                instance.setState(NodeState.INITIALIZING);
+
                 // Register in FlowProcess network
-                return registerNodeInNetwork(instance, nodeFlowPath)
-                    .thenCompose(v -> {
-                        // Initialize node with scoped interface
-                        instance.setState(NodeState.INITIALIZING);
-                        return inode.initialize(nodeInterface);
-                    })
-                    .thenCompose(v -> {
+                return inode.initialize(nodeDataInterface, nodeProcessInterface) 
+                    .thenApply((v) -> {
                         instance.setState(NodeState.RUNNING);
                         
-                        // Start background tasks if node has them
-                        if (inode.hasBackgroundTasks()) {
-                            return inode.runBackgroundTasks()
-                                .thenApply(voidResult -> instance);
-                        } else {
-                            return CompletableFuture.completedFuture(instance);
-                        }
+                        return instance;
                     });
             })
-            .whenComplete((instance, ex) -> {
+            .whenComplete((v, ex) -> {
                 state.removeState(LOADING_NODE);
                 
                 if (ex != null) {
@@ -237,47 +271,24 @@ public class NodeController extends FlowProcess {
                 } else {
                     System.out.println("[NodeController] Node loaded successfully: " + 
                         pkgIdStr);
-                    
-                    // Register in AppData's registry
-                    appData.nodeRegistry().put(packageId, instance.getNode());
                 }
             });
     }
     
-    /**
-     * Register node in FlowProcess network
-     */
-    private CompletableFuture<Void> registerNodeInNetwork(
-            NodeInstance instance,
-            ContextPath nodeFlowPath) {
-        
-        INode node = instance.getNode();
-        
-        // Create FlowProcess adapter for the node
-        NodeFlowAdapter adapter = new NodeFlowAdapter(node, nodeFlowPath, this);
-        
-        instance.setFlowAdapter(adapter);
-        
-        // Register in ProcessRegistry
-        return CompletableFuture.runAsync(() -> {
-            processRegistry.registerProcess(adapter, nodeFlowPath);
-            System.out.println("[NodeController] Node registered at: " + nodeFlowPath);
-        }, VirtualExecutors.getVirtualExecutor());
-    }
+
     
     // ===== NODE UNLOADING =====
     
-    /**
+     /**
      * Unload a running node
-     * 
-     * @param packageId Package identifier (NoteBytesReadOnly)
      */
     public CompletableFuture<Void> unloadNode(NoteBytesReadOnly packageId) {
         NodeInstance instance = nodes.get(packageId);
         
         if (instance == null) {
             return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Node not loaded: " + packageId.getAsString()));
+                new IllegalArgumentException("Node not loaded: " + 
+                    packageId.getAsString()));
         }
         
         state.addState(UNLOADING_NODE);
@@ -290,42 +301,16 @@ public class NodeController extends FlowProcess {
         INode node = instance.getNode();
         
         // Shutdown sequence
-        return CompletableFuture.runAsync(() -> {
-            // Notify subscribers
-            if (node.hasFlowSubscribers()) {
-                NoteBytesMap shutdownEvent = new NoteBytesMap();
-                shutdownEvent.put(Keys.CMD, ProtocolMesssages.SHUTDOWN);
-                shutdownEvent.put(Keys.NODE_ID, new NoteBytes(pkgIdStr));
-                
-                // Emit shutdown event
-                RoutedPacket packet = new RoutedPacket(
-                    node.getContextPath(),
-                    node.getContextPath(),
-                    shutdownEvent.readOnlyObject()
-                );
-                node.emitFlowEvent(packet);
-            }
-        }, VirtualExecutors.getVirtualExecutor())
-        .thenCompose(v -> {
-            // Shutdown node
-            return node.shutdown();
-        })
+        return node.shutdown()
         .thenRun(() -> {
-            // Unregister from network
-            NodeFlowAdapter adapter = instance.getFlowAdapter();
-            if (adapter != null) {
-                processRegistry.unregisterProcess(adapter.getContextPath());
-            }
-            
             // Remove from registries
             nodes.remove(packageId);
-            appData.nodeRegistry().remove(packageId);
             
             instance.setState(NodeState.STOPPED);
             
             System.out.println("[NodeController] Node unloaded: " + pkgIdStr);
         })
-        .whenComplete((result, ex) -> {
+        .whenComplete((v, ex) -> {
             state.removeState(UNLOADING_NODE);
             
             if (ex != null) {
@@ -363,22 +348,7 @@ public class NodeController extends FlowProcess {
         return isNodeLoaded(new NoteBytesReadOnly(packageId));
     }
     
-    // ===== INTER-NODE ROUTING =====
-    
-    public CompletableFuture<Void> routeNodeMessage(
-            NoteBytesReadOnly fromNodeId,
-            NoteBytesReadOnly toNodeId,
-            RoutedPacket packet) {
-        
-        return nodeRouter.routeMessage(fromNodeId, toNodeId, packet);
-    }
-    
-    public CompletableFuture<StreamChannel> requestNodeStreamChannel(
-            NoteBytesReadOnly fromNodeId,
-            NoteBytesReadOnly toNodeId) {
-        
-        return nodeRouter.requestStreamChannel(fromNodeId, toNodeId);
-    }
+
 
     // ===== MESSAGE HANDLING =====
     
@@ -502,15 +472,5 @@ public class NodeController extends FlowProcess {
         return state;
     }
     
-    public FlowProcessRegistry getProcessRegistry() {
-        return processRegistry;
-    }
-    
-    public NodeRouter getNodeRouter() {
-        return nodeRouter;
-    }
-    
-    public ContextPath getPath() {
-        return contextPath;
-    }
+
 }

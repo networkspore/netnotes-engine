@@ -1,7 +1,7 @@
 package io.netnotes.engine.core.system.control.nodes;
 
 
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -23,8 +23,8 @@ public class NodeInstance {
     private final INode node;
     
     private volatile NodeState state;
-    private AppDataInterface dataInterface;
-    private NodeFlowAdapter flowAdapter;
+    private NoteFileServiceInterface dataInterface;
+   
     
     private final long loadTime;
     private int crashCount = 0;
@@ -60,13 +60,10 @@ public class NodeInstance {
         return state;
     }
     
-    public AppDataInterface getAppDataInterface() {
+    public NoteFileServiceInterface getAppDataInterface() {
         return dataInterface;
     }
-    
-    public NodeFlowAdapter getFlowAdapter() {
-        return flowAdapter;
-    }
+
     
     public long getLoadTime() {
         return loadTime;
@@ -90,12 +87,8 @@ public class NodeInstance {
             oldState + " → " + state);
     }
     
-    public void setDataInterface(AppDataInterface sandbox) {
+    public void setDataInterface(NoteFileServiceInterface sandbox) {
         this.dataInterface = sandbox;
-    }
-    
-    public void setFlowAdapter(NodeFlowAdapter adapter) {
-        this.flowAdapter = adapter;
     }
     
     public void incrementCrashCount() {

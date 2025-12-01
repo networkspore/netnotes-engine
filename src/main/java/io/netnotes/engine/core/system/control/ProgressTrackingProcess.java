@@ -46,8 +46,8 @@ public class ProgressTrackingProcess extends FlowProcess {
     private static final long UPDATE_INTERVAL_MS = 100;
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
     
-    public ProgressTrackingProcess(UIRenderer uiRenderer) {
-        super(ProcessType.SINK);
+    public ProgressTrackingProcess(String name, UIRenderer uiRenderer) {
+        super(name, ProcessType.SINK);
         this.uiRenderer = uiRenderer;
 
         setupMessageMap();

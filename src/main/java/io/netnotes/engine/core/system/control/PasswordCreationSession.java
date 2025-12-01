@@ -50,12 +50,14 @@ public class PasswordCreationSession extends FlowProcess {
     private NoteBytesEphemeral temporaryFirstPassword = null;
     
     public PasswordCreationSession(
-            InputDevice inputDevice,
-            UIRenderer uiRenderer,
-            String prompt1,
-            String prompt2) {
+        String name,
+        InputDevice inputDevice,
+        UIRenderer uiRenderer,
+        String prompt1,
+        String prompt2
+    ) {
         
-        super(ProcessType.SINK);
+        super(name, ProcessType.SINK);
         this.inputDevice = inputDevice;
         this.uiRenderer = uiRenderer;
         this.prompt1 = prompt1;

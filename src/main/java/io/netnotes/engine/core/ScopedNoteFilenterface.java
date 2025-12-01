@@ -4,7 +4,6 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteFiles.NoteFile;
-import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
@@ -33,12 +32,11 @@ import io.netnotes.engine.utils.VirtualExecutors;
  *     → Ownership check fails (database-node ≠ other-node)
  *   → DENIED
  */
-public class ScopedAppDataInterface implements AppDataInterface {
+public class ScopedNoteFilenterface implements NoteFileServiceInterface {
     
-    private final NoteFileService noteFileService;
     private final ContextPath basePath;     // Primary location (e.g., runtime)
     private final ContextPath altPath;      // Alternative location (e.g., user)
-    
+    private final NoteFileServiceInterface fileInterface;
     /**
      * Constructor - paths determine access
      * 
@@ -46,13 +44,13 @@ public class ScopedAppDataInterface implements AppDataInterface {
      * @param basePath Primary path where this interface lives
      * @param altPath Alternative path (optional, can be null)
      */
-    public ScopedAppDataInterface(
-            NoteFileService noteFileService,
+    public ScopedNoteFilenterface(
+            NoteFileServiceInterface fileInterface,
             ContextPath basePath,
             ContextPath altPath) {
         
-        if (noteFileService == null) {
-            throw new IllegalArgumentException("NoteFileService cannot be null");
+        if (fileInterface == null) {
+            throw new IllegalArgumentException("NoteFileServiceInterface cannot be null");
         }
         
         if (basePath == null) {
@@ -66,8 +64,17 @@ public class ScopedAppDataInterface implements AppDataInterface {
         if (altPath != null && !altPath.isAbsolute()) {
             throw new IllegalArgumentException("altPath must be absolute: " + altPath);
         }
+
+
+        if(fileInterface.getBasePath().size() > 0 && !basePath.startsWith(fileInterface.getBasePath())){
+            throw new IllegalArgumentException("basePath must be within parent interface base path");
+        }
+        if(altPath != null && fileInterface.getAltPath().size() > 0 && !altPath.startsWith(fileInterface.getAltPath())){
+            throw new IllegalArgumentException("altPath must be within parent interface alt path");
+        }
         
-        this.noteFileService = noteFileService;
+        
+        this.fileInterface = fileInterface;
         this.basePath = basePath;
         this.altPath = altPath;
     }
@@ -104,18 +111,13 @@ public class ScopedAppDataInterface implements AppDataInterface {
                 resolution.resolvedVia
             ));
             
-            return resolution.resolvedPath.getSegments();
+            return resolution.resolvedPath;
             
         }, VirtualExecutors.getVirtualExecutor())
-        .thenCompose(segments -> noteFileService.getNoteFile(segments));
+        .thenCompose(path -> fileInterface.getNoteFile(path));
     }
     
-    @Override
-    public void shutdown() {
-        // Scoped interfaces don't own resources
-        // Nothing to shutdown
-    }
-    
+
     // =========================================================================
     // PATH RESOLUTION & HOP VALIDATION
     // =========================================================================

@@ -31,7 +31,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 
 public class NotePathReEncryption {
 
-    public static CompletableFuture<NoteBytesObject> updatePathLedgerEncryption(File pathLedger, SecretKey oldSecretKey,
+    public static CompletableFuture<Boolean> updatePathLedgerEncryption(File pathLedger, SecretKey oldSecretKey,
         SecretKey newSecretKey, int batchSize, AsyncNoteBytesWriter progressWriter, ExecutorService execService
     ) {
     
@@ -68,7 +68,8 @@ public class NotePathReEncryption {
                 StreamUtils.safeClose(parsedOutput);
             })    
             .thenCompose(v -> parseFuture) // wait for all files to finish updating
-            .thenCompose(v-> saveFuture);
+            .thenCompose(v-> saveFuture)
+            .thenApply(v->true);
     }
 
     public static CompletableFuture<CompletableFuture<Void>> parseStreamUpdateEncryption(int batchSize, long fileSize,

@@ -1,6 +1,7 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.AppData;
+import io.netnotes.engine.core.SystemRuntime;
+import io.netnotes.engine.core.RuntimeAccess;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.*;
 import io.netnotes.engine.core.system.control.recovery.RecoveryFlags;
@@ -23,6 +24,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
@@ -84,16 +86,16 @@ import io.netnotes.engine.utils.streams.StreamUtils;
  * - All operations go through appData
  */
 public class SystemSessionProcess extends FlowProcess {
-    
+    public static final ContextPath RUNTIME = ContextPath.parse("runtime");
     private final BitFlagStateMachine state;
     private final UIRenderer uiRenderer;
     
     // Configuration
     private NoteBytesMap bootstrapConfig;
     
-    // System data (created after password verification)
-    private AppData appData; // PRIMARY INTERFACE - cached
-    
+    private SystemRuntime appData = null; 
+    private RuntimeAccess systemAccess = null;
+
     // Session info
     private final String sessionId;
     private final SessionType sessionType;
@@ -107,11 +109,13 @@ public class SystemSessionProcess extends FlowProcess {
         new ConcurrentHashMap<>();
     
     public SystemSessionProcess(
-            String sessionId,
-            SessionType sessionType,
-            UIRenderer uiRenderer) {
+        String sessionId,
+        SessionType sessionType,
+        UIRenderer uiRenderer
         
-        super(ProcessType.BIDIRECTIONAL);
+    ) {
+        
+        super(sessionId, ProcessType.BIDIRECTIONAL);
         this.sessionId = sessionId;
         this.sessionType = sessionType;
         this.uiRenderer = uiRenderer;
@@ -285,7 +289,8 @@ public class SystemSessionProcess extends FlowProcess {
     private void startPasswordCreationSession() {
         getSecureInputDevice()
             .thenAccept(device -> {
-                PasswordCreationSession session = new PasswordCreationSession(
+                PasswordCreationSession passwordCreationSession = new PasswordCreationSession(
+                    "firstrun-password-creation",
                     device,
                     uiRenderer,
                     "Create master password",
@@ -293,46 +298,71 @@ public class SystemSessionProcess extends FlowProcess {
                 );
                 
                 // Handle successful password creation
-                session.onPasswordCreated(password -> {
+                passwordCreationSession.onPasswordCreated(password -> {
                     return createNewSystem(password)
-                        .thenAccept(appDataResult -> {
-                            this.appData = appDataResult;
-                            
+                        .thenRun(() -> {
                             state.removeState(SystemSessionStates.FIRST_RUN_SETUP);
                             state.addState(SystemSessionStates.READY);
                             
                             uiRenderer.render(UIProtocol.showMessage(
                                 "Master password created successfully"));
+                         
+                        }).exceptionally(ex->{
+                            //TODO: Handle failure to create system -> Set state ERROR?
+                            uiRenderer.render(UIProtocol.showError(
+                                "Error creating new system: " + ex.getMessage()));
+                            return null;
                         });
                 });
                 
                 // Handle cancellation
-                session.onCancelled(() -> {
+                passwordCreationSession.onCancelled(() -> {
                     uiRenderer.render(UIProtocol.showError(
                         "Password creation cancelled - cannot proceed"));
                 });
                 
                 // Spawn session
-                spawnChild(session, "password-creation")
-                    .thenCompose(path -> registry.startProcess(path));
+                spawnChild(passwordCreationSession)
+                    .thenCompose(path -> registryInterface.startProcess(path));
             });
     }
+
+    private ProcessRegistryInterface createRuntimeInterface(ContextPath runtimePath){
+        return registryInterface.createChildInterface(
+            runtimePath,
+            (caller, target) -> {
+                // Runtime can access:
+                // - Its own children (repositories, nodes, controller)
+                // - Parent (this session) for coordination
+                return target.startsWith(runtimePath) ||  // Own subtree
+                        target.equals(contextPath);         // Parent session
+            }
+        );
+    }
     
-    /**
-     * Create new system: SettingsData → AppData
+   /**
+     * Create new system - provide empty access object
      */
-    private CompletableFuture<AppData> createNewSystem(NoteBytesEphemeral password) {
-        System.out.println("[SystemSession] Creating new system with password");
-        
+    private CompletableFuture<Void> createNewSystem(NoteBytesEphemeral password) {
         return SettingsData.createSettings(password)
             .thenApply(settingsData -> {
-                System.out.println("[SystemSession] SettingsData created, initializing AppData");
+                // Create empty access object
+                RuntimeAccess access = new RuntimeAccess();
+                ContextPath runtimePath = contextPath.append(RUNTIME);
                 
-                // Create AppData from SettingsData
-                AppData newAppData = new AppData(settingsData);
+                // Create AppData - it fills the access object
+                SystemRuntime newAppData = new SystemRuntime(
+                    runtimePath,
+                    settingsData,
+                    createRuntimeInterface(runtimePath),
+                    access  // AppData fills this with closures!
+                );
                 
-                System.out.println("[SystemSession] AppData initialized successfully");
-                return newAppData;
+                // Store both
+                this.appData = newAppData;
+                this.systemAccess = access; // Now filled with capabilities
+                
+                return null;
             });
     }
     
@@ -343,7 +373,8 @@ public class SystemSessionProcess extends FlowProcess {
     private void startPasswordVerificationSession() {
         getSecureInputDevice()
             .thenAccept(device -> {
-                PasswordSessionProcess session = new PasswordSessionProcess(
+                PasswordSessionProcess pwdVerifySession = new PasswordSessionProcess(
+                    "existing-password-verification",
                     device,
                     uiRenderer,
                     "Enter master password",
@@ -351,11 +382,10 @@ public class SystemSessionProcess extends FlowProcess {
                 );
                 
                 // Set password verification handler
-                session.onPasswordEntered(password -> {
+                pwdVerifySession.onPasswordEntered(password -> {
                     return verifyAndLoadSystem(password)
-                        .thenApply(appDataResult -> {
-                            if (appDataResult != null) {
-                                this.appData = appDataResult;
+                        .thenApply(valid -> {
+                            if (valid) {
                                 
                                 state.removeState(SystemSessionStates.SETTINGS_EXIST);
                                 state.addState(SystemSessionStates.READY);
@@ -368,11 +398,11 @@ public class SystemSessionProcess extends FlowProcess {
                         });
                 });
                 
-                this.passwordSession = session;
+                this.passwordSession = pwdVerifySession;
                 
                 // Spawn session
-                spawnChild(session, "password-verification")
-                    .thenCompose(path -> registry.startProcess(path));
+                spawnChild(pwdVerifySession)
+                    .thenCompose(path -> registryInterface.startProcess(path));
             });
     }
         
@@ -381,7 +411,7 @@ public class SystemSessionProcess extends FlowProcess {
      * Password verification during initialization
      * NOW uses AppData instead of SettingsData directly
      */
-    private CompletableFuture<AppData> verifyAndLoadSystem(NoteBytesEphemeral password) {
+    private CompletableFuture<Boolean> verifyAndLoadSystem(NoteBytesEphemeral password) {
         System.out.println("[SystemSession] Verifying password and loading system");
         
         // Load settingsMap (ephemeral - only exists in this scope)
@@ -399,46 +429,48 @@ public class SystemSessionProcess extends FlowProcess {
                             return SettingsData.loadSettingsData(password, settingsMap)
                                 .thenApply(settingsData -> {
                                     System.out.println("[SystemSession] SettingsData loaded, creating AppData");
-                                    
+                                    RuntimeAccess access = new RuntimeAccess();
+                                    ContextPath runtimePath = contextPath.append(RUNTIME);
                                     // Create AppData (SettingsData becomes private)
-                                    AppData newAppData = new AppData(settingsData);
-                                    
+                                    SystemRuntime newAppData = new SystemRuntime(
+                                        runtimePath,
+                                        settingsData, 
+                                        createRuntimeInterface(runtimePath),
+                                        access
+                                    );
+
+                                    this.appData = newAppData;
+                                    this.systemAccess = access; // Now filled with capabilities
                                     System.out.println("[SystemSession] AppData created");
                                     
-                                    return newAppData;
+                                    return true;
                                 });
                         } else {
                             System.out.println("[SystemSession] Password invalid");
-                            return CompletableFuture.completedFuture(null);
+                            return CompletableFuture.completedFuture(false);
                         }
                     });
             });
     }
         
     
-    /**
-     * Unlock from LOCKED state
-     * NOW uses AppData for password verification
-     */
     private void startUnlockPasswordSession() {
         getSecureInputDevice()
             .thenAccept(device -> {
-                PasswordSessionProcess session = new PasswordSessionProcess(
+                PasswordSessionProcess pwdUnlockSession = new PasswordSessionProcess(
+                    "unlock-password-session",
                     device,
                     uiRenderer,
                     "Enter password to unlock",
                     0
                 );
                 
-                // Set password verification handler
-                session.onPasswordEntered(password -> {
-                    // Verify using AppData (not SettingsData directly)
-                    return appData.verifyPassword(password)
+                pwdUnlockSession.onPasswordEntered(password -> {
+                    return systemAccess.verifyPassword(password)
                         .thenApply(valid -> {
                             if (valid) {
                                 state.removeState(SystemSessionStates.UNLOCKING);
                                 state.addState(SystemSessionStates.UNLOCKED);
-                                
                                 uiRenderer.render(UIProtocol.showMessage("System unlocked"));
                             } else {
                                 uiRenderer.render(UIProtocol.showError("Invalid password"));
@@ -447,11 +479,9 @@ public class SystemSessionProcess extends FlowProcess {
                         });
                 });
                 
-                this.passwordSession = session;
-                
-                // Spawn session
-                spawnChild(session, "password-unlock")
-                    .thenCompose(path -> registry.startProcess(path));
+                this.passwordSession = pwdUnlockSession;
+                spawnChild(pwdUnlockSession)
+                    .thenCompose(path -> registryInterface.startProcess(path));
             });
     }
     
@@ -478,7 +508,7 @@ public class SystemSessionProcess extends FlowProcess {
             }
             
             InputDevice device = (InputDevice) 
-                registry.getProcess(ContextPath.parse(devicePath));
+                registryInterface.getProcess(ContextPath.parse(devicePath));
             
             if (device == null) {
                 throw new IllegalStateException("Device not found: " + devicePath);
@@ -513,10 +543,10 @@ public class SystemSessionProcess extends FlowProcess {
     }
     
     private void createMenuNavigator() {
-        menuNavigator = new MenuNavigatorProcess(uiRenderer);
+        menuNavigator = new MenuNavigatorProcess("system-session-menu-navigator",uiRenderer);
         
-        spawnChild(menuNavigator, "menu-navigator")
-            .thenCompose(path -> registry.startProcess(path));
+        spawnChild(menuNavigator)
+            .thenCompose(path -> registryInterface.startProcess(path));
     }
 
 
@@ -689,15 +719,16 @@ public class SystemSessionProcess extends FlowProcess {
         getSecureInputDevice()
             .thenAccept(device -> {
                 // First verify current password
-                PasswordSessionProcess verifySession = new PasswordSessionProcess(
+                PasswordSessionProcess changeVerifySession = new PasswordSessionProcess(
+                    "change-password-verify-current",
                     device,
                     uiRenderer,
                     "Enter current password",
                     3
                 );
                 
-                verifySession.onPasswordEntered(currentPassword -> {
-                    return appData.verifyPassword(currentPassword)
+                changeVerifySession.onPasswordEntered(currentPassword -> {
+                    return systemAccess.verifyPassword(currentPassword)
                         .thenCompose(valid -> {
                             if (valid) {
                                 // Password valid, validate disk space before proceeding
@@ -709,8 +740,8 @@ public class SystemSessionProcess extends FlowProcess {
                         });
                 });
                 
-                spawnChild(verifySession, "verify-current-password")
-                    .thenCompose(path -> registry.startProcess(path));
+                spawnChild(changeVerifySession)
+                    .thenCompose(path -> registryInterface.startProcess(path));
             });
     }
 
@@ -726,7 +757,7 @@ public class SystemSessionProcess extends FlowProcess {
         uiRenderer.render(UIProtocol.showMessage("Validating disk space..."));
         
         // Pre-validate disk space (async)
-        return appData.getNoteFileService().validateDiskSpaceForReEncryption()
+        return systemAccess.validateDiskSpaceForReEncryption()
             .thenCompose(validation -> {
                 
                 if (!validation.isValid()) {
@@ -791,6 +822,7 @@ public class SystemSessionProcess extends FlowProcess {
     ) {
         
         PasswordCreationSession newPasswordSession = new PasswordCreationSession(
+            "change-password-session",
             device,
             uiRenderer,
             "Enter new password",
@@ -807,19 +839,18 @@ public class SystemSessionProcess extends FlowProcess {
                 "Starting password change. This may take a while..."));
             
             // Create progress tracker (UI feedback only)
-            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+            ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("UI-pwd-change-tracker",uiRenderer);
             
-            return spawnChild(progressTracker, "progress-tracker")
-                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-                .thenCompose(v -> registry.requestStreamChannel(contextPath, 
-                    progressTracker.getContextPath()))
+            return spawnChild(progressTracker)
+                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
+                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                         progressChannel.getStream()
                     );
                     
                     // Execute password change
-                    return appData.changePassword(
+                    return systemAccess.changePassword(
                         currentPassword, 
                         newPassword, 
                         batchSize, 
@@ -858,8 +889,8 @@ public class SystemSessionProcess extends FlowProcess {
             showMainMenu();
         });
         
-        return spawnChild(newPasswordSession, "new-password")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(newPasswordSession)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenApply(v -> true);
     }
 
@@ -1029,7 +1060,7 @@ public class SystemSessionProcess extends FlowProcess {
         uiRenderer.render(UIProtocol.showMessage("Analyzing file encryption state..."));
         
         // Check if old key available
-        boolean hasOldKey = appData.hasOldKeyForRecovery();
+        boolean hasOldKey =  systemAccess.hasOldKeyForRecovery();
         
         if (!hasOldKey) {
             // No old key - offer to provide password or skip
@@ -1038,7 +1069,7 @@ public class SystemSessionProcess extends FlowProcess {
         }
         
         // Old key available - analyze files
-        appData.getNoteFileService().investigateFileEncryptionState()
+        systemAccess.investigateFileEncryption()
             .thenAccept(analysis -> {
                 showRecoveryMenu(analysis, true);
             })
@@ -1177,7 +1208,7 @@ public class SystemSessionProcess extends FlowProcess {
                 "All issues resolved - exit recovery mode",
                 () -> {
                     RecoveryFlags.clearRecoveryFlag();
-                    appData.clearOldKey();
+                    systemAccess.clearOldKey();
                     state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
                     
                     uiRenderer.render(UIProtocol.showMessage(
@@ -1207,7 +1238,7 @@ public class SystemSessionProcess extends FlowProcess {
             String.format("Deleting %d temporary files...", analysis.getFilesNeedingCleanup().size())));
         
       
-        appData.performTempFileCleanup(analysis).thenAccept(success->{
+        systemAccess.performTempFileCleanup(analysis).thenAccept(success->{
             
             uiRenderer.render(UIProtocol.showMessage(
                 String.format(success ? "✓ Deleted temporary files" : "x Unable to delete all temp files")));
@@ -1324,7 +1355,7 @@ public class SystemSessionProcess extends FlowProcess {
         confirmMenu.addItem(
             "no-back",
             "NO - Return to Recovery",
-            () -> showRecoveryMenu(analysis, appData.hasOldKeyForRecovery())
+            () -> showRecoveryMenu(analysis, systemAccess.hasOldKeyForRecovery())
         );
         
         menuNavigator.showMenu(confirmMenu);
@@ -1339,15 +1370,14 @@ public class SystemSessionProcess extends FlowProcess {
         int batchSize = 1;
         
         // Create progress tracker
-        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("recovery-progress",uiRenderer);
             
-            spawnChild(progressTracker, "recovery-progress")
-                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-                .thenCompose(v -> registry.requestStreamChannel(
-                    contextPath, progressTracker.getContextPath()))
+            spawnChild(progressTracker)
+                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
+                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
-                    return appData.performRecovery(analysis, progressWriter, batchSize)
+                    return systemAccess.performRecovery(analysis, progressWriter, batchSize)
                         .whenComplete((v, ex)->{
                             StreamUtils.safeClose(progressWriter);
                             StreamUtils.safeClose(progressChannel);
@@ -1385,15 +1415,14 @@ public class SystemSessionProcess extends FlowProcess {
 
         
         // Create progress tracker
-        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("swap-progress", uiRenderer);
             
-            spawnChild(progressTracker, "swap-progress")
-                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-                .thenCompose(v -> registry.requestStreamChannel(
-                    contextPath, progressTracker.getContextPath()))
+            spawnChild(progressTracker)
+                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
+                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
-                    return appData.performSwap(analysis, progressWriter)
+                    return systemAccess.performSwap(analysis, progressWriter)
                         .whenComplete((v, ex)->{
                             StreamUtils.safeClose(progressWriter);
                             StreamUtils.safeClose(progressChannel);
@@ -1483,6 +1512,7 @@ public class SystemSessionProcess extends FlowProcess {
         getSecureInputDevice()
             .thenAccept(device -> {
                 PasswordSessionProcess session = new PasswordSessionProcess(
+                    "verify-old-password",
                     device,
                     uiRenderer,
                     "Enter OLD password (before change)",
@@ -1490,7 +1520,7 @@ public class SystemSessionProcess extends FlowProcess {
                 );
                 
                 session.onPasswordEntered(oldPassword -> {
-                    return appData.verifyOldPassword(oldPassword)
+                    return systemAccess.verifyOldPassword(oldPassword)
                         .thenApply(valid -> {
                             if (valid) {
                                 uiRenderer.render(UIProtocol.showMessage(
@@ -1507,8 +1537,8 @@ public class SystemSessionProcess extends FlowProcess {
                         });
                 });
                 
-                spawnChild(session, "verify-old-password")
-                    .thenCompose(path -> registry.startProcess(path));
+                spawnChild(session)
+                    .thenCompose(path -> registryInterface.startProcess(path));
             });
     }
 
@@ -1682,7 +1712,7 @@ public class SystemSessionProcess extends FlowProcess {
         uiRenderer.render(UIProtocol.showMessage(
             String.format("Deleting %d corrupted files...", corruptedFiles.size())));
         
-        appData.getNoteFileService().deleteCorruptedFiles(corruptedFiles)
+        systemAccess.deleteCorruptedFiles(corruptedFiles)
             .thenAccept(success -> {
                 if (success) {
                     uiRenderer.render(UIProtocol.showMessage(
@@ -1744,7 +1774,7 @@ public class SystemSessionProcess extends FlowProcess {
     private void listAllRegisteredFiles() {
         uiRenderer.render(UIProtocol.showMessage("Listing registered files..."));
         
-        appData.getNoteFileService().getFileCount()
+       systemAccess.getFileCount()
             .thenAccept(count -> {
                 uiRenderer.render(UIProtocol.showMessage(
                     String.format("Total registered files: %d\n\n" +
@@ -1779,7 +1809,7 @@ public class SystemSessionProcess extends FlowProcess {
             "Processing..."));
         
         // Step 1: Rollback SettingsData (swap keys)
-        appData.rollbackSettingsData()
+        systemAccess.rollbackSettingsData()
             .thenCompose(v -> {
                 uiRenderer.render(UIProtocol.showMessage(
                     "✓ SettingsData rolled back\n\n" +
@@ -1795,18 +1825,17 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 int batchSize = calculateAdaptiveBatchSize(analysis, 1024 * 1024); // 1MB mem limit
                 
-                ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+                ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("rollback-progress", uiRenderer);
                 
-                return spawnChild(progressTracker, "rollback-progress")
-                    .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-                    .thenCompose(voidResult -> registry.requestStreamChannel(
-                        contextPath, progressTracker.getContextPath()))
+                return spawnChild(progressTracker)
+                    .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
+                    .thenCompose(voidResult -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
                     .thenCompose(progressChannel -> {
                         AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                             progressChannel.getStream());
-                        
+                    
                         // Revert: newKey (now old) -> oldKey (now current)
-                        return appData.performRollback(analysis, progressWriter, batchSize)
+                        return systemAccess.performRollback(analysis, progressWriter, batchSize)
                             .whenComplete((result, ex) -> {
                                 StreamUtils.safeClose(progressWriter);
                                 StreamUtils.safeClose(progressChannel);
@@ -1819,7 +1848,7 @@ public class SystemSessionProcess extends FlowProcess {
                 if (success) {
                     // Clear recovery state
                     RecoveryFlags.clearRecoveryFlag();
-                    appData.clearOldKey();
+                    systemAccess.clearOldKey();
                     state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
                     
                     uiRenderer.render(UIProtocol.showMessage(
@@ -2027,17 +2056,15 @@ public class SystemSessionProcess extends FlowProcess {
         int batchSize = calculateAdaptiveBatchSize(analysis, 2 * 1024 * 1024); // 2MB
         
         // Create progress tracker
-        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess(uiRenderer);
+        ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("comprehensive-recovery", uiRenderer);
         
-        spawnChild(progressTracker, "comprehensive-recovery")
-            .thenCompose(trackerPath -> registry.startProcess(trackerPath))
-            .thenCompose(v -> registry.requestStreamChannel(
-                contextPath, progressTracker.getContextPath()))
+        spawnChild(progressTracker)
+            .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
+            .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
             .thenCompose(progressChannel -> {
-                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                    progressChannel.getStream());
+                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(progressChannel.getStream());
                 
-                return appData.performComprehensiveRecovery(
+                return systemAccess.performComprehensiveRecovery(
                     analysis, progressWriter, batchSize)
                     .whenComplete((result, ex) -> {
                         StreamUtils.safeClose(progressWriter);
@@ -2073,12 +2100,12 @@ public class SystemSessionProcess extends FlowProcess {
         private void recheckAndClearFlagIfResolved() {
         
         // Re-investigate to see if issues remain
-        appData.getNoteFileService().investigateFileEncryptionState()
+        systemAccess.investigateFileEncryption()
             .thenAccept(analysis -> {
                 if (!analysis.needsRecovery() && analysis.getCorruptedFiles().isEmpty()) {
                     // All resolved!
                     RecoveryFlags.clearRecoveryFlag();
-                    appData.clearOldKey();
+                    systemAccess.clearOldKey();
                     
                     state.removeState(SystemSessionStates.RECOVERY_REQUIRED);
                     
@@ -2091,12 +2118,12 @@ public class SystemSessionProcess extends FlowProcess {
                     uiRenderer.render(UIProtocol.showMessage(
                         "Some issues remain. Review recovery options."));
                     
-                    showRecoveryMenu(analysis, appData.hasOldKeyForRecovery());
+                    showRecoveryMenu(analysis, systemAccess.hasOldKeyForRecovery());
                 }
             })
             .exceptionally(ex -> {
                 System.err.println("Recheck failed: " + ex.getMessage());
-                showRecoveryMenu(null, appData.hasOldKeyForRecovery());
+                showRecoveryMenu(null, systemAccess.hasOldKeyForRecovery());
                 return null;
             });
     }
@@ -2140,7 +2167,7 @@ public class SystemSessionProcess extends FlowProcess {
         // Cancel current operation
         if (passwordSession != null) {
             passwordSession.cancel();
-            registry.unregisterProcess(passwordSession.getContextPath());
+            registryInterface.unregisterProcess(passwordSession.getContextPath());
             passwordSession = null;
         }
         
@@ -2212,7 +2239,7 @@ public class SystemSessionProcess extends FlowProcess {
     /**
      * Get AppData (primary interface)
      */
-    public AppData getAppData() {
+    public SystemRuntime getAppData() {
         return appData;
     }
     

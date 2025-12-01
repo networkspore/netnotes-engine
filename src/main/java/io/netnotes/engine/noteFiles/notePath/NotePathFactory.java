@@ -155,7 +155,7 @@ public class NotePathFactory {
     }
 
 
-     protected CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
+     protected CompletableFuture<Boolean> updateFilePathLedgerEncryption(
         File filePathLedger,
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,

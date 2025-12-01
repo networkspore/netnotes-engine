@@ -702,6 +702,36 @@ public class ByteDecoding{
         return c;
     }
 
+     public static NoteBytes concat(NoteBytes a, NoteBytes... list) {
+        int len = a.byteLength();
+
+        // Count total length
+        for (NoteBytes b : list) {
+            len += b.byteLength();
+        }
+
+        // Allocate once
+        byte[] dst = new byte[len];
+
+        // Copy first
+        int pos = 0;
+        byte[] aBytes = a.get();
+        System.arraycopy(aBytes, 0, dst, 0, aBytes.length);
+        pos += aBytes.length;
+        byte type = a.getType();
+        // Copy rest
+        for (NoteBytes b : list) {
+            byte[] bBytes = b.get();
+            if(b.getType() != type){
+               type = NoteBytesMetaData.RAW_BYTES_TYPE;
+            }
+            System.arraycopy(bBytes, 0, dst, pos, bBytes.length);
+            pos += bBytes.length;
+        }
+
+        return new NoteBytes(dst, type);
+    }
+
 
      public static char[] utf16BytesToChars(byte[] bytes){
         return utf16BytesToChars(bytes, 0,bytes.length);

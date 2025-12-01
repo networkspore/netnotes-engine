@@ -169,6 +169,38 @@ public class NoteBytesReadOnly extends NoteBytes {
         return getAsString().equals(str);
     }
 
+    @Override
+    public NoteBytesReadOnly concat(NoteBytes... list) {
+        int len = byteLength();
+
+        // Count total length
+        for (NoteBytes b : list) {
+            len += b.byteLength();
+        }
+
+        // Allocate once
+        byte[] dst = new byte[len];
+
+        // Copy first
+        int pos = 0;
+        byte[] aBytes = getBytesInternal();
+        System.arraycopy(aBytes, 0, dst, 0, aBytes.length);
+        pos += aBytes.length;
+        
+        byte type = getType();
+        // Copy rest
+        for (NoteBytes b : list) {
+            byte[] bBytes = b instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : b.get();
+            if(b.getType() != type){
+               type = NoteBytesMetaData.RAW_BYTES_TYPE;
+            }
+            System.arraycopy(bBytes, 0, dst, pos, bBytes.length);
+            pos += bBytes.length;
+        }
+
+        return new NoteBytesReadOnly(dst, type);
+    }
+
 
 
     public static NoteBytesReadOnly of(Object obj) {

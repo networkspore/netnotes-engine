@@ -36,12 +36,14 @@ public class PasswordSessionProcess extends FlowProcess {
     private final CompletableFuture<Boolean> result = new CompletableFuture<>();
     
     public PasswordSessionProcess(
-            InputDevice inputDevice,
-            UIRenderer uiRenderer,
-            String prompt,
-            int maxAttempts) {
+        String name,
+        InputDevice inputDevice,
+        UIRenderer uiRenderer,
+        String prompt,
+        int maxAttempts
+    ) {
         
-        super(ProcessType.SINK);
+        super(name, ProcessType.SINK);
         this.inputDevice = inputDevice;
         this.uiRenderer = uiRenderer;
         this.prompt = prompt;

@@ -2,9 +2,9 @@ package io.netnotes.engine.core.system.control.nodes;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.AppData;
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
+import io.netnotes.engine.io.process.ProcessRegistryInterface;
 
 /**
  * NodeLoader - Loads nodes from packages (OSGi integration)
@@ -17,13 +17,14 @@ import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
  * For now, focuses on OSGi bundles
  */
 class NodeLoader {
-    
-    private final AppDataInterface appDataInterface;
+    private final ProcessRegistryInterface processInterface;
+    private final NoteFileServiceInterface fileInterface;
     private final OSGiBundleLoader osgiBundleLoader;
     
-    public NodeLoader(AppDataInterface appDataInterface) {
-        this.appDataInterface = appDataInterface;
-        this.osgiBundleLoader = new OSGiBundleLoader(appDataInterface);
+    public NodeLoader(ProcessRegistryInterface processInterface, NoteFileServiceInterface fileInterface) {
+        this.processInterface = processInterface;
+        this.fileInterface = fileInterface;
+        this.osgiBundleLoader = new OSGiBundleLoader(fileInterface);
     }
     
     /**

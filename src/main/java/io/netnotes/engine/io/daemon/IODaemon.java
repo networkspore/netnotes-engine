@@ -33,7 +33,6 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 /**
@@ -72,8 +71,8 @@ public class IODaemon extends FlowProcess {
      * Functional interface for routed message handlers (with packet context for reply)
      */
     
-    public IODaemon(String socketPath) {
-        super(ProcessType.BIDIRECTIONAL);
+    public IODaemon(String name, String socketPath) {
+        super(name, ProcessType.BIDIRECTIONAL);
         this.socketPath = socketPath;
         
         setupMessageMapping();
@@ -343,35 +342,36 @@ public class IODaemon extends FlowProcess {
     public CompletableFuture<ContextPath> createSession(String sessionId, int clientPid) {
         ContextPath sessionPath = contextPath.append(sessionId);
         
-        if (registry.exists(sessionPath)) {
+        if (registryInterface.exists(sessionPath)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Session already exists: " + sessionId));
         }
         
         ClientSession session = new ClientSession(sessionId, clientPid);
-        registry.registerProcess(session, sessionPath, contextPath);
-        
-        // Authenticate session
-        session.state.addState(ClientStateFlags.CONNECTED);
-        session.state.addState(ClientStateFlags.AUTHENTICATED);
-        
-        registry.startProcess(sessionPath);
-        
-        // Bidirectional connection for request-reply
-        registry.connect(contextPath, sessionPath);
-        registry.connect(sessionPath, contextPath);
-        
-        System.out.println("Created session: " + sessionPath);
-        return CompletableFuture.completedFuture(sessionPath);
+     
+
+        return spawnChild(session).thenApply(path->{
+            session.state.addState(ClientStateFlags.CONNECTED);
+            session.state.addState(ClientStateFlags.AUTHENTICATED);
+            
+            registryInterface.startProcess(sessionPath);
+            
+            // Bidirectional connection for request-reply
+            registryInterface.connect(contextPath, sessionPath);
+            registryInterface.connect(sessionPath, contextPath);
+            return path;
+        });
+      
+       
     }
     
     public ClientSession getSession(String sessionId) {
         ContextPath sessionPath = contextPath.append(sessionId);
-        return (ClientSession) registry.getProcess(sessionPath);
+        return (ClientSession) registryInterface.getProcess(sessionPath);
     }
     
     public List<ClientSession> getSessions() {
-        return registry.findChildrenByType(contextPath, ClientSession.class);
+        return registryInterface.findChildrenByType(ClientSession.class);
     }
     
     private ClientSession findSessionForDevice(String deviceId) {
@@ -556,7 +556,7 @@ public class IODaemon extends FlowProcess {
         List<ClientSession> sessions = getSessions();
         for (ClientSession session : sessions) {
             session.state.addState(ClientStateFlags.DISCONNECTING);
-            registry.unregisterProcess(session.getContextPath());
+            registryInterface.unregisterProcess(session.getContextPath());
         }
         
         System.out.println("Disconnected from daemon, cleaned up " + sessions.size() + " sessions");
@@ -567,7 +567,7 @@ public class IODaemon extends FlowProcess {
         if (connected) {
             NoteBytesObject shutdown = new NoteBytesObject();
             shutdown.add(Keys.TYPE, EventBytes.TYPE_SHUTDOWN);
-            shutdown.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            shutdown.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             
             try {
                 asyncWriter.writeSync(shutdown);

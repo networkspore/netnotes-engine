@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.ui.UICommands;
 import io.netnotes.engine.core.system.control.ui.UIProtocol;
@@ -40,7 +40,7 @@ public class NodeManagerProcess extends FlowProcess {
     private final BitFlagStateMachine state;
     private final InstallationRegistry installationRegistry;  // NEW: Direct reference
     private final RepositoryManager repositoryManager;        // NEW: Direct reference
-    private final AppDataInterface packagesInterface;         // NEW: For package installation
+    private final NoteFileServiceInterface packagesInterface;         // NEW: For package installation
     private final UIRenderer uiRenderer;
     
     // Package cache (in-memory only)
@@ -75,14 +75,14 @@ public class NodeManagerProcess extends FlowProcess {
      * @param uiRenderer UI implementation
      */
     public NodeManagerProcess(
-            ContextPath myPath,
+        String name,
             InstallationRegistry installationRegistry,
             RepositoryManager repositoryManager,
-            AppDataInterface packagesInterface,
-            UIRenderer uiRenderer) {
+            NoteFileServiceInterface packagesInterface,
+            UIRenderer uiRenderer
+    ) {
         
-        super(ProcessType.BIDIRECTIONAL);
-        this.contextPath = myPath;  // Set FlowProcess path
+        super(name, ProcessType.BIDIRECTIONAL);
         this.installationRegistry = installationRegistry;
         this.repositoryManager = repositoryManager;
         this.packagesInterface = packagesInterface;

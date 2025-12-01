@@ -9,7 +9,6 @@ import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.utils.AtomicSequence;
 
 import java.io.*;
 import java.util.*;
@@ -505,7 +504,7 @@ public class IODaemonProtocol {
         public static NoteBytesObject createCommand(NoteBytesReadOnly command, NoteBytesPair... params) {
             NoteBytesObject msg = new NoteBytesObject();
             msg.add(Keys.TYPE, EventBytes.TYPE_CMD);
-            msg.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             msg.add(Keys.CMD, command);
             
             for (NoteBytesPair param : params) {
@@ -518,7 +517,7 @@ public class IODaemonProtocol {
         public static NoteBytesObject createError(int errorCode, String message) {
             NoteBytesObject msg = new NoteBytesObject();
             msg.add(Keys.TYPE, EventBytes.TYPE_ERROR);
-            msg.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             msg.add(Keys.ERROR_CODE, errorCode);
             msg.add(Keys.MSG, message);
             return msg;
@@ -527,7 +526,7 @@ public class IODaemonProtocol {
         public static NoteBytesObject createAccept(String status) {
             NoteBytesObject msg = new NoteBytesObject();
             msg.add(Keys.TYPE, EventBytes.TYPE_ACCEPT);
-            msg.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             msg.add(Keys.STATUS, status);
             return msg;
         }

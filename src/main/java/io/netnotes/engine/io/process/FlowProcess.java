@@ -2,11 +2,8 @@ package io.netnotes.engine.io.process;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.*;
+import io.netnotes.engine.noteBytes.collections.*;
 
 import java.time.Duration;
 import java.util.*;
@@ -15,36 +12,26 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 /**
- * Process - Universal base class for ALL system components.
+ * FlowProcess - Universal base class for ALL system components
  * 
- * Unified Design:
- * - Input sources (keyboard, mouse) are processes that PRODUCE packets
- * - Compute processes TRANSFORM packets (input → output)
- * - Sink processes CONSUME packets (logger, renderer)
- * - All use Reactive Streams for backpressure and flow control
- * 
- * Process Types:
- * - SOURCE: Generates packets (keyboard, mouse, network, timers)
- * - TRANSFORM: Receives and sends (workers, filters, routers)
- * - SINK: Only receives (loggers, file writers, UI renderers)
- * - BIDIRECTIONAL: Both sends and receives (databases, network connections)
- * 
- * Key Features:
- * - CompletableFuture-based async API
- * - Request-reply pattern support
- * - Virtual thread-friendly
- * - Composable (pipeline, map-reduce, scatter-gather)
- * - Automatic backpressure management
+ * REFACTORED:
+ * - No longer has direct registry access
+ * - Uses ProcessRegistryInterface for controlled access
+ * - Interface is set during initialization (not constructor)
+ * - Bootstrap processes get BootstrapProcessInterface
+ * - Node processes get ScopedProcessInterface
  */
 public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== IDENTITY =====
-    public ContextPath contextPath;
-    public FlowProcessId processId;  // Derived from contextPath
-    public ContextPath parentPath;
+    protected ContextPath contextPath;
+    protected FlowProcessId processId;
+    protected ContextPath parentPath;
     
-    // ===== REGISTRY =====
-    public FlowProcessRegistry registry;
+    // ===== REGISTRY ACCESS (Interface, not direct) =====
+    // Changed from: public FlowProcessRegistry registry
+    // To: protected ProcessRegistryInterface registryInterface
+    protected ProcessRegistryInterface registryInterface;
     
     // ===== LIFECYCLE =====
     private volatile boolean alive = true;
@@ -54,12 +41,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     private final CompletableFuture<Void> completionFuture = new CompletableFuture<>();
     
     // ===== REACTIVE STREAMS =====
-    
-    // Incoming: We are a SUBSCRIBER (receive packets)
     private final ProcessSubscriber incomingSubscriber = new ProcessSubscriber();
     private Flow.Subscription incomingSubscription;
-    
-    // Outgoing: We are a PUBLISHER (send packets)
     private final SubmissionPublisher<RoutedPacket> outgoingPublisher;
     private final ExecutorService publisherExecutor;
     
@@ -70,61 +53,90 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== PROCESS TYPE =====
     private final ProcessType processType;
+    private final String name;
     
     /**
      * Constructor - specify process type
+     * 
+     * NO registry reference in constructor!
+     * Registry interface is set later during initialize()
      */
-    public FlowProcess(ProcessType type) {
+    public FlowProcess(String name, ProcessType type) {
+        if (name == null || name.isEmpty()) {
+            throw new IllegalArgumentException("Process name required");
+        }
+        if (name.contains("/") || name.contains("\\")) {
+            throw new IllegalArgumentException(
+                "Process name cannot contain path separators: " + name);
+        }
+
         this.processType = type;
+        this.name = name;
         this.publisherExecutor = getExecutorForType(type);
         this.outgoingPublisher = new SubmissionPublisher<>(
             publisherExecutor,
             getBufferSizeForType(type)
         );
     }
+
+    public String getName() {
+        return name;
+    }
+    
+    // ===== INITIALIZATION =====
+    
+     /**
+     * Initialize - called by registrar
+     * 
+     * Path is computed from parent + name
+     * 
+     * @param parentPath Parent's path
+     * @param registryInterface Interface for registry operations
+     */
+    public void initialize(
+            ContextPath parentPath,
+            ProcessRegistryInterface registryInterface) {
+        
+        // Compute path: parent + name
+        if (parentPath == null) {
+            // Root process - name IS the path
+            this.contextPath = ContextPath.of(name);
+        } else {
+            // Child process - append name to parent
+            this.contextPath = parentPath.append(name);
+        }
+        
+        this.processId = new FlowProcessId(contextPath);
+        this.parentPath = parentPath;
+        this.registryInterface = registryInterface;
+        this.startTime = System.currentTimeMillis();
+        
+        System.out.println("[FlowProcess] Initialized: " + contextPath + 
+            " (name: " + name + ", interface: " + 
+            registryInterface.getClass().getSimpleName() + ")");
+    }
     
     // ===== CORE LIFECYCLE METHODS =====
     
-    /**
-     * Main execution method - override for long-running processes.
-     * SOURCE processes typically run forever, generating packets.
-     * TRANSFORM/SINK processes can return immediately.
-     */
     public CompletableFuture<Void> run() {
         return CompletableFuture.completedFuture(null);
     }
     
-    /**
-     * Handle incoming packet - MAIN METHOD FOR TRANSFORM/SINK PROCESSES
-     * SOURCE processes typically don't override this.
-     */
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         return CompletableFuture.completedFuture(null);
     }
     
-    /**
-     * Configure backpressure for INCOMING messages
-     */
     public BackpressureStrategy getBackpressureStrategy() {
         return switch (processType) {
-            case SOURCE -> BackpressureStrategy.UNBOUNDED; // Sources generate, don't receive
+            case SOURCE -> BackpressureStrategy.UNBOUNDED;
             case TRANSFORM -> BackpressureStrategy.BUFFERED_100;
             case SINK -> BackpressureStrategy.BUFFERED_100;
             case BIDIRECTIONAL -> BackpressureStrategy.BUFFERED_100;
         };
     }
     
-
-    /**
-     * Handles stream messages from a stream channel
-     * 
-     */
-     public abstract void handleStreamChannel(StreamChannel channel, ContextPath fromPath);
+    public abstract void handleStreamChannel(StreamChannel channel, ContextPath fromPath);
     
-
-    /**
-     * Lifecycle hooks
-     */
     public void onStart() {}
     public void onStop() {}
     public void onStreamError(Throwable error) {
@@ -133,41 +145,34 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     public void onStreamComplete() {}
     
-    // ===== OUTGOING PACKET EMISSION (PUBLISHER) =====
+    // ===== OUTGOING PACKET EMISSION =====
     
-    /**
-     * Emit a packet to all subscribers.
-     * Use this in SOURCE processes to generate events.
-     * Use this in TRANSFORM processes to send output.
-     */
     public void emit(RoutedPacket packet) {
         if (!alive) return;
         
         try {
             int lag = outgoingPublisher.submit(packet);
             if (lag > 100) {
-                System.out.println("WARNING: " + contextPath + " downstream lagging (buffer: " + lag + ")");
+                System.out.println("WARNING: " + contextPath + 
+                    " downstream lagging (buffer: " + lag + ")");
             }
         } catch (Exception e) {
             System.err.println("Error emitting packet: " + e.getMessage());
         }
     }
     
-    public void emit(NoteBytesMap map){
+    public void emit(NoteBytesMap map) {
         emit(map.getNoteBytesObject());
     }
-
-    public void emit(NoteBytesObject object){
+    
+    public void emit(NoteBytesObject object) {
         emit(object.readOnly());
     }
-
-    /**
-     * Emit with automatic source path stamping
-     */
+    
     public void emit(NoteBytesReadOnly payload) {
         emit(RoutedPacket.create(contextPath, payload));
     }
-
+    
     public void emitTo(ContextPath destination, NoteBytesPair... pairs) {
         emitTo(destination, new NoteBytesObject(pairs));
     }
@@ -175,26 +180,24 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     public void emitTo(ContextPath destination, NoteBytesMap payload) {
         emitTo(destination, payload.getNoteBytesObject());
     }
-
+    
     public void emitTo(ContextPath destination, NoteBytesObject payload) {
         emitTo(destination, payload.readOnly());
     }
-    /**
-     * Emit to specific destination
-     */
+    
     public void emitTo(ContextPath destination, NoteBytesReadOnly payload) {
         emit(RoutedPacket.createDirect(contextPath, destination, payload));
     }
     
-    // ===== PUBLISHER INTERFACE IMPLEMENTATION =====
+    // ===== PUBLISHER INTERFACE =====
     
     @Override
     public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber) {
         outgoingPublisher.subscribe(subscriber);
     }
     
-    public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber, ContextPath filterPath) {
-        // Wrap subscriber with filter
+    public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber, 
+                         ContextPath filterPath) {
         Flow.Subscriber<RoutedPacket> filteredSubscriber = new Flow.Subscriber<>() {
             @Override
             public void onSubscribe(Flow.Subscription subscription) {
@@ -221,26 +224,17 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         
         outgoingPublisher.subscribe(filteredSubscriber);
     }
-    /**
-     * Get number of downstream subscribers
-     */
+    
     public int getSubscriberCount() {
         return outgoingPublisher.getNumberOfSubscribers();
     }
     
-    /**
-     * Check if anyone is listening
-     */
     public boolean hasSubscribers() {
         return getSubscriberCount() > 0;
     }
     
-    // ===== INCOMING PACKET SUBSCRIPTION (SUBSCRIBER) =====
+    // ===== INCOMING PACKET SUBSCRIPTION =====
     
-    /**
-     * Get subscriber for incoming packets.
-     * Used by registry to wire up message flow.
-     */
     public Flow.Subscriber<RoutedPacket> getSubscriber() {
         return incomingSubscriber;
     }
@@ -266,12 +260,10 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             
             pending.decrementAndGet();
             
-            // Check if this is a reply to pending request
             if (packet.hasMetadata("correlationId")) {
                 handleReply(packet);
             }
             
-            // Process message asynchronously
             handleMessage(packet)
                 .exceptionally(ex -> {
                     onError(ex);
@@ -329,14 +321,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     // ===== REQUEST-REPLY PATTERN =====
-
+    
     public CompletableFuture<RoutedPacket> request(
             ContextPath targetPath,
-            Duration timeout, NoteBytesPair... pairs) {
+            Duration timeout, 
+            NoteBytesPair... pairs) {
         return request(targetPath, new NoteBytesObject(pairs), timeout);
     }
     
-
     public CompletableFuture<RoutedPacket> request(
             ContextPath targetPath,
             NoteBytesMap map,
@@ -350,20 +342,17 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             Duration timeout) {
         return request(targetPath, object.readOnly(), timeout);
     }
-    /**
-     * Send request and wait for reply
-     */
+    
     public CompletableFuture<RoutedPacket> request(
             ContextPath targetPath,
             NoteBytesReadOnly payload,
             Duration timeout) {
         
-        String correlationId = generateCorrelationId();
+        String correlationId = processId.getNextCorrelationId();
         CompletableFuture<RoutedPacket> future = new CompletableFuture<>();
         
         pendingRequests.put(correlationId, future);
         
-        // Create request packet
         RoutedPacket request = RoutedPacket
             .createDirect(contextPath, targetPath, payload)
             .withMetadata("correlationId", correlationId)
@@ -377,7 +366,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
                 Thread.sleep(timeout.toMillis());
                 CompletableFuture<RoutedPacket> pending = pendingRequests.remove(correlationId);
                 if (pending != null && !pending.isDone()) {
-                    pending.completeExceptionally(new TimeoutException("Request timed out"));
+                    pending.completeExceptionally(
+                        new TimeoutException("Request timed out"));
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -386,14 +376,11 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         
         return future;
     }
-
+    
     public void reply(RoutedPacket originalRequest, NoteBytes payload) {
         reply(originalRequest, payload.readOnly());
     }
     
-    /**
-     * Reply to a request
-     */
     public void reply(RoutedPacket originalRequest, NoteBytesReadOnly payload) {
         String correlationId = originalRequest.getMetadataString("correlationId");
         String replyTo = originalRequest.getMetadataString("replyTo");
@@ -410,7 +397,6 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         emit(reply);
     }
     
-
     private void handleReply(RoutedPacket reply) {
         String correlationId = reply.getMetadataString("correlationId");
         if (correlationId != null) {
@@ -421,17 +407,102 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         }
     }
     
+    // ===== CHILD PROCESS MANAGEMENT (Uses interface!) =====
+    
+    /**
+     * Spawn child - name determines path automatically
+     * 
+     * OLD: spawnChild(child, "worker-1")
+     * NEW: Same, but path = this.path + "worker-1"
+     * 
+     * Child's name must match what you pass here!
+     */
+    public CompletableFuture<ContextPath> spawnChild(FlowProcess child) {
+        if (registryInterface == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Process not initialized"));
+        }
+        
+        return CompletableFuture.supplyAsync(() -> {
+            // Interface computes child path = parent path + child name
+            return registryInterface.registerChild(child);
+        }, virtualExecutor);
+    }
+    
+    /**
+     * Start a child process
+     * 
+     * Uses interface for validation
+     */
+    public CompletableFuture<Void> startChild(ContextPath childPath) {
+        if (registryInterface == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Process not initialized"));
+        }
+        
+        return registryInterface.startChild(childPath);
+    }
+
+    
+    
+    /**
+     * Get a process (read-only)
+     * 
+     * Uses interface - scoped processes can only access reachable processes
+     */
+    public FlowProcess getProcess(ContextPath path) {
+        if (registryInterface == null) {
+            throw new IllegalStateException("Process not initialized");
+        }
+        
+        return registryInterface.getProcess(path);
+    }
+    
+    /**
+     * Request stream channel to another process
+     * 
+     * Uses interface - validates reachability
+     */
+    public CompletableFuture<StreamChannel> requestStreamChannel(ContextPath target) {
+        if (registryInterface == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Process not initialized"));
+        }
+        
+        return registryInterface.requestStreamChannel(target);
+    }
+    
+    /**
+     * Get children of this process
+     */
+    public List<ContextPath> getChildren() {
+        if (registryInterface == null) {
+            return Collections.emptyList();
+        }
+        
+        return registryInterface.getChildren();
+    }
+    
+    // ===== PROTECTED INTERFACE ACCESS =====
+    
+    /**
+     * Get registry interface (for subclasses that need advanced operations)
+     * 
+     * Protected - only subclasses can access
+     * Still goes through interface (not direct service)
+     */
+    protected ProcessRegistryInterface getRegistryInterface() {
+        return registryInterface;
+    }
+    
     // ===== COMPOSITION PATTERNS =====
     
-   
     public CompletableFuture<RoutedPacket> pipeline(
             NoteBytes input,
             ContextPath... stages) {
         return pipeline(input.readOnly(), stages);
     }
-    /**
-     * Pipeline: chain multiple processes
-     */
+    
     public CompletableFuture<RoutedPacket> pipeline(
             NoteBytesReadOnly input,
             ContextPath... stages) {
@@ -454,9 +525,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             Duration timeout) {
         return scatterGather(input.readOnly(), targets, timeout);
     }
-    /**
-     * Scatter-gather: parallel fan-out then collect
-     */
+    
     public CompletableFuture<List<RoutedPacket>> scatterGather(
             NoteBytesReadOnly input,
             Collection<ContextPath> targets,
@@ -473,11 +542,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
                 .filter(Objects::nonNull)
                 .toList());
     }
-
-
-    /**
-     * Map-reduce: transform in parallel, then reduce
-     */
+    
     public <T> CompletableFuture<T> mapReduce(
             Collection<NoteBytes> inputs,
             ContextPath mapper,
@@ -497,9 +562,6 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== VIRTUAL THREAD HELPERS =====
     
-    /**
-     * Block safely (virtual threads make this cheap)
-     */
     public <T> T await(CompletableFuture<T> future) {
         return await(future, Duration.ofSeconds(30));
     }
@@ -526,44 +588,17 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         }
     }
     
-    // ===== CHILD PROCESS MANAGEMENT =====
-    
-    public CompletableFuture<ContextPath> spawnChild(
-            FlowProcess child,
-            String childName) {
-        
-        return CompletableFuture.supplyAsync(() -> {
-            ContextPath childPath = contextPath.append(childName);
-            return registry.registerProcess(child, childPath, this.contextPath);
-        }, virtualExecutor);
-    }
-    
     // ===== LIFECYCLE CONTROL =====
-
-    protected FlowProcessRegistry getFlowProcessRegistry(){
-        return registry;
-    }
-    
-    public void initialize(ContextPath path, ContextPath parentPath, FlowProcessRegistry registry) {
-        this.contextPath = path;
-        this.processId = new FlowProcessId(path.hashCode());
-        this.parentPath = parentPath;
-        this.registry = registry;
-        this.startTime = System.currentTimeMillis();
-    }
     
     public void kill() {
         killed = true;
         alive = false;
         
-        // Cancel pending requests
         pendingRequests.values().forEach(f -> 
             f.completeExceptionally(new CancellationException("Process killed")));
         pendingRequests.clear();
         
-        // Close publisher
         outgoingPublisher.close();
-        
         completionFuture.complete(null);
     }
     
@@ -622,10 +657,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== UTILITIES =====
     
-    private String generateCorrelationId() {
-        return processId.asString();
-    }
-    
+
     private ExecutorService getExecutorForType(ProcessType type) {
         return switch (type) {
             case SOURCE, BIDIRECTIONAL -> Executors.newVirtualThreadPerTaskExecutor();
@@ -636,9 +668,9 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     private int getBufferSizeForType(ProcessType type) {
         return switch (type) {
-            case SOURCE -> 1000;  // Sources generate lots of events
+            case SOURCE -> 1000;
             case TRANSFORM -> 256;
-            case SINK -> 100;     // Sinks don't need large buffers
+            case SINK -> 100;
             case BIDIRECTIONAL -> 256;
         };
     }
@@ -646,36 +678,9 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     // ===== ENUMS =====
     
     public enum ProcessType {
-        /**
-         * SOURCE: Generates packets (keyboard, mouse, timers, network input)
-         * - Typically runs forever in run()
-         * - Calls emit() to send packets
-         * - Usually doesn't receive packets
-         */
         SOURCE,
-        
-        /**
-         * TRANSFORM: Receives packets, transforms them, emits new packets
-         * - Overrides handleMessage()
-         * - Calls emit() to send results
-         * - Examples: filters, parsers, routers
-         */
         TRANSFORM,
-        
-        /**
-         * SINK: Only receives packets (loggers, file writers, UI renderers)
-         * - Overrides handleMessage()
-         * - Does NOT emit packets
-         * - Terminal nodes in the flow
-         */
         SINK,
-        
-        /**
-         * BIDIRECTIONAL: Both generates and receives (databases, connections)
-         * - Overrides both run() and handleMessage()
-         * - Can emit() at any time
-         * - Examples: database connections, network sockets
-         */
         BIDIRECTIONAL
     }
     

@@ -4,7 +4,7 @@ package io.netnotes.engine.core.system.control.nodes;
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteFiles.NoteFile;
@@ -24,8 +24,8 @@ import io.netnotes.engine.utils.streams.UrlStreamHelpers;
  */
 public class PackageInstaller {
 
-    private final AppDataInterface appDataInterface;
-    public PackageInstaller(AppDataInterface appDataInteface) {
+    private final NoteFileServiceInterface appDataInterface;
+    public PackageInstaller(NoteFileServiceInterface appDataInteface) {
         this.appDataInterface = appDataInteface;
     }
     

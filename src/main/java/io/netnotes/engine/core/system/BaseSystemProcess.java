@@ -11,6 +11,8 @@ import io.netnotes.engine.io.daemon.ClientSession;
 import io.netnotes.engine.io.daemon.IODaemon;
 import io.netnotes.engine.io.input.KeyboardInput;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.FlowProcessService;
+import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
@@ -42,8 +44,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * - ERROR: Fatal error occurred
  */
 public class BaseSystemProcess extends FlowProcess {
-    
+    public static final String NAME = "system";
+    private final FlowProcessService processService;
     private final BitFlagStateMachine state;
+    private final ProcessRegistryInterface bootstrapInterface;
     private NoteBytesMap bootstrapConfig;
     private final Map<ContextPath, SystemSessionProcess> activeSessions = 
         new ConcurrentHashMap<>();
@@ -68,11 +72,14 @@ public class BaseSystemProcess extends FlowProcess {
     /**
      * Private constructor - use factory method
      */
-    private BaseSystemProcess(KeyboardInput guiKeyboard, UIRenderer uiRenderer) {
-        super(ProcessType.BIDIRECTIONAL);
+    private BaseSystemProcess(FlowProcessService processService, ProcessRegistryInterface bootstrapInterface, KeyboardInput guiKeyboard, UIRenderer uiRenderer) {
+        super(NAME, ProcessType.BIDIRECTIONAL);
         this.guiKeyboard = guiKeyboard;
         this.uiRenderer = uiRenderer;
-        this.state = new BitFlagStateMachine("base-system");
+        this.processService = processService;
+        this.bootstrapInterface = bootstrapInterface;
+
+        this.state = new BitFlagStateMachine(contextPath.toString());
         
         if (guiKeyboard == null) {
             throw new IllegalArgumentException("GUI keyboard required (null provided)");
@@ -93,10 +100,17 @@ public class BaseSystemProcess extends FlowProcess {
      * @return Initialized BaseSystemProcess
      */
     public static CompletableFuture<BaseSystemProcess> bootstrap(
+            FlowProcessService registry,
+            ProcessRegistryInterface bootstrapInterface,
             KeyboardInput guiKeyboard, 
-            UIRenderer uiRenderer) {
+            UIRenderer uiRenderer
+        ) {
+
         
-        BaseSystemProcess process = new BaseSystemProcess(guiKeyboard, uiRenderer);
+        BaseSystemProcess process = new BaseSystemProcess(registry, bootstrapInterface, guiKeyboard, uiRenderer);
+
+
+        bootstrapInterface.registerChild(process);
         
         return process.initialize()
             .thenApply(v -> process);
@@ -131,8 +145,7 @@ public class BaseSystemProcess extends FlowProcess {
     private CompletableFuture<Void> initialize() {
         state.addState(INITIALIZING);
         
-        return registerSelfInRegistry()
-            .thenCompose(v -> startGUIKeyboard())
+        return startGUIKeyboard()
             .thenCompose(v -> initializeUIRenderer())
             .thenCompose(v -> loadOrCreateBootstrapConfig())
             .thenCompose(config -> {
@@ -154,18 +167,12 @@ public class BaseSystemProcess extends FlowProcess {
             });
     }
     
-    private CompletableFuture<Void> registerSelfInRegistry() {
-        ContextPath basePath = ContextPath.of("system", "base");
-        registry.registerProcess(this, basePath, null);
-        return CompletableFuture.completedFuture(null);
-    }
-    
     /**
      * Start GUI keyboard as child process (always available)
      */
     private CompletableFuture<Void> startGUIKeyboard() {
-        return spawnChild(guiKeyboard, "gui-keyboard")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(guiKeyboard)
+            .thenCompose(path -> bootstrapInterface.startProcess(path))
             .thenRun(() -> {
                 System.out.println("[BaseSystem] GUI keyboard available at: " + 
                     guiKeyboard.getContextPath());
@@ -216,16 +223,16 @@ public class BaseSystemProcess extends FlowProcess {
      * Launch interactive bootstrap wizard
      */
     private CompletableFuture<NoteBytesMap> launchBootstrapWizard() {
-        bootstrapWizard = new BootstrapWizardProcess(uiRenderer);
+        bootstrapWizard = new BootstrapWizardProcess("bootstrap-wizard", uiRenderer);
         
-        return spawnChild(bootstrapWizard, "bootstrap-wizard")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(bootstrapWizard)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenCompose(v -> bootstrapWizard.getCompletionFuture())
             .thenApply(v -> {
                 NoteBytesMap config = bootstrapWizard.getBootstrapConfig();
                 
                 // Clean up wizard
-                registry.unregisterProcess(bootstrapWizard.getContextPath());
+                registryInterface.unregisterProcess(bootstrapWizard.getContextPath());
                 bootstrapWizard = null;
                 
                 state.removeState(BOOTSTRAP_RUNNING);
@@ -250,10 +257,10 @@ public class BaseSystemProcess extends FlowProcess {
     
     private CompletableFuture<Void> startIODaemon() {
         String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
-        ioDaemon = new IODaemon(socketPath);
+        ioDaemon = new IODaemon("base-io-daemon",socketPath);
         
-        return spawnChild(ioDaemon, "io-daemon")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(ioDaemon)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenRun(() -> {
                 System.out.println("[BaseSystem] IODaemon started at: " + socketPath);
             })
@@ -278,7 +285,7 @@ public class BaseSystemProcess extends FlowProcess {
         
         return ioDaemon.createSession(sessionId, pid)
             .thenCompose(sessionPath -> {
-                systemClientSession = (ClientSession) registry.getProcess(sessionPath);
+                systemClientSession = (ClientSession) processService.getProcess(sessionPath);
                 System.out.println("[BaseSystem] System session created: " + sessionPath);
                 
                 // Discover devices immediately
@@ -305,13 +312,11 @@ public class BaseSystemProcess extends FlowProcess {
         SystemSessionProcess session = new SystemSessionProcess(
             sessionId, type, sessionUIRenderer);
         
-        ContextPath sessionPath = contextPath.append("sessions", sessionId);
-        
         return CompletableFuture.supplyAsync(() -> {
-            registry.registerProcess(session, sessionPath, contextPath);
+            ContextPath sessionPath = registryInterface.registerChild(session);
             activeSessions.put(sessionPath, session);
             
-            registry.startProcess(sessionPath);
+            registryInterface.startProcess(sessionPath);
             
             System.out.println("[BaseSystem] Created session: " + sessionId + 
                 " (type: " + type + ")");
@@ -520,10 +525,10 @@ public class BaseSystemProcess extends FlowProcess {
         System.out.println("[BaseSystem] Secure input installation requested");
         
         String os = System.getProperty("os.name");
-        SecureInputInstaller installer = new SecureInputInstaller(os, uiRenderer);
+        SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
         
-        return spawnChild(installer, "installer")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(installer)
+            .thenCompose(path -> registryInterface.startProcess(installer.getContextPath()))
             .thenCompose(v -> installer.getCompletionFuture())
             .thenCompose(v -> {
                 if (!installer.isComplete()) {
@@ -634,7 +639,7 @@ public class BaseSystemProcess extends FlowProcess {
         if (ioDaemon != null) {
             System.out.println("[BaseSystem] Stopping IODaemon");
             ioDaemon.kill();
-            registry.unregisterProcess(ioDaemon.getContextPath());
+            registryInterface.unregisterProcess(ioDaemon.getContextPath());
             ioDaemon = null;
         }
         

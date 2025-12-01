@@ -12,6 +12,8 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 public class GitHubInfo {
 
+    public static final GitHubInfo NETNOTES_OFFICIAL_REPO = new GitHubInfo("networkspore", "Netnotes-Resources");
+
     private final String m_user;
     private final String m_project;
     private final String m_branch;

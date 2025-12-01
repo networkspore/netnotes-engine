@@ -5,7 +5,7 @@ import org.osgi.framework.launch.Framework;
 import org.osgi.framework.launch.FrameworkFactory;
 import org.osgi.util.tracker.ServiceTracker;
 
-import io.netnotes.engine.core.AppDataInterface;
+import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.io.ContextPath;
@@ -45,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class OSGiBundleLoader {
     
-    private final AppDataInterface appDataInterface;
+    private final NoteFileServiceInterface appDataInterface;
     private Framework framework;
     private final Map<String, Bundle> installedBundles = new ConcurrentHashMap<>();
     
@@ -53,12 +53,13 @@ public class OSGiBundleLoader {
     private volatile boolean frameworkInitialized = false;
     private final Object frameworkLock = new Object();
     
-    public OSGiBundleLoader(AppDataInterface appDataInterface) {
+    public OSGiBundleLoader(NoteFileServiceInterface appDataInterface) {
         this.appDataInterface = appDataInterface;
     }
     
     /**
      * Initialize OSGi framework (lazy - called on first bundle load)
+     * TODO: this should be using steaming note file services rather than a direct file
      */
     private CompletableFuture<Void> initializeFramework() {
         if (frameworkInitialized) {

@@ -26,15 +26,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class KeyboardInput extends FlowProcess implements InputDevice {
     
-    private final String sourceId = "KeyboardInput";
     private StreamChannel streamChannel;
     private volatile boolean active = false;
     
     // Event consumer pattern (same as ClaimedDevice)
     private Map<String, ExecutorConsumer<RoutedEvent>> m_consumerMap = new ConcurrentHashMap<>();
     
-    public KeyboardInput() {
-        super(ProcessType.SOURCE);
+    public KeyboardInput(String inputId) {
+        super(inputId, ProcessType.SOURCE);
     }
     
     @Override
@@ -64,9 +63,9 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
                     // Check if this is sourceId prefix
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
                         
-                        if (!nextBytes.equalsString(sourceId)) {
+                        if (!nextBytes.equalsString(getName())) {
                             System.err.println("SourceId mismatch: expected " + 
-                                sourceId + ", got " + nextBytes);
+                                getName() + ", got " + nextBytes);
                             break;
                         }
                         
@@ -133,10 +132,7 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
     }
     
     // ===== GETTERS =====
-    
-    public String getSourceId() {
-        return sourceId;
-    }
+ 
     
     public boolean isActive() {
         return active;

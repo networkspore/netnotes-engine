@@ -1,6 +1,5 @@
 package io.netnotes.engine.io;
 
-
 import io.netnotes.engine.io.process.FlowProcessId;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -101,19 +100,19 @@ public final class RoutedPacket {
     /**
      * Get ProcessId from source path
      * Useful when routing to processes
-     */
+    */
     public FlowProcessId getSourceProcessId() {
-        return new FlowProcessId();
+        return new FlowProcessId(sourcePath);
     }
     
     /**
      * Get ProcessId from destination path
-     */
+  */
     public FlowProcessId getDestinationProcessId() {
         if (destinationPath == null) {
             throw new IllegalStateException("No destination path set");
         }
-        return new FlowProcessId(destinationPath.hashCode());
+        return new FlowProcessId(destinationPath);
     }
     
     // ===== PAYLOAD ACCESSORS =====

@@ -140,7 +140,37 @@ public class NoteBytes {
         return b & 0xff;
     }
    
-  
+
+    public NoteBytes concat(NoteBytes... list) {
+        int len = byteLength();
+
+        // Count total length
+        for (NoteBytes b : list) {
+            len += b.byteLength();
+        }
+
+        // Allocate once
+        byte[] dst = new byte[len];
+
+        // Copy first
+        int pos = 0;
+        byte[] aBytes = get();
+        System.arraycopy(aBytes, 0, dst, 0, aBytes.length);
+        pos += aBytes.length;
+        byte type = getType();
+        // Copy rest
+        for (NoteBytes b : list) {
+            byte[] bBytes = b instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : b.get();
+            if(b.getType() != type){
+               type = NoteBytesMetaData.RAW_BYTES_TYPE;
+            }
+            System.arraycopy(bBytes, 0, dst, pos, bBytes.length);
+            pos += bBytes.length;
+        }
+
+        return new NoteBytes(dst, type);
+    }
+    
 
     protected byte[] getBytesInternal(){
         if(isRuined()){
@@ -424,7 +454,7 @@ public class NoteBytes {
             if(objType != thisType){
                 return false;
             }
-            byte[] objValue = noteBytesObj.get();
+            byte[] objValue =  noteBytesObj instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : noteBytesObj.get();
             if(byteLength() != objValue.length){
                 return false;
             }
@@ -448,27 +478,29 @@ public class NoteBytes {
     }
 
     public int compare(NoteBytes noteBytes){
-        byte[] bytes = noteBytes.get();
+        byte[] bytes = noteBytes instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : noteBytes.get();
         return compareBytes(bytes);
     }
 
     public int compareBytes(byte[] bytes){
-        return Arrays.compare(m_value, bytes);
+        return Arrays.compare( this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : get(), bytes);
     }
 
     public boolean constantTimmEqualsBytes(byte[] bytes){
-        return ByteDecoding.constantTimeCompare(this.m_value, bytes);
+        return ByteDecoding.constantTimeCompare(this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : get(), bytes);
     }
 
     public boolean constantTimeEquals(NoteBytes noteBytes){
-        return ByteDecoding.constantTimeCompare(m_value, noteBytes.get());
+        return ByteDecoding.constantTimeCompare(this instanceof NoteBytesReadOnly readOnly 
+            ? readOnly.getBytesInternal() : get(), noteBytes instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : noteBytes.get());
     }
 
     public boolean equalsBytes(byte[] bytes){
         if(isRuined()){
             return false;
         }
-        byte[] value = m_value;
+        byte[] value = this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : get();
+        
         if(value.length != bytes.length){
             return false;
         }

@@ -62,6 +62,10 @@ public class NoteFileService extends NotePathFactory {
     }
     
     // ===== STANDARD FILE OPERATIONS =====
+
+    public CompletableFuture<NoteFile> getNoteFile(ContextPath notePath) {
+        return getNoteFile(notePath.getSegments());
+    }
     
     public CompletableFuture<NoteFile> getNoteFile(NoteStringArrayReadOnly notePath) {
         ManagedNoteFileInterface existing = m_registry.get(notePath);
@@ -137,7 +141,7 @@ public class NoteFileService extends NotePathFactory {
      * 
      * Called by AppData.changePassword()
      */
-    public CompletableFuture<NoteBytesObject> updateFilePathLedgerEncryption(
+    public CompletableFuture<Boolean> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,

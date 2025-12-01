@@ -5,11 +5,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import io.netnotes.engine.core.AppDataInterface;
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.github.GitHubInfo;
@@ -48,10 +51,13 @@ import java.util.concurrent.ConcurrentHashMap;
  *   "packages": [...]
  * }
  */
-public class RepositoryManager {
-    
-    private final ContextPath myPath;           // NEW: Track my own path
-    private final AppDataInterface dataInterface;
+public class RepositoryManager extends FlowProcess {
+    public static final GitHubNodeRepository OFFICIAL_REPO = new GitHubNodeRepository("official","Official Netnotes Repository",
+            GitHubInfo.NETNOTES_OFFICIAL_REPO,
+            "packages/packages.json",
+            "packages/key.gpg",
+            true
+        );
     private final ConcurrentHashMap<NoteBytesReadOnly, Repository> repositories;
     
     // Cached NoteFile - expensive to get, cheap to keep
@@ -59,30 +65,26 @@ public class RepositoryManager {
     private NoteFile sourcesFile;
     
     /**
-     * Constructor - called by AppData
+     * Constructor
      * 
-     * OLD: RepositoryManager(AppData appData)
-     * NEW: RepositoryManager(ContextPath myPath, AppDataInterface dataInterface)
-     * 
-     * @param myPath Where this manager lives (given by parent)
-     * @param dataInterface Scoped interface for file access
+     * @param name Process name (e.g., "repository-manager")
+     * @param repositoryFile NoteFile for repository sources
      */
     public RepositoryManager(
-            ContextPath myPath,
-            AppDataInterface dataInterface) {
-        
-        if (myPath == null) {
-            throw new IllegalArgumentException("myPath cannot be null");
-        }
-        
-        if (dataInterface == null) {
-            throw new IllegalArgumentException("dataInterface cannot be null");
-        }
-        
-        this.myPath = myPath;
-        this.dataInterface = dataInterface;
+        String name,
+        NoteFile repositoryFile
+    ) {
+        super(name, ProcessType.BIDIRECTIONAL);
+        this.sourcesFile = repositoryFile;
         this.repositories = new ConcurrentHashMap<>();
     }
+
+    @Override
+    public CompletableFuture<Void> run() {
+        return initialize()
+            .thenCompose(v -> getCompletionFuture());
+    }
+    
     
     /**
      * Initialize - load repositories from NoteFile
@@ -90,17 +92,9 @@ public class RepositoryManager {
      * Gets NoteFile ONCE and stores for entire lifecycle.
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[RepositoryManager] Initializing at: " + myPath);
-        
-        // I know MY path, so I create files under ME
-        ContextPath sourcesPath = myPath.append("sources");
-        
-        return dataInterface.getNoteFile(sourcesPath)
-            .thenAccept(file -> {
-                this.sourcesFile = file;
-                System.out.println("[RepositoryManager] NoteFile acquired and cached");
-            })
-            .thenCompose(v -> loadRepositories())
+        System.out.println("[RepositoryManager] Initializing at: " + contextPath);
+  
+        return loadRepositories()
             .exceptionallyCompose(ex -> {
                 // First run - add default repository
                 System.out.println("[RepositoryManager] No existing sources found, adding defaults");
@@ -136,20 +130,23 @@ public class RepositoryManager {
                 }
             });
     }
-    
+
+    private void emitRepositoryEvent(String eventType, NoteBytesReadOnly repoId) {
+        emit(new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair("event", eventType),
+            new NoteBytesPair("repository_id", repoId),
+            new NoteBytesPair("timestamp", System.currentTimeMillis())
+        }));
+    }
+
     /**
      * Add default official repository on first run
      */
     private void addDefaultRepository() {
-        GitHubNodeRepository official = new GitHubNodeRepository("official","Official Netnotes Repository",
-            new GitHubInfo("networkspore", "Netnotes-Resources"),
-            "packages/main/packages.json",
-            "packages/main/key.gpg",
-            true
-        );
-        repositories.put(official.getId(), official);
+        
+        repositories.put(OFFICIAL_REPO.getId(), OFFICIAL_REPO);
         System.out.println("[RepositoryManager] Added default repository: " + 
-            official.getName());
+            OFFICIAL_REPO.getName());
     }
     
     /**
@@ -165,6 +162,7 @@ public class RepositoryManager {
     public CompletableFuture<Void> addRepository(Repository repo) {
         repositories.put(repo.getId(), repo);
         System.out.println("[RepositoryManager] Added repository: " + repo.getName());
+        emitRepositoryEvent("repository_added", repo.getId());
         return saveRepositories();
     }
     
@@ -176,6 +174,8 @@ public class RepositoryManager {
         if (removed != null) {
             System.out.println("[RepositoryManager] Removed repository: " + 
                 removed.getName());
+            emitRepositoryEvent("repository_removed", removed.getId());
+            
             return saveRepositories();
         }
         return CompletableFuture.completedFuture(null);
@@ -190,6 +190,10 @@ public class RepositoryManager {
             repo.setEnabled(enabled);
             System.out.println("[RepositoryManager] Repository " + repo.getName() + 
                 " " + (enabled ? "enabled" : "disabled"));
+            emitRepositoryEvent(
+                enabled ? "repository_enabled" : "repository_disabled",
+                repo.getId()
+            );
             return saveRepositories();
         }
         return CompletableFuture.completedFuture(null);
@@ -310,8 +314,6 @@ public class RepositoryManager {
     /**
      * Save repositories to cached NoteFile
      * 
-     * ✅ Uses cached NoteFile - no ledger access!
-     * 
      * Format: NoteBytesMap { repositoryId -> Repository.toNoteBytes() }
      */
     private CompletableFuture<Void> saveRepositories() {
@@ -325,7 +327,7 @@ public class RepositoryManager {
         // Serialize each repository
         for (Repository repo : repositories.values()) {
             reposMap.put(
-                new NoteBytes(repo.getId()),
+                repo.getId(),
                 repo.toNoteBytes()
             );
         }
@@ -352,9 +354,8 @@ public class RepositoryManager {
                         ex.getMessage());
                 }
                 
-                // ✅ Close cached NoteFile
                 if (sourcesFile != null) {
-                    sourcesFile.close();
+                    sourcesFile.close(); // disables further access
                     System.out.println("[RepositoryManager] NoteFile closed");
                 }
             })
@@ -378,12 +379,10 @@ public class RepositoryManager {
         );
     }
     
-    /**
-     * Get my path (for debugging)
-     */
-    public ContextPath getPath() {
-        return myPath;
+
+    @Override
+    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        throw new UnsupportedOperationException("Unimplemented method 'handleStreamChannel'");
     }
     
-    // REMOVED: getAppData() - no more AppData reference
 }

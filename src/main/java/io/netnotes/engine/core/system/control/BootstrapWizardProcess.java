@@ -23,14 +23,14 @@ import java.util.concurrent.CompletableFuture;
  * 5. Save configuration
  */
 public class BootstrapWizardProcess extends FlowProcess {
-    
+
     private final BitFlagStateMachine state;
     private final UIRenderer uiRenderer;
     
     private MenuNavigatorProcess menuNavigator;
     private NoteBytesMap bootstrapConfig;
     private SecureInputDetectionResult detectionResult;
-    
+
     // States
     public static final long DETECTING = 1L << 0;
     public static final long CONFIGURING = 1L << 1;
@@ -38,8 +38,8 @@ public class BootstrapWizardProcess extends FlowProcess {
     public static final long VERIFYING = 1L << 3;
     public static final long COMPLETE = 1L << 4;
     
-    public BootstrapWizardProcess(UIRenderer uiRenderer) {
-        super(ProcessType.BIDIRECTIONAL);
+    public BootstrapWizardProcess(String name, UIRenderer uiRenderer) {
+        super(name, ProcessType.BIDIRECTIONAL);
         this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("bootstrap-wizard");
     }
@@ -52,10 +52,10 @@ public class BootstrapWizardProcess extends FlowProcess {
         bootstrapConfig = BootstrapConfig.createDefault();
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess(uiRenderer);
-        
-        return spawnChild(menuNavigator, "wizard-menu")
-            .thenCompose(path -> registry.startProcess(path))
+        menuNavigator = new MenuNavigatorProcess("menu-navigator", uiRenderer);
+
+        return spawnChild(menuNavigator)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenCompose(v -> showWelcomeScreen())
             .thenCompose(v -> detectSecureInput())
             .thenCompose(result -> {
@@ -259,10 +259,10 @@ public class BootstrapWizardProcess extends FlowProcess {
         state.addState(INSTALLING);
         
         String os = detectionResult.os;
-        SecureInputInstaller installer = new SecureInputInstaller(os, uiRenderer);
+        SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
         
-        spawnChild(installer, "secure-input-installer")
-            .thenCompose(path -> registry.startProcess(path))
+        spawnChild(installer)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenCompose(v -> installer.getCompletionFuture())
             .thenCompose(v -> {
                 state.removeState(INSTALLING);

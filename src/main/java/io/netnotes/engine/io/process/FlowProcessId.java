@@ -1,67 +1,84 @@
 package io.netnotes.engine.io.process;
 
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.utils.AtomicSequence;
+import java.util.Objects;
+
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteUUID;
 
 /**
  * ProcessId - Unique identifier for a process.
  * 
- * Can be converted to/from sourceId (NoteBytesReadOnly INTEGER)
- * for use with the routing registry.
  */
 public final class FlowProcessId {
-    private final long value;
-    
-    public FlowProcessId(long value) {
-        this.value = value;
+    private final ContextPath path;
+    private final String uuid;
+
+    public FlowProcessId(ContextPath path, String nodeUuid) {
+        this.path = Objects.requireNonNull(path, "path cannot be null");
+        this.uuid = nodeUuid;
     }
 
-    public FlowProcessId(){
-        this.value = AtomicSequence.getNextSequenceLong();
+    public FlowProcessId(ContextPath path) {
+        this(path, null);
+    }
+
+    public String getNextCorrelationId() {
+        long uuid64 =  NoteUUID.getNextUUID64();
+  
+        return asString() + "-" + uuid64;
+       
     }
     
-    /**
-     * Convert to sourceId for registry routing
-     */
-    public NoteBytesReadOnly asSourceId() {
-        return new NoteBytesReadOnly(value);
+    public ContextPath getPath() {
+        return path;
+    }
+
+    public String getUuid() {
+        return uuid;
+    }
+
+    public boolean isDistributed() {
+        return uuid != null;
     }
     
-    /**
-     * Create from sourceId
-     */
-    public static FlowProcessId fromSourceId(NoteBytesReadOnly sourceId) {
-        return new FlowProcessId(sourceId.getAsInt());
-    }
     
     /**
-     * Get integer value
+     * Full identity string
+     * Local:       "/system/base/io-daemon"
+     * Distributed: "node-abc123:/system/base/io-daemon"
      */
-    public long asLong() {
-        return value;
+    public String asString() {
+        if (uuid != null) {
+            return uuid + ":" + path.toString();
+        }
+        return path.toString();
     }
     
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof FlowProcessId)) return false;
-        return value == ((FlowProcessId) obj).value;
+        FlowProcessId other = (FlowProcessId) obj;
+        
+        if (uuid != null) {
+            // Distributed: must match both uuid and path
+            return uuid.equals(other.uuid) && path.equals(other.path);
+        } else {
+            // Local: path is sufficient
+            return path.equals(other.path);
+        }
     }
     
     @Override
     public int hashCode() {
-        return Long.hashCode(value);
-    }
-
-    public String asString(){
-        byte[] bytes = ByteDecoding.longToBytesBigEndian(value);
-        return ByteDecoding.bytesToUrlSafeString(bytes);
+        return uuid != null 
+            ? Objects.hash(uuid, path) 
+            : path.hashCode();
     }
     
     @Override
     public String toString() {
-        return "ProcessId(" + asString() + ")";
+        return asString();
     }
 }

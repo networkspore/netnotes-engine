@@ -7,9 +7,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.utils.AtomicSequence;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -49,7 +49,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private volatile boolean active = false;
     
     public ClaimedDevice(String deviceId, ContextPath devicePath, String deviceType, DeviceCapabilitySet capabilities) {
-        super(ProcessType.BIDIRECTIONAL);
+        super(deviceId, ProcessType.BIDIRECTIONAL);
 
         this.deviceId = deviceId;
         this.devicePath = devicePath;
@@ -168,7 +168,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             byte[] clientPublicKey = encryptionSession.getPublicKey();
             NoteBytesObject accept = new NoteBytesObject();
             accept.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_ACCEPT);
-            accept.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+            accept.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             accept.add(Keys.PUBLIC_KEY, clientPublicKey);
             
             sendDeviceControlMessage(accept);
@@ -203,7 +203,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private void declineEncryption(String reason) {
         NoteBytesObject decline = new NoteBytesObject();
         decline.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_DECLINE);
-        decline.add(Keys.SEQUENCE, AtomicSequence.getNextSequenceLong());
+        decline.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         decline.add(Keys.MSG, reason);
         
         sendDeviceControlMessage(decline);

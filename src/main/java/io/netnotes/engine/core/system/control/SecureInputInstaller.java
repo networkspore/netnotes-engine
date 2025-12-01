@@ -61,11 +61,11 @@ public class SecureInputInstaller extends FlowProcess {
     public static final long COMPLETE = 1L << 6;
     public static final long FAILED = 1L << 7;
     
-    public SecureInputInstaller(String os, UIRenderer uiRenderer) {
-        super(ProcessType.SINK);
+    public SecureInputInstaller(String name, String os, UIRenderer uiRenderer) {
+        super(name, ProcessType.SINK);
         this.os = os;
         this.uiRenderer = uiRenderer;
-        this.state = new BitFlagStateMachine("installer");
+        this.state = new BitFlagStateMachine(name);
         
         setupStateTransitions();
     }
@@ -105,10 +105,10 @@ public class SecureInputInstaller extends FlowProcess {
         state.addState(IDLE);
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess(uiRenderer);
+        menuNavigator = new MenuNavigatorProcess("installer-menu", uiRenderer);
         
-        return spawnChild(menuNavigator, "installer-menu")
-            .thenCompose(path -> registry.startProcess(path))
+        return spawnChild(menuNavigator)
+            .thenCompose(path -> registryInterface.startProcess(path))
             .thenCompose(v -> {
                 state.removeState(IDLE);
                 state.addState(FETCHING_RELEASES);

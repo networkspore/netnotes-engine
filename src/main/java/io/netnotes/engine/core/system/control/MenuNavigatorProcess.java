@@ -37,7 +37,7 @@ import io.netnotes.engine.state.BitFlagStateMachine;
  * Path: /system/base/system-session/{session-id}/menu-navigator
  */
 public class MenuNavigatorProcess extends FlowProcess {
-    
+
     private final BitFlagStateMachine state;
     private final UIRenderer uiRenderer;
     
@@ -57,8 +57,8 @@ public class MenuNavigatorProcess extends FlowProcess {
     public static final long WAITING_PASSWORD = 1L << 3;
     public static final long EXECUTING_ACTION = 1L << 4;
     
-    public MenuNavigatorProcess(UIRenderer uiRenderer) {
-        super(ProcessType.BIDIRECTIONAL);
+    public MenuNavigatorProcess(String name, UIRenderer uiRenderer) {
+        super(name, ProcessType.BIDIRECTIONAL);
         this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("menu-navigator");
         
