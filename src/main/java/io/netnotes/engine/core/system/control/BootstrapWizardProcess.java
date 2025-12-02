@@ -55,7 +55,7 @@ public class BootstrapWizardProcess extends FlowProcess {
         menuNavigator = new MenuNavigatorProcess("menu-navigator", uiRenderer);
 
         return spawnChild(menuNavigator)
-            .thenCompose(path -> registryInterface.startProcess(path))
+            .thenCompose(path -> registry.startProcess(path))
             .thenCompose(v -> showWelcomeScreen())
             .thenCompose(v -> detectSecureInput())
             .thenCompose(result -> {
@@ -262,7 +262,7 @@ public class BootstrapWizardProcess extends FlowProcess {
         SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
         
         spawnChild(installer)
-            .thenCompose(path -> registryInterface.startProcess(path))
+            .thenCompose(path -> registry.startProcess(path))
             .thenCompose(v -> installer.getCompletionFuture())
             .thenCompose(v -> {
                 state.removeState(INSTALLING);

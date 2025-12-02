@@ -16,10 +16,13 @@ import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 import java.io.IOException;
 import java.util.Map;
@@ -27,7 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * BaseSystemProcess - Bootstrap and service manager
+ * SystemProcess - Bootstrap and service manager
  * 
  * Architecture:
  * - GUI keyboard is ALWAYS available (injected)
@@ -43,15 +46,56 @@ import java.util.concurrent.ConcurrentHashMap;
  * - READY: Fully operational
  * - ERROR: Fatal error occurred
  */
-public class BaseSystemProcess extends FlowProcess {
+public class SystemProcess extends FlowProcess {
+
+    public static final class SYSTEM_INIT_CMDS{
+        public static final NoteBytesReadOnly GET_SECURE_INPUT_DEVICE   = new NoteBytesReadOnly("get_secure_input_device");
+        public static final NoteBytesReadOnly RECCONFIGURE_BOOTSTRAP    = new NoteBytesReadOnly("reconfigure_bootstrap");
+        public static final NoteBytesReadOnly INSTALL_SECURE_INPUT      = new NoteBytesReadOnly("install_secure_input");
+        public static final NoteBytesReadOnly GET_BOOSTRAP_CONFIG       = new NoteBytesReadOnly("get_bootstrap_config");
+        public static final NoteBytesReadOnly UPDATE_BOOSTRAP_CONFIG    = new NoteBytesReadOnly("update_bootstrap_config");
+    }
+
     public static final String NAME = "system";
+    public static final String IO_DAEMON_NAME = "io-service";
+    public static final String RUNTIME = "runtime";
+    public static final String NODE_CONTROLLER = "node-controller";
+    public static final String REPOSITORIES = "repositories";
+    public static final String registryName = "node-registry";
+    public static final String loaderName = "node-loader";
+
+    public static final String CLUSTERS = "clusters";
+    public static final String NODES = "nodes";
+    public static final String CONTROLLERS = "controllers";
+
+    public static final ContextPath SYSTEM_PATH = ContextPath.of(NAME);
+    public static final ContextPath REPOSITORIES_PATH = SYSTEM_PATH.append(REPOSITORIES);
+
+    public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append("services");
+    public static final ContextPath IO_SERVICE_PATH = SERVICES_PATH.append(IO_DAEMON_NAME);
+
+    
+    public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
+
+    public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);
+    public static final ContextPath CLUSTERS_PATH = RUNTIME_PATH.append(CLUSTERS);
+
+    public static final ContextPath CONTROLLERS_PATH = RUNTIME_PATH.append(CONTROLLERS);
+    public static final ContextPath NODE_CONTROLLER_PATH = CONTROLLERS_PATH.append(NODE_CONTROLLER);
+    //public static final ContextPath PACKAGE_CONTROLLER_PATH = CONTROLLERS_PATH.append("package-controller");
+    //public static final ContextPath SECURITY_CONTROLLER_PATH = CONTROLLERS_PATH.append("security-controller");
+    
+    public static final ContextPath SHARED_PATH = RUNTIME_PATH.append("shared");
+    
+
     private final FlowProcessService processService;
     private final BitFlagStateMachine state;
-    private final ProcessRegistryInterface bootstrapInterface;
+   // private final ProcessRegistryInterface bootstrapInterface;
     private NoteBytesMap bootstrapConfig;
-    private final Map<ContextPath, SystemSessionProcess> activeSessions = 
-        new ConcurrentHashMap<>();
-    
+    private final Map<ContextPath, SystemSessionProcess> activeSessions = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
+
+ 
     // Services
     private IODaemon ioDaemon;
     private ClientSession systemClientSession; // Session for system's own device access
@@ -72,12 +116,12 @@ public class BaseSystemProcess extends FlowProcess {
     /**
      * Private constructor - use factory method
      */
-    private BaseSystemProcess(FlowProcessService processService, ProcessRegistryInterface bootstrapInterface, KeyboardInput guiKeyboard, UIRenderer uiRenderer) {
+    private SystemProcess(FlowProcessService processService, KeyboardInput guiKeyboard, UIRenderer uiRenderer) {
         super(NAME, ProcessType.BIDIRECTIONAL);
         this.guiKeyboard = guiKeyboard;
         this.uiRenderer = uiRenderer;
         this.processService = processService;
-        this.bootstrapInterface = bootstrapInterface;
+        
 
         this.state = new BitFlagStateMachine(contextPath.toString());
         
@@ -90,6 +134,14 @@ public class BaseSystemProcess extends FlowProcess {
         }
         
         setupStateTransitions();
+        setupMsgExecutorMap();
+    }
+    private void setupMsgExecutorMap(){
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.GET_SECURE_INPUT_DEVICE, (msg, packet)-> handleGetSecureInputDevice(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.RECCONFIGURE_BOOTSTRAP, (msg, packet)-> handleReconfigureBootstrap(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.INSTALL_SECURE_INPUT, (msg, packet)-> handleInstallSecureInput(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.GET_BOOSTRAP_CONFIG, (msg, packet)-> handleGetBootstrapConfig(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.UPDATE_BOOSTRAP_CONFIG, (msg, packet)-> handleUpdateBootstrapConfig(packet));
     }
     
     /**
@@ -97,23 +149,24 @@ public class BaseSystemProcess extends FlowProcess {
      * 
      * @param guiKeyboard GUI keyboard input source (must be compatible with ClaimedDevice)
      * @param uiRenderer UI implementation (GUI, console, web, etc.)
-     * @return Initialized BaseSystemProcess
+     * @return Initialized SystemProcess
      */
-    public static CompletableFuture<BaseSystemProcess> bootstrap(
-            FlowProcessService registry,
-            ProcessRegistryInterface bootstrapInterface,
-            KeyboardInput guiKeyboard, 
-            UIRenderer uiRenderer
-        ) {
+    public static CompletableFuture<SystemProcess> bootstrap(
+        KeyboardInput guiKeyboard,
+        UIRenderer uiRenderer
+    ) {
+        return CompletableFuture.supplyAsync(() -> {
+            // Synchronous construction
+            FlowProcessService flowProcessService = new FlowProcessService();
+            ProcessRegistryInterface bootstrapInterface = flowProcessService.getRegistryInterface();
 
-        
-        BaseSystemProcess process = new BaseSystemProcess(registry, bootstrapInterface, guiKeyboard, uiRenderer);
+            SystemProcess process = new SystemProcess(flowProcessService, guiKeyboard, uiRenderer);
+            bootstrapInterface.registerChild(SYSTEM_PATH, process);
 
-
-        bootstrapInterface.registerChild(process);
-        
-        return process.initialize()
-            .thenApply(v -> process);
+            return process;
+        }, VirtualExecutors.getVirtualExecutor()) 
+            .thenCompose(process ->process.initialize()
+            .thenApply(v -> process));
     }
     
     private void setupStateTransitions() {
@@ -172,7 +225,7 @@ public class BaseSystemProcess extends FlowProcess {
      */
     private CompletableFuture<Void> startGUIKeyboard() {
         return spawnChild(guiKeyboard)
-            .thenCompose(path -> bootstrapInterface.startProcess(path))
+            .thenCompose(path -> registry.startProcess(path))
             .thenRun(() -> {
                 System.out.println("[BaseSystem] GUI keyboard available at: " + 
                     guiKeyboard.getContextPath());
@@ -226,13 +279,13 @@ public class BaseSystemProcess extends FlowProcess {
         bootstrapWizard = new BootstrapWizardProcess("bootstrap-wizard", uiRenderer);
         
         return spawnChild(bootstrapWizard)
-            .thenCompose(path -> registryInterface.startProcess(path))
+            .thenCompose(path -> startProcess(path))
             .thenCompose(v -> bootstrapWizard.getCompletionFuture())
             .thenApply(v -> {
                 NoteBytesMap config = bootstrapWizard.getBootstrapConfig();
                 
                 // Clean up wizard
-                registryInterface.unregisterProcess(bootstrapWizard.getContextPath());
+                unregisterProcess(bootstrapWizard.getContextPath());
                 bootstrapWizard = null;
                 
                 state.removeState(BOOTSTRAP_RUNNING);
@@ -257,10 +310,9 @@ public class BaseSystemProcess extends FlowProcess {
     
     private CompletableFuture<Void> startIODaemon() {
         String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
-        ioDaemon = new IODaemon("base-io-daemon",socketPath);
-        
-        return spawnChild(ioDaemon)
-            .thenCompose(path -> registryInterface.startProcess(path))
+        ioDaemon = new IODaemon(IO_DAEMON_NAME, socketPath);
+        registry.registerChild(IO_SERVICE_PATH, ioDaemon);
+        return startProcess(IO_SERVICE_PATH)
             .thenRun(() -> {
                 System.out.println("[BaseSystem] IODaemon started at: " + socketPath);
             })
@@ -280,7 +332,7 @@ public class BaseSystemProcess extends FlowProcess {
             return CompletableFuture.completedFuture(null);
         }
         
-        String sessionId = "system-session-" + NoteUUID.createSafeUUID128();
+        String sessionId = IO_DAEMON_NAME + "-session-" + NoteUUID.createSafeUUID128();
         int pid = (int) ProcessHandle.current().pid();
         
         return ioDaemon.createSession(sessionId, pid)
@@ -313,10 +365,10 @@ public class BaseSystemProcess extends FlowProcess {
             sessionId, type, sessionUIRenderer);
         
         return CompletableFuture.supplyAsync(() -> {
-            ContextPath sessionPath = registryInterface.registerChild(session);
+            ContextPath sessionPath = registerChild(session);
             activeSessions.put(sessionPath, session);
             
-            registryInterface.startProcess(sessionPath);
+            startProcess(sessionPath);
             
             System.out.println("[BaseSystem] Created session: " + sessionId + 
                 " (type: " + type + ")");
@@ -330,6 +382,8 @@ public class BaseSystemProcess extends FlowProcess {
         return getCompletionFuture();
     }
     
+ 
+
     /**
      * Handle input device requests and system commands
      */
@@ -344,20 +398,14 @@ public class BaseSystemProcess extends FlowProcess {
                 return CompletableFuture.completedFuture(null);
             }
             
-            String cmd = cmdBytes.getAsString();
-            
-            return switch (cmd) {
-                case "get_secure_input_device" -> handleGetSecureInputDevice(packet);
-                case "reconfigure_bootstrap" -> handleReconfigureBootstrap(packet);
-                case "install_secure_input" -> handleInstallSecureInput(packet);
-                case "get_bootstrap_config" -> handleGetBootstrapConfig(packet);
-                case "update_bootstrap_config" -> handleUpdateBootstrapConfig(packet);
-                default -> {
-                    System.err.println("[BaseSystem] Unknown command: " + cmd);
-                    yield CompletableFuture.completedFuture(null);
-                }
-            };
-            
+            RoutedMessageExecutor msgExec = m_execMsgMap.get(cmdBytes);
+            if(msgExec != null){
+                return msgExec.execute(msg, packet);
+            }else{
+                System.err.println("[BaseSystem] Unknown command: " + cmdBytes);
+                return CompletableFuture.completedFuture(null);
+            }
+  
         } catch (Exception e) {
             System.err.println("[BaseSystem] Error handling message: " + e.getMessage());
             return CompletableFuture.failedFuture(e);
@@ -528,7 +576,7 @@ public class BaseSystemProcess extends FlowProcess {
         SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
         
         return spawnChild(installer)
-            .thenCompose(path -> registryInterface.startProcess(installer.getContextPath()))
+            .thenCompose(path -> startProcess(installer.getContextPath()))
             .thenCompose(v -> installer.getCompletionFuture())
             .thenCompose(v -> {
                 if (!installer.isComplete()) {
@@ -639,7 +687,7 @@ public class BaseSystemProcess extends FlowProcess {
         if (ioDaemon != null) {
             System.out.println("[BaseSystem] Stopping IODaemon");
             ioDaemon.kill();
-            registryInterface.unregisterProcess(ioDaemon.getContextPath());
+            unregisterProcess(ioDaemon.getContextPath());
             ioDaemon = null;
         }
         

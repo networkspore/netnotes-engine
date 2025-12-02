@@ -3,6 +3,7 @@ package io.netnotes.engine.core.system;
 import io.netnotes.engine.core.SystemRuntime;
 import io.netnotes.engine.core.RuntimeAccess;
 import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.core.system.SystemProcess.SYSTEM_INIT_CMDS;
 import io.netnotes.engine.core.system.control.*;
 import io.netnotes.engine.core.system.control.recovery.RecoveryFlags;
 import io.netnotes.engine.core.system.control.ui.*;
@@ -24,7 +25,6 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
-import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
@@ -86,7 +86,7 @@ import io.netnotes.engine.utils.streams.StreamUtils;
  * - All operations go through appData
  */
 public class SystemSessionProcess extends FlowProcess {
-    public static final ContextPath RUNTIME = ContextPath.parse("runtime");
+    private final ContextPath SYSTEM_RUNTIME_PATH;
     private final BitFlagStateMachine state;
     private final UIRenderer uiRenderer;
     
@@ -112,7 +112,6 @@ public class SystemSessionProcess extends FlowProcess {
         String sessionId,
         SessionType sessionType,
         UIRenderer uiRenderer
-        
     ) {
         
         super(sessionId, ProcessType.BIDIRECTIONAL);
@@ -120,7 +119,8 @@ public class SystemSessionProcess extends FlowProcess {
         this.sessionType = sessionType;
         this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("system-session-" + sessionId);
-        
+        SYSTEM_RUNTIME_PATH = contextPath.append("runtime");
+
         setupMessageMapping();
         setupStateTransitions();
     }
@@ -323,22 +323,11 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 // Spawn session
                 spawnChild(passwordCreationSession)
-                    .thenCompose(path -> registryInterface.startProcess(path));
+                    .thenCompose(path -> registry.startProcess(path));
             });
     }
 
-    private ProcessRegistryInterface createRuntimeInterface(ContextPath runtimePath){
-        return registryInterface.createChildInterface(
-            runtimePath,
-            (caller, target) -> {
-                // Runtime can access:
-                // - Its own children (repositories, nodes, controller)
-                // - Parent (this session) for coordination
-                return target.startsWith(runtimePath) ||  // Own subtree
-                        target.equals(contextPath);         // Parent session
-            }
-        );
-    }
+
     
    /**
      * Create new system - provide empty access object
@@ -348,13 +337,12 @@ public class SystemSessionProcess extends FlowProcess {
             .thenApply(settingsData -> {
                 // Create empty access object
                 RuntimeAccess access = new RuntimeAccess();
-                ContextPath runtimePath = contextPath.append(RUNTIME);
+             
                 
                 // Create AppData - it fills the access object
                 SystemRuntime newAppData = new SystemRuntime(
-                    runtimePath,
                     settingsData,
-                    createRuntimeInterface(runtimePath),
+                    registry,
                     access  // AppData fills this with closures!
                 );
                 
@@ -402,7 +390,7 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 // Spawn session
                 spawnChild(pwdVerifySession)
-                    .thenCompose(path -> registryInterface.startProcess(path));
+                    .thenCompose(path -> registry.startProcess(path));
             });
     }
         
@@ -430,12 +418,10 @@ public class SystemSessionProcess extends FlowProcess {
                                 .thenApply(settingsData -> {
                                     System.out.println("[SystemSession] SettingsData loaded, creating AppData");
                                     RuntimeAccess access = new RuntimeAccess();
-                                    ContextPath runtimePath = contextPath.append(RUNTIME);
                                     // Create AppData (SettingsData becomes private)
                                     SystemRuntime newAppData = new SystemRuntime(
-                                        runtimePath,
                                         settingsData, 
-                                        createRuntimeInterface(runtimePath),
+                                        registry,
                                         access
                                     );
 
@@ -481,14 +467,14 @@ public class SystemSessionProcess extends FlowProcess {
                 
                 this.passwordSession = pwdUnlockSession;
                 spawnChild(pwdUnlockSession)
-                    .thenCompose(path -> registryInterface.startProcess(path));
+                    .thenCompose(path -> registry.startProcess(path));
             });
     }
     
     // ===== INPUT DEVICE ACCESS =====
     
     /**
-     * Get secure input device from parent (BaseSystemProcess)
+     * Get secure input device from parent (SystemProcess)
      */
     private CompletableFuture<InputDevice> getSecureInputDevice() {
         if (parentPath == null) {
@@ -496,19 +482,19 @@ public class SystemSessionProcess extends FlowProcess {
                 new IllegalStateException("No parent process"));
         }
         
-        // Request device from BaseSystemProcess
+        // Request device from SystemProcess
         return request(parentPath, Duration.ofSeconds(5),
-            new NoteBytesPair(Keys.CMD, "get_secure_input_device")
+            new NoteBytesPair(Keys.CMD, SYSTEM_INIT_CMDS.GET_SECURE_INPUT_DEVICE)
         ).thenApply(response -> {
             NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
-            String devicePath = resp.get("device_path").getAsString();
+            String devicePath = resp.get(Keys.PATH).getAsString();
             
             if (devicePath == null) {
                 throw new IllegalStateException("No secure input device available");
             }
             
             InputDevice device = (InputDevice) 
-                registryInterface.getProcess(ContextPath.parse(devicePath));
+                registry.getProcess(ContextPath.parse(devicePath));
             
             if (device == null) {
                 throw new IllegalStateException("Device not found: " + devicePath);
@@ -546,7 +532,7 @@ public class SystemSessionProcess extends FlowProcess {
         menuNavigator = new MenuNavigatorProcess("system-session-menu-navigator",uiRenderer);
         
         spawnChild(menuNavigator)
-            .thenCompose(path -> registryInterface.startProcess(path));
+            .thenCompose(path -> registry.startProcess(path));
     }
 
 
@@ -583,7 +569,7 @@ public class SystemSessionProcess extends FlowProcess {
     }
         
     /**
-     * Request secure input installation (delegates to BaseSystemProcess)
+     * Request secure input installation (delegates to SystemProcess)
      */
     private void requestSecureInputInstallation() {
         if (parentPath == null) {
@@ -591,9 +577,9 @@ public class SystemSessionProcess extends FlowProcess {
             return;
         }
         
-        // Send request to BaseSystemProcess
+        // Send request to SystemProcess
         NoteBytesMap request = new NoteBytesMap();
-        request.put(Keys.CMD, new NoteBytes("install_secure_input"));
+        request.put(Keys.CMD, SYSTEM_INIT_CMDS.INSTALL_SECURE_INPUT);
         
         emitTo(parentPath, request.getNoteBytesObject());
         
@@ -613,9 +599,9 @@ public class SystemSessionProcess extends FlowProcess {
             return;
         }
         
-        // Send request to BaseSystemProcess
+        // Send request to SystemProcess
         NoteBytesMap request = new NoteBytesMap();
-        request.put(Keys.CMD, new NoteBytes("reconfigure_bootstrap"));
+        request.put(Keys.CMD, new NoteBytes(SYSTEM_INIT_CMDS.RECCONFIGURE_BOOTSTRAP));
         
         emitTo(parentPath, request.getNoteBytesObject());
         
@@ -639,7 +625,7 @@ public class SystemSessionProcess extends FlowProcess {
                 showBootstrapConfigInfo();
             });
             
-            subMenu.addItem("install_secure_input", "Install Secure Input", 
+            subMenu.addItem(SYSTEM_INIT_CMDS.INSTALL_SECURE_INPUT.getAsString(), "Install Secure Input", 
                 "Requires administrator privileges", () -> {
                 requestSecureInputInstallation();
             });
@@ -653,7 +639,7 @@ public class SystemSessionProcess extends FlowProcess {
         });
         
         menu.addItem("about", "About", () -> {
-            uiRenderer.render(UIProtocol.showMessage("Netnotes v1.0"));
+            uiRenderer.render(UIProtocol.showMessage("Netnotes v1.0.0"));
         });
         
         return menu;
@@ -741,7 +727,7 @@ public class SystemSessionProcess extends FlowProcess {
                 });
                 
                 spawnChild(changeVerifySession)
-                    .thenCompose(path -> registryInterface.startProcess(path));
+                    .thenCompose(path -> registry.startProcess(path));
             });
     }
 
@@ -842,8 +828,8 @@ public class SystemSessionProcess extends FlowProcess {
             ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("UI-pwd-change-tracker",uiRenderer);
             
             return spawnChild(progressTracker)
-                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
-                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                         progressChannel.getStream()
@@ -890,7 +876,7 @@ public class SystemSessionProcess extends FlowProcess {
         });
         
         return spawnChild(newPasswordSession)
-            .thenCompose(path -> registryInterface.startProcess(path))
+            .thenCompose(path -> registry.startProcess(path))
             .thenApply(v -> true);
     }
 
@@ -1373,8 +1359,8 @@ public class SystemSessionProcess extends FlowProcess {
         ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("recovery-progress",uiRenderer);
             
             spawnChild(progressTracker)
-                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
-                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
                     return systemAccess.performRecovery(analysis, progressWriter, batchSize)
@@ -1418,8 +1404,8 @@ public class SystemSessionProcess extends FlowProcess {
         ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("swap-progress", uiRenderer);
             
             spawnChild(progressTracker)
-                .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
-                .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
+                .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
                     return systemAccess.performSwap(analysis, progressWriter)
@@ -1538,7 +1524,7 @@ public class SystemSessionProcess extends FlowProcess {
                 });
                 
                 spawnChild(session)
-                    .thenCompose(path -> registryInterface.startProcess(path));
+                    .thenCompose(path -> registry.startProcess(path));
             });
     }
 
@@ -1828,8 +1814,8 @@ public class SystemSessionProcess extends FlowProcess {
                 ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("rollback-progress", uiRenderer);
                 
                 return spawnChild(progressTracker)
-                    .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
-                    .thenCompose(voidResult -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
+                    .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+                    .thenCompose(voidResult -> requestStreamChannel(progressTracker.getContextPath()))
                     .thenCompose(progressChannel -> {
                         AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
                             progressChannel.getStream());
@@ -2059,8 +2045,8 @@ public class SystemSessionProcess extends FlowProcess {
         ProgressTrackingProcess progressTracker = new ProgressTrackingProcess("comprehensive-recovery", uiRenderer);
         
         spawnChild(progressTracker)
-            .thenCompose(trackerPath -> registryInterface.startProcess(trackerPath))
-            .thenCompose(v -> registryInterface.requestStreamChannel(progressTracker.getContextPath()))
+            .thenCompose(trackerPath -> registry.startProcess(trackerPath))
+            .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
             .thenCompose(progressChannel -> {
                 AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(progressChannel.getStream());
                 
@@ -2167,7 +2153,7 @@ public class SystemSessionProcess extends FlowProcess {
         // Cancel current operation
         if (passwordSession != null) {
             passwordSession.cancel();
-            registryInterface.unregisterProcess(passwordSession.getContextPath());
+            registry.unregisterProcess(passwordSession.getContextPath());
             passwordSession = null;
         }
         

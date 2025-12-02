@@ -32,7 +32,7 @@ import io.netnotes.engine.utils.VirtualExecutors;
  *     → Ownership check fails (database-node ≠ other-node)
  *   → DENIED
  */
-public class ScopedNoteFilenterface implements NoteFileServiceInterface {
+public class ScopedNoteFileInterface implements NoteFileServiceInterface {
     
     private final ContextPath basePath;     // Primary location (e.g., runtime)
     private final ContextPath altPath;      // Alternative location (e.g., user)
@@ -44,7 +44,7 @@ public class ScopedNoteFilenterface implements NoteFileServiceInterface {
      * @param basePath Primary path where this interface lives
      * @param altPath Alternative path (optional, can be null)
      */
-    public ScopedNoteFilenterface(
+    public ScopedNoteFileInterface(
             NoteFileServiceInterface fileInterface,
             ContextPath basePath,
             ContextPath altPath) {

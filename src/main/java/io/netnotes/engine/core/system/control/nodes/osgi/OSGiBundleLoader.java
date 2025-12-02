@@ -53,8 +53,8 @@ public class OSGiBundleLoader {
     private volatile boolean frameworkInitialized = false;
     private final Object frameworkLock = new Object();
     
-    public OSGiBundleLoader(NoteFileServiceInterface appDataInterface) {
-        this.appDataInterface = appDataInterface;
+    public OSGiBundleLoader(NoteFileServiceInterface fileServiceInterface) {
+        this.appDataInterface = fileServiceInterface;
     }
     
     /**

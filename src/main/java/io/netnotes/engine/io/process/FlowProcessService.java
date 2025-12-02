@@ -2,7 +2,7 @@ package io.netnotes.engine.io.process;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.function.BiPredicate;
+import java.util.stream.Collectors;
 
 import io.netnotes.engine.io.ContextPath;
 
@@ -20,7 +20,6 @@ import io.netnotes.engine.io.ContextPath;
  * // AppData creates and owns the registry
  * FlowProcessService registry = new FlowProcessService();
  * 
- * // AppData controls interface creation
  * ProcessRegistryInterface nodeInterface = registry.createInterface(
  *     nodePath,
  *     (callerPath, targetPath) -> callerPath.canReach(targetPath)  // Custom rules
@@ -58,28 +57,35 @@ public class FlowProcessService {
         System.out.println("[FlowProcessService] New registry instance created");
     }
     
+    public ProcessRegistryInterface getRegistryInterface(){
+        return new FullRegistryInterface();
+    }
+
     // ===== INTERNAL OPERATIONS (Package-private for interfaces) =====
     
     /**
-     * Register a process (called by interfaces after validation)
+     * Register process at EXPLICIT path
+     * 
+     * Path is independent of parent relationship!
      */
     ContextPath registerProcess(
-            FlowProcess process,
-            ContextPath path,
-            ContextPath parentPath,
-            ProcessRegistryInterface interfaceForNewProcess) {
+        FlowProcess process,
+        ContextPath path,
+        ContextPath parentPath,
+        ProcessRegistryInterface interfaceForNewProcess
+    ) {
         
         if (processes.containsKey(path)) {
             throw new IllegalStateException("Process already registered at: " + path);
         }
         
-        // Initialize process with provided interface
-        process.initialize(parentPath, interfaceForNewProcess);
+        // Initialize with explicit path
+        process.initialize(path, parentPath, interfaceForNewProcess);
         
         // Store
         processes.put(path, process);
         
-        // Track relationships
+        // Track hierarchy (separate from path structure!)
         if (parentPath != null) {
             parents.put(path, parentPath);
             children.computeIfAbsent(parentPath, k -> ConcurrentHashMap.newKeySet())
@@ -90,12 +96,13 @@ public class FlowProcessService {
         detectStreamCapability(process, path);
         
         System.out.println("[ProcessService] Registered: " + path +
-            " (stream: " + streamCapable.getOrDefault(path, false) + ")");
+            " (parent: " + parentPath + ", stream: " + 
+            streamCapable.getOrDefault(path, false) + ")");
         
         return path;
     }
     
-    private void detectStreamCapability(FlowProcess process, ContextPath path) {
+     private void detectStreamCapability(FlowProcess process, ContextPath path) {
         try {
             process.handleStreamChannel(null, null);
         } catch (UnsupportedOperationException e) {
@@ -119,7 +126,7 @@ public class FlowProcessService {
         
         streamCapable.remove(path);
         
-        // Remove relationships
+        // Remove from hierarchy
         ContextPath parentPath = parents.remove(path);
         if (parentPath != null) {
             Set<ContextPath> siblings = children.get(parentPath);
@@ -186,20 +193,23 @@ public class FlowProcessService {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Process not found: " + path));
         }
-        
-        return CompletableFuture.runAsync(() -> {
-            try {
-                process.onStart();
-                process.run().join();
-            } catch (Exception e) {
-                System.err.println("Process " + path + " error: " + e.getMessage());
-                e.printStackTrace();
-            } finally {
-                process.onStop();
-                process.complete();
-            }
-        }, virtualExec);
+    
+        return CompletableFuture
+            .runAsync(process::onStart, virtualExec)
+            .thenCompose(v -> process.run())
+            .whenComplete((v, ex) -> {
+                if (ex != null) {
+                    System.err.println("Process " + path + " error: " + ex);
+                    ex.printStackTrace();
+                }
+                try {
+                    process.onStop();
+                } finally {
+                    process.complete();
+                }
+            });
     }
+
     
     /**
      * Kill a process
@@ -247,6 +257,25 @@ public class FlowProcessService {
     public boolean exists(ContextPath path) {
         return processes.containsKey(path);
     }
+
+    /**
+     * Find by path prefix - KEY NEW FEATURE
+     * 
+     * No process needs to exist at prefix path!
+     * Searches by string matching on paths.
+     */
+    public List<FlowProcess> findByPathPrefix(ContextPath prefix) {
+        return processes.entrySet().stream()
+            .filter(e -> e.getKey().startsWith(prefix))
+            .map(Map.Entry::getValue)
+            .collect(Collectors.toList());
+    }
+
+    public Set<ContextPath> getAllPaths() {
+        return new HashSet<>(processes.keySet());
+    }
+
+
     
     public Set<ContextPath> getChildren(ContextPath parentPath) {
         Set<ContextPath> childPaths = children.get(parentPath);
@@ -264,6 +293,18 @@ public class FlowProcessService {
             .map(type::cast)
             .toList();
     }
+
+    public List<FlowProcess> findChildrenByName(ContextPath parentPath, String name) {
+        Set<ContextPath> childPaths = children.get(parentPath);
+        if (childPaths == null) return Collections.emptyList();
+        
+        return childPaths.stream()
+            .map(processes::get)
+            .filter(Objects::nonNull)
+            .filter((flowProcess)->flowProcess.getName().equals(name))
+            .toList();
+    }
+    
     
     public ContextPath getParent(ContextPath childPath) {
         return parents.get(childPath);
@@ -310,6 +351,114 @@ public class FlowProcessService {
         connections.clear();
         streamCapable.clear();
         System.out.println("[ProcessService] Shutdown complete");
+    }
+
+    /**
+     * Inner class implementing full interface
+     */
+    private class FullRegistryInterface implements ProcessRegistryInterface {
+        
+        @Override
+        public ContextPath registerProcess(
+                FlowProcess process, 
+                ContextPath path, 
+                ContextPath parentPath,
+                ProcessRegistryInterface interfaceForNewProcess) {
+            return FlowProcessService.this.registerProcess(
+                process, path, parentPath, interfaceForNewProcess);
+        }
+        
+        @Override
+        public void unregisterProcess(ContextPath path) {
+            FlowProcessService.this.unregisterProcess(path);
+        }
+        
+        @Override
+        public FlowProcess getProcess(ContextPath path) {
+            return FlowProcessService.this.getProcess(path);
+        }
+        
+        @Override
+        public boolean exists(ContextPath path) {
+            return FlowProcessService.this.exists(path);
+        }
+        
+        @Override
+        public List<FlowProcess> findByPathPrefix(ContextPath prefix) {
+            return FlowProcessService.this.findByPathPrefix(prefix);
+        }
+        
+        @Override
+        public Set<ContextPath> getAllPaths() {
+            return FlowProcessService.this.getAllPaths();
+        }
+        
+        @Override
+        public ContextPath getParent(ContextPath childPath) {
+            return FlowProcessService.this.getParent(childPath);
+        }
+        
+        @Override
+        public Set<ContextPath> getChildren(ContextPath parentPath) {
+            return FlowProcessService.this.getChildren(parentPath);
+        }
+        
+        @Override
+        public <T extends FlowProcess> List<T> findChildrenByType(
+                ContextPath parentPath, Class<T> type) {
+            return FlowProcessService.this.findChildrenByType(parentPath, type);
+        }
+        
+        @Override
+        public List<FlowProcess> findChildrenByName(ContextPath parentPath, String name) {
+            return FlowProcessService.this.findChildrenByName(parentPath, name);
+        }
+        
+        @Override
+        public CompletableFuture<Void> startProcess(ContextPath path) {
+            return FlowProcessService.this.startProcess(path);
+        }
+        
+        @Override
+        public void killProcess(ContextPath path) {
+            FlowProcessService.this.killProcess(path);
+        }
+        
+        @Override
+        public void connect(ContextPath upstreamPath, ContextPath downstreamPath) {
+            FlowProcessService.this.connect(upstreamPath, downstreamPath);
+        }
+        
+        @Override
+        public void disconnect(ContextPath upstreamPath, ContextPath downstreamPath) {
+            FlowProcessService.this.disconnect(upstreamPath, downstreamPath);
+        }
+        
+        @Override
+        public Set<ContextPath> getUpstreams(ContextPath processPath) {
+            return FlowProcessService.this.getUpstreams(processPath);
+        }
+        
+        @Override
+        public Set<ContextPath> getDownstreams(ContextPath processPath) {
+            return FlowProcessService.this.getDownstreams(processPath);
+        }
+        
+        @Override
+        public CompletableFuture<StreamChannel> requestStreamChannel(
+                ContextPath callerPath, ContextPath target) {
+            return FlowProcessService.this.requestStreamChannel(callerPath, target);
+        }
+        
+        @Override
+        public boolean isStreamCapable(ContextPath path) {
+            return FlowProcessService.this.isStreamCapable(path);
+        }
+        
+        @Override
+        public String getSummary() {
+            return FlowProcessService.this.getSummary();
+        }
     }
     
     /**

@@ -108,7 +108,7 @@ public class SecureInputInstaller extends FlowProcess {
         menuNavigator = new MenuNavigatorProcess("installer-menu", uiRenderer);
         
         return spawnChild(menuNavigator)
-            .thenCompose(path -> registryInterface.startProcess(path))
+            .thenCompose(path -> registry.startProcess(path))
             .thenCompose(v -> {
                 state.removeState(IDLE);
                 state.addState(FETCHING_RELEASES);

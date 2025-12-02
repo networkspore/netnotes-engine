@@ -268,10 +268,10 @@ public class ClientSession extends FlowProcess {
         }
         //FlowProcess process, ContextPath path, ContextPath parentPath
         // Register as child
-        registryInterface.registerChild(claimedDevice);
+        registerChild(claimedDevice);
         
         // Setup stream channel between IODaemon and ClaimedDevice
-        return registryInterface.requestStreamChannel(claimedDevicePath)
+        return requestStreamChannel(claimedDevicePath)
             .thenCompose(channel -> {
                 return channel.getReadyFuture()
                     .thenCompose(v -> {
@@ -287,7 +287,7 @@ public class ClientSession extends FlowProcess {
                         discoveredDevices.markClaimed(deviceId);
                         state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
                         
-                        registryInterface.startProcess(claimedDevicePath);
+                        registry.startProcess(claimedDevicePath);
                         
                         System.out.println("Claimed device: " + deviceId + 
                                         " at " + claimedDevicePath +
@@ -331,19 +331,18 @@ public class ClientSession extends FlowProcess {
         ).thenRun(() -> {
             discoveredDevices.markReleased(deviceId);
             if (claimedDevice != null) {
-                registryInterface.unregisterProcess(claimedDevice.getContextPath());
+                registry.unregisterProcess(claimedDevice.getContextPath());
             }
             System.out.println("Released device: " + deviceId);
         });
     }
     
     private void releaseAllDevices() {
-        List<ClaimedDevice> devices = 
-            registryInterface.findChildrenByType(ClaimedDevice.class);
+        List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
         
         for (ClaimedDevice device : devices) {
             device.release();
-            registryInterface.unregisterProcess(device.getContextPath());
+            registry.unregisterProcess(device.getContextPath());
         }
     }
     
@@ -419,7 +418,7 @@ public class ClientSession extends FlowProcess {
     // ===== HELPERS =====
     
     public ClaimedDevice getClaimedDevice(String deviceId) {
-        return (ClaimedDevice) registryInterface.getChildProcess(deviceId);
+        return (ClaimedDevice) getChildProcess(deviceId);
     }
     
     public DiscoveredDeviceRegistry getDiscoveredDevices() {

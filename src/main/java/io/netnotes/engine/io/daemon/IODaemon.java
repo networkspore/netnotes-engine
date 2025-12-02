@@ -342,7 +342,7 @@ public class IODaemon extends FlowProcess {
     public CompletableFuture<ContextPath> createSession(String sessionId, int clientPid) {
         ContextPath sessionPath = contextPath.append(sessionId);
         
-        if (registryInterface.exists(sessionPath)) {
+        if (registry.exists(sessionPath)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Session already exists: " + sessionId));
         }
@@ -354,11 +354,11 @@ public class IODaemon extends FlowProcess {
             session.state.addState(ClientStateFlags.CONNECTED);
             session.state.addState(ClientStateFlags.AUTHENTICATED);
             
-            registryInterface.startProcess(sessionPath);
+            registry.startProcess(sessionPath);
             
             // Bidirectional connection for request-reply
-            registryInterface.connect(contextPath, sessionPath);
-            registryInterface.connect(sessionPath, contextPath);
+            registry.connect(contextPath, sessionPath);
+            registry.connect(sessionPath, contextPath);
             return path;
         });
       
@@ -367,11 +367,11 @@ public class IODaemon extends FlowProcess {
     
     public ClientSession getSession(String sessionId) {
         ContextPath sessionPath = contextPath.append(sessionId);
-        return (ClientSession) registryInterface.getProcess(sessionPath);
+        return (ClientSession) registry.getProcess(sessionPath);
     }
     
     public List<ClientSession> getSessions() {
-        return registryInterface.findChildrenByType(ClientSession.class);
+        return findChildrenByType(ClientSession.class);
     }
     
     private ClientSession findSessionForDevice(String deviceId) {
@@ -556,7 +556,7 @@ public class IODaemon extends FlowProcess {
         List<ClientSession> sessions = getSessions();
         for (ClientSession session : sessions) {
             session.state.addState(ClientStateFlags.DISCONNECTING);
-            registryInterface.unregisterProcess(session.getContextPath());
+            registry.unregisterProcess(session.getContextPath());
         }
         
         System.out.println("Disconnected from daemon, cleaned up " + sessions.size() + " sessions");

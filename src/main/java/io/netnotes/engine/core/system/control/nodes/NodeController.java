@@ -4,11 +4,20 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiPredicate;
 
 import io.netnotes.engine.core.NoteFileServiceInterface;
-import io.netnotes.engine.core.ScopedNoteFilenterface;
+import io.netnotes.engine.core.ScopedNoteFileInterface;
+import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.system.control.nodes.security.NodeSecurityPolicy;
+import io.netnotes.engine.core.system.control.nodes.security.PackageTrust;
+import io.netnotes.engine.core.system.control.nodes.security.PathCapability;
+import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
+import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest.ClusterConfig;
+import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest.ClusterRole;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
@@ -39,13 +48,18 @@ public class NodeController extends FlowProcess {
         public static final NoteBytesReadOnly NODE_STATUS = ProtocolMesssages.STATUS;
     }
 
-    public static final String registryName = "node-registry";
-    public static final String loaderName = "node-loader";
-    public static final String NODES = "nodes";
-    public static final String RUNTIME = "runtime";
+    public static final class Paths {
+        public static final ContextPath RUNTIME = SystemProcess.RUNTIME_PATH;
+
+    }
+
+   
+
+    private final ContextPath NODES_PATH = SystemProcess.NODES_PATH;
+    private final ContextPath CLUSTERS_PATH = SystemProcess.CLUSTERS_PATH;
 
     private final BitFlagStateMachine state;
-    private final NoteFileServiceInterface noteFilenterface;
+    private final NoteFileServiceInterface noteFileInterface;
     private InstallationRegistry installationRegistry;
 
     // Node registry: packageId → NodeInstance (ONE instance per package)
@@ -55,7 +69,7 @@ public class NodeController extends FlowProcess {
 
     // Node loader (OSGi integration)
     private NodeLoader nodeLoader;
-    private final ContextPath nodesPath;
+    private final ContextPath ioDaemonPath = SystemProcess.IO_SERVICE_PATH;
     
     // States
     private static final long INITIALIZING = 1L << 0;
@@ -74,13 +88,14 @@ public class NodeController extends FlowProcess {
      */
     public NodeController(
         String name,
-        NoteFileServiceInterface noteFilenterface,
-        ContextPath nodesPath
+        NoteFileServiceInterface noteFilenterface
     ) {
         super(name, ProcessType.BIDIRECTIONAL);
-        this.noteFilenterface = noteFilenterface;
+        this.noteFileInterface = noteFilenterface;
         this.state = new BitFlagStateMachine(name + "-state");
-        this.nodesPath = nodesPath;
+     
+
+
         setupMsgExecutorMap();
     }
 
@@ -125,15 +140,15 @@ public class NodeController extends FlowProcess {
     private CompletableFuture<Void> initializeInstallationRegistry() {
    
         // Create child interface scoped to registry subtree
-        ContextPath installedFilePath = noteFilenterface.getBasePath().append(registryName);
+        ContextPath installedFilePath = noteFileInterface.getBasePath().append(registryName);
         
-        return noteFilenterface.getNoteFile(installedFilePath)
+        return noteFileInterface.getNoteFile(installedFilePath)
             .thenCompose(registryFile->{
     
                 this.installationRegistry = new InstallationRegistry(registryName, registryFile );
-                ContextPath path = registryInterface.registerChild(installationRegistry);
+                ContextPath path = registerChild(installationRegistry);
                 System.out.println("[SystemRuntime] Registered InstallationRegistry at: " + path);
-                return registryInterface.startChild(path)
+                return startChild(path)
                     .thenCompose(v -> installationRegistry.initialize());
             });
             
@@ -141,24 +156,15 @@ public class NodeController extends FlowProcess {
 
     /**
      * Initialize NodeLoader with scoped interface
+     * 
      */
     private CompletableFuture<Void> initializeNodeLoader() {
   
         ContextPath packagesProcessesPath = contextPath.append(loaderName);
-        ContextPath packagesFilePath = noteFilenterface.getBasePath().append(loaderName);
-        // Create interface using our parent's createChildInterface
-        ProcessRegistryInterface loaderProcessInterface = 
-            registryInterface.createChildInterface(
-                contextPath.append(contextPath),
-                (caller, target) -> target.startsWith(packagesProcessesPath)
-            );
-                // NodeLoader needs interface to read package files
-   
-        NoteFileServiceInterface loaderFileInterface = new ScopedNoteFilenterface(noteFilenterface,
-            packagesFilePath,
-            null  // No alt path
-        );
-        this.nodeLoader = new NodeLoader(loaderProcessInterface, loaderFileInterface);
+        ContextPath packagesFilePath = noteFileInterface.getBasePath().append(loaderName);
+  
+    
+        this.nodeLoader = new NodeLoader(registry, noteFileInterface);
         
         return CompletableFuture.completedFuture(null);
     }
@@ -172,17 +178,32 @@ public class NodeController extends FlowProcess {
     // ===== NODE LOADING =====
     
     /**
-     * Load a node from an installed package
-     * 
-     * ONE instance per package - node manages its own internal instances
-     * 
-     * @param packageId Package identifier (NoteBytesReadOnly)
-     * @param installedPackage Package metadata (optional, will lookup if null)
-     * @return NodeInstance wrapper
+     * Overload: Load standalone node (no cluster)
      */
     public CompletableFuture<NodeInstance> loadNode(
             NoteBytesReadOnly packageId,
             InstalledPackage installedPackage) {
+        return loadNode(packageId, installedPackage, null);
+    }
+
+    /**
+     * Load a node from an installed package
+     * 
+     * Clustering considerations:
+     * - Standalone: nodeFlowPath = /nodes/{packageId}
+     * - Cluster leader: nodeFlowPath = /nodes/clusters/{clusterId}/leader
+     * - Cluster member: nodeFlowPath = /nodes/clusters/{clusterId}/members/{packageId}
+     * - Shared leader: Multiple INodes share same leader path
+     * 
+     * @param packageId Package identifier
+     * @param installedPackage Package metadata (optional, will lookup if null)
+     * @param clusterConfig Cluster configuration (null for standalone)
+     * @return NodeInstance wrapper
+     */
+    public CompletableFuture<NodeInstance> loadNode(
+            NoteBytesReadOnly packageId,
+            InstalledPackage installedPackage,
+            ClusterConfig clusterConfig) {
         
         if (nodes.containsKey(packageId)) {
             return CompletableFuture.failedFuture(
@@ -205,17 +226,24 @@ public class NodeController extends FlowProcess {
                 new IllegalArgumentException("Package not installed: " + pkgIdStr));
         }
         
-        // === PATHS: Parent decides where node lives ===
-        
-        // FlowProcess path (for routing in network)
-        ContextPath nodeFlowPath = nodesPath.append(pkgIdStr);
-        ContextPath runtimePath = noteFilenterface.getBasePath().append(RUNTIME, pkgIdStr);
-        ContextPath userPath = noteFilenterface.getAltPath().append(pkgIdStr);
+        NodeSecurityPolicy policy = getOrCreatePolicy(packageId, pkg);
+
+        System.out.println("  Capabilities: " + policy.getGrantedCapabilities().size());
+        for (PathCapability cap : policy.getGrantedCapabilities()) {
+            System.out.println("    - " + cap.getDescription());
+        }
+    
+        // === COMPUTE PATHS (Cluster-aware) ===
+        PathConfiguration pathConfig = computePaths(packageId, pkgIdStr, clusterConfig);
         
         System.out.println("[NodeController] Node paths:");
-        System.out.println("  Flow:    " + nodeFlowPath);
-        System.out.println("  Runtime: " + runtimePath);
-        System.out.println("  User:    " + userPath);
+        System.out.println("  Flow:    " + pathConfig.nodeFlowPath);
+        System.out.println("  Runtime: " + pathConfig.runtimePath);
+        System.out.println("  User:    " + pathConfig.userPath);
+        if (clusterConfig != null) {
+            System.out.println("  Cluster: " + clusterConfig.getClusterId() + 
+                " (role: " + clusterConfig.getRole() + ")");
+        }
         
         return nodeLoader.loadNodeFromPackage(pkg)
             .thenCompose(inode -> {
@@ -227,36 +255,42 @@ public class NodeController extends FlowProcess {
                     NodeState.LOADING
                 );
                 
+                // Store instance
                 nodes.put(packageId, instance);
                 
-                // === CREATE SCOPED INTERFACE ===
-                // Node gets access to runtime + user paths
-                NoteFileServiceInterface nodeDataInterface = new ScopedNoteFilenterface(
-                    noteFilenterface,
-                    runtimePath,  // Primary: system runtime data
-                    userPath      // Alternative: user data
+                // === CREATE SCOPED FILE INTERFACE ===
+                
+                NoteFileServiceInterface nodeDataInterface = new ScopedNoteFileInterface(
+                    noteFileInterface,
+                    pathConfig.runtimePath,  // Primary: system runtime data
+                    pathConfig.userPath      // Alternative: user data
                 );
                 
                 instance.setDataInterface(nodeDataInterface);
-                ProcessRegistryInterface nodeProcessInterface = 
-                    registryInterface.createChildInterface(
-                        nodeFlowPath,
-                        (caller, target) -> {
-                            // Node can reach:
-                            // - Its own children
-                            // - Its parent (controller)
-                            // - Other nodes (if controller allows)
-                            return target.startsWith(nodeFlowPath) ||  // Own children
-                                   target.equals(contextPath) ||        // Parent (controller)
-                                   target.startsWith(nodesPath); // Sibling nodes
-                        }
-                    );
+                
+                // === CREATE PROCESS INTERFACE WITH CAPABILITY ENFORCEMENT ===
+                ProcessRegistryInterface nodeProcessInterface = createNodeInterface(
+                    pathConfig.nodeFlowPath,
+                    policy
+                );
+                
                 instance.setState(NodeState.INITIALIZING);
-
-                // Register in FlowProcess network
-                return inode.initialize(nodeDataInterface, nodeProcessInterface) 
+                
+                // === INITIALIZE INODE ===
+                // Interface is passed to INode, not stored in instance
+                // INode decides if/how to register itself in the process tree
+                return inode.initialize(nodeDataInterface, nodeProcessInterface)
                     .thenApply((v) -> {
                         instance.setState(NodeState.RUNNING);
+                        
+                        // Check if INode registered itself
+                        if (registry.exists(pathConfig.nodeFlowPath)) {
+                            System.out.println("[NodeController] INode registered at: " + 
+                                pathConfig.nodeFlowPath);
+                        } else {
+                            System.out.println("[NodeController] INode did NOT register " +
+                                "(might be cluster member delegating to leader)");
+                        }
                         
                         return instance;
                     });
@@ -274,7 +308,254 @@ public class NodeController extends FlowProcess {
                 }
             });
     }
+    private NodeSecurityPolicy getOrCreatePolicy(
+        NoteBytesReadOnly packageId,
+        InstalledPackage pkg) {
     
+        // Check if policy already exists
+        // (would be stored in InstallationRegistry)
+        
+        NodeSecurityPolicy policy = new NodeSecurityPolicy(
+            packageId,
+            pkg.getPackageId(),
+            "system"  // TODO: Get actual user ID
+        );
+        
+        // Default capabilities are granted by constructor:
+        // - PathCapability.messageController() → SystemProcess.NODE_CONTROLLER_PATH
+        // - PathCapability.ownRuntimeData() → NodeController.NODES_PATH + {self}
+        // - PathCapability.ownUserData() → /user/{self}
+        
+        // Grant additional capabilities from manifest
+        if (pkg.getManifest() != null) {
+            PolicyManifest manifest = pkg.getManifest().getSecurityPolicy();
+            if (manifest != null) {
+                for (PathCapability cap : manifest.getRequestedCapabilities()) {
+                    policy.grantCapability(cap);
+                }
+            }
+        }
+        
+        return policy;
+    }
+
+    /**
+    * Find all nodes (using enhanced registry)
+    */
+    public List<NodeInstance> findAllNodes() {
+        // Use path-prefix query
+        List<FlowProcess> processes = registry.findByPathPrefix(NODES_PATH);
+        
+        return processes.stream()
+            .map(p -> {
+                // Find corresponding NodeInstance
+                for (NodeInstance instance : nodes.values()) {
+                    if (instance.getNode().getContextPath().equals(p.getContextPath())) {
+                        return instance;
+                    }
+                }
+                return null;
+            })
+            .filter(Objects::nonNull)
+            .toList();
+    }
+
+    /**
+     * Find all nodes in a cluster
+     */
+    public List<NodeInstance> findNodesInCluster(String clusterId) {
+        ContextPath clusterPath = CLUSTERS_PATH.append(clusterId);
+        
+        // Find all processes under cluster path
+        List<FlowProcess> processes = registry.findByPathPrefix(clusterPath);
+        
+        System.out.println("[NodeController] Found " + processes.size() + 
+            " processes in cluster: " + clusterId);
+        
+        // Map to NodeInstances
+        return processes.stream()
+            .map(p -> {
+                for (NodeInstance instance : nodes.values()) {
+                    if (instance.getNode().getContextPath().equals(p.getContextPath())) {
+                        return instance;
+                    }
+                }
+                return null;
+            })
+            .filter(Objects::nonNull)
+            .toList();
+    }
+
+    /**
+     * Example: Service discovery using path queries
+     */
+    public List<FlowProcess> findAvailableServices() {
+        // Query all under services path - no intermediate process needed!
+        return registry.findByPathPrefix(SystemProcess.SERVICES_PATH);
+    }
+
+    /**
+     * Path configuration for a node
+     */
+    private static class PathConfiguration {
+        ContextPath nodeFlowPath;   // Where INode registers in process tree
+        ContextPath runtimePath;    // System runtime data
+        ContextPath userPath;       // User data
+    }
+
+    /**
+     * Cluster configuration
+    
+    public static class ClusterConfig {
+        String clusterId;
+        ClusterRole role;
+        
+        public ClusterConfig(String clusterId, ClusterRole role) {
+            this.clusterId = clusterId;
+            this.role = role;
+        }
+        
+        public enum ClusterRole {
+            LEADER,        // Registers itself, handles all cluster communication
+            MEMBER,        // Doesn't register, delegates to leader
+            SHARED_LEADER  // Multiple INodes share same leader registration
+        }
+    } */
+
+    
+    /**
+     * Compute paths for node (cluster-aware)
+     */
+    private PathConfiguration computePaths(
+            NoteBytesReadOnly packageId,
+            String pkgIdStr,
+            ClusterConfig clusterConfig) {
+        
+        PathConfiguration config = new PathConfiguration();
+        
+        if (clusterConfig == null) {
+            // === STANDALONE NODE ===
+            config.nodeFlowPath = NODES_PATH.append(pkgIdStr);
+            config.runtimePath = noteFileInterface.getBasePath()
+                .append(RUNTIME, pkgIdStr);
+            config.userPath = noteFileInterface.getAltPath()
+                .append(pkgIdStr);
+            
+        } else {
+            // === CLUSTER NODE ===
+            String clusterId = clusterConfig.getClusterId();
+            
+            switch (clusterConfig.getRole()) {
+                case ClusterRole.LEADER:
+                    // Leader registers at /nodes/clusters/{clusterId}/leader
+                    config.nodeFlowPath = CLUSTERS_PATH
+                        .append(clusterId)
+                        .append("leader");
+                    
+                    // Leader's runtime data
+                    config.runtimePath = noteFileInterface.getBasePath()
+                        .append(RUNTIME, CLUSTERS, clusterId, "leader");
+                    
+                    // Leader's user data (shared cluster data)
+                    config.userPath = noteFileInterface.getAltPath()
+                        .append(CLUSTERS, clusterId, "shared");
+                    break;
+                    
+                case ClusterRole.MEMBER:
+                    // Member doesn't register itself - uses leader's path for communication
+                    // But has its own data paths
+                    config.nodeFlowPath = CLUSTERS_PATH
+                        .append(clusterId)
+                        .append("leader");  // Members use leader's path!
+                    
+                    // Member's private runtime data
+                    config.runtimePath = noteFileInterface.getBasePath()
+                        .append(RUNTIME, CLUSTERS, clusterId, "members", pkgIdStr);
+                    
+                    // Member's private user data
+                    config.userPath = noteFileInterface.getAltPath()
+                        .append(CLUSTERS, clusterId, "members", pkgIdStr);
+                    break;
+
+                case ClusterRole.SHARED_LEADER:
+                    // Multiple INodes share the same leader path
+                    config.nodeFlowPath = CLUSTERS_PATH
+                        .append(clusterId)
+                        .append("leader");
+                    
+                    // Shared runtime data
+                    config.runtimePath = noteFileInterface.getBasePath()
+                        .append(RUNTIME, CLUSTERS, clusterId, "shared");
+                    
+                    // Shared user data
+                    config.userPath = noteFileInterface.getAltPath()
+                        .append(CLUSTERS, clusterId, "shared");
+                    break;
+            }
+        }
+        
+        return config;
+    }
+
+    private ProcessRegistryInterface createNodeInterface(
+        ContextPath nodeFlowPath,
+        NodeSecurityPolicy policy
+    ) {
+  
+        // Wrap with security enforcement
+        return new NodeProcessInterface(
+            registry,
+            nodeFlowPath,  // Node's base scope
+            policy
+        );
+    }
+
+    /**
+     * Create a cluster with one leader and multiple members
+     */
+    public CompletableFuture<Void> createCluster(
+            String clusterId,
+            NoteBytesReadOnly leaderPackageId,
+            List<NoteBytesReadOnly> memberPackageIds) {
+       
+        // 1. Load leader node
+        ClusterConfig leaderConfig = new ClusterConfig(clusterId, ClusterRole.LEADER);
+        
+        return loadNode(leaderPackageId, null, leaderConfig)
+            .thenCompose(leaderInstance -> {
+                ClusterLeaderNode leader = (ClusterLeaderNode) leaderInstance.getNode();
+                
+                // 2. Load member nodes
+                List<CompletableFuture<NodeInstance>> memberFutures = memberPackageIds.stream()
+                    .map(memberId -> {
+                        ClusterConfig memberConfig = new ClusterConfig(
+                            clusterId, 
+                            ClusterRole.MEMBER
+                        );
+                        return loadNode(memberId, null, memberConfig);
+                    })
+                    .toList();
+                
+                return CompletableFuture.allOf(
+                    memberFutures.toArray(new CompletableFuture[0])
+                ).thenAccept(v -> {
+                    // 3. Wire members to leader
+                    for (CompletableFuture<NodeInstance> memberFuture : memberFutures) {
+                        NodeInstance memberInstance = memberFuture.join();
+                        ClusterMemberNode member = (ClusterMemberNode) memberInstance.getNode();
+                        
+                        member.setLeader(leader);
+                        leader.addMember(
+                            memberInstance.getPackageId().getAsString(), 
+                            member
+                        );
+                    }
+                    
+                    System.out.println("[NodeController] Cluster created: " + clusterId +
+                        " (1 leader, " + memberPackageIds.size() + " members)");
+                });
+            });
+    }
 
     
     // ===== NODE UNLOADING =====

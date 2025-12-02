@@ -4,6 +4,7 @@ import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.core.system.SystemProcess;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
 import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;
@@ -13,7 +14,7 @@ import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
 
 public class SystemRuntime {
-    private final ContextPath myPath;
+
     private final NoteFileService noteFileService;
     private final ProcessRegistryInterface registryInterface;
     
@@ -32,14 +33,11 @@ public class SystemRuntime {
      * @param registryInterface Interface for spawning child processes
      */
     public SystemRuntime(
-        ContextPath myPath,
         SettingsData settingsData,
         ProcessRegistryInterface registryInterface,
         RuntimeAccess systemAccess
     ) {
-        if (myPath == null) {
-            throw new IllegalArgumentException("myPath cannot be null");
-        }
+     
         if (settingsData == null) {
             throw new IllegalArgumentException("SettingsData cannot be null");
         }
@@ -47,10 +45,8 @@ public class SystemRuntime {
             throw new IllegalArgumentException("ProcessRegistryInterface cannot be null");
         }
         
-        this.myPath = ContextPath.of("system");
         this.noteFileService = new NoteFileService(settingsData);
         this.registryInterface = registryInterface;
-        
         if(systemAccess != null){
             grantSystemAccess(systemAccess);
         }
@@ -232,74 +228,68 @@ public class SystemRuntime {
     
 
     private CompletableFuture<Void> initializeRepositoryManager() {
-        String managerName = "repositories";
+       
         // Create child interface scoped to repositories subtree
-        ContextPath repoPath = myPath.append(managerName);
+        ContextPath repoPath = ContextPath.of(SystemProcess.REPOSITORIES);
+
         ContextPath repoFilePath = repoPath.append("repository-list");
         return noteFileService.getNoteFile(repoFilePath.getSegments())
             .thenCompose(repoFile -> {
-               this.repositoryManager = new RepositoryManager(managerName, repoFile);
-                ContextPath path = registryInterface.registerChild(repositoryManager);
+               this.repositoryManager = new RepositoryManager(SystemProcess.REPOSITORIES, repoFile);
+                ContextPath path = registryInterface.registerProcess(
+                    repositoryManager, 
+                    SystemProcess.REPOSITORIES_PATH,
+                    SystemProcess.SYSTEM_PATH,
+                    registryInterface
+                );
                 System.out.println("[SystemRuntime] Registered RepositoryManager at: " + path);
-                return registryInterface.startChild(path)
+                return registryInterface.startProcess(path)
                     .thenCompose(v -> repositoryManager.initialize());
             });
     }
 
     private CompletableFuture<Void> initializeNodeController() {
-        String nodes = "nodes";
-        String controllerName = "controller";
-        String user_home = "user";
 
-        
+        ContextPath basePath = ContextPath.of("run");
+        ContextPath altPath = ContextPath.of("var");
 
-        // Create child interface scoped to controller subtree
-        ContextPath controllerPath = myPath.append(controllerName);
-        ContextPath nodesPath = myPath.append(nodes);
+        NoteFileServiceInterface noteFileServiceInterface = new NoteFileServiceInterface(){
 
-        ProcessRegistryInterface controllerChildInterface = registryInterface.createChildInterface(
-                controllerPath,
-                (caller, target) -> target.startsWith(controllerPath) || 
-                                    target.startsWith(nodesPath)
-            );
+            @Override
+            public CompletableFuture<NoteFile> getNoteFile(ContextPath path) {
+                return SystemRuntime.this.noteFileService.getNoteFile(path);
+            }
 
-        ContextPath basePath = ContextPath.of(nodes);
-        ContextPath altPath = ContextPath.of(user_home);
+            @Override
+            public ContextPath getBasePath() {
+                return basePath;
+            }
 
-       NoteFileServiceInterface noteFileServiceInterface = new NoteFileServiceInterface(){
+            @Override
+            public ContextPath getAltPath() {
+                return altPath;
+            }
 
-                @Override
-                public CompletableFuture<NoteFile> getNoteFile(ContextPath path) {
-                    return SystemRuntime.this.noteFileService.getNoteFile(path);
-                }
+        };
 
-                @Override
-                public ContextPath getBasePath() {
-                    return basePath;
-                }
-
-                @Override
-                public ContextPath getAltPath() {
-                    return altPath;
-                }
-
-            };
-
-        ScopedNoteFilenterface controllerFileInterface = new ScopedNoteFilenterface(
-            noteFileServiceInterface, basePath, altPath);
-        
+       
 
         // Create controller
         this.nodeController = new NodeController(
-            controllerName,
-            controllerFileInterface,
-            nodesPath
+            SystemProcess.NODE_CONTROLLER,
+            noteFileServiceInterface
         );
-        ContextPath path = controllerChildInterface.registerChild(nodeController);
+        ContextPath path = registryInterface.registerProcess(
+                    nodeController, 
+                    SystemProcess.NODE_CONTROLLER_PATH,
+                    SystemProcess.SYSTEM_PATH,
+                    registryInterface
+                );
+
         System.out.println("[SystemRuntime] Registered NodeController at: " + path);
 
-        // Register and start
-       return registryInterface.startChild(path);
+
+        return registryInterface.startProcess(path);
            
     }
 

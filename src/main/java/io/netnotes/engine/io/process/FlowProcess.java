@@ -31,7 +31,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     // ===== REGISTRY ACCESS (Interface, not direct) =====
     // Changed from: public FlowProcessRegistry registry
     // To: protected ProcessRegistryInterface registryInterface
-    protected ProcessRegistryInterface registryInterface;
+    protected ProcessRegistryInterface registry;
     
     // ===== LIFECYCLE =====
     private volatile boolean alive = true;
@@ -86,36 +86,68 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     // ===== INITIALIZATION =====
     
      /**
-     * Initialize - called by registrar
+     * Initialize with EXPLICIT path
      * 
-     * Path is computed from parent + name
      * 
-     * @param parentPath Parent's path
+     * @param contextPath Explicit path for this process
+     * @param parentPath Parent's path (for hierarchy tracking, can be null)
      * @param registryInterface Interface for registry operations
      */
     public void initialize(
+            ContextPath contextPath,
             ContextPath parentPath,
             ProcessRegistryInterface registryInterface) {
         
-        // Compute path: parent + name
-        if (parentPath == null) {
-            // Root process - name IS the path
-            this.contextPath = ContextPath.of(name);
-        } else {
-            // Child process - append name to parent
-            this.contextPath = parentPath.append(name);
-        }
-        
+        this.contextPath = contextPath;
         this.processId = new FlowProcessId(contextPath);
         this.parentPath = parentPath;
-        this.registryInterface = registryInterface;
+        this.registry = registryInterface;
         this.startTime = System.currentTimeMillis();
         
         System.out.println("[FlowProcess] Initialized: " + contextPath + 
-            " (name: " + name + ", interface: " + 
-            registryInterface.getClass().getSimpleName() + ")");
+            " (name: " + name + ", parent: " + parentPath + 
+            ", interface: " + registryInterface.getClass().getSimpleName() + ")");
     }
-    
+
+
+    /**
+     * Intitializes a process directly beneath the parent path
+     * utlizing the child's name
+     * 
+     * @param parentPath
+     * @param registryInterface
+     */
+
+    public ContextPath initializeParentsChild(FlowProcess process) {
+        
+        ContextPath computedPath = contextPath.append(process.getName());
+        
+        initialize(computedPath, contextPath, registry);
+        return computedPath;
+    }
+
+    /**
+     * Register child at EXPLICIT path
+     * 
+     * @param child Child process
+     * @param childPath Explicit path (can be multi-level: "services/group/worker")
+     * @return The registered path
+     */
+    public ContextPath registerChildAt(FlowProcess child, ContextPath childPath) {
+        if (registry == null) {
+            throw new IllegalStateException("Process not initialized");
+        }
+        
+        // Register with explicit path, this process as parent
+        return registry.registerProcess(
+            child, 
+            childPath, 
+            this.contextPath,  // parent for hierarchy
+            registry   // same interface
+        );
+    }
+
+
     // ===== CORE LIFECYCLE METHODS =====
     
     public CompletableFuture<Void> run() {
@@ -418,16 +450,73 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Child's name must match what you pass here!
      */
     public CompletableFuture<ContextPath> spawnChild(FlowProcess child) {
-        if (registryInterface == null) {
+        if (registry == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Process not initialized"));
         }
         
         return CompletableFuture.supplyAsync(() -> {
             // Interface computes child path = parent path + child name
-            return registryInterface.registerChild(child);
+            return registry.registerChild(contextPath, child);
         }, virtualExecutor);
     }
+
+    public ContextPath registerChild(FlowProcess process) {
+        if (registry == null) {
+            throw new NullPointerException("Process cannot be null");
+        }
+        return registry.registerChild(contextPath, process);
+    }
+
+    /**
+     * CONVENIENCE: Register child under sub-path
+     * 
+     * Path = this.contextPath + "/" + subPath + "/" + child.getName()
+     * 
+     * Example: parent at "system", subPath "services" → "system/services/auth"
+     */
+    public ContextPath registerChildUnder(FlowProcess child, String subPath) {
+        if (registry == null) {
+            throw new IllegalStateException("You must register the process before adding children");
+        }
+        
+        ContextPath fullPath = this.contextPath.append(subPath).append(child.getName());
+        
+        return registry.registerProcess(
+            child,
+            fullPath,
+            this.contextPath,  // parent is still THIS process
+            registry
+        );
+    }
+
+    /**
+     * Find all processes under a path prefix
+     * 
+     * Can search intermediate paths that have no process!
+     */
+    public List<FlowProcess> findByPathPrefix(ContextPath prefix) {
+        if (registry == null) {
+            return Collections.emptyList();
+        }
+        
+        return registry.findByPathPrefix(prefix);
+    }
+
+    /**
+     * Find children under sub-path
+     * 
+     * Example: parent at "system", query "system/services"
+     */
+    public List<FlowProcess> findChildrenUnder(String subPath) {
+        if (registry == null) {
+            return Collections.emptyList();
+        }
+        
+        ContextPath searchPath = this.contextPath.append(subPath);
+        return registry.findByPathPrefix(searchPath);
+    }
+
     
     /**
      * Start a child process
@@ -435,14 +524,21 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Uses interface for validation
      */
     public CompletableFuture<Void> startChild(ContextPath childPath) {
-        if (registryInterface == null) {
+        if (registry == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Process not initialized"));
         }
         
-        return registryInterface.startChild(childPath);
+        return registry.startProcess(childPath);
     }
 
+    public <T extends FlowProcess> List<T> findChildrenByType(Class<T> type) {
+        if (registry == null) {
+            throw new IllegalStateException("Process not initialized");
+        }
+        
+        return registry.findChildrenByType(contextPath, type);
+    }
     
     
     /**
@@ -451,11 +547,11 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Uses interface - scoped processes can only access reachable processes
      */
     public FlowProcess getProcess(ContextPath path) {
-        if (registryInterface == null) {
+        if (registry == null) {
             throw new IllegalStateException("Process not initialized");
         }
         
-        return registryInterface.getProcess(path);
+        return registry.getProcess(path);
     }
     
     /**
@@ -464,23 +560,48 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Uses interface - validates reachability
      */
     public CompletableFuture<StreamChannel> requestStreamChannel(ContextPath target) {
-        if (registryInterface == null) {
+        if (registry == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Process not initialized"));
         }
         
-        return registryInterface.requestStreamChannel(target);
+        return registry.requestStreamChannel(contextPath, target);
+    }
+
+    public CompletableFuture<Void> startProcess(ContextPath processPath) {
+        if (registry == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Process not initialized"));
+        }
+        
+        return registry.startProcess(processPath);
+    }
+
+    public void unregisterProcess(ContextPath processPath) {
+        if (registry == null) {
+            throw new IllegalStateException("Process not initialized");
+        }
+        
+        registry.unregisterProcess(processPath);
     }
     
     /**
      * Get children of this process
      */
     public List<ContextPath> getChildren() {
-        if (registryInterface == null) {
+        if (registry == null) {
             return Collections.emptyList();
         }
         
-        return registryInterface.getChildren();
+        return registry.getChildren();
+    }
+
+    public FlowProcess getChildProcess(String childName) {
+        if (registry == null) {
+            throw new IllegalStateException("Process not initialized");
+        }
+        
+        return registry.getChildProcess(contextPath, childName);
     }
     
     // ===== PROTECTED INTERFACE ACCESS =====
@@ -491,8 +612,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Protected - only subclasses can access
      * Still goes through interface (not direct service)
      */
-    protected ProcessRegistryInterface getRegistryInterface() {
-        return registryInterface;
+    protected ProcessRegistryInterface getRegistry() {
+        return registry;
     }
     
     // ===== COMPOSITION PATTERNS =====
