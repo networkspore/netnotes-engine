@@ -9,79 +9,65 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteFiles.NoteFile;
 
 /**
  * InstallationRegistry - Tracks INSTALLED packages (FlowProcess)
  * 
- * REFACTORED to be a FlowProcess:
- * - Receives ProcessRegistryInterface at construction
- * - Can handle messages (queries, install/uninstall commands)
- * - Can emit events (package installed/uninstalled)
- * - Participates in process network
+ * RESPONSIBILITIES:
+ * - Track which packages are installed
+ * - Persist to NoteFile
+ * - Emit events on install/uninstall
+ * - Answer queries about installed packages
  * 
  * LIFECYCLE:
  * - Created by SystemRuntime during initialization
- * - Registered as child process
- * - Lives for entire session lifetime
- * - Maintains NoteFile reference for efficient access
+ * - Registered as child process at /system/nodes/registry
+ * - Initialized (loads from NoteFile)
+ * - Lives for entire session
  * - Closed during shutdown
  * 
  * STORAGE:
- * - Path: {myPath}/installed
+ * - Path: /node-packages/registry
  * - Format: NoteBytesMap { packageId -> InstalledPackage }
  * - NoteFile cached as instance field
  */
 public class InstallationRegistry extends FlowProcess {
     
-    private final ConcurrentHashMap<NoteBytesReadOnly, InstalledPackage> installed;
+    private final ConcurrentHashMap<PackageId, InstalledPackage> installed;
+    private final NoteFile registryFile;
     
-    // Cached NoteFile - expensive to get, cheap to keep
-    private NoteFile registryFile = null;
-
-    /**
-     * Constructor
-     * 
-     * @param name Process name (e.g., "registry")
-     * @param noteFileService For file access
-     */
-    public InstallationRegistry(
-        String name,
-        NoteFile registryFile)
-     {
-        
+    public InstallationRegistry(String name, NoteFile registryFile) {
         super(name, ProcessType.BIDIRECTIONAL);
         
         if (registryFile == null) {
             throw new IllegalArgumentException("Registry file cannot be null");
         }
-
+        
         this.registryFile = registryFile;
         this.installed = new ConcurrentHashMap<>();
     }
     
     @Override
-    public CompletableFuture<Void> run() {  
-        return initialize()
-            .thenCompose(v -> getCompletionFuture());
+    public CompletableFuture<Void> run() {
+        // Initialize will be called separately by SystemRuntime
+        return getCompletionFuture();
     }
     
     /**
      * Initialize - load installation registry from NoteFile
-     * 
-     * Gets NoteFile ONCE and stores for entire lifecycle.
      */
     public CompletableFuture<Void> initialize() {
         System.out.println("[InstallationRegistry] Initializing at: " + contextPath);
         
         return loadInstalledPackages()
-            .exceptionallyCompose(ex -> {
+            .exceptionally(ex -> {
                 // First run - create empty registry
-                System.out.println("[InstallationRegistry] Initial registry file created");
-                return saveToFile();
+                System.out.println("[InstallationRegistry] First run - creating empty registry");
+                return saveToFile().join(); // Create empty file
             });
     }
     
@@ -97,23 +83,28 @@ public class InstallationRegistry extends FlowProcess {
                 
                 NoteBytesMap packagesMap = noteBytesObj.getAsNoteBytesMap();
                 
-                System.out.println("[InstallationRegistry] Found " + 
+                System.out.println("[InstallationRegistry] Loading " + 
                     packagesMap.size() + " installed packages");
                 
-                for (NoteBytes pkgId : packagesMap.keySet()) {
+                for (NoteBytes pkgIdBytes : packagesMap.keySet()) {
                     try {
-                        NoteBytesMap pkgData = packagesMap.get(pkgId).getAsNoteBytesMap();
-                        InstalledPackage pkg = InstalledPackage.fromNoteBytes(pkgData);
-                        installed.put(pkgId.readOnly(), pkg);
+                        NoteBytesMap pkgData = packagesMap.get(pkgIdBytes).getAsNoteBytesMap();
+                        InstalledPackage pkg = 
+                            InstalledPackage.fromNoteBytes(pkgData);
                         
-                        System.out.println("[InstallationRegistry] Loaded: " + 
+                        installed.put(pkg.getPackageId(), pkg);
+                        
+                        System.out.println("[InstallationRegistry]   Loaded: " + 
                             pkg.getName() + " v" + pkg.getVersion());
                             
                     } catch (Exception e) {
-                        System.err.println("[InstallationRegistry] Failed to load package " + 
-                            pkgId.getAsString() + ": " + e.getMessage());
+                        System.err.println("[InstallationRegistry]   Failed to load package " + 
+                            pkgIdBytes.getAsString() + ": " + e.getMessage());
                     }
                 }
+                
+                System.out.println("[InstallationRegistry] Successfully loaded " + 
+                    installed.size() + " packages");
             });
     }
     
@@ -122,33 +113,39 @@ public class InstallationRegistry extends FlowProcess {
      */
     public CompletableFuture<Void> registerPackage(InstalledPackage pkg) {
         installed.put(pkg.getPackageId(), pkg);
-        System.out.println("[InstallationRegistry] Registered: " + pkg.getName());
+        
+        System.out.println("[InstallationRegistry] Registered: " + pkg.getName() + 
+            " (processId: " + pkg.getProcessId() + ")");
         
         // Emit event
-        emitPackageEvent("package_installed", pkg.getPackageId());
+        emitPackageEvent("package_installed", pkg.getPackageId().getId());
         
         return saveToFile()
             .thenRun(() -> {
-                System.out.println("[InstallationRegistry] Registry saved with " + 
-                    installed.size() + " packages");
+                System.out.println("[InstallationRegistry] Registry saved (" + 
+                    installed.size() + " packages)");
             });
     }
     
     /**
      * Unregister a package (before deletion)
      */
-    public CompletableFuture<Void> unregisterPackage(NoteBytesReadOnly packageId) {
+    public CompletableFuture<Void> unregisterPackage(PackageId packageId) {
         InstalledPackage removed = installed.remove(packageId);
         
         if (removed != null) {
             System.out.println("[InstallationRegistry] Unregistered: " + removed.getName());
             
             // Emit event
-            emitPackageEvent("package_uninstalled", packageId);
+            emitPackageEvent("package_uninstalled", packageId.getId());
             
-            return saveToFile();
+            return saveToFile()
+                .thenRun(() -> {
+                    System.out.println("[InstallationRegistry] Registry saved after removal");
+                });
         }
         
+        System.out.println("[InstallationRegistry] Package not found: " + packageId);
         return CompletableFuture.completedFuture(null);
     }
     
@@ -162,14 +159,14 @@ public class InstallationRegistry extends FlowProcess {
     /**
      * Get specific package
      */
-    public InstalledPackage getPackage(NoteBytesReadOnly packageId) {
+    public InstalledPackage getPackage(PackageId packageId) {
         return installed.get(packageId);
     }
     
     /**
      * Check if package is installed
      */
-    public boolean isInstalled(NoteBytesReadOnly packageId) {
+    public boolean isInstalled(PackageId packageId) {
         return installed.containsKey(packageId);
     }
     
@@ -184,14 +181,19 @@ public class InstallationRegistry extends FlowProcess {
         
         NoteBytesMap packagesMap = new NoteBytesMap();
         
+        // Serialize each package
         for (InstalledPackage pkg : installed.values()) {
             packagesMap.put(
-                pkg.getPackageId(),
+                pkg.getPackageId().getId(),
                 pkg.toNoteBytes()
             );
         }
         
         return registryFile.write(packagesMap.getNoteBytesObject())
+            .thenRun(() -> {
+                System.out.println("[InstallationRegistry] Saved " + 
+                    installed.size() + " packages to file");
+            })
             .exceptionally(ex -> {
                 System.err.println("[InstallationRegistry] Failed to save: " + 
                     ex.getMessage());
@@ -202,19 +204,22 @@ public class InstallationRegistry extends FlowProcess {
     /**
      * Emit package event (for subscribers like NodeController)
      */
-    private void emitPackageEvent(String eventType, NoteBytesReadOnly packageId) {
+    private void emitPackageEvent(String eventType, NoteBytes packageId) {
         NoteBytesMap event = new NoteBytesMap();
         event.put("event", new NoteBytes(eventType));
-        event.put("package_id", packageId);
-        event.put("timestamp", new NoteBytes(System.currentTimeMillis()));
+        event.put(Keys.PACKAGE_ID, packageId);
+        event.put(Keys.TIMESTAMP, new NoteBytes(System.currentTimeMillis()));
         
         emit(event.getNoteBytesObject());
     }
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        // Handle queries, commands, etc.
-        // For now, not implemented
+        // Could handle queries like:
+        // - list_installed
+        // - get_package
+        // - is_installed
+        // For now, not implemented (direct method calls used)
         return CompletableFuture.completedFuture(null);
     }
     
@@ -248,6 +253,9 @@ public class InstallationRegistry extends FlowProcess {
             });
     }
     
+    /**
+     * Get statistics
+     */
     public String getStatistics() {
         return String.format("Installed packages: %d", installed.size());
     }

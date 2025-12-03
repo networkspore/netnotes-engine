@@ -1,7 +1,7 @@
 package io.netnotes.engine.core.system.control.nodes;
 
 
-import io.netnotes.engine.core.NoteFileServiceInterface;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -17,107 +17,69 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
  * - Crash count
  */
 public class NodeInstance {
-    
-    private final NoteBytesReadOnly packageId;
-    private final InstalledPackage installedPackage;
-    private final INode node;
+    private final InstanceId instanceId;           // Unique per load
+    private final InstalledPackage pkg;             // What package
+    private final ProcessConfig processConfig;     // What namespace
+    private final INode inode;                     // The actual node
     
     private volatile NodeState state;
-    private NoteFileServiceInterface dataInterface;
-   
-    
     private final long loadTime;
-    private int crashCount = 0;
+    private int crashCount;
     
     public NodeInstance(
-            NoteBytesReadOnly packageId,
-            InstalledPackage installedPackage,
-            INode node,
-            NodeState initialState) {
-        
-        this.packageId = packageId;
-        this.installedPackage = installedPackage;
-        this.node = node;
-        this.state = initialState;
+        InstalledPackage pkg,
+        INode inode
+    ) {
+        this.instanceId = InstanceId.generate();
+        this.pkg = pkg;
+        this.processConfig = pkg.getProcessConfig();
+        this.inode = inode;
+        this.state = NodeState.LOADING;
         this.loadTime = System.currentTimeMillis();
+        this.crashCount = 0;
     }
     
-    // ===== GETTERS =====
+    // ===== IDENTITY =====
     
-    public NoteBytesReadOnly getPackageId() {
-        return packageId;
-    }
+    public InstanceId getInstanceId() { return instanceId; }
+    public PackageId getPackageId() { return pkg.getPackageId(); }
+    public NoteBytesReadOnly getProcessId() { return processConfig.getProcessId(); }
     
-    public InstalledPackage getInstalledPackage() {
-        return installedPackage;
-    }
+    // ===== CONFIGURATION =====
     
-    public INode getNode() {
-        return node;
-    }
+    public InstalledPackage getPackage() { return pkg; }
+    public ProcessConfig getProcessConfig() { return processConfig; }
+    public ContextPath getDataRootPath() { return processConfig.getDataRootPath(); }
+    public ContextPath getFlowBasePath() { return processConfig.getFlowBasePath(); }
     
-    public NodeState getState() {
-        return state;
-    }
+    // ===== RUNTIME =====
     
-    public NoteFileServiceInterface getAppDataInterface() {
-        return dataInterface;
-    }
-
+    public INode getINode() { return inode; }
+    public NodeState getState() { return state; }
+    public void setState(NodeState state) { this.state = state; }
+    public long getLoadTime() { return loadTime; }
+    public long getUptime() { return System.currentTimeMillis() - loadTime; }
+    public int getCrashCount() { return crashCount; }
+    public void incrementCrashCount() { crashCount++; }
     
-    public long getLoadTime() {
-        return loadTime;
-    }
-    
-    public long getUptime() {
-        return System.currentTimeMillis() - loadTime;
-    }
-    
-    public int getCrashCount() {
-        return crashCount;
-    }
-    
-    // ===== SETTERS =====
-    
-    public void setState(NodeState state) {
-        NodeState oldState = this.state;
-        this.state = state;
-        
-        System.out.println("[NodeInstance:" + packageId + "] State: " + 
-            oldState + " → " + state);
-    }
-    
-    public void setDataInterface(NoteFileServiceInterface sandbox) {
-        this.dataInterface = sandbox;
-    }
-    
-    public void incrementCrashCount() {
-        this.crashCount++;
-    }
-    
-    // ===== STATUS CHECKS =====
+    // ===== STATUS =====
     
     public boolean isRunning() {
-        return state == NodeState.RUNNING && node.isActive();
+        return state == NodeState.RUNNING && inode.isActive();
     }
     
     public boolean isHealthy() {
-        return isRunning() && node.isAlive();
-    }
-    
-    public boolean isStopped() {
-        return state == NodeState.STOPPED;
+        return isRunning() && inode.isAlive();
     }
     
     @Override
     public String toString() {
         return String.format(
-            "NodeInstance[id=%s, state=%s, uptime=%ds, crashes=%d]",
-            packageId,
-            state,
-            getUptime() / 1000,
-            crashCount
+            "Instance[id=%s, package=%s, process=%s, state=%s]",
+            instanceId,
+            pkg.getPackageId(),
+            processConfig.getProcessId(),
+            state
         );
     }
 }
-

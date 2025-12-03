@@ -3,6 +3,14 @@ package io.netnotes.engine.core;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import io.netnotes.engine.core.system.control.nodes.InstallationRegistry;
+import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
+import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
+import io.netnotes.engine.core.system.control.nodes.InstanceId;
+import io.netnotes.engine.core.system.control.nodes.NodeInstance;
+import io.netnotes.engine.core.system.control.nodes.NodeLoadRequest;
+import io.netnotes.engine.core.system.control.nodes.PackageId;
+import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
@@ -10,15 +18,15 @@ import io.netnotes.engine.noteFiles.notePath.NoteFileService.FileEncryptionAnaly
 
 
 /**
- * AppDataSystemAccess - Capability container filled by AppData
+ * AppDataSystemAccess - Capability container filled by SystemRuntime
  * 
  * Pattern:
- * 1. SystemSessionProcess creates: new AppDataSystemAccess()
- * 2. Passes to AppData: new AppData(settingsData, processService, systemAccess)
- * 3. AppData fills with closures over private fields
+ * 1. SystemSessionProcess creates: new RuntimeAccess()
+ * 2. Passes to SystemRuntime: new SystemRuntime(settingsData, processService, systemAccess)
+ * 3. SystemRuntime fills with closures over private fields
  * 4. SystemSessionProcess uses: systemAccess.changePassword(...)
  * 
- * Result: Capabilities WITHOUT AppData exposing getters
+ * Result: Capabilities WITHOUT SystemRuntime exposing getters
  */
 public class RuntimeAccess {
     
@@ -38,8 +46,18 @@ public class RuntimeAccess {
     private DiskSpaceValidator diskSpaceValidator;
     private CorruptedFilesDeleter corruptedFilesDeleter;
     private FileCounter fileCounter;
+
+    private PackageBrowser packageBrowser;
+    private PackageInstaller packageInstaller;
+    private InstalledPackagesProvider installedPackagesProvider;
+    private PackageUninstaller packageUninstaller;
+    private NodeLoader nodeLoader;
+    private NodeUnloader nodeUnloader;
+    private RunningInstancesProvider runningInstancesProvider;
+    private InstallationRegistryProvider installationRegistryProvider;
+
     
-    // === PACKAGE-PRIVATE SETTERS (called by AppData.grantSystemAccess) ===
+    // === PACKAGE-PRIVATE SETTERS (called by SystemRuntime.grantSystemAccess) ===
     
     void setPasswordChanger(PasswordChanger changer) {
         this.passwordChanger = changer;
@@ -100,7 +118,41 @@ public class RuntimeAccess {
     void setFileCounter(FileCounter counter) {
         this.fileCounter = counter;
     }
-    
+
+
+    void setPackageBrowser(PackageBrowser browser) {
+        this.packageBrowser = browser;
+    }
+
+    void setPackageInstaller(PackageInstaller installer) {
+        this.packageInstaller = installer;
+    }
+
+    void setInstalledPackagesProvider(InstalledPackagesProvider provider) {
+        this.installedPackagesProvider = provider;
+    }
+
+    void setPackageUninstaller(PackageUninstaller uninstaller) {
+        this.packageUninstaller = uninstaller;
+    }
+
+    void setNodeLoader(NodeLoader loader) {
+        this.nodeLoader = loader;
+    }
+
+    void setNodeUnloader(NodeUnloader unloader) {
+        this.nodeUnloader = unloader;
+    }
+
+    void setRunningInstancesProvider(RunningInstancesProvider provider) {
+        this.runningInstancesProvider = provider;
+    }
+
+    void setInstallationRegistryProvider(InstallationRegistryProvider provider) {
+        this.installationRegistryProvider = provider;
+    }
+
+        
     // === PUBLIC GETTERS (called by SystemSessionProcess) ===
     
     public CompletableFuture<Boolean> changePassword(
@@ -331,5 +383,143 @@ public class RuntimeAccess {
     @FunctionalInterface
     public interface FileCounter {
         CompletableFuture<Integer> count();
+    }
+
+
+    /**
+     * Browse available packages from repositories
+     */
+    public CompletableFuture<List<PackageInfo>> browseAvailablePackages() {
+        if (packageBrowser == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Package browser capability not granted"));
+        }
+        return packageBrowser.browse();
+    }
+
+    /**
+     * Install a package (password already verified by caller)
+     * 
+     * The password in the request was already verified by SystemSessionProcess,
+     * so we can proceed with installation directly.
+     */
+    public CompletableFuture<InstalledPackage> installPackage(
+        InstallationRequest request
+    ) {
+        if (packageInstaller == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Package installer capability not granted"));
+        }
+        return packageInstaller.install(request);
+    }
+
+    /**
+     * Get list of installed packages
+     */
+    public CompletableFuture<List<InstalledPackage>> getInstalledPackages() {
+        if (installedPackagesProvider == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Installed packages provider capability not granted"));
+        }
+        return installedPackagesProvider.provide();
+    }
+
+    /**
+     * Uninstall a package
+     */
+    public CompletableFuture<Void> uninstallPackage(PackageId packageId) {
+        if (packageUninstaller == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Package uninstaller capability not granted"));
+        }
+        return packageUninstaller.uninstall(packageId);
+    }
+
+    /**
+     * Load a node instance
+     */
+    public CompletableFuture<NodeInstance> loadNode(NodeLoadRequest request) {
+        if (nodeLoader == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Node loader capability not granted"));
+        }
+        return nodeLoader.load(request);
+    }
+
+    /**
+     * Unload a node instance
+     */
+    public CompletableFuture<Void> unloadNode(InstanceId instanceId) {
+        if (nodeUnloader == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Node unloader capability not granted"));
+        }
+        return nodeUnloader.unload(instanceId);
+    }
+
+    /**
+     * Get all running node instances
+     */
+    public CompletableFuture<List<NodeInstance>> getRunningInstances() {
+        if (runningInstancesProvider == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Running instances provider capability not granted"));
+        }
+        return runningInstancesProvider.provide();
+    }
+
+    /**
+     * Get installation registry (needed by InstallationFlowCoordinator)
+     */
+    public InstallationRegistry getInstallationRegistry() {
+        if (installationRegistryProvider == null) {
+            throw new IllegalStateException(
+                "Installation registry provider capability not granted");
+        }
+        return installationRegistryProvider.provide();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ADD THESE FUNCTIONAL INTERFACES (at end of file, with existing ones)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @FunctionalInterface
+    public interface PackageBrowser {
+        CompletableFuture<List<PackageInfo>> browse();
+    }
+
+    @FunctionalInterface
+    public interface PackageInstaller {
+        CompletableFuture<InstalledPackage> install(InstallationRequest request);
+    }
+
+    @FunctionalInterface
+    public interface InstalledPackagesProvider {
+        CompletableFuture<List<InstalledPackage>> provide();
+    }
+
+    @FunctionalInterface
+    public interface PackageUninstaller {
+        CompletableFuture<Void> uninstall(PackageId packageId);
+    }
+
+    @FunctionalInterface
+    public interface NodeLoader {
+        CompletableFuture<NodeInstance> load(NodeLoadRequest request);
+    }
+
+    @FunctionalInterface
+    public interface NodeUnloader {
+        CompletableFuture<Void> unload(InstanceId instanceId);
+    }
+
+    @FunctionalInterface
+    public interface RunningInstancesProvider {
+        CompletableFuture<List<NodeInstance>> provide();
+    }
+
+    @FunctionalInterface
+    public interface InstallationRegistryProvider {
+        InstallationRegistry provide();
     }
 }

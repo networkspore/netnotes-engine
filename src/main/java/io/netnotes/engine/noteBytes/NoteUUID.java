@@ -14,8 +14,8 @@ import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytesReadOnly {
 
-    private static final AtomicInteger m_atomicByte = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
-
+    private static final AtomicInteger m_atomicInteger = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
+    private static final AtomicInteger m_lastTime = new AtomicInteger(getIntTimeStamp());
     private NoteUUID(byte[] bytes){
         super(bytes, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
     }
@@ -31,8 +31,8 @@ public class NoteUUID extends NoteBytesReadOnly {
         return ByteDecoding.longToBytesLittleEndian(System.currentTimeMillis());
     }
 
-    public static int getAndIncrementByte(){
-        return m_atomicByte.updateAndGet((i)->i < 255 ? i + 1 : 0);
+    public static int getAndIncrementInteger(){
+        return m_atomicInteger.updateAndGet((i)->i + 1);
 
     }
 
@@ -61,14 +61,14 @@ public class NoteUUID extends NoteBytesReadOnly {
 
     public static byte[] createTimeRndBytes(){
 		byte[] nanoTime = littleEndianNanoTimeHash();
-		byte[] randomBytes = RandomService.getRandomBytes(7);
-		byte[] intTime = intTimeStampBytes();
-        byte byteIncrement = (byte) getAndIncrementByte();
+		byte[] randomBytes = RandomService.getRandomBytes(4);
+		byte[] timeSequence = createTimeSequenceBytes64();
+
         byte[] bytes = new byte[] {
-            intTime[0],     intTime[1],     intTime[2],     intTime[3],
-            nanoTime[0],    nanoTime[1],    nanoTime[2],    nanoTime[3],
-            randomBytes[0], randomBytes[1], randomBytes[2], randomBytes[3],
-            randomBytes[4], randomBytes[5], randomBytes[6], byteIncrement
+            timeSequence[0],    timeSequence[1],    timeSequence[2],    timeSequence[3],
+            timeSequence[4],    timeSequence[5],    timeSequence[6],    timeSequence[7],
+            nanoTime[0],        nanoTime[1],        nanoTime[2],        nanoTime[3],
+            randomBytes[0],     randomBytes[1],     randomBytes[2],     randomBytes[3]
         };
 
         return bytes;
@@ -99,7 +99,7 @@ public class NoteUUID extends NoteBytesReadOnly {
     }
 
     public static NoteUUID fromUnencodedBytes(byte[] bytes){
-        return new NoteUUID( EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
+        return new NoteUUID(EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
 
     }
 
@@ -108,18 +108,51 @@ public class NoteUUID extends NoteBytesReadOnly {
         return ByteDecoding.bytesToLongBigEndian(createTimeSequenceBytes64());
     }
 
-    public static byte[] createTimeSequenceBytes64() {
-       
-        byte[] intTimestamp   = intTimeStampBytes();
-        byte[] nanoTime = littleEndianNanoTimeHash();
+    public static int getNextSequenceRand(){
+        return getNextSequenceRand(getIntTimeStamp());
+    }
 
+    private static int getNextSequenceRand(int now) {
+        int rand = ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4));
+        
+        while (true) {
+            int last = m_lastTime.get();
+
+            if (last == now) {
+                // Same time window → increment and return
+                return m_atomicInteger.incrementAndGet();
+            }
+
+            // Timestamp changed → try to update the timestamp
+            if (m_lastTime.compareAndSet(last, now)) {
+                // Successfully updated timestamp → reset counter
+                m_atomicInteger.set(rand);
+                return rand; // first value for this new window
+            }
+
+            // Else: another thread changed it first → loop and retry
+        }
+    }
+
+    public static byte[] createTimeSequenceBytes64() {
+        int now = getIntTimeStamp();
+        int seq = getNextSequenceRand(now);
+
+        byte[] intTimestamp = ByteDecoding.intToBytesBigEndian(now);
+        byte[] seqBytes = ByteDecoding.intToBytesBigEndian(seq);
+        
         return new byte[] {
             intTimestamp[0],  intTimestamp[1],  intTimestamp[2],    intTimestamp[3],
-            nanoTime[0],      nanoTime[1],      nanoTime[2],        nanoTime[3]   
+            seqBytes[0],      seqBytes[1],      seqBytes[2],      seqBytes[3]   
         };
     }
 
-     public static int getIntTimeStamp(){
+    /**
+     * Current timestamp YYY/MM-SSSSS
+     * Hour/Min/Sec in 16s resolution
+     * @return
+     */
+    public static int getIntTimeStamp(){
          long now = System.currentTimeMillis();
 
         Calendar cal = Calendar.getInstance();

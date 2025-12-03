@@ -15,68 +15,49 @@ import io.netnotes.engine.utils.VirtualExecutors;
  * 
  * Example:
  *   Interface at: /system/nodes/runtime/database-node
- *   Alt path: /user/nodes/database-node
  *   
- *   Request: config/settings.json (relative)
- *   → Resolves to: /system/nodes/runtime/database-node/config/settings.json
+ *   Request: config/settings (relative)
+ *   → Resolves to: /system/nodes/runtime/database-node/config/settings
  *   → canReach? Yes (within basePath)
- *   → ALLOWED
  *   
- *   Request: /user/nodes/database-node/exports/data.csv (absolute)
+ *   Request: /user/nodes/database-node/exports/data
  *   → canReach from basePath? Check hops...
- *   → canReach from altPath? Check hops...
  *   → ALLOWED (reachable from altPath)
  *   
- *   Request: /system/nodes/runtime/other-node/data.json (absolute)
+ *   Request: /system/nodes/runtime/other-node/data
  *   → canReach from basePath? Check hops...
  *     → Ownership check fails (database-node ≠ other-node)
  *   → DENIED
  */
 public class ScopedNoteFileInterface implements NoteFileServiceInterface {
     
-    private final ContextPath basePath;     // Primary location (e.g., runtime)
-    private final ContextPath altPath;      // Alternative location (e.g., user)
+    private final ContextPath dataRootPath;     // DataRoot
     private final NoteFileServiceInterface fileInterface;
     /**
      * Constructor - paths determine access
      * 
      * @param noteFileService File service for actual file operations
-     * @param basePath Primary path where this interface lives
-     * @param altPath Alternative path (optional, can be null)
+     * @param dataRootPath Primary path where this interface lives
      */
     public ScopedNoteFileInterface(
-            NoteFileServiceInterface fileInterface,
-            ContextPath basePath,
-            ContextPath altPath) {
+        NoteFileServiceInterface fileInterface,
+        ContextPath dataRootPath
+    ) {
         
         if (fileInterface == null) {
             throw new IllegalArgumentException("NoteFileServiceInterface cannot be null");
         }
         
-        if (basePath == null) {
+        if (dataRootPath == null) {
             throw new IllegalArgumentException("basePath cannot be null");
         }
-        
-        if (!basePath.isAbsolute()) {
-            throw new IllegalArgumentException("basePath must be absolute: " + basePath);
-        }
-        
-        if (altPath != null && !altPath.isAbsolute()) {
-            throw new IllegalArgumentException("altPath must be absolute: " + altPath);
-        }
 
-
-        if(fileInterface.getBasePath().size() > 0 && !basePath.startsWith(fileInterface.getBasePath())){
+        if(fileInterface.getDataRootPath().size() > 0 && !dataRootPath.startsWith(fileInterface.getDataRootPath())){
             throw new IllegalArgumentException("basePath must be within parent interface base path");
         }
-        if(altPath != null && fileInterface.getAltPath().size() > 0 && !altPath.startsWith(fileInterface.getAltPath())){
-            throw new IllegalArgumentException("altPath must be within parent interface alt path");
-        }
-        
-        
+     
         this.fileInterface = fileInterface;
-        this.basePath = basePath;
-        this.altPath = altPath;
+        this.dataRootPath = dataRootPath;
     }
     
     // =========================================================================
@@ -99,17 +80,9 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
                 throw new SecurityException(String.format(
                     "Cannot access '%s' from base '%s'%s",
                     requestedPath,
-                    basePath,
-                    altPath != null ? " or alt '" + altPath + "'" : ""
+                    dataRootPath
                 ));
             }
-            
-            System.out.println(String.format(
-                "[ScopedInterface] %s → %s (via %s)",
-                requestedPath,
-                resolution.resolvedPath,
-                resolution.resolvedVia
-            ));
             
             return resolution.resolvedPath;
             
@@ -125,58 +98,20 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
     /**
      * Resolve requested path to absolute path
      * 
-     * Strategy:
-     * 1. If RELATIVE: scope to basePath (or altPath)
-     * 2. If ABSOLUTE: verify reachable via hop validation
      * 
      * @param requestedPath Path requested by caller
      * @return PathResolution with resolved path, or null if denied
      */
     private PathResolution resolvePath(ContextPath requestedPath) {
         
-        // === RELATIVE PATH ===
-        if (requestedPath.isRelative()) {
-            // Scope to basePath first
-            ContextPath scopedToBase = basePath.append(requestedPath);
-            
-            // Verify no path traversal attacks
-            if (basePath.canReach(scopedToBase)) {
-                return new PathResolution(scopedToBase, true, "basePath");
-            }
-            
-            // Try altPath if available
-            if (altPath != null) {
-                ContextPath scopedToAlt = altPath.append(requestedPath);
-                
-                if (altPath.canReach(scopedToAlt)) {
-                    return new PathResolution(scopedToAlt, true, "altPath");
-                }
-            }
-            
-            // Cannot scope safely
-            return new PathResolution(requestedPath, false, "relative-unsafe");
-        }
-        
         // === ABSOLUTE PATH ===
         // Check if reachable from basePath
-        if (basePath.canReach(requestedPath)) {
-            return new PathResolution(requestedPath, true, "basePath-hop-valid");
+        if (dataRootPath.canReach(requestedPath)) {
+            return new PathResolution(requestedPath, true);
         }
+
         
-        // Check if reachable from altPath
-        if (altPath != null && altPath.canReach(requestedPath)) {
-            return new PathResolution(requestedPath, true, "altPath-hop-valid");
-        }
-        
-        // Not reachable
-        System.err.println(String.format(
-            "[Security] Hop validation failed: '%s' not reachable from '%s'%s",
-            requestedPath,
-            basePath,
-            altPath != null ? " or '" + altPath + "'" : ""
-        ));
-        
-        return new PathResolution(requestedPath, false, "hop-validation-failed");
+        return new PathResolution(requestedPath, false);
     }
     
     // =========================================================================
@@ -189,33 +124,23 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
     private static class PathResolution {
         final ContextPath resolvedPath;
         final boolean allowed;
-        final String resolvedVia;  // For debugging
         
-        PathResolution(ContextPath resolvedPath, boolean allowed, String resolvedVia) {
+        PathResolution(ContextPath resolvedPath, boolean allowed) {
             this.resolvedPath = resolvedPath;
             this.allowed = allowed;
-            this.resolvedVia = resolvedVia;
         }
     }
     
-    // =========================================================================
-    // GETTERS (for debugging)
-    // =========================================================================
-    
-    public ContextPath getBasePath() {
-        return basePath;
+
+    public ContextPath getDataRootPath() {
+        return dataRootPath;
     }
-    
-    public ContextPath getAltPath() {
-        return altPath;
-    }
-    
+
     @Override
     public String toString() {
         return String.format(
-            "ScopedInterface[base=%s, alt=%s]",
-            basePath,
-            altPath
+            "ScopedInterface[base=%s]",
+            dataRootPath
         );
     }
 }

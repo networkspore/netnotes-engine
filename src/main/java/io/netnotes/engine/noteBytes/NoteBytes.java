@@ -96,7 +96,7 @@ public class NoteBytes {
     }
  
     public ByteBuffer getByteByffer(){
-        return ByteBuffer.wrap(m_value);
+        return ByteBuffer.wrap(this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : this.get());
     }
 
     public void set(byte[] value, byte type) {
@@ -303,7 +303,7 @@ public class NoteBytes {
     }
 
      public InputStream getAsInputStream() {
-        return new ByteArrayInputStream(m_value);
+        return new ByteArrayInputStream(this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : this.get());
     }
 
 
@@ -364,6 +364,10 @@ public class NoteBytes {
     }
 
     public NoteBytesReadOnly readOnly(){
+
+        if(this instanceof NoteBytesReadOnly readOnly){
+            return readOnly;
+        }
         if(byteLength() > 0){
             byte[] bytes = m_value;
             byte[] newbytes = new byte[bytes.length];
@@ -622,11 +626,11 @@ public class NoteBytes {
     }
 
     public NoteBytesArray getAsNoteBytesArray(){
-        return new NoteBytesArray(m_value);
+        return new NoteBytesArray(get());
     }
 
     public NoteBytesArrayReadOnly getAsNoteBytesArrayReadOnly(){
-        return new NoteBytesArrayReadOnly(m_value);
+        return new NoteBytesArrayReadOnly(get());
     }
 
     public NoteIntegerArray getAsNoteIntegerArray(){
@@ -785,7 +789,7 @@ public class NoteBytes {
     }
 
     public byte[] getHash(int digestLength){
-        byte[] bytes = getBytesInternal();
+        byte[] bytes = this instanceof NoteBytesReadOnly readOnly ? readOnly.getBytesInternal() : this.get();
 
         return HashServices.digestBytesToBytes(bytes, digestLength);
     }

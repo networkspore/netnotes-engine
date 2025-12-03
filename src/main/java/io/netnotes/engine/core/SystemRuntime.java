@@ -26,13 +26,12 @@ public class SystemRuntime {
     private NodeController nodeController;
 
     /**
-     * Constructor
-     * 
-     * @param myPath Where this runtime lives (e.g., "system/session/runtime")
-     * @param settingsData Decrypted settings (password already verified)
-     * @param registryInterface Interface for spawning child processes
+     * @param settingsData
+     * @param registryInterface
+     * @param systemAccess
      */
     public SystemRuntime(
+        ContextPath sessionPath,
         SettingsData settingsData,
         ProcessRegistryInterface registryInterface,
         RuntimeAccess systemAccess
@@ -250,8 +249,7 @@ public class SystemRuntime {
 
     private CompletableFuture<Void> initializeNodeController() {
 
-        ContextPath basePath = ContextPath.of("run");
-        ContextPath altPath = ContextPath.of("var");
+
 
         NoteFileServiceInterface noteFileServiceInterface = new NoteFileServiceInterface(){
 
@@ -261,13 +259,8 @@ public class SystemRuntime {
             }
 
             @Override
-            public ContextPath getBasePath() {
-                return basePath;
-            }
-
-            @Override
-            public ContextPath getAltPath() {
-                return altPath;
+            public ContextPath getDataRootPath() {
+                return SystemProcess.NODE_DATA_PATH;
             }
 
         };

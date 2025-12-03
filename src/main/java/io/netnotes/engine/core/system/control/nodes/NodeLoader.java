@@ -20,8 +20,9 @@ class NodeLoader {
     private final ProcessRegistryInterface processInterface;
     private final NoteFileServiceInterface fileInterface;
     private final OSGiBundleLoader osgiBundleLoader;
-    
-    public NodeLoader(ProcessRegistryInterface processInterface, NoteFileServiceInterface fileInterface) {
+    private final String name;
+    public NodeLoader(String name, ProcessRegistryInterface processInterface, NoteFileServiceInterface fileInterface) {
+        this.name = name;
         this.processInterface = processInterface;
         this.fileInterface = fileInterface;
         this.osgiBundleLoader = new OSGiBundleLoader(fileInterface);

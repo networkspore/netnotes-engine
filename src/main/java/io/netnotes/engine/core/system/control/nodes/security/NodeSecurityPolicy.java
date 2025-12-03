@@ -16,23 +16,21 @@ import java.util.*;
 public class NodeSecurityPolicy {
     
     private final NoteBytesReadOnly nodeId;
-    private final String packageId;
+    private final NoteBytesReadOnly packageId;
     private final Set<PathCapability> grantedCapabilities;
     
     // Approval metadata
     private final long createdAt;
-    private final String approvedByUser;
     private boolean approved;
     
     // Runtime permission grants (audit trail)
     private final List<RuntimePermissionGrant> runtimeGrants;
     
-    public NodeSecurityPolicy(NoteBytesReadOnly nodeId, String packageId, String approvedByUser) {
+    public NodeSecurityPolicy(NoteBytesReadOnly nodeId, NoteBytesReadOnly packageId) {
         this.nodeId = nodeId;
         this.packageId = packageId;
         this.grantedCapabilities = new HashSet<>();
         this.createdAt = System.currentTimeMillis();
-        this.approvedByUser = approvedByUser;
         this.approved = false;
         this.runtimeGrants = new ArrayList<>();
         
@@ -46,7 +44,6 @@ public class NodeSecurityPolicy {
     private void initializeDefaults() {
         grantCapability(PathCapability.messageController());
         grantCapability(PathCapability.ownRuntimeData(packageId));
-        grantCapability(PathCapability.ownUserData(packageId));
     }
     
     // ===== CAPABILITY MANAGEMENT =====
@@ -181,7 +178,6 @@ public class NodeSecurityPolicy {
         map.put("package_id", packageId);
         map.put("approved", approved);
         map.put("created_at", createdAt);
-        map.put("approved_by", approvedByUser);
         
         // Granted capabilities
         NoteBytesArray capsArr = new NoteBytesArray();
@@ -200,17 +196,15 @@ public class NodeSecurityPolicy {
         return map.getNoteBytesObject();
     }
     
-    public static NodeSecurityPolicy fromNoteBytes(NoteBytesObject obj) {
-        NoteBytesMap map = obj.getAsNoteBytesMap();
+    public static NodeSecurityPolicy fromNoteBytes(NoteBytesMap map) {
         
         NoteBytesReadOnly nodeId = map.getReadOnly(Keys.NODE_ID);
-        String packageId = map.get("package_id").getAsString();
-        String approvedBy = map.get("approved_by").getAsString();
+        NoteBytesReadOnly packageId = map.getReadOnly(Keys.PACKAGE_ID);
         
-        NodeSecurityPolicy policy = new NodeSecurityPolicy(nodeId, packageId, approvedBy);
+        NodeSecurityPolicy policy = new NodeSecurityPolicy(nodeId, packageId);
         
         // Restore approval state
-        policy.approved = map.get("approved").getAsBoolean();
+        policy.approved = map.get(Keys.APPROVED).getAsBoolean();
         
         // Restore capabilities (clear defaults first)
         policy.grantedCapabilities.clear();
@@ -237,9 +231,8 @@ public class NodeSecurityPolicy {
     // ===== GETTERS =====
     
     public NoteBytesReadOnly getNodeId() { return nodeId; }
-    public String getPackageId() { return packageId; }
+    public NoteBytesReadOnly getPackageId() { return packageId; }
     public long getCreatedAt() { return createdAt; }
-    public String getApprovedBy() { return approvedByUser; }
     
     // ===== NESTED RECORD =====
     

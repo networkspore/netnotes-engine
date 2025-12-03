@@ -8,6 +8,7 @@ import org.osgi.util.tracker.ServiceTracker;
 import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
+import io.netnotes.engine.core.system.control.nodes.PackageId;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
@@ -124,7 +125,7 @@ public class OSGiBundleLoader {
      */
     public CompletableFuture<INode> loadBundle(InstalledPackage pkg) {
         return initializeFramework()
-            .thenCompose(v -> installBundleFromNoteFile(pkg.getPackageId(), pkg))
+            .thenCompose(v -> installBundleFromNoteFile(pkg))
             .thenCompose(bundle -> waitForNodeService(pkg.getPackageId(), bundle))
             .whenComplete((inode, ex) -> {
                 if (ex != null) {
@@ -140,10 +141,9 @@ public class OSGiBundleLoader {
      * OSGi needs a File path, but NoteFiles are encrypted.
      * Solution: Extract to temporary file, install bundle, then delete temp.
      */
-    private CompletableFuture<Bundle> installBundleFromNoteFile(
-        NoteBytesReadOnly packageId,
-        InstalledPackage pkg) {
-        ContextPath jarPath = pkg.getInstallPath().append("package.jar");
+    private CompletableFuture<Bundle> installBundleFromNoteFile(InstalledPackage pkg) {
+
+        ContextPath jarPath = pkg.getInstallPath();
 
         return appDataInterface
             .getNoteFile(jarPath).thenCompose(jarFile->
@@ -157,7 +157,7 @@ public class OSGiBundleLoader {
                     // Load directly from stream
                     BundleContext context = framework.getBundleContext();
                     
-                    String location = "notefile://" + packageId;
+                    String location = pkg.getPluginUrl();
                     
                     // Install from encrypted stream
                     try (InputStream stream = jarFile.getInputStream()) {
@@ -189,7 +189,7 @@ public class OSGiBundleLoader {
      * }
      */
     private CompletableFuture<INode> waitForNodeService(
-            NoteBytesReadOnly packageId, 
+            PackageId packageId, 
             Bundle bundle) {
         
         return CompletableFuture.supplyAsync(() -> {

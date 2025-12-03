@@ -33,7 +33,9 @@ import java.util.List;
  */
 public class PackageManifest {
     public static final NoteBytesReadOnly OSGI_BUNDLE = new NoteBytesReadOnly("osgi-bundle");
-
+    private final boolean allowMultipleInstances;
+    private final ProcessConfig.InheritanceMode defaultProcessMode;
+    private final boolean supportsClustering;
     private final String name;
     private final String version;
     private final String type;  // osgi-bundle, script, native, etc.
@@ -49,8 +51,11 @@ public class PackageManifest {
         String entry,
         List<String> dependencies,
         boolean autoload,
+        boolean allowMultipleInstances,
+        ProcessConfig.InheritanceMode defaultProcessMode,
+        boolean supportsClustering,
         JsonObject metadata
-    ) { this(name, version, type, entry, dependencies, autoload, NoteBytes.fromJson(metadata).getAsMap()); }
+    ){ this(name, version, type, entry, dependencies, autoload, allowMultipleInstances, defaultProcessMode, supportsClustering, NoteBytes.fromJson(metadata).getAsMap()); }
 
     public PackageManifest(
         String name,
@@ -59,8 +64,11 @@ public class PackageManifest {
         String entry,
         List<String> dependencies,
         boolean autoload,
+        boolean allowMultipleInstances,
+        ProcessConfig.InheritanceMode defaultProcessMode,
+        boolean supportsClustering,
         NoteBytesMap metadata
-    ) {
+    ){
         this.name = name;
         this.version = version;
         this.type = type;
@@ -68,6 +76,11 @@ public class PackageManifest {
         this.dependencies = dependencies != null ? dependencies : new ArrayList<>();
         this.autoload = autoload;
         this.metadata = metadata;
+        this.allowMultipleInstances = allowMultipleInstances;
+        this.defaultProcessMode = defaultProcessMode != null 
+            ? defaultProcessMode 
+            : ProcessConfig.InheritanceMode.STANDALONE;
+        this.supportsClustering = supportsClustering;
     }
     
     public String getName() { return name; }
@@ -77,7 +90,9 @@ public class PackageManifest {
     public List<String> getDependencies() { return dependencies; }
     public boolean isAutoload() { return autoload; }
     public NoteBytesMap getMetadata() { return metadata; }
-    
+    public boolean allowsMultipleInstances() { return allowMultipleInstances; }
+    public ProcessConfig.InheritanceMode getDefaultProcessMode() { return defaultProcessMode; }
+    public boolean supportsClustering() { return supportsClustering;  }
     /**
      * Parse manifest from JSON
      */
@@ -88,7 +103,7 @@ public class PackageManifest {
             json.get("type").getAsString() : "osgi-bundle";
         String entry = json.has("entry") ? 
             json.get("entry").getAsString() : null;
-        
+       
         List<String> dependencies = new ArrayList<>();
         if (json.has("dependencies") && json.get("dependencies").isJsonArray()) {
             json.getAsJsonArray("dependencies").forEach(e -> 
@@ -98,8 +113,46 @@ public class PackageManifest {
         boolean autoload = json.has("autoload") && 
             json.get("autoload").getAsBoolean();
 
-        return new PackageManifest(name, version, type, entry, 
-            dependencies, autoload, NoteBytes.fromJson(json).getAsMap());
+        String defaultProcessMode = json.has("defaultProcessMode") 
+            ? json.get("defaultProcessMode").getAsString().toUpperCase()
+            : "STANDALONE";
+        boolean allowMultipleInstances = json.has("allowMultipleInstances")
+            ? json.get("allowMultipleInstances").getAsBoolean()
+            : false;
+        boolean supportsClustering = json.has("supportsClustering")
+            ? json.get("supportsClustering").getAsBoolean()
+            : false;
+
+        ProcessConfig.InheritanceMode inheritanceMode = ProcessConfig.InheritanceMode.valueOf(defaultProcessMode);
+
+        return new PackageManifest(
+            name, 
+            version, 
+            type, 
+            entry, 
+            dependencies, 
+            autoload, 
+            allowMultipleInstances, 
+            inheritanceMode, 
+            supportsClustering, 
+            json);
+    }
+
+     /**
+     * Check if package can be installed with given mode
+     */
+    public boolean supportsProcessMode(ProcessConfig.InheritanceMode mode) {
+        if (mode == ProcessConfig.InheritanceMode.STANDALONE) {
+            return true; // Always supported
+        }
+        if (mode == ProcessConfig.InheritanceMode.SHARED) {
+            return allowMultipleInstances;
+        }
+        if (mode == ProcessConfig.InheritanceMode.CLUSTER_LEADER || 
+            mode == ProcessConfig.InheritanceMode.CLUSTER_MEMBER) {
+            return supportsClustering;
+        }
+        return false;
     }
     
     /**
@@ -183,7 +236,30 @@ public class PackageManifest {
         }
         NoteBytes autoloadBytes = map.get(Keys.AUTOLOAD);
         boolean autoload = autoloadBytes != null ? autoloadBytes.getAsBoolean() : false;        
-        return new PackageManifest(name, version, type, entry, 
-            dependencies, autoload, map);
+
+
+        String defaultProcessMode = map.has("defaultProcessMode") 
+            ? map.get("defaultProcessMode").getAsString().toUpperCase()
+            : "STANDALONE";
+        boolean allowMultipleInstances = map.has("allowMultipleInstances")
+            ? map.get("allowMultipleInstances").getAsBoolean()
+            : false;
+        boolean supportsClustering = map.has("supportsClustering")
+            ? map.get("supportsClustering").getAsBoolean()
+            : false;
+
+        ProcessConfig.InheritanceMode inheritanceMode = ProcessConfig.InheritanceMode.valueOf(defaultProcessMode);
+
+        return new PackageManifest(
+            name, 
+            version, 
+            type, 
+            entry, 
+            dependencies, 
+            autoload, 
+            allowMultipleInstances, 
+            inheritanceMode, 
+            supportsClustering, 
+            map);
     }
 }

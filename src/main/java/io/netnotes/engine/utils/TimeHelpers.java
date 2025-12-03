@@ -21,6 +21,14 @@ public class TimeHelpers {
         return instant.toEpochMilli();
     }
 
+    /**
+     * Format timestamp for display
+     */
+    public static String formatDate(long timestamp) {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm")
+            .format(new java.util.Date(timestamp));
+    }
+
     public static String formatDateTimeString(LocalDateTime localDateTime) {
 
         DateTimeFormatter formater = DateTimeFormatter.ofPattern("MM-dd-yyyy hh:mm:ss.SSS a");

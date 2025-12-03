@@ -42,13 +42,10 @@ import java.util.*;
 public class PolicyManifest {
     
     private final List<PathCapability> requestedCapabilities;
-    private final ClusterConfig clusterConfig;
-    
+
     public PolicyManifest(
-            List<PathCapability> requestedCapabilities,
-            ClusterConfig clusterConfig) {
+            List<PathCapability> requestedCapabilities) {
         this.requestedCapabilities = new ArrayList<>(requestedCapabilities);
-        this.clusterConfig = clusterConfig;
     }
     
     // ===== GETTERS =====
@@ -57,14 +54,8 @@ public class PolicyManifest {
         return Collections.unmodifiableList(requestedCapabilities);
     }
     
-    public ClusterConfig getClusterConfig() {
-        return clusterConfig;
-    }
-    
-    public boolean hasClusterConfig() {
-        return clusterConfig != null;
-    }
-    
+
+
     /**
      * Get capabilities that require user approval (not default granted)
      */
@@ -103,12 +94,7 @@ public class PolicyManifest {
                 errors.add("Capability missing reason: " + cap.getPathPattern());
             }
         }
-        
-        // Validate cluster config
-        if (clusterConfig != null) {
-            List<String> clusterErrors = clusterConfig.validate();
-            errors.addAll(clusterErrors);
-        }
+    
         
         return errors;
     }
@@ -128,11 +114,6 @@ public class PolicyManifest {
             if (pattern.startsWith(SystemProcess.NODES_PATH)){
                 return true;
             }
-
-            if (pattern.startsWith(SystemProcess.SHARED_PATH)){
-                return true;
-            }
-            
         }
         return false;
     }
@@ -144,7 +125,6 @@ public class PolicyManifest {
      */
     public static PolicyManifest fromJson(JsonObject json) {
         List<PathCapability> capabilities = new ArrayList<>();
-        ClusterConfig cluster = null;
         
         // Parse requested capabilities
         if (json.has("requested_capabilities") && json.get("requested_capabilities").isJsonArray()) {
@@ -154,13 +134,8 @@ public class PolicyManifest {
                 capabilities.add(parseCapabilityFromJson(capJson));
             }
         }
-        
-        // Parse cluster config
-        if (json.has("cluster")) {
-            cluster = ClusterConfig.fromJson(json.getAsJsonObject("cluster"));
-        }
-        
-        return new PolicyManifest(capabilities, cluster);
+    
+        return new PolicyManifest(capabilities);
     }
     
     private static PathCapability parseCapabilityFromJson(JsonObject json) {
@@ -204,11 +179,6 @@ public class PolicyManifest {
         }
         json.add("requested_capabilities", capsArr);
         
-        // Cluster config
-        if (clusterConfig != null) {
-            json.add("cluster", clusterConfig.toJson());
-        }
-        
         return json;
     }
     
@@ -243,19 +213,13 @@ public class PolicyManifest {
         requestedCapabilities.forEach(cap -> capsArr.add(cap.toNoteBytes()));
         map.put("requested_capabilities", capsArr);
         
-        // Cluster config
-        if (clusterConfig != null) {
-            map.put("cluster", clusterConfig.toNoteBytes());
-        }
-        
         return map.getNoteBytesObject();
     }
     
-    public static PolicyManifest fromNoteBytes(NoteBytesObject obj) {
-        NoteBytesMap map = obj.getAsNoteBytesMap();
+    public static PolicyManifest fromNoteBytes(NoteBytesMap map) {
+  
         
         List<PathCapability> capabilities = new ArrayList<>();
-        ClusterConfig cluster = null;
         
         // Parse capabilities
         NoteBytes capsBytes = map.get("requested_capabilities");
@@ -266,104 +230,18 @@ public class PolicyManifest {
             }
         }
         
-        // Parse cluster
-        NoteBytes clusterBytes = map.get("cluster");
-        if (clusterBytes != null) {
-            cluster = ClusterConfig.fromNoteBytes(clusterBytes.getAsNoteBytesObject());
-        }
         
-        return new PolicyManifest(capabilities, cluster);
+        return new PolicyManifest(capabilities);
     }
     
     // ===== CLUSTER CONFIG =====
     
-    public static class ClusterConfig {
-        private final String clusterId;
-        private final ClusterRole role;
-        private final String sharedPath;
-        private final int maxMembers;
-        
-        public ClusterConfig(String clusterId, ClusterRole role, String sharedPath, int maxMembers) {
-            this.clusterId = clusterId;
-            this.role = role;
-            this.sharedPath = sharedPath;
-            this.maxMembers = maxMembers;
-        }
-        
-        public String getClusterId() { return clusterId; }
-        public ClusterRole getRole() { return role; }
-        public String getSharedPath() { return sharedPath; }
-        public int getMaxMembers() { return maxMembers; }
-        
-        public List<String> validate() {
-            List<String> errors = new ArrayList<>();
-            
-            if (clusterId == null || clusterId.isEmpty()) {
-                errors.add("Cluster ID required");
-            }
-            if (role == null) {
-                errors.add("Cluster role required");
-            }
-            if (sharedPath == null || sharedPath.isEmpty()) {
-                errors.add("Cluster shared path required");
-            }
-            if (maxMembers < 0) {
-                errors.add("Max members cannot be negative");
-            }
-            
-            return errors;
-        }
-        
-        public static ClusterConfig fromJson(JsonObject json) {
-            return new ClusterConfig(
-                json.get("cluster_id").getAsString(),
-                ClusterRole.valueOf(json.get("role").getAsString().toUpperCase()),
-                json.has("shared_path") ? json.get("shared_path").getAsString() : "",
-                json.has("max_members") ? json.get("max_members").getAsInt() : 0
-            );
-        }
-        
-        public JsonObject toJson() {
-            JsonObject json = new JsonObject();
-            json.addProperty("cluster_id", clusterId);
-            json.addProperty("role", role.name().toLowerCase());
-            json.addProperty("shared_path", sharedPath);
-            json.addProperty("max_members", maxMembers);
-            return json;
-        }
-        
-        public NoteBytesObject toNoteBytes() {
-            NoteBytesMap map = new NoteBytesMap();
-            map.put("cluster_id", clusterId);
-            map.put("role", role.name());
-            map.put("shared_path", sharedPath);
-            map.put("max_members", maxMembers);
-            return map.getNoteBytesObject();
-        }
-        
-        public static ClusterConfig fromNoteBytes(NoteBytesObject obj) {
-            NoteBytesMap map = obj.getAsNoteBytesMap();
-            return new ClusterConfig(
-                map.get("cluster_id").getAsString(),
-                ClusterRole.valueOf(map.get("role").getAsString()),
-                map.get("shared_path").getAsString(),
-                map.get("max_members").getAsInt()
-            );
-        }
-    }
-    
-    public enum ClusterRole {
-        LEADER,         // Creates cluster, coordinates members
-        MEMBER,         // Joins existing cluster
-        SHARED_LEADER   // Can operate independently or in cluster
-    }
     
     // ===== BUILDER =====
     
     public static class Builder {
         private final List<PathCapability> capabilities = new ArrayList<>();
-        private ClusterConfig cluster = null;
-        
+
         public Builder requestCapability(PathCapability capability) {
             capabilities.add(capability);
             return this;
@@ -384,18 +262,10 @@ public class PolicyManifest {
             return this;
         }
         
-        public Builder requestSharedData(String reason) {
-            capabilities.add(PathCapability.sharedUserData());
-            return this;
-        }
-        
-        public Builder cluster(String clusterId, ClusterRole role, String sharedPath, int maxMembers) {
-            this.cluster = new ClusterConfig(clusterId, role, sharedPath, maxMembers);
-            return this;
-        }
+
         
         public PolicyManifest build() {
-            return new PolicyManifest(capabilities, cluster);
+            return new PolicyManifest(capabilities);
         }
     }
 }

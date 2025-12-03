@@ -140,6 +140,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly DEVICE_ID     = new NoteBytesReadOnly("device_id");
         public static final NoteBytesReadOnly SESSION_ID    = new NoteBytesReadOnly("session_id");
         public static final NoteBytesReadOnly PACKAGE_ID    = new NoteBytesReadOnly("package_id");
+        public static final NoteBytesReadOnly PROCESS_ID    = new NoteBytesReadOnly("process_id");
         public static final NoteBytesReadOnly NODE_ID       = new NoteBytesReadOnly("node_id");
         public static final NoteBytesReadOnly PID           = new NoteBytesReadOnly("pid");
         public static final NoteBytesReadOnly RECEIVER_ID   = new NoteBytesReadOnly("receiver_id");
@@ -154,7 +155,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly ENTRY         = new NoteBytesReadOnly("entry");
         public static final NoteBytesReadOnly DEPENDENCIES  = new NoteBytesReadOnly("dependencies");
         public static final NoteBytesReadOnly AUTOLOAD      = new NoteBytesReadOnly("autoload");
-        
+        public static final NoteBytesReadOnly APPROVED      = new NoteBytesReadOnly("approved");
         
         // Metadata
         public static final NoteBytesReadOnly NAME          = new NoteBytesReadOnly("name");
@@ -163,6 +164,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly TITLE         = new NoteBytesReadOnly("title");
         public static final NoteBytesReadOnly CONTENT       = new NoteBytesReadOnly("content");
         public static final NoteBytesReadOnly ALLOW_COPY    = new NoteBytesReadOnly("allow_copy");
+        public static final NoteBytesReadOnly DESCRIPTION   = new NoteBytesReadOnly("description");
+        
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");

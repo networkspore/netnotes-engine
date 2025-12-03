@@ -19,6 +19,8 @@ import java.util.*;
  * - Handles logical groupings (e.g., "services" in path, not parent)
  */
 public class PathCapability {
+    public static final NoteBytesReadOnly SELF = new NoteBytesReadOnly("{self}");
+
     
     private final ContextPath pathPattern;  // Changed from String to ContextPath
     private final Set<Operation> operations;
@@ -144,7 +146,7 @@ public class PathCapability {
     public boolean allowsWithSelfSubstitution(
             ContextPath target, 
             Operation operation, 
-            String selfPackageId) {
+            NoteBytesReadOnly selfPackageId) {
         
         if (!operations.contains(operation)) {
             return false;
@@ -160,15 +162,16 @@ public class PathCapability {
         return target.startsWith(substitutedPattern);
     }
     
+    
     /**
      * Substitute {self} placeholder in path
      */
-    private ContextPath substituteSelf(ContextPath pattern, String selfValue) {
-        String[] segments = pattern.getSegments().getAsStringArray();
-        String[] newSegments = new String[segments.length];
+    private ContextPath substituteSelf(ContextPath pattern, NoteBytesReadOnly selfValue) {
+        NoteBytesReadOnly[] segments = pattern.getSegments().getAsArray();
+        NoteBytesReadOnly[] newSegments = new NoteBytesReadOnly[segments.length];
         
         for (int i = 0; i < segments.length; i++) {
-            if (segments[i].equals("{self}")) {
+            if (segments[i].equals(SELF)) {
                 newSegments[i] = selfValue;
             } else {
                 newSegments[i] = segments[i];
@@ -198,9 +201,11 @@ public class PathCapability {
      * Access own runtime data (always granted)
      * 
      * Pattern: /runtime/nodes/{self}
+     * 
+     * TODO: packageId is not used
      */
-    public static PathCapability ownRuntimeData(String packageId) {
-        ContextPath pattern = SystemProcess.NODES_PATH.append("{self}");
+    public static PathCapability ownRuntimeData(NoteBytesReadOnly packageId) {
+        ContextPath pattern = SystemProcess.NODES_PATH.append(SELF);
         
         return new PathCapability(
             pattern,
@@ -212,26 +217,7 @@ public class PathCapability {
         );
     }
     
-    /**
-     * Access own user data (always granted)
-     * 
-     * Pattern: /user/{self}
-     */
-    public static PathCapability ownUserData(String packageId) {
-        // Assuming user data root is defined somewhere
-        ContextPath userRoot = ContextPath.of("user");
-        ContextPath pattern = userRoot.append("{self}");
-        
-        return new PathCapability(
-            pattern,
-            Set.of(Operation.READ, Operation.WRITE),
-            true,
-            "Read and write node's user data",
-            null,
-            MatchMode.WITH_SELF
-        );
-    }
-    
+
     /**
      * Access system services
      * 
@@ -311,39 +297,9 @@ public class PathCapability {
         );
     }
     
-    /**
-     * Access shared user data (requires approval)
-     */
-    public static PathCapability sharedUserData() {
-        ContextPath sharedPath = ContextPath.of("user", "shared");
-        
-        return new PathCapability(
-            sharedPath,
-            Set.of(Operation.READ, Operation.WRITE),
-            false,
-            "Read and write shared user data",
-            null,
-            MatchMode.PREFIX
-        );
-    }
     
     /**
-     * Cluster communication (granted if in cluster)
-     */
-    public static PathCapability clusterCommunication(String clusterId) {
-        ContextPath clusterPath = SystemProcess.CLUSTERS_PATH
-            .append(clusterId);
-        
-        return new PathCapability(
-            clusterPath,
-            Set.of(Operation.MESSAGE, Operation.STREAM),
-            true,
-            "Communicate with cluster members",
-            null,
-            MatchMode.PREFIX
-        );
-    }
-    
+
     /**
      * Access all system services (dangerous - requires explicit approval)
      */

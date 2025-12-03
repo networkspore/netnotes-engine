@@ -8,6 +8,5 @@ import io.netnotes.engine.noteFiles.NoteFile;
 public interface NoteFileServiceInterface {
 
     CompletableFuture<NoteFile> getNoteFile(ContextPath path);
-    ContextPath getBasePath();     
-    ContextPath getAltPath(); 
+    ContextPath getDataRootPath();     
 }

@@ -20,7 +20,7 @@ import io.netnotes.engine.utils.streams.UrlStreamHelpers;
  * 3. Store files in encrypted NoteFiles
  * 4. Register in InstallationRegistry
  * 
- * Does NOT load into runtime - that's AppData's job
+ * Does NOT load into runtime
  */
 public class PackageInstaller {
 
@@ -29,37 +29,17 @@ public class PackageInstaller {
         this.appDataInterface = appDataInteface;
     }
     
-    public CompletableFuture<InstalledPackage> installPackage(PackageInfo pkg) {
-        System.out.println("[PackageInstaller] Installing " + pkg.getName());
+    public CompletableFuture<ContextPath> installPackage(PackageInfo pkgInfo) {
+        System.out.println("[PackageInstaller] Installing " + pkgInfo.getName());
         
-        // Build install path: node-packages/{name}/{version}/
-        ContextPath installPath = ContextPath.of(
-            "node-packages",
-            pkg.getName(),
-            pkg.getVersion()
-        );
+        ContextPath installPath = pkgInfo.createInstallPath();
         
         return appDataInterface
-            .getNoteFile( installPath.append("package.jar"))
-            .thenCompose(noteFile -> downloadToNoteFile(pkg.getDownloadUrl(), noteFile))
+            .getNoteFile( installPath)
+            .thenCompose(noteFile -> downloadToNoteFile(pkgInfo.getDownloadUrl(), noteFile))
             .thenApply(v -> {
-                // Create InstalledPackage metadata
-                InstalledPackage installed = new InstalledPackage(
-                    pkg.getPackageId(),
-                    pkg.getName(),
-                    pkg.getVersion(),
-                    pkg.getCategory(),
-                    pkg.getDescription(),
-                    pkg.getRepository(),
-                    installPath,
-                    pkg.getManifest(),
-                    System.currentTimeMillis()
-                );
-                
-                System.out.println("[PackageInstaller] Successfully installed " + 
-                    pkg.getName());
-                
-                return installed;
+       
+                return installPath;
             });
     }
     

@@ -1,5 +1,7 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -16,17 +18,18 @@ public class PackageInfo {
     private final String downloadUrl;
     private final long size;
     private final PackageManifest manifest;  // JSON manifest
-    
+
     public PackageInfo(
-            NoteBytesReadOnly packageId,
-            String name,
-            String version,
-            String category,
-            String description,
-            String repository,
-            String downloadUrl,
-            long size,
-            PackageManifest manifest) {
+        NoteBytesReadOnly packageId,
+        String name,
+        String version,
+        String category,
+        String description,
+        String repository,
+        String downloadUrl,
+        long size,
+        PackageManifest manifest
+    ) {
         
         this.packageId = packageId;
         this.name = name;
@@ -37,6 +40,7 @@ public class PackageInfo {
         this.downloadUrl = downloadUrl;
         this.size = size;
         this.manifest = manifest;
+
     }
     
     public NoteBytesReadOnly getPackageId() { return packageId; }
@@ -48,4 +52,11 @@ public class PackageInfo {
     public String getDownloadUrl() { return downloadUrl; }
     public long getSize() { return size; }
     public PackageManifest getManifest() { return manifest; }
+
+    public ContextPath createInstallPath(){
+        return SystemProcess.PACKAGE_STORE_PATH.append(
+            name,
+            version
+        );
+    }
 }

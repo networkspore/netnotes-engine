@@ -36,31 +36,31 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
  */
 public final class ContextPath {
     public final static String DELIMITER = "/";
+    
+    public static final NoteBytesReadOnly forwardSlash = new NoteBytesReadOnly("/");
+    public static final NoteBytesReadOnly doubleBackSlash = new NoteBytesReadOnly("\\");
+
+
+
     private final NoteStringArrayReadOnly segments;
     private final String pathString;
-    private final boolean isAbsolute;
 
-    public static final ContextPath ROOT = new ContextPath(NoteStringArrayReadOnly.EMPTY, true);
+    public static final ContextPath ROOT = new ContextPath(NoteStringArrayReadOnly.EMPTY);
     
-    // Known root segments (absolute paths must start with one of these)
-    private static final String[] ROOT_SEGMENTS = {"system", "user"};
 
-    private ContextPath(NoteStringArrayReadOnly segments, boolean isAbsolute) {
+    private ContextPath(NoteStringArrayReadOnly segments) {
         this.segments = segments;
-        this.isAbsolute = isAbsolute;
         this.pathString = buildPathString();
     }
 
     public static ContextPath fromNoteBytes(NoteBytes noteBytes){
+        if(noteBytes == null){
+            throw new NullPointerException("fromNoteBytes cannot be null");
+        }
         if(noteBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
             throw new IllegalArgumentException("ContextPath must be constructed from Array NoteBytes");
         }
-        NoteStringArrayReadOnly segments = new NoteStringArrayReadOnly(noteBytes.get());
-        
-        // Determine if absolute based on first segment
-        boolean absolute = segments.isEmpty() || isRootSegment(segments.getRootString());
-        
-        return new ContextPath(segments, absolute); 
+        return ContextPath.of(noteBytes.getAsNoteBytesArrayReadOnly()); 
     }
 
     public static ContextPath parseExternal(String path, boolean urlEncoded) {
@@ -76,9 +76,8 @@ public final class ContextPath {
                 }
             }
             NoteStringArrayReadOnly segments = new NoteStringArrayReadOnly(decoded.toArray(new String[0]));
-            boolean absolute = path.startsWith(DELIMITER) || 
-                              (segments.size() > 0 && isRootSegment(segments.getRootString()));
-            return new ContextPath(segments, absolute);
+  
+            return new ContextPath(segments);
         }
         
         return parse(path);  // Regular parsing for internal use
@@ -88,20 +87,26 @@ public final class ContextPath {
     public static ContextPath parse(String path) {
         if (path == null || path.isEmpty() || path.equals(DELIMITER)) return ROOT;
 
-        // Check if path starts with delimiter (absolute)
-        boolean startsWithDelimiter = path.startsWith(DELIMITER);
-        
         // Parse segments
         NoteStringArrayReadOnly segments = NoteStringArrayReadOnly.parse(path, DELIMITER);
         
-        // Determine if absolute:
-        // 1. Starts with "/" in string form, OR
-        // 2. First segment is a known root segment (system, user)
-        boolean absolute = startsWithDelimiter || 
-                          (segments.size() > 0 && isRootSegment(segments.getRootString()));
-        
-        return new ContextPath(segments, absolute);
+        return new ContextPath(segments);
     }
+
+    public static ContextPath of(NoteStringArrayReadOnly stringArray) {
+        return of(stringArray.getAsArray());
+    }
+    public static ContextPath of(NoteBytes... arrayOfNoteBytes) {
+  
+        for(int i = 0; i < arrayOfNoteBytes.length ; i++){
+            if(!ByteDecoding.isStringType(arrayOfNoteBytes[i].getType())){
+                throw new IllegalStateException("ContextPath requires string types");
+            }
+            
+        }
+        return new ContextPath(new NoteStringArrayReadOnly(arrayOfNoteBytes));
+    }
+
 
     /** Create ABSOLUTE path from varargs segments */
     public static ContextPath of(String... segments) {
@@ -115,17 +120,14 @@ public final class ContextPath {
         }
         NoteStringArrayReadOnly array = new NoteStringArrayReadOnly(valid.toArray(new String[0]));
         
-        // Absolute if first segment is a root segment
-        boolean absolute = valid.size() > 0 && isRootSegment(valid.get(0));
-        
-        return new ContextPath(array, absolute);
+        return new ContextPath(array);
     }
 
     public String[] getStringSegments(){
         return segments.getAsStringArray();
     }
     
-    /** Create RELATIVE path from varargs segments */
+    /** Create path from varargs segments
     public static ContextPath relative(String... segments) {
         if (segments == null || segments.length == 0) {
             throw new IllegalArgumentException("Relative path must have at least one segment");
@@ -151,20 +153,10 @@ public final class ContextPath {
         }
         
         NoteStringArrayReadOnly array = new NoteStringArrayReadOnly(valid.toArray(new String[0]));
-        return new ContextPath(array, false);  // Explicitly relative
-    }
+        return new ContextPath(array);
+    } */
     
-    /**
-     * Check if a segment is a known root segment
-     */
-    private static boolean isRootSegment(String segment) {
-        for (String root : ROOT_SEGMENTS) {
-            if (root.equals(segment)) {
-                return true;
-            }
-        }
-        return false;
-    }
+ 
 
     /** Segment validation */
     private static void validateSegment(String segment) {
@@ -174,16 +166,8 @@ public final class ContextPath {
         if (segment.contains("/") || segment.contains("\\")) {
             throw new IllegalArgumentException("Segment cannot contain path separators: " + segment);
         }
-        // No dots allowed (prevents path traversal)
-        if (segment.equals(".") || segment.equals("..")) {
-            throw new IllegalArgumentException("Segment cannot be '.' or '..': " + segment);
-        }
     }
     
-    public static final NoteBytesReadOnly forwardSlash = new NoteBytesReadOnly("/");
-    public static final NoteBytesReadOnly doubleBackSlash = new NoteBytesReadOnly("\\");
-    public static final NoteBytesReadOnly dot = new NoteBytesReadOnly(".");
-    public static final NoteBytesReadOnly doubleDot =  new NoteBytesReadOnly("..");
 
 
     private static void validateSegment(NoteBytesReadOnly segment) {
@@ -197,19 +181,13 @@ public final class ContextPath {
         if (segment.containsBytes(forwardSlash) || segment.containsBytes(doubleBackSlash)) {
             throw new IllegalArgumentException("Segment cannot contain path separators: " + segment);
         }
-        
-        // No dots allowed (prevents path traversal)
-        if (segment.equals(dot) || segment.equals(doubleDot)) {
-            throw new IllegalArgumentException("Segment cannot be '.' or '..': " + segment);
-        }
+
     }
 
     public boolean containsPathTraversal() {
         NoteBytesReadOnly[] bytesArray = segments.getAsArray();
         for (NoteBytesReadOnly segment : bytesArray) {
-            if (segment.equals(doubleDot) || 
-                segment.equals(dot) || 
-                segment.containsBytes(forwardSlash) || 
+            if (segment.containsBytes(forwardSlash) || 
                 segment.containsBytes(doubleBackSlash)) {
                 return true;
             }
@@ -221,121 +199,10 @@ public final class ContextPath {
     private String buildPathString() {
         if (segments.isEmpty()) return "/";
         
-        // Absolute paths start with "/"
-        // Relative paths don't
-        if (isAbsolute) {
-            return "/" + segments.getAsString();
-        } else {
-            return segments.getAsString();
-        }
+        return "/" + segments.getAsString();
+      
     }
 
-    // === NEW API ===
-    
-    /**
-     * Check if this is an absolute path
-     * 
-     * Absolute paths:
-     * - Start with "/" in string form, OR
-     * - First segment is a known root segment (system, user)
-     * 
-     * Examples:
-     *   /system/nodes/registry → true
-     *   system/nodes/registry  → true (starts with "system")
-     *   config/settings        → false (relative)
-     *   /                      → true (root)
-     */
-    public boolean isAbsolute() {
-        return isAbsolute;
-    }
-    
-    /**
-     * Check if this is a relative path
-     * 
-     * Relative paths:
-     * - Do NOT start with "/" in string form
-     * - First segment is NOT a root segment
-     * 
-     * Examples:
-     *   config/settings        → true
-     *   temp/upload            → true
-     *   system/nodes           → false (starts with root segment)
-     */
-    public boolean isRelative() {
-        return !isAbsolute;
-    }
-    
-    /**
-     * Convert to absolute path by prepending base path
-     * 
-     * Only works if this is a relative path.
-     * 
-     * Example:
-     *   relative: config/settings
-     *   base: /system/nodes/runtime/my-node
-     *   result: /system/nodes/runtime/my-node/config/settings
-     * 
-     * @param basePath Base path to prepend (must be absolute)
-     * @return Absolute path
-     * @throws IllegalArgumentException if this is already absolute or base is relative
-     */
-    public ContextPath toAbsolute(ContextPath basePath) {
-        if (isAbsolute) {
-            throw new IllegalArgumentException(
-                "Cannot convert absolute path to absolute: " + this);
-        }
-        
-        if (basePath == null || !basePath.isAbsolute()) {
-            throw new IllegalArgumentException(
-                "Base path must be absolute: " + basePath);
-        }
-        
-        return basePath.append(this);
-    }
-    
-    /**
-     * Convert to relative path by removing base prefix
-     * 
-     * Only works if this path starts with the base path.
-     * 
-     * Example:
-     *   absolute: /system/nodes/runtime/my-node/config/settings
-     *   base: /system/nodes/runtime/my-node
-     *   result: config/settings (relative)
-     * 
-     * @param basePath Base path to remove (must be absolute)
-     * @return Relative path
-     * @throws IllegalArgumentException if this doesn't start with base
-     */
-    public ContextPath toRelative(ContextPath basePath) {
-        if (!isAbsolute) {
-            throw new IllegalArgumentException(
-                "Cannot convert relative path to relative: " + this);
-        }
-        
-        if (basePath == null || !basePath.isAbsolute()) {
-            throw new IllegalArgumentException(
-                "Base path must be absolute: " + basePath);
-        }
-        
-        if (!this.startsWith(basePath)) {
-            throw new IllegalArgumentException(
-                "Path " + this + " does not start with base " + basePath);
-        }
-        
-        if (this.equals(basePath)) {
-            throw new IllegalArgumentException(
-                "Cannot make path relative to itself");
-        }
-        
-        // Create relative path from remaining segments
-        NoteStringArrayReadOnly relativeSeg = segments.subPath(
-            basePath.segments.size(), 
-            segments.size()
-        );
-        
-        return new ContextPath(relativeSeg, false);  // Explicitly relative
-    }
 
     // === Delegated API ===
 
@@ -389,8 +256,7 @@ public final class ContextPath {
         
         // Maintain absolute/relative nature
         return new ContextPath(
-            segments.subPath(0, segments.size() - 1), 
-            isAbsolute
+            segments.subPath(0, segments.size() - 1)
         );
     }
 
@@ -401,12 +267,12 @@ public final class ContextPath {
 
     public ContextPath append(String segment) {
         validateSegment(segment);
-        return new ContextPath(segments.append(segment), isAbsolute);
+        return new ContextPath(segments.append(segment));
     }
 
     public ContextPath append(NoteBytesReadOnly segment) {
         validateSegment(segment);
-        return new ContextPath(segments.append(segment), isAbsolute);
+        return new ContextPath(segments.append(segment));
     }
 
     public ContextPath append(String... more) {
@@ -414,7 +280,7 @@ public final class ContextPath {
             validateSegment(s);
         }
         NoteStringArrayReadOnly next = segments.append(more);
-        return new ContextPath(next, isAbsolute);
+        return new ContextPath(next);
     }
 
     public ContextPath append(ContextPath other) {
@@ -422,7 +288,7 @@ public final class ContextPath {
         
         // When appending to absolute path, result is absolute
         // When appending to relative path, result is relative
-        return new ContextPath(segments.concat(other.segments), isAbsolute);
+        return new ContextPath(segments.concat(other.segments));
     }
 
     public boolean startsWith(ContextPath prefix) {
@@ -435,12 +301,8 @@ public final class ContextPath {
 
     public ContextPath subPath(int start, int end) {
         NoteStringArrayReadOnly sub = segments.subPath(start, end);
-        
-        // If original is absolute and we're taking from start (0),
-        // result is absolute. Otherwise relative.
-        boolean resultAbsolute = (isAbsolute && start == 0);
-        
-        return new ContextPath(sub, resultAbsolute);
+
+        return new ContextPath(sub);
     }
 
     public String getSegment(int segmentIndex) {
@@ -478,21 +340,9 @@ public final class ContextPath {
             base.segments.size(), 
             this.segments.size()
         );
-        
-        return new ContextPath(relativeSeg, false);  // Relative path
+        return new ContextPath(relativeSeg);  
     }
 
-    public ContextPath relativize(ContextPath target) {
-        if (!target.startsWith(this)) return null;
-        if (target.equals(this)) return ROOT;
-        
-        NoteStringArrayReadOnly relativeSeg = target.segments.subPath(
-            segments.size(), 
-            target.segments.size()
-        );
-        
-        return new ContextPath(relativeSeg, false);  // Relative path
-    }
 
     public ContextPath resolve(String relativePath) {
         if (relativePath.startsWith("/")) return parse(relativePath);
@@ -523,10 +373,8 @@ public final class ContextPath {
         }
         if (common == 0) return ROOT;
         
-        // Common ancestor maintains absolute nature if both are absolute
-        boolean resultAbsolute = isAbsolute && other.isAbsolute;
         
-        return new ContextPath(segments.subPath(0, common), resultAbsolute);
+        return new ContextPath(segments.subPath(0, common));
     }
 
     /**
@@ -566,11 +414,6 @@ public final class ContextPath {
         // Same path - always reachable
         if (this.equals(target)) {
             return true;
-        }
-        
-        // Both must be absolute for hop validation
-        if (!this.isAbsolute() || !target.isAbsolute()) {
-            return false;
         }
         
         // Find common ancestor
@@ -822,7 +665,7 @@ public final class ContextPath {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o instanceof ContextPath other ){
-            return segments.equals(other.segments) && isAbsolute == other.isAbsolute;
+            return segments.equals(other.segments);
         }else if(o instanceof NoteBytes noteBytes){
             return segments.equals(noteBytes);
         }
@@ -831,7 +674,7 @@ public final class ContextPath {
 
     @Override
     public int hashCode() {
-        return 31 * segments.hashCode() + (isAbsolute ? 1 : 0);
+        return segments.hashCode();
     }
 
     @Override
@@ -846,17 +689,6 @@ public final class ContextPath {
     /** Builder */
     public static class Builder {
         private final List<String> segments = new ArrayList<>();
-        private boolean isAbsolute = true;  // Default to absolute
-        
-        public Builder absolute() { 
-            isAbsolute = true; 
-            return this; 
-        }
-        
-        public Builder relative() { 
-            isAbsolute = false; 
-            return this; 
-        }
         
         public Builder append(String seg) { 
             validateSegment(seg); 
@@ -876,20 +708,7 @@ public final class ContextPath {
                 segments.toArray(new String[0])
             );
             
-            // If building absolute and first segment isn't a root segment, error
-            if (isAbsolute && !isRootSegment(segments.get(0))) {
-                throw new IllegalArgumentException(
-                    "Absolute path must start with root segment (system, user): " + 
-                    segments.get(0));
-            }
-            
-            // If building relative and first segment IS a root segment, error
-            if (!isAbsolute && isRootSegment(segments.get(0))) {
-                throw new IllegalArgumentException(
-                    "Relative path cannot start with root segment: " + segments.get(0));
-            }
-            
-            return new ContextPath(array, isAbsolute);
+            return new ContextPath(array);
         }
     }
 

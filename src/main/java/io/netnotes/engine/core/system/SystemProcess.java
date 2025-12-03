@@ -61,10 +61,10 @@ public class SystemProcess extends FlowProcess {
     public static final String RUNTIME = "runtime";
     public static final String NODE_CONTROLLER = "node-controller";
     public static final String REPOSITORIES = "repositories";
-    public static final String registryName = "node-registry";
-    public static final String loaderName = "node-loader";
+    public static final String NODE_REGISTRY = "node-registry";
+    public static final String NODE_LOADER = "node-loader";
+    public static final String PACKAGE_STORE = "pkg-store";
 
-    public static final String CLUSTERS = "clusters";
     public static final String NODES = "nodes";
     public static final String CONTROLLERS = "controllers";
 
@@ -78,15 +78,27 @@ public class SystemProcess extends FlowProcess {
     public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
 
     public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);
-    public static final ContextPath CLUSTERS_PATH = RUNTIME_PATH.append(CLUSTERS);
 
     public static final ContextPath CONTROLLERS_PATH = RUNTIME_PATH.append(CONTROLLERS);
     public static final ContextPath NODE_CONTROLLER_PATH = CONTROLLERS_PATH.append(NODE_CONTROLLER);
+    public static final ContextPath NODE_LOADER_PATH = CONTROLLERS_PATH.append(NODE_LOADER);
+    public static final ContextPath NODE_REGISTRY_PATH = CONTROLLERS_PATH.append(NODE_REGISTRY);
+
+    //DATA PATHS
+
+    public static final ContextPath NODE_DATA_PATH = ContextPath.of("data");
+    
+
+
+    public static final ContextPath RUNTIME_DATA            = ContextPath.of("run");
+    public static final ContextPath PACKAGE_STORE_PATH      = RUNTIME_DATA.append("pkg");
+    public static final ContextPath REPOSITORIES_DATA_PATH  = RUNTIME_DATA.append(REPOSITORIES);
+    public static final ContextPath NODE_LOADER_DATA_PATH   = RUNTIME_DATA.append(NODE_LOADER);
+    public static final ContextPath NODE_REGISTRY_DATA_PATH = RUNTIME_DATA.append(NODE_REGISTRY);
+
     //public static final ContextPath PACKAGE_CONTROLLER_PATH = CONTROLLERS_PATH.append("package-controller");
     //public static final ContextPath SECURITY_CONTROLLER_PATH = CONTROLLERS_PATH.append("security-controller");
-    
-    public static final ContextPath SHARED_PATH = RUNTIME_PATH.append("shared");
-    
+
 
     private final FlowProcessService processService;
     private final BitFlagStateMachine state;
