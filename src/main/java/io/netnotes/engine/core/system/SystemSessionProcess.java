@@ -831,7 +831,7 @@ public class SystemSessionProcess extends FlowProcess {
                 .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
                     AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                        progressChannel.getStream()
+                        progressChannel.getOutputStream()
                     );
                     
                     // Execute password change
@@ -1361,7 +1361,7 @@ public class SystemSessionProcess extends FlowProcess {
                 .thenCompose(trackerPath -> registry.startProcess(trackerPath))
                 .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
-                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
+                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getOutputStream());
                     return systemAccess.performRecovery(analysis, progressWriter, batchSize)
                         .whenComplete((v, ex)->{
                             StreamUtils.safeClose(progressWriter);
@@ -1406,7 +1406,7 @@ public class SystemSessionProcess extends FlowProcess {
                 .thenCompose(trackerPath -> registry.startProcess(trackerPath))
                 .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
                 .thenCompose(progressChannel -> {
-                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getStream());
+                    AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter( progressChannel.getOutputStream());
                     return systemAccess.performSwap(analysis, progressWriter)
                         .whenComplete((v, ex)->{
                             StreamUtils.safeClose(progressWriter);
@@ -1817,7 +1817,7 @@ public class SystemSessionProcess extends FlowProcess {
                     .thenCompose(voidResult -> requestStreamChannel(progressTracker.getContextPath()))
                     .thenCompose(progressChannel -> {
                         AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(
-                            progressChannel.getStream());
+                            progressChannel.getOutputStream());
                     
                         // Revert: newKey (now old) -> oldKey (now current)
                         return systemAccess.performRollback(analysis, progressWriter, batchSize)
@@ -2047,7 +2047,7 @@ public class SystemSessionProcess extends FlowProcess {
             .thenCompose(trackerPath -> registry.startProcess(trackerPath))
             .thenCompose(v -> requestStreamChannel(progressTracker.getContextPath()))
             .thenCompose(progressChannel -> {
-                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(progressChannel.getStream());
+                AsyncNoteBytesWriter progressWriter = new AsyncNoteBytesWriter(progressChannel.getOutputStream());
                 
                 return systemAccess.performComprehensiveRecovery(
                     analysis, progressWriter, batchSize)

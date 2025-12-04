@@ -89,8 +89,7 @@ public class NodeController extends FlowProcess {
         
         InstalledPackage pkg = request.getPackage();
         ProcessConfig processConfig = request.getProcessConfig();
-        NodeSecurityPolicy securityPolicy = request.getSecurityPolicy();
-        // TODO: securitypolicy not used
+ 
         // Check if already loaded with this processId
         if (instanceRegistry.isLoaded(pkg.getPackageId(), processConfig.getProcessId())) {
             return CompletableFuture.failedFuture(

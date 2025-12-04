@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.process;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
@@ -70,13 +71,21 @@ public class StreamChannel {
     
     /**
      * Get raw output stream for advanced usage
-     */
+     
     public PipedOutputStream getStream() {
         if (!active) {
             throw new IllegalStateException("Channel not ready yet");
         }
         return senderOutput;
+    }*/
+
+    public OutputStream getOutputStream() {
+        if (!active) {
+            throw new IllegalStateException("Channel not ready yet");
+        }
+        return senderOutput;
     }
+
     
     /**
      * Execute writer when channel is ready

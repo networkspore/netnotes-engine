@@ -37,7 +37,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly PONG          = new NoteBytesReadOnly("pong");
         public static final NoteBytesReadOnly SHUTDOWN      = new NoteBytesReadOnly("shutdown");
         public static final NoteBytesReadOnly DISCONNECTED  = new NoteBytesReadOnly("disconnected");
-
+        public static final NoteBytesReadOnly DEVICE_DISCONNECTED  = new NoteBytesReadOnly("device_disconnected");
         // Discovery
         public static final NoteBytesReadOnly REQUEST_DISCOVERY = new NoteBytesReadOnly("request_discovery");
         public static final NoteBytesReadOnly ITEM_LIST         = new NoteBytesReadOnly("item_list");

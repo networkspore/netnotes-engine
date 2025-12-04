@@ -9,6 +9,7 @@ import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.daemon.IODaemonProtocol.DeviceMode;
+import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
@@ -95,22 +96,44 @@ public class ClientSession extends FlowProcess {
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         try {
             NoteBytesReadOnly payload = packet.getPayload();
-            NoteBytesMap command = payload.getAsNoteBytesMap();
+            NoteBytesMap message = payload.getAsNoteBytesMap();
             
-            NoteBytesReadOnly cmd = command.getReadOnly(Keys.CMD);
+            NoteBytesReadOnly type = message.getReadOnly(Keys.TYPE);
+            
+            // Handle daemon disconnect notification
+            if (type != null && type.equals(EventBytes.TYPE_DISCONNECTED)) {
+                handleDaemonDisconnect(message);
+                return CompletableFuture.completedFuture(null);
+            }
+            
+            NoteBytesReadOnly cmd = message.getReadOnly(Keys.CMD);
             
             RoutedMessageExecutor msgExecutor = m_routedMsgMap.get(cmd);
-
             if(msgExecutor != null){
-                return msgExecutor.execute(command, packet);
-            }else{
-                return CompletableFuture.failedFuture(new UnsupportedOperationException("ClientSession does not support this command"));
+                return msgExecutor.execute(message, packet);
+            } else {
+                return CompletableFuture.failedFuture(
+                    new UnsupportedOperationException("ClientSession does not support this command"));
             }
 
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
         }
     }
+
+    /**
+     * Handle daemon socket disconnect
+     */
+    private void handleDaemonDisconnect(NoteBytesMap notification) {
+        System.err.println("Daemon disconnected: " + notification.get(Keys.MSG));
+        
+        state.addState(ClientStateFlags.DISCONNECTING);
+        state.addState(ClientStateFlags.ERROR_STATE);
+        
+        // Release all devices (they'll notify IODaemon, but it's already disconnected)
+        releaseAllDevices();
+    }
+
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
@@ -224,80 +247,69 @@ public class ClientSession extends FlowProcess {
             });
     }
     
+    
     public CompletableFuture<ContextPath> claimDevice(String deviceId, String requestedMode) {
+        // --- VALIDATION ---
         if (!ClientStateFlags.canClaim(state)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cannot claim in current state"));
         }
-        
-        DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo = 
-            discoveredDevices.getDevice(deviceId);
-        
+
+        var deviceInfo = discoveredDevices.getDevice(deviceId);
         if (deviceInfo == null) {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Device not found: " + deviceId));
         }
-        
+
         if (deviceInfo.claimed()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Device already claimed: " + deviceId));
         }
-        
+
         if (!discoveredDevices.validateModeCompatibility(deviceId, requestedMode)) {
-            String availableModes = String.join(", ", 
+            String availableModes = String.join(", ",
                 discoveredDevices.getAvailableModes(deviceId));
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException(
-                    "Device does not support mode: " + requestedMode + 
+                    "Device does not support mode: " + requestedMode +
                     ". Available: " + availableModes));
         }
-        String deviceIdString = deviceId;
-        // Create ClaimedDevice as child of this session
-        ContextPath claimedDevicePath = contextPath.append(deviceIdString);
-        
+
+        // --- SETUP ---
+        ContextPath claimedDevicePath = contextPath.append(deviceId);
+
         ClaimedDevice claimedDevice = new ClaimedDevice(
-            deviceIdString,
+            deviceId,
             claimedDevicePath,
             deviceInfo.usbDevice().get_device_type(),
-            deviceInfo.capabilities()
+            deviceInfo.capabilities(),
+            parentPath
         );
-        
+
         if (!claimedDevice.enableMode(requestedMode)) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Failed to enable mode: " + requestedMode));
         }
-        //FlowProcess process, ContextPath path, ContextPath parentPath
-        // Register as child
+
         registerChild(claimedDevice);
-        
-        // Setup stream channel between IODaemon and ClaimedDevice
-        return requestStreamChannel(claimedDevicePath)
-            .thenCompose(channel -> {
-                return channel.getReadyFuture()
-                    .thenCompose(v -> {
-                        // Send claim request to IODaemon socket manager
-                        return request(parentPath, Duration.ofSeconds(5),
-                            new NoteBytesPair(Keys.CMD, ProtocolMesssages.CLAIM_ITEM),
-                            new NoteBytesPair(Keys.SESSION_ID, sessionId),
-                            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
-                            new NoteBytesPair(Keys.MODE, requestedMode)
-                        );
-                    })
-                    .thenApply(response -> {
-                        discoveredDevices.markClaimed(deviceId);
-                        state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
-                        
-                        registry.startProcess(claimedDevicePath);
-                        
-                        System.out.println("Claimed device: " + deviceId + 
-                                        " at " + claimedDevicePath +
-                                        " with mode: " + requestedMode);
-                        
-                        return claimedDevicePath;
-                    });
-            });
+        registry.startProcess(claimedDevicePath); 
+
+       // Send claim request to IODaemon
+        return request(parentPath, Duration.ofSeconds(5),
+            new NoteBytesPair(Keys.CMD, ProtocolMesssages.CLAIM_ITEM),
+            new NoteBytesPair(Keys.SESSION_ID, sessionId),
+            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+            new NoteBytesPair(Keys.MODE, requestedMode)
+        ).thenApply(response -> {
+            discoveredDevices.markClaimed(deviceId);
+            state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+            
+            System.out.println("Claimed device: " + deviceId);
+            return claimedDevicePath;
+        });
     }
-    
+
+
     // ===== RELEASE =====
     
     private CompletableFuture<Void> handleReleaseCommand(NoteBytesMap command, RoutedPacket request) {
@@ -337,13 +349,24 @@ public class ClientSession extends FlowProcess {
         });
     }
     
+        
     private void releaseAllDevices() {
         List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
         
+        System.out.println("Releasing " + devices.size() + " devices...");
+        
         for (ClaimedDevice device : devices) {
-            device.release();
-            registry.unregisterProcess(device.getContextPath());
+            try {
+                device.release();
+                registry.unregisterProcess(device.getContextPath());
+            } catch (Exception e) {
+                System.err.println("Error releasing device " + 
+                    device.getDeviceId() + ": " + e.getMessage());
+            }
         }
+        
+        discoveredDevices.clear();
+        state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
     }
     
     // ===== BACKPRESSURE =====

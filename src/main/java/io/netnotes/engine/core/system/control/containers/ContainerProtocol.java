@@ -33,7 +33,11 @@ public class ContainerProtocol {
         new NoteBytesReadOnly("query_container");
     public static final NoteBytesReadOnly LIST_CONTAINERS = 
         new NoteBytesReadOnly("list_containers");
-    
+    public static final NoteBytesReadOnly MAXIMIZE_CONTAINER = 
+        new NoteBytesReadOnly("maximize_container");
+    public static final NoteBytesReadOnly RESTORE_CONTAINER = 
+        new NoteBytesReadOnly("restore_container");
+
     // ===== EVENTS (from ContainerService to INode) =====
     public static final NoteBytesReadOnly CONTAINER_CREATED = 
         new NoteBytesReadOnly("container_created");
@@ -51,7 +55,7 @@ public class ContainerProtocol {
         new NoteBytesReadOnly("container_maximized");
     public static final NoteBytesReadOnly CONTAINER_RESTORED = 
         new NoteBytesReadOnly("container_restored");
-    
+
     // ===== REQUEST BUILDERS =====
     
     /**
@@ -116,6 +120,26 @@ public class ContainerProtocol {
     public static NoteBytesMap hideContainer(ContainerId containerId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, HIDE_CONTAINER);
+        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        return msg;
+    }
+
+    /**
+     * Show container (unhide/unminimize)
+     */
+    public static NoteBytesMap maximizeContainer(ContainerId containerId) {
+        NoteBytesMap msg = new NoteBytesMap();
+        msg.put(Keys.CMD, MAXIMIZE_CONTAINER);
+        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        return msg;
+    }
+    
+    /**
+     * Hide container (minimize)
+     */
+    public static NoteBytesMap restoreContainer(ContainerId containerId) {
+        NoteBytesMap msg = new NoteBytesMap();
+        msg.put(Keys.CMD, RESTORE_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
         return msg;
     }

@@ -124,6 +124,7 @@ public class IODaemonProtocol {
         public static final NoteBytesReadOnly PAUSE_DEVICE = new NoteBytesReadOnly("pause_device");
         public static final NoteBytesReadOnly RESUME_DEVICE = new NoteBytesReadOnly("resume_device");
         
+        
         // Errors
     }
     
@@ -414,14 +415,27 @@ public class IODaemonProtocol {
     public static class AsyncNoteBytesWriter {
         private final NoteBytesWriter writer;
         private final BlockingQueue<WriteRequest> writeQueue = new LinkedBlockingQueue<>();
-        private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor(
-            r -> Thread.ofVirtual().name("AsyncWriter").unstarted(r)
-        );
+        private final ExecutorService writeExecutor;
         private volatile boolean running = true;
-        
+        private final String name;
         public AsyncNoteBytesWriter(OutputStream out) {
+            this(null, out);
+        }
+
+        public AsyncNoteBytesWriter(String name, OutputStream out) {
+            this.name = name == null
+                ? "AsyncWriter-" + NoteUUID.getNextUUID64()
+                : name;
+
+            writeExecutor = Executors.newSingleThreadExecutor(
+                r -> Thread.ofVirtual().name(name).unstarted(r)
+            );
             this.writer = new NoteBytesWriter(out);
             startWriteLoop();
+        }
+
+        public String getName(){
+            return name;
         }
         
         private void startWriteLoop() {
@@ -445,20 +459,52 @@ public class IODaemonProtocol {
         }
         
         public CompletableFuture<Void> writeAsync(NoteBytesObject obj) {
-            WriteRequest request = new WriteRequest(obj);
+            WriteRequest request = new SingleWriteRequest(obj);
             writeQueue.offer(request);
             return request.future;
         }
         
         public CompletableFuture<Void> writeAsync(NoteBytes bytes) {
-            WriteRequest request = new WriteRequest(bytes);
+            WriteRequest request = new SingleWriteRequest(bytes);
+            writeQueue.offer(request);
+            return request.future;
+        }
+
+        /**
+         * Write routed message atomically: [STRING:deviceId][OBJECT:payload]
+         * Guarantees no interleaving between deviceId and payload.
+         */
+        public CompletableFuture<Void> writeRoutedMessageAsync(String deviceId, NoteBytesObject payload) {
+            WriteRequest request = new RoutedWriteRequest(deviceId, payload);
             writeQueue.offer(request);
             return request.future;
         }
         
+        /**
+         * Write routed message atomically: [STRING:deviceId][PAYLOAD]
+         * For forwarding arbitrary payload types.
+         */
+        public CompletableFuture<Void> writeRoutedMessageAsync(String deviceId, NoteBytesReadOnly payload) {
+            WriteRequest request = new RoutedWriteRequest(deviceId, payload);
+            writeQueue.offer(request);
+            return request.future;
+        }
+
+        
         public void writeSync(NoteBytesObject obj) throws IOException {
             try {
                 writeAsync(obj).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Write interrupted", e);
+            } catch (ExecutionException e) {
+                throw new IOException("Write failed", e.getCause());
+            }
+        }
+
+        public void writeRoutedMessageSync(String deviceId, NoteBytesObject payload) throws IOException {
+            try {
+                writeRoutedMessageAsync(deviceId, payload).get();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Write interrupted", e);
@@ -471,22 +517,15 @@ public class IODaemonProtocol {
             running = false;
             writeExecutor.shutdown();
         }
+
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return writeExecutor.awaitTermination(timeout, unit);
+        }
         
-        private static class WriteRequest {
-            private final Object data;
-            private final CompletableFuture<Void> future = new CompletableFuture<>();
+        private abstract static class WriteRequest {
+            protected final CompletableFuture<Void> future = new CompletableFuture<>();
             
-            WriteRequest(Object data) {
-                this.data = data;
-            }
-            
-            void write(NoteBytesWriter writer) throws IOException {
-                if (data instanceof NoteBytesObject) {
-                    writer.write((NoteBytesObject) data);
-                } else if (data instanceof NoteBytes) {
-                    writer.write((NoteBytes) data);
-                }
-            }
+            abstract void write(NoteBytesWriter writer) throws IOException;
             
             void complete() {
                 future.complete(null);
@@ -494,6 +533,56 @@ public class IODaemonProtocol {
             
             void completeExceptionally(Throwable t) {
                 future.completeExceptionally(t);
+            }
+        }
+
+        /**
+         * Single data write (non-routed)
+         */
+        private static class SingleWriteRequest extends WriteRequest {
+            private final Object data;
+            
+            SingleWriteRequest(Object data) {
+                this.data = data;
+            }
+            
+            @Override
+            void write(NoteBytesWriter writer) throws IOException {
+                if (data instanceof NoteBytesObject) {
+                    writer.write((NoteBytesObject) data);
+                } else if (data instanceof NoteBytes) {
+                    writer.write((NoteBytes) data);
+                }
+                writer.flush();
+            }
+        }
+        
+        /**
+         * Routed message write - atomic [STRING:deviceId][payload]
+         */
+        private static class RoutedWriteRequest extends WriteRequest {
+            private final String deviceId;
+            private final Object payload;
+            
+            RoutedWriteRequest(String deviceId, Object payload) {
+                this.deviceId = deviceId;
+                this.payload = payload;
+            }
+            
+            @Override
+            void write(NoteBytesWriter writer) throws IOException {
+                // Write both parts atomically
+                writer.write(new NoteBytes(deviceId));
+                
+                if (payload instanceof NoteBytesObject) {
+                    writer.write((NoteBytesObject) payload);
+                } else if (payload instanceof NoteBytesReadOnly) {
+                    writer.write((NoteBytesReadOnly) payload);
+                } else if (payload instanceof NoteBytes) {
+                    writer.write((NoteBytes) payload);
+                }
+                
+                writer.flush();
             }
         }
     }

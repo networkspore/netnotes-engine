@@ -36,6 +36,9 @@ public class NoteBytesPair {
         this(key, new NoteException(value));
     }
 
+    public NoteBytesPair(NoteBytes key, long value){
+        this(key, new NoteBytes(value));
+    }
 
     public NoteBytesPair(String key, String value){
         this(new NoteString(key), new NoteString(value));

@@ -1,6 +1,5 @@
 package io.netnotes.engine.core.system.control.ui;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**

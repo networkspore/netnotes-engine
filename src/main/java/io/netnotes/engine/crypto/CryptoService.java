@@ -241,7 +241,6 @@ public class CryptoService {
     public static class EncryptedSession {
         private SecretKey secretKey;
         private byte[] iv;
-        private long counter; // IV counter for GCM
         
         /**
          * Initialize with shared secret
@@ -256,7 +255,6 @@ public class CryptoService {
             
             // Generate initial IV
             this.iv = RandomService.getRandomBytes(CryptoService.AES_IV_SIZE);
-            this.counter = 0;
         }
         
         /**
@@ -274,7 +272,6 @@ public class CryptoService {
                 throw new IllegalArgumentException("IV must be " + CryptoService.AES_IV_SIZE + " bytes");
             }
             this.iv = iv.clone();
-            this.counter = 0;
         }
 
       
@@ -320,7 +317,6 @@ public class CryptoService {
                 iv[i]++;
                 if (iv[i] != 0) break; // No carry needed
             }
-            counter++;
         }
         
         /**

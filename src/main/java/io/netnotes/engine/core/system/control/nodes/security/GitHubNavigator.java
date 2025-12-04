@@ -367,7 +367,6 @@ public class GitHubNavigator {
                 .exceptionally(ex -> null);
             
             // Try next if this one fails
-            String finalName = name;
             manifestFuture = manifestFuture.thenCompose(content -> {
                 if (content != null) {
                     return CompletableFuture.completedFuture(content);
