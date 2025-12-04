@@ -10,7 +10,6 @@ import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.PackageId;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 import java.io.*;
 import java.util.*;
@@ -136,10 +135,7 @@ public class OSGiBundleLoader {
     }
     
     /**
-     * Extract bundle JAR from encrypted NoteFile to temp location
-     * 
-     * OSGi needs a File path, but NoteFiles are encrypted.
-     * Solution: Extract to temporary file, install bundle, then delete temp.
+     * Read bundle from stream location
      */
     private CompletableFuture<Bundle> installBundleFromNoteFile(InstalledPackage pkg) {
 
@@ -162,7 +158,6 @@ public class OSGiBundleLoader {
                     // Install from encrypted stream
                     try (InputStream stream = jarFile.getInputStream()) {
                         Bundle bundle = context.installBundle(location, stream);
-                        //TODO: Consider verifying bundle signature here if needed
                         //verify if we should start() here
                         bundle.start();
                         return bundle;
@@ -216,8 +211,7 @@ public class OSGiBundleLoader {
                     INode node = (INode) context.getService(refs[0]);
                     
                     if (node != null) {
-                        System.out.println("[OSGiBundleLoader] Found INode service: " + 
-                            node.getNodeId());
+                        System.out.println("[OSGiBundleLoader] Found INode service: ");
                         return node;
                     }
                 }
@@ -257,8 +251,7 @@ public class OSGiBundleLoader {
                 );
             }
             
-            System.out.println("[OSGiBundleLoader] INode service registered: " + 
-                node.getNodeId());
+            System.out.println("[OSGiBundleLoader] INode service registered: ");
             
             return node;
             

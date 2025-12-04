@@ -188,7 +188,11 @@ public class NoteBytesMap{
         return value != null ? value.readOnly() : null;
     }
 
+    public NoteBytesReadOnly getReadOnly(String key) {
+        NoteBytes value = m_pairs.get(key);
 
+        return value != null ? value.readOnly() : null;
+    }
 
     public NoteBytesPair getFirst(){
         return getAtIndex(0);

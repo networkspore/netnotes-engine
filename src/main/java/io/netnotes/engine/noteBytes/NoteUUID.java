@@ -98,6 +98,15 @@ public class NoteUUID extends NoteBytesReadOnly {
         return new NoteUUID(Arrays.copyOf(bytes, bytes.length));
     }
 
+    public static NoteUUID fromNoteBytes(NoteBytes notebytes){
+        byte[] bytes = notebytes.getBytes(notebytes.byteLength());
+    
+        return ByteDecoding.isStringType(notebytes.getType())
+            ? new NoteUUID(bytes)
+            : fromUnencodedBytes(bytes);
+        
+    }
+
     public static NoteUUID fromUnencodedBytes(byte[] bytes){
         return new NoteUUID(EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
 

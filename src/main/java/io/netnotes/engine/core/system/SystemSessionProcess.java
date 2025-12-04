@@ -1,14 +1,9 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.SystemRuntime;
-import io.netnotes.engine.core.RuntimeAccess;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.SystemProcess.SYSTEM_INIT_CMDS;
 import io.netnotes.engine.core.system.control.*;
-import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.nodes.NodeLoadRequest;
-import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.recovery.RecoveryFlags;
 import io.netnotes.engine.core.system.control.ui.*;
 
@@ -42,7 +37,6 @@ import io.netnotes.engine.noteFiles.DiskSpaceValidation;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService.FileEncryptionAnalysis;
 import io.netnotes.engine.state.BitFlagStateMachine;
-import io.netnotes.engine.utils.TimeHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
@@ -482,7 +476,7 @@ public class SystemSessionProcess extends FlowProcess {
     /**
      * Get secure input device from parent (SystemProcess)
      */
-    private CompletableFuture<InputDevice> getSecureInputDevice() {
+    CompletableFuture<InputDevice> getSecureInputDevice() {
         if (parentPath == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("No parent process"));
@@ -2124,413 +2118,18 @@ public class SystemSessionProcess extends FlowProcess {
     // NODE MANAGEMENT MENUS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Show node manager main menu
-     */
     private void showNodeManagerMenu() {
-        // Load statistics
-        systemAccess.getInstalledPackages()
-            .thenCombine(systemAccess.getRunningInstances(), 
-                (installed, running) -> {
-                    
-                    MenuContext menu = new MenuContext(
-                        contextPath.append("menu", "nodes"),
-                        "Node Manager",
-                        uiRenderer,
-                        menuNavigator.getCurrentMenu()
-                    );
-                    
-                    menu.addInfoItem("stats", String.format(
-                        "Installed Packages: %d | Running Instances: %d",
-                        installed.size(),
-                        running.size()
-                    ));
-                    
-                    menu.addSeparator("Package Management");
-                    
-                    menu.addItem("browse",
-                        "📦 Browse & Install Packages",
-                        "View and install from repositories",
-                        this::showBrowsePackagesMenu);
-                    
-                    menu.addItem("installed",
-                        "📋 Manage Installed Packages",
-                        "View, configure, or remove packages",
-                        this::showInstalledPackagesMenu);
-                    
-                    menu.addSeparator("Instance Management");
-                    
-                    menu.addItem("running",
-                        "📊 Running Instances",
-                        "View and manage active nodes",
-                        this::showRunningInstancesMenu);
-                    
-                    menu.addSeparator("");
-                    
-                    menu.addItem("back",
-                        "← Back to Main Menu",
-                        this::showMainMenu);
-                    
-                    menuNavigator.showMenu(menu);
-                    return null;
-                })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to load node statistics: " + ex.getMessage()));
-                showMainMenu();
-                return null;
-            });
-    }
-
-    /**
-     * Start package installation with password confirmation
-     * 
-     */
-    private void startPackageInstallation(PackageInfo pkg) {
-        uiRenderer.render(UIProtocol.showMessage(
-            "Starting installation: " + pkg.getName()));
-        
-        // Create installation flow coordinator with password supplier
-        InstallationFlowCoordinator flowCoordinator = new InstallationFlowCoordinator(
+        NodeManagerMenus.showNodeManagerMenu(
+            this,
+            contextPath,
+            systemAccess,
             uiRenderer,
-            contextPath.append("install"),
-            systemAccess,  // Pass RuntimeAccess instead of registry
-            this::requestPasswordForInstallation  // Password callback
+            menuNavigator,
+            menuNavigator.getCurrentMenu(),
+            this::showMainMenu  // onBack callback
         );
-        
-        // Run installation flow
-        flowCoordinator.startInstallation(pkg)
-            .thenCompose(request -> {
-                if (request == null) {
-                    // User cancelled
-                    uiRenderer.render(UIProtocol.showMessage("Installation cancelled"));
-                    showNodeManagerMenu();
-                    return CompletableFuture.completedFuture(null);
-                }
-                
-                // Execute installation via systemAccess
-                return systemAccess.installPackage(request)
-                    .thenApply(installedPkg -> {
-                        uiRenderer.render(UIProtocol.showMessage(
-                            "✓ Package installed: " + pkg.getName()));
-                        
-                        // Load immediately if requested
-                        if (request.shouldLoadImmediately()) {
-                            NodeLoadRequest loadRequest = new NodeLoadRequest( installedPkg );
-                            
-                            return systemAccess.loadNode(loadRequest)
-                                .thenApply(instance -> {
-                                    uiRenderer.render(UIProtocol.showMessage(
-                                        "✓ Node loaded: " + instance.getInstanceId()));
-                                    return installedPkg;
-                                });
-                        }
-                        
-                        return CompletableFuture.completedFuture(installedPkg);
-                    })
-                    .thenCompose(f -> f);
-            })
-            .whenComplete((result, ex) -> {
-                if (ex != null) {
-                    uiRenderer.render(UIProtocol.showError(
-                        "Installation failed: " + ex.getMessage()));
-                }
-                showNodeManagerMenu();
-            });
     }
-
-    /**
-     * Browse available packages
-     */
-    private void showBrowsePackagesMenu() {
-        uiRenderer.render(UIProtocol.showMessage("Loading available packages..."));
-        
-        systemAccess.browseAvailablePackages()
-            .thenAccept(packages -> {
-                if (packages.isEmpty()) {
-                    uiRenderer.render(UIProtocol.showMessage(
-                        "No packages available.\n\n" +
-                        "Check repository configuration."));
-                    showNodeManagerMenu();
-                    return;
-                }
-                
-                MenuContext menu = new MenuContext(
-                    contextPath.append("menu", "browse-packages"),
-                    "Available Packages",
-                    uiRenderer,
-                    menuNavigator.getCurrentMenu()
-                );
-                
-                menu.addInfoItem("info", packages.size() + " package(s) available");
-                menu.addSeparator("Packages");
-                
-                // Group by category
-                Map<String, List<PackageInfo>> byCategory = packages.stream()
-                    .collect(java.util.stream.Collectors.groupingBy(PackageInfo::getCategory));
-                
-                for (Map.Entry<String, List<PackageInfo>> entry : byCategory.entrySet()) {
-                    String category = entry.getKey();
-                    List<PackageInfo> pkgs = entry.getValue();
-                    
-                    menu.addSubMenu(category, category, subMenu -> {
-                        for (PackageInfo pkg : pkgs) {
-                            String displayName = String.format("%s (%s)",
-                                pkg.getName(), pkg.getVersion());
-                            
-                            subMenu.addItem(
-                                pkg.getPackageId().toString(),
-                                displayName,
-                                pkg.getDescription(),
-                                () -> startPackageInstallation(pkg)
-                            );
-                        }
-                        return subMenu;
-                    });
-                }
-                
-                menu.addItem("back", "← Back", this::showNodeManagerMenu);
-                
-                menuNavigator.showMenu(menu);
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to load packages: " + ex.getMessage()));
-                showNodeManagerMenu();
-                return null;
-            });
-    }
-            
-
-    /**
-     * Request password for installation
-     * 
-     * This is the callback given to InstallationFlowCoordinator.
-     * Creates a PasswordSessionProcess to get the password.
-     * 
-     * IMPORTANT: Returns a COPY of the password for the installation to use.
-     * The original password is auto-closed by PasswordSessionProcess.
-     */
-    private CompletableFuture<NoteBytesEphemeral> requestPasswordForInstallation() {
-        CompletableFuture<NoteBytesEphemeral> passwordFuture = new CompletableFuture<>();
-        
-        getSecureInputDevice()
-            .thenAccept(device -> {
-                PasswordSessionProcess pwdSession = new PasswordSessionProcess(
-                    "installation-password-confirm",
-                    device,
-                    uiRenderer,
-                    "Enter system password to confirm installation",
-                    3
-                );
-                
-                // Verify password
-                pwdSession.onPasswordEntered(password -> {
-                    return systemAccess.verifyPassword(password)
-                        .thenApply(valid -> {
-                            if (valid) {
-                                // Password valid! Copy for installation use
-                                // (original will be closed after this handler)
-                                NoteBytesEphemeral passwordCopy = password.copy();
-                                passwordFuture.complete(passwordCopy);
-                            } else {
-                                uiRenderer.render(UIProtocol.showError("Invalid password"));
-                            }
-                            return valid;
-                        });
-                });
-                
-                pwdSession.onMaxAttemptsReached(() -> {
-                    uiRenderer.render(UIProtocol.showError(
-                        "Maximum password attempts reached"));
-                    passwordFuture.complete(null);
-                });
-                
-                pwdSession.onCancelled(() -> {
-                    uiRenderer.render(UIProtocol.showMessage(
-                        "Installation cancelled"));
-                    passwordFuture.complete(null);
-                });
-                
-                // Spawn password session
-                spawnChild(pwdSession)
-                    .thenCompose(path -> registry.startProcess(path));
-            })
-            .exceptionally(ex -> {
-                passwordFuture.completeExceptionally(ex);
-                return null;
-            });
-        
-        return passwordFuture;
-    }
-
-    /**
-     * Show installed packages
-     */
-    private void showInstalledPackagesMenu() {
-        systemAccess.getInstalledPackages()
-            .thenAccept(installed -> {
-                if (installed.isEmpty()) {
-                    uiRenderer.render(UIProtocol.showMessage(
-                        "No packages installed"));
-                    showNodeManagerMenu();
-                    return;
-                }
-                
-                MenuContext menu = new MenuContext(
-                    contextPath.append("menu", "installed-packages"),
-                    "Installed Packages",
-                    uiRenderer,
-                    menuNavigator.getCurrentMenu()
-                );
-                
-                menu.addInfoItem("info", installed.size() + " package(s) installed");
-                menu.addSeparator("Packages");
-                
-                for (InstalledPackage pkg : installed) {
-                    String displayName = String.format("%s %s",
-                        pkg.getName(), pkg.getVersion());
-                    
-                    menu.addItem(
-                        pkg.getPackageId().toString(),
-                        displayName,
-                        pkg.getDescription(),
-                        () -> showPackageDetailsMenu(pkg)
-                    );
-                }
-                
-                menu.addItem("back", "← Back", this::showNodeManagerMenu);
-                
-                menuNavigator.showMenu(menu);
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to load installed packages: " + ex.getMessage()));
-                showNodeManagerMenu();
-                return null;
-            });
-    }
-
-    /**
-     * Show package details with actions
-     */
-    private void showPackageDetailsMenu(InstalledPackage pkg) {
-        MenuContext menu = new MenuContext(
-            contextPath.append("menu", "package-details"),
-            pkg.getName(),
-            uiRenderer,
-            menuNavigator.getCurrentMenu()
-        );
-        
-        String details = String.format(
-            "Name: %s\n" +
-            "Version: %s\n" +
-            "Process ID: %s\n" +
-            "Repository: %s\n" +
-            "Installed: %s\n\n" +
-            "%s",
-            pkg.getName(),
-            pkg.getVersion(),
-            pkg.getProcessId(),
-            pkg.getRepository(),
-            TimeHelpers.formatDate(pkg.getInstalledDate()),
-            pkg.getDescription()
-        );
-        
-        menu.addInfoItem("details", details);
-        menu.addSeparator("Actions");
-        
-        menu.addItem("load",
-            "▶️ Load Instance",
-            "Start a node instance",
-            () -> loadNodeInstance(pkg));
-        
-        menu.addItem("uninstall",
-            "🗑️ Uninstall",
-            "Remove this package",
-            () -> confirmPackageUninstall(pkg));
-        
-        menu.addItem("back", "← Back", this::showInstalledPackagesMenu);
-        
-        menuNavigator.showMenu(menu);
-    }
-
-    /**
-     * Load a node instance from installed package
-     */
-    private void loadNodeInstance(InstalledPackage pkg) {
-        uiRenderer.render(UIProtocol.showMessage(
-            "Loading node: " + pkg.getName()));
-        
-        NodeLoadRequest loadRequest = new NodeLoadRequest(pkg);
-        
-        systemAccess.loadNode(loadRequest)
-            .thenAccept(instance -> {
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Node loaded successfully\n\n" +
-                    "Instance ID: " + instance.getInstanceId()));
-                showPackageDetailsMenu(pkg);
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to load node: " + ex.getMessage()));
-                showPackageDetailsMenu(pkg);
-                return null;
-            });
-    }
-
-    /**
-     * Confirm package uninstall
-     */
-    private void confirmPackageUninstall(InstalledPackage pkg) {
-        MenuContext menu = new MenuContext(
-            contextPath.append("menu", "confirm-uninstall"),
-            "Confirm Uninstall",
-            uiRenderer,
-            menuNavigator.getCurrentMenu()
-        );
-        
-        menu.addInfoItem("warning",
-            "⚠️ Uninstall " + pkg.getName() + "?\n\n" +
-            "This will:\n" +
-            "  • Stop any running instances\n" +
-            "  • Delete package files\n" +
-            "  • Remove from installed list\n\n" +
-            "This action cannot be undone.");
-        
-        menu.addSeparator("Confirmation");
-        
-        menu.addItem("confirm",
-            "✓ Yes, Uninstall",
-            () -> uninstallPackage(pkg));
-        
-        menu.addItem("cancel",
-            "✗ Cancel",
-            () -> showPackageDetailsMenu(pkg));
-        
-        menuNavigator.showMenu(menu);
-    }
-
-    /**
-     * Uninstall a package
-     */
-    private void uninstallPackage(InstalledPackage pkg) {
-        uiRenderer.render(UIProtocol.showMessage(
-            "Uninstalling " + pkg.getName() + "..."));
-        
-        systemAccess.uninstallPackage(pkg.getPackageId())
-            .thenRun(() -> {
-                uiRenderer.render(UIProtocol.showMessage(
-                    "✓ Package uninstalled: " + pkg.getName()));
-                showInstalledPackagesMenu();
-            })
-            .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Uninstall failed: " + ex.getMessage()));
-                showPackageDetailsMenu(pkg);
-                return null;
-            });
-    }
+    
 
     /**
      * Show running instances
@@ -2602,15 +2201,13 @@ public class SystemSessionProcess extends FlowProcess {
             "Instance ID: %s\n" +
             "Process ID: %s\n" +
             "State: %s\n" +
-            "Uptime: %ds\n" +
-            "Healthy: %s",
+            "Uptime: %ds\n",
             instance.getPackage().getName(),
             instance.getPackage().getVersion(),
             instance.getInstanceId(),
             instance.getPackage().getProcessId(),
             instance.getState(),
-            instance.getUptime() / 1000,
-            instance.isHealthy() ? "Yes" : "No"
+            instance.getUptime() / 1000
         );
         
         menu.addInfoItem("details", details);

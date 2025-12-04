@@ -1,10 +1,11 @@
-package io.netnotes.engine.core;
+package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.NoteFileServiceInterface;
+import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
 import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;

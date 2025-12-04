@@ -1,4 +1,4 @@
-package io.netnotes.engine.core;
+package io.netnotes.engine.core.system;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -155,7 +155,7 @@ public class RuntimeAccess {
         
     // === PUBLIC GETTERS (called by SystemSessionProcess) ===
     
-    public CompletableFuture<Boolean> changePassword(
+    CompletableFuture<Boolean> changePassword(
         NoteBytesEphemeral currentPassword,
         NoteBytesEphemeral newPassword,
         int batchSize,
@@ -168,7 +168,7 @@ public class RuntimeAccess {
         return passwordChanger.change(currentPassword, newPassword, batchSize, progressWriter);
     }
     
-    public CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password) {
+    CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password) {
         if (passwordVerifier == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Password verifier capability not granted"));
@@ -176,7 +176,7 @@ public class RuntimeAccess {
         return passwordVerifier.verify(password);
     }
     
-    public CompletableFuture<Boolean> verifyOldPassword(NoteBytesEphemeral oldPassword) {
+    CompletableFuture<Boolean> verifyOldPassword(NoteBytesEphemeral oldPassword) {
         if (oldPasswordVerifier == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Old password verifier capability not granted"));
@@ -184,7 +184,7 @@ public class RuntimeAccess {
         return oldPasswordVerifier.verify(oldPassword);
     }
     
-    public CompletableFuture<FileEncryptionAnalysis> investigateFileEncryption() {
+    CompletableFuture<FileEncryptionAnalysis> investigateFileEncryption() {
         if (investigator == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Investigator capability not granted"));
@@ -192,7 +192,7 @@ public class RuntimeAccess {
         return investigator.investigate();
     }
     
-    public CompletableFuture<Boolean> performRecovery(
+    CompletableFuture<Boolean> performRecovery(
         FileEncryptionAnalysis analysis,
         AsyncNoteBytesWriter progressWriter,
         int batchSize
@@ -204,7 +204,7 @@ public class RuntimeAccess {
         return recoveryPerformer.perform(analysis, progressWriter, batchSize);
     }
     
-    public CompletableFuture<Boolean> performRollback(
+    CompletableFuture<Boolean> performRollback(
         FileEncryptionAnalysis analysis,
         AsyncNoteBytesWriter progressWriter,
         int batchSize
@@ -216,7 +216,7 @@ public class RuntimeAccess {
         return rollbackPerformer.perform(analysis, progressWriter, batchSize);
     }
     
-    public CompletableFuture<Boolean> performComprehensiveRecovery(
+    CompletableFuture<Boolean> performComprehensiveRecovery(
         FileEncryptionAnalysis analysis,
         AsyncNoteBytesWriter progressWriter,
         int batchSize
@@ -228,7 +228,7 @@ public class RuntimeAccess {
         return comprehensiveRecoveryPerformer.perform(analysis, progressWriter, batchSize);
     }
     
-    public CompletableFuture<Boolean> performSwap(
+    CompletableFuture<Boolean> performSwap(
         FileEncryptionAnalysis analysis,
         AsyncNoteBytesWriter progressWriter
     ) {
@@ -239,7 +239,7 @@ public class RuntimeAccess {
         return swapPerformer.perform(analysis, progressWriter);
     }
     
-    public CompletableFuture<Boolean> performTempFileCleanup(FileEncryptionAnalysis analysis) {
+    CompletableFuture<Boolean> performTempFileCleanup(FileEncryptionAnalysis analysis) {
         if (cleanupPerformer == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cleanup performer capability not granted"));
@@ -247,7 +247,7 @@ public class RuntimeAccess {
         return cleanupPerformer.cleanup(analysis);
     }
     
-    public CompletableFuture<Void> rollbackSettingsData() {
+    CompletableFuture<Void> rollbackSettingsData() {
         if (settingsRollback == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Settings rollback capability not granted"));
@@ -255,21 +255,21 @@ public class RuntimeAccess {
         return settingsRollback.rollback();
     }
     
-    public boolean hasOldKeyForRecovery() {
+    boolean hasOldKeyForRecovery() {
         if (oldKeyChecker == null) {
             throw new IllegalStateException("Old key checker capability not granted");
         }
         return oldKeyChecker.hasOldKey();
     }
     
-    public void clearOldKey() {
+    void clearOldKey() {
         if (oldKeyClearer == null) {
             throw new IllegalStateException("Old key clearer capability not granted");
         }
         oldKeyClearer.clear();
     }
     
-    public CompletableFuture<DiskSpaceValidation> validateDiskSpaceForReEncryption() {
+    CompletableFuture<DiskSpaceValidation> validateDiskSpaceForReEncryption() {
         if (diskSpaceValidator == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Disk space validator capability not granted"));
@@ -277,7 +277,7 @@ public class RuntimeAccess {
         return diskSpaceValidator.validate();
     }
     
-    public CompletableFuture<Boolean> deleteCorruptedFiles(List<String> files) {
+    CompletableFuture<Boolean> deleteCorruptedFiles(List<String> files) {
         if (corruptedFilesDeleter == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Corrupted files deleter capability not granted"));
@@ -285,7 +285,7 @@ public class RuntimeAccess {
         return corruptedFilesDeleter.delete(files);
     }
     
-    public CompletableFuture<Integer> getFileCount() {
+    CompletableFuture<Integer> getFileCount() {
         if (fileCounter == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("File counter capability not granted"));
@@ -296,7 +296,7 @@ public class RuntimeAccess {
     // === FUNCTIONAL INTERFACES ===
     
     @FunctionalInterface
-    public interface PasswordChanger {
+    interface PasswordChanger {
         CompletableFuture<Boolean> change(
             NoteBytesEphemeral current,
             NoteBytesEphemeral newPassword,
@@ -306,17 +306,17 @@ public class RuntimeAccess {
     }
     
     @FunctionalInterface
-    public interface PasswordVerifier {
+    interface PasswordVerifier {
         CompletableFuture<Boolean> verify(NoteBytesEphemeral password);
     }
     
     @FunctionalInterface
-    public interface InvestigationProvider {
+    interface InvestigationProvider {
         CompletableFuture<FileEncryptionAnalysis> investigate();
     }
     
     @FunctionalInterface
-    public interface RecoveryPerformer {
+    interface RecoveryPerformer {
         CompletableFuture<Boolean> perform(
             FileEncryptionAnalysis analysis,
             AsyncNoteBytesWriter progressWriter,
@@ -325,7 +325,7 @@ public class RuntimeAccess {
     }
     
     @FunctionalInterface
-    public interface RollbackPerformer {
+    interface RollbackPerformer {
         CompletableFuture<Boolean> perform(
             FileEncryptionAnalysis analysis,
             AsyncNoteBytesWriter progressWriter,
@@ -334,7 +334,7 @@ public class RuntimeAccess {
     }
     
     @FunctionalInterface
-    public interface ComprehensiveRecoveryPerformer {
+    interface ComprehensiveRecoveryPerformer {
         CompletableFuture<Boolean> perform(
             FileEncryptionAnalysis analysis,
             AsyncNoteBytesWriter progressWriter,
@@ -343,7 +343,7 @@ public class RuntimeAccess {
     }
     
     @FunctionalInterface
-    public interface SwapPerformer {
+    interface SwapPerformer {
         CompletableFuture<Boolean> perform(
             FileEncryptionAnalysis analysis,
             AsyncNoteBytesWriter progressWriter
@@ -351,37 +351,37 @@ public class RuntimeAccess {
     }
     
     @FunctionalInterface
-    public interface CleanupPerformer {
+    interface CleanupPerformer {
         CompletableFuture<Boolean> cleanup(FileEncryptionAnalysis analysis);
     }
     
     @FunctionalInterface
-    public interface SettingsRollback {
+    interface SettingsRollback {
         CompletableFuture<Void> rollback();
     }
     
     @FunctionalInterface
-    public interface OldKeyChecker {
+    interface OldKeyChecker {
         boolean hasOldKey();
     }
     
     @FunctionalInterface
-    public interface OldKeyClearer {
+    interface OldKeyClearer {
         void clear();
     }
     
     @FunctionalInterface
-    public interface DiskSpaceValidator {
+    interface DiskSpaceValidator {
         CompletableFuture<DiskSpaceValidation> validate();
     }
     
     @FunctionalInterface
-    public interface CorruptedFilesDeleter {
+    interface CorruptedFilesDeleter {
         CompletableFuture<Boolean> delete(List<String> files);
     }
     
     @FunctionalInterface
-    public interface FileCounter {
+    interface FileCounter {
         CompletableFuture<Integer> count();
     }
 
@@ -389,7 +389,7 @@ public class RuntimeAccess {
     /**
      * Browse available packages from repositories
      */
-    public CompletableFuture<List<PackageInfo>> browseAvailablePackages() {
+    CompletableFuture<List<PackageInfo>> browseAvailablePackages() {
         if (packageBrowser == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Package browser capability not granted"));
@@ -403,7 +403,7 @@ public class RuntimeAccess {
      * The password in the request was already verified by SystemSessionProcess,
      * so we can proceed with installation directly.
      */
-    public CompletableFuture<InstalledPackage> installPackage(
+    CompletableFuture<InstalledPackage> installPackage(
         InstallationRequest request
     ) {
         if (packageInstaller == null) {
@@ -416,7 +416,7 @@ public class RuntimeAccess {
     /**
      * Get list of installed packages
      */
-    public CompletableFuture<List<InstalledPackage>> getInstalledPackages() {
+    CompletableFuture<List<InstalledPackage>> getInstalledPackages() {
         if (installedPackagesProvider == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Installed packages provider capability not granted"));
@@ -427,7 +427,7 @@ public class RuntimeAccess {
     /**
      * Uninstall a package
      */
-    public CompletableFuture<Void> uninstallPackage(PackageId packageId) {
+    CompletableFuture<Void> uninstallPackage(PackageId packageId) {
         if (packageUninstaller == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Package uninstaller capability not granted"));
@@ -438,7 +438,7 @@ public class RuntimeAccess {
     /**
      * Load a node instance
      */
-    public CompletableFuture<NodeInstance> loadNode(NodeLoadRequest request) {
+    CompletableFuture<NodeInstance> loadNode(NodeLoadRequest request) {
         if (nodeLoader == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Node loader capability not granted"));
@@ -449,7 +449,7 @@ public class RuntimeAccess {
     /**
      * Unload a node instance
      */
-    public CompletableFuture<Void> unloadNode(InstanceId instanceId) {
+    CompletableFuture<Void> unloadNode(InstanceId instanceId) {
         if (nodeUnloader == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Node unloader capability not granted"));
@@ -460,7 +460,7 @@ public class RuntimeAccess {
     /**
      * Get all running node instances
      */
-    public CompletableFuture<List<NodeInstance>> getRunningInstances() {
+    CompletableFuture<List<NodeInstance>> getRunningInstances() {
         if (runningInstancesProvider == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Running instances provider capability not granted"));
@@ -471,7 +471,7 @@ public class RuntimeAccess {
     /**
      * Get installation registry (needed by InstallationFlowCoordinator)
      */
-    public InstallationRegistry getInstallationRegistry() {
+    InstallationRegistry getInstallationRegistry() {
         if (installationRegistryProvider == null) {
             throw new IllegalStateException(
                 "Installation registry provider capability not granted");
@@ -484,42 +484,42 @@ public class RuntimeAccess {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @FunctionalInterface
-    public interface PackageBrowser {
+    interface PackageBrowser {
         CompletableFuture<List<PackageInfo>> browse();
     }
 
     @FunctionalInterface
-    public interface PackageInstaller {
+    interface PackageInstaller {
         CompletableFuture<InstalledPackage> install(InstallationRequest request);
     }
 
     @FunctionalInterface
-    public interface InstalledPackagesProvider {
+    interface InstalledPackagesProvider {
         CompletableFuture<List<InstalledPackage>> provide();
     }
 
     @FunctionalInterface
-    public interface PackageUninstaller {
+    interface PackageUninstaller {
         CompletableFuture<Void> uninstall(PackageId packageId);
     }
 
     @FunctionalInterface
-    public interface NodeLoader {
+    interface NodeLoader {
         CompletableFuture<NodeInstance> load(NodeLoadRequest request);
     }
 
     @FunctionalInterface
-    public interface NodeUnloader {
+    interface NodeUnloader {
         CompletableFuture<Void> unload(InstanceId instanceId);
     }
 
     @FunctionalInterface
-    public interface RunningInstancesProvider {
+    interface RunningInstancesProvider {
         CompletableFuture<List<NodeInstance>> provide();
     }
 
     @FunctionalInterface
-    public interface InstallationRegistryProvider {
+    interface InstallationRegistryProvider {
         InstallationRegistry provide();
     }
 }

@@ -1,13 +1,14 @@
-package io.netnotes.engine.core.system.control;
+package io.netnotes.engine.core.system;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
-import io.netnotes.engine.core.RuntimeAccess;
+import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.nodes.InstallationRegistry;
 import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
-import io.netnotes.engine.core.system.control.nodes.PackageId;
+import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
@@ -156,10 +157,8 @@ public class InstallationFlowCoordinator {
         PackageManifest manifest = selectedPackage.getManifest();
         String manifestInfo = String.format(
             "Type: %s\n" +
-            "Multiple Instances: %s\n" +
             "Auto-load: %s",
             manifest.getType(),
-            manifest.allowsMultipleInstances() ? "Yes" : "No",
             manifest.isAutoload() ? "Yes" : "No"
         );
         
@@ -239,103 +238,302 @@ public class InstallationFlowCoordinator {
     }
     
     // ===== STEP 3: CHOOSE PROCESS CONFIGURATION =====
-    
+        
+    /**
+     * Choose processId for installation
+     */
     private CompletableFuture<ProcessConfig> chooseProcessConfiguration() {
         PackageManifest manifest = selectedPackage.getManifest();
+        PackageManifest.NamespaceRequirement nsReq = manifest.getNamespaceRequirement();
         
-        // Get installation registry from systemAccess
-        InstallationRegistry registry = systemAccess.getInstallationRegistry();
-        
-        // Single instance only? Auto-assign
-        if (!manifest.allowsMultipleInstances()) {
-            NoteBytesReadOnly processId = selectedPackage.getPackageId();
+        // Case 1: REQUIRED namespace - no user choice
+        if (nsReq.mode() == PackageManifest.NamespaceMode.REQUIRED) {
+            NoteBytesReadOnly requiredNs = nsReq.namespace();
             
-            if (registry.isInstalled(new PackageId(selectedPackage.getPackageId(), selectedPackage.getVersion()))) {
-                uiRenderer.render(UIProtocol.showError(
-                    "Package already installed and does not support multiple instances"));
-                return CompletableFuture.completedFuture(null);
-            }
+            System.out.println("[InstallationFlow] Package requires namespace: " + requiredNs);
             
-            return CompletableFuture.completedFuture(
-                ProcessConfig.standalone(processId)
-            );
+            uiRenderer.render(UIProtocol.showMessage(
+                String.format(
+                    "This package must be installed in namespace: %s\n\n" +
+                    "This is a system requirement and cannot be changed.",
+                    requiredNs
+                )
+            ));
+            
+            ProcessConfig config = ProcessConfig.create(requiredNs);
+            return CompletableFuture.completedFuture(config);
         }
         
-        return chooseProcessConfigurationMenu(registry);
+        // Case 2 & 3: DEFAULT or FLEXIBLE - show menu
+        return showNamespaceChoiceMenu(nsReq);
     }
-    
-    private CompletableFuture<ProcessConfig> chooseProcessConfigurationMenu(
-        InstallationRegistry registry
+
+
+    /**
+     * Show namespace choice menu
+     */
+    private CompletableFuture<ProcessConfig> showNamespaceChoiceMenu(
+        PackageManifest.NamespaceRequirement nsReq
     ) {
         CompletableFuture<ProcessConfig> resultFuture = new CompletableFuture<>();
         
-        PackageManifest manifest = selectedPackage.getManifest();
+        InstallationRegistry registry = systemAccess.getInstallationRegistry();
         
         MenuContext menu = new MenuContext(
             basePath.append("process-config"),
-            "Process Configuration",
+            "Choose Installation Namespace",
             uiRenderer
         );
         
-        menu.addInfoItem("info", 
-            "This package supports multiple instances.\n" +
-            "Choose how this instance should run:");
+        // Different info based on namespace mode
+        if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
+            menu.addInfoItem("info", 
+                String.format(
+                    "This package suggests namespace: %s\n\n" +
+                    "You can accept the suggestion or choose a different namespace.\n" +
+                    "Packages sharing a namespace share data and flow paths.",
+                    nsReq.namespace()
+                )
+            );
+        } else {
+            menu.addInfoItem("info", 
+                "Choose where this package will be installed.\n\n" +
+                "Packages sharing a processId share data and flow paths.\n" +
+                "Most packages use their own unique processId.");
+        }
         
-        menu.addSeparator("Configuration Options");
+        menu.addSeparator("Options");
         
-        menu.addItem("standalone", 
-            "Standalone Instance",
-            "Run in its own namespace (recommended)",
+        // Option 1: Use suggested/default namespace
+        NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
+        String defaultLabel = nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT ?
+            "✓ Use Suggested: " + defaultNs :
+            "✓ Default: " + defaultNs;
+        String defaultDesc = nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT ?
+            "Use package's recommended namespace" :
+            "Standard installation with unique namespace";
+        
+        menu.addItem("default", 
+            defaultLabel,
+            defaultDesc,
             () -> {
-                NoteBytesReadOnly processId = generateUniqueProcessId(
-                    selectedPackage.getPackageId(),
-                    registry
-                );
-                resultFuture.complete(ProcessConfig.standalone(processId));
+                ProcessConfig config = ProcessConfig.create(defaultNs);
+                resultFuture.complete(config);
             });
         
-        if (manifest.supportsProcessMode(ProcessConfig.InheritanceMode.SHARED)) {
-            menu.addItem("shared",
-                "Shared Workspace",
-                "Share namespace with other packages",
-                () -> {
-                    // TODO: Choose shared workspace
-                    resultFuture.complete(null);
-                });
+        // Option 2: Join existing namespace
+        List<NoteBytesReadOnly> existingProcessIds = getExistingProcessIds(registry);
+        if (!existingProcessIds.isEmpty()) {
+            menu.addSeparator("Join Existing Namespace");
+            
+            for (NoteBytesReadOnly existingId : existingProcessIds) {
+                List<InstalledPackage> members = getPackagesInNamespace(existingId, registry);
+                String memberNames = members.stream()
+                    .map(InstalledPackage::getName)
+                    .limit(3)
+                    .collect(Collectors.joining(", "));
+                
+                if (members.size() > 3) {
+                    memberNames += String.format(" (+%d more)", members.size() - 3);
+                }
+                
+                String description = String.format(
+                    "Share with: %s", 
+                    memberNames
+                );
+                
+                menu.addItem("join-" + existingId,
+                    "Join: " + existingId,
+                    description,
+                    () -> {
+                        // Show warning if joining different namespace than suggested
+                        if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT &&
+                            !existingId.equals(nsReq.namespace())) {
+                            
+                            confirmNamespaceOverride(existingId, nsReq.namespace())
+                                .thenAccept(confirmed -> {
+                                    if (confirmed) {
+                                        ProcessConfig config = ProcessConfig.forExistingNamespace(existingId);
+                                        resultFuture.complete(config);
+                                    } else {
+                                        // Return to menu
+                                        showNamespaceChoiceMenu(nsReq)
+                                            .thenAccept(resultFuture::complete);
+                                    }
+                                });
+                        } else {
+                            ProcessConfig config = ProcessConfig.forExistingNamespace(existingId);
+                            resultFuture.complete(config);
+                        }
+                    });
+            }
         }
         
-        if (manifest.supportsClustering()) {
-            menu.addItem("cluster",
-                "Cluster Member",
-                "Join an existing cluster",
-                () -> {
-                    // TODO: Choose cluster
-                    resultFuture.complete(null);
-                });
-        }
+        // Option 3: Custom namespace
+        menu.addItem("custom",
+            "Custom Namespace",
+            "Create a new named namespace for grouping",
+            () -> promptForCustomProcessId()
+                .thenCompose(customId -> {
+                    if (customId == null) {
+                        resultFuture.complete(null);
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    
+                    // Show warning if using custom namespace instead of suggested
+                    if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT &&
+                        !customId.equals(nsReq.namespace())) {
+                        
+                        return confirmNamespaceOverride(customId, nsReq.namespace())
+                            .thenApply(confirmed -> {
+                                if (confirmed) {
+                                    ProcessConfig config = ProcessConfig.withCustomId(customId);
+                                    resultFuture.complete(config);
+                                } else {
+                                    // Return to menu
+                                    showNamespaceChoiceMenu(nsReq)
+                                        .thenAccept(resultFuture::complete);
+                                }
+                                return null;
+                            });
+                    } else {
+                        ProcessConfig config = ProcessConfig.withCustomId(customId);
+                        resultFuture.complete(config);
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }));
         
+        menu.addSeparator("Actions");
         menu.addItem("cancel", "Cancel Installation", 
             () -> resultFuture.complete(null));
         
         menu.display();
-        
         return resultFuture;
     }
-    
-    private NoteBytesReadOnly generateUniqueProcessId(NoteBytesReadOnly baseId, InstallationRegistry registry) {
-        NoteBytesReadOnly processId = baseId;
-        
-        if (isProcessIdInUse(processId, registry)) {
-            processId = baseId.concat(DASH, NoteUUID.createLocalUUID64());
+
+
+    /**
+     * Get default namespace based on manifest requirements
+     */
+    private NoteBytesReadOnly getDefaultNamespace(PackageManifest.NamespaceRequirement nsReq) {
+        switch (nsReq.mode()) {
+            case REQUIRED:
+            case DEFAULT:
+                return nsReq.namespace();
+            case FLEXIBLE:
+            default:
+                return selectedPackage.getPackageId();
         }
+    }
+
+   
+
+  
+    /**
+     * Confirm namespace override when user chooses different from suggested
+     */
+    private CompletableFuture<Boolean> confirmNamespaceOverride(
+        NoteBytesReadOnly chosenNs,
+        NoteBytesReadOnly suggestedNs
+    ) {
+        CompletableFuture<Boolean> resultFuture = new CompletableFuture<>();
         
-        return processId;
+        MenuContext menu = new MenuContext(
+            basePath.append("confirm-override"),
+            "Confirm Namespace Override",
+            uiRenderer
+        );
+        
+        menu.addInfoItem("warning",
+            String.format(
+                "⚠️  This package recommends namespace: %s\n\n" +
+                "You've chosen: %s\n\n" +
+                "Using a different namespace may affect functionality " +
+                "if this package expects to coordinate with others.",
+                suggestedNs,
+                chosenNs
+            )
+        );
+        
+        menu.addSeparator("Decision");
+        
+        menu.addItem("proceed",
+            "Continue with " + chosenNs,
+            "I understand the risks",
+            () -> resultFuture.complete(true));
+        
+        menu.addItem("back",
+            "Use Suggested: " + suggestedNs,
+            "Follow package recommendation",
+            () -> resultFuture.complete(false));
+        
+        menu.display();
+        return resultFuture;
     }
-    
-    private boolean isProcessIdInUse(NoteBytesReadOnly processId, InstallationRegistry registry) {
+
+
+   /**
+     * Get all existing processIds from installed packages
+     */
+    private List<NoteBytesReadOnly> getExistingProcessIds(InstallationRegistry registry) {
         return registry.getInstalledPackages().stream()
-            .anyMatch(pkg -> pkg.getProcessId().equals(processId));
+            .map(pkg -> pkg.getProcessId())
+            .distinct()
+            .sorted((a, b) -> a.toString().compareTo(b.toString()))
+            .collect(Collectors.toList());
     }
+
+    /**
+     * Get all packages sharing a namespace
+     */
+    private List<InstalledPackage> getPackagesInNamespace(
+        NoteBytesReadOnly processId, 
+        InstallationRegistry registry
+    ) {
+        return registry.getInstalledPackages().stream()
+            .filter(pkg -> pkg.getProcessId().equals(processId))
+            .collect(Collectors.toList());
+    }
+
+
+   /**
+     * Prompt for custom processId
+     */
+    private CompletableFuture<NoteBytesReadOnly> promptForCustomProcessId() {
+        CompletableFuture<NoteBytesReadOnly> resultFuture = new CompletableFuture<>();
+        
+        MenuContext menu = new MenuContext(
+            basePath.append("custom-namespace"),
+            "Custom Namespace",
+            uiRenderer
+        );
+        
+        menu.addInfoItem("info",
+            "Enter a custom namespace identifier.\n\n" +
+            "This will be used for the installation path and must be unique.");
+        
+        // Temporary: Generate unique ID
+        // In real implementation, would use UIProtocol text input
+        String customId = "custom-" + NoteUUID.createSafeUUID64();
+        
+        menu.addItem("generate",
+            "Generate: " + customId,
+            "Use auto-generated unique namespace",
+            () -> resultFuture.complete(new NoteBytesReadOnly(customId)));
+        
+        menu.addItem("cancel",
+            "Cancel",
+            "Return to namespace selection",
+            () -> resultFuture.complete(null));
+        
+        menu.display();
+        return resultFuture;
+    }
+
+
+   
+    
+
     
     // ===== STEP 5: PASSWORD CONFIRMATION =====
     

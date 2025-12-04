@@ -56,7 +56,6 @@ class InstallationExecutor {
         
         System.out.println("[InstallationExecutor] Installing: " + pkgInfo.getName());
         System.out.println("  ProcessId: " + processConfig.getProcessId());
-        System.out.println("  Mode: " + processConfig.getMode());
         
         // Step 1: Download and store package files
         return packageInstaller.installPackage(pkgInfo)

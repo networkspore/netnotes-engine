@@ -61,17 +61,7 @@ public class NodeInstance {
     public long getUptime() { return System.currentTimeMillis() - loadTime; }
     public int getCrashCount() { return crashCount; }
     public void incrementCrashCount() { crashCount++; }
-    
-    // ===== STATUS =====
-    
-    public boolean isRunning() {
-        return state == NodeState.RUNNING && inode.isActive();
-    }
-    
-    public boolean isHealthy() {
-        return isRunning() && inode.isAlive();
-    }
-    
+
     @Override
     public String toString() {
         return String.format(

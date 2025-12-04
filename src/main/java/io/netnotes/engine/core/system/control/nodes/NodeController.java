@@ -101,7 +101,6 @@ public class NodeController extends FlowProcess {
         System.out.println("[NodeController] Loading node:");
         System.out.println("  Package: " + pkg.getName() + " v" + pkg.getPackageId().getVersion());
         System.out.println("  ProcessId: " + processConfig.getProcessId());
-        System.out.println("  Mode: " + processConfig.getMode());
         System.out.println("  Data root: " + processConfig.getDataRootPath());
         System.out.println("  Flow base: " + processConfig.getFlowBasePath());
         

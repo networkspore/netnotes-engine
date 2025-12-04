@@ -142,6 +142,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly PACKAGE_ID    = new NoteBytesReadOnly("package_id");
         public static final NoteBytesReadOnly PROCESS_ID    = new NoteBytesReadOnly("process_id");
         public static final NoteBytesReadOnly NODE_ID       = new NoteBytesReadOnly("node_id");
+        public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
+        
         public static final NoteBytesReadOnly PID           = new NoteBytesReadOnly("pid");
         public static final NoteBytesReadOnly RECEIVER_ID   = new NoteBytesReadOnly("receiver_id");
         public static final NoteBytesReadOnly SENDER_ID     = new NoteBytesReadOnly("sender_id");
@@ -165,7 +167,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly CONTENT       = new NoteBytesReadOnly("content");
         public static final NoteBytesReadOnly ALLOW_COPY    = new NoteBytesReadOnly("allow_copy");
         public static final NoteBytesReadOnly DESCRIPTION   = new NoteBytesReadOnly("description");
-        
+        public static final NoteBytesReadOnly CONFIG        = new NoteBytesReadOnly("config");
+
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");
@@ -183,6 +186,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly AVAILABLE     = new NoteBytesReadOnly("available");
         public static final NoteBytesReadOnly SELECTED_INDEX = new NoteBytesReadOnly("selected_index");
         public static final NoteBytesReadOnly DATA          = new NoteBytesReadOnly("data");
+        public static final NoteBytesReadOnly UPDATES       = new NoteBytesReadOnly("updates");
 
         // Items (Generic resource term)
         public static final NoteBytesReadOnly ITEM          = new NoteBytesReadOnly("item");
