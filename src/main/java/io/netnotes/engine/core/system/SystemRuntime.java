@@ -4,6 +4,7 @@ import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
@@ -230,16 +231,16 @@ public class SystemRuntime {
     private CompletableFuture<Void> initializeRepositoryManager() {
        
         // Create child interface scoped to repositories subtree
-        ContextPath repoPath = ContextPath.of(SystemProcess.REPOSITORIES);
+        ContextPath repoPath = ContextPath.of(CoreConstants.REPOSITORIES);
 
         ContextPath repoFilePath = repoPath.append("repository-list");
         return noteFileService.getNoteFile(repoFilePath.getSegments())
             .thenCompose(repoFile -> {
-               this.repositoryManager = new RepositoryManager(SystemProcess.REPOSITORIES, repoFile);
+               this.repositoryManager = new RepositoryManager(CoreConstants.REPOSITORIES, repoFile);
                 ContextPath path = registryInterface.registerProcess(
                     repositoryManager, 
-                    SystemProcess.REPOSITORIES_PATH,
-                    SystemProcess.SYSTEM_PATH,
+                    CoreConstants.REPOSITORIES_PATH,
+                    CoreConstants.SYSTEM_PATH,
                     registryInterface
                 );
                 System.out.println("[SystemRuntime] Registered RepositoryManager at: " + path);
@@ -261,7 +262,7 @@ public class SystemRuntime {
 
             @Override
             public ContextPath getDataRootPath() {
-                return SystemProcess.NODE_DATA_PATH;
+                return CoreConstants.NODE_DATA_PATH;
             }
 
         };
@@ -270,13 +271,13 @@ public class SystemRuntime {
 
         // Create controller
         this.nodeController = new NodeController(
-            SystemProcess.NODE_CONTROLLER,
+            CoreConstants.NODE_CONTROLLER,
             noteFileServiceInterface
         );
         ContextPath path = registryInterface.registerProcess(
                     nodeController, 
-                    SystemProcess.NODE_CONTROLLER_PATH,
-                    SystemProcess.SYSTEM_PATH,
+                    CoreConstants.NODE_CONTROLLER_PATH,
+                    CoreConstants.SYSTEM_PATH,
                     registryInterface
                 );
 
@@ -300,65 +301,6 @@ public class SystemRuntime {
                 System.out.println("[SystemRuntime] Shutdown complete");
             });
     }
-
-/*
-    private void initializeSystemServices() {
-        // InstallationRegistry gets scoped interface
-        ContextPath registryPath = myPath.append("registry");
-        AppDataInterface registryInterface = createScopedInterface(registryPath);
-        
-        this.installationRegistry = new InstallationRegistry(
-            registryPath,
-            registryInterface
-        );
-        
-        // RepositoryManager gets scoped interface
-        ContextPath repoPath = myPath.append("repositories");
-        AppDataInterface repoInterface = createScopedInterface(repoPath);
-        
-        this.repositoryManager = new RepositoryManager(
-            repoPath,
-            repoInterface
-        );
-    }
-
-    private AppDataInterface createScopedInterface(ContextPath basePath) {
-        return null;
-    }*/
-
-    /**
-     * Initialize node system
-   
-    public CompletableFuture<Void> initializeNodeSystem() {
-        System.out.println("[AppData] Initializing node system...");
-        
-        return installationRegistry.initialize()
-            .thenCompose(v -> repositoryManager.initialize())
-            .thenCompose(v -> {
-                ContextPath controllerPath = myPath.append("controller");
-              
-                this.nodeController = new NodeController(
-                    "controller",
-                    this,
-                    processService,
-                    installationRegistry
-                );
-                
-                processService.registerProcess(
-                    nodeController,
-                    controllerPath,
-                    myPath,
-                    processService.createUnrestrictedInterface(controllerPath)
-                );
-                
-                return nodeController.run();
-            })
-            .thenRun(() -> {
-                System.out.println("[AppData] Node system initialized");
-            });
-    }  */
-
-
 
   
 }

@@ -14,7 +14,7 @@ import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytesReadOnly {
 
-    private static final AtomicInteger m_atomicInteger = new AtomicInteger(ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)));
+    private static final AtomicInteger m_atomicInteger = new AtomicInteger(createSequenceRand());
     private static final AtomicInteger m_lastTime = new AtomicInteger(getIntTimeStamp());
     private NoteUUID(byte[] bytes){
         super(bytes, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
@@ -23,17 +23,12 @@ public class NoteUUID extends NoteBytesReadOnly {
 
 
       
-    public static byte[] littleEndianNanoTimeHash(){
-        return ByteDecoding.intToBytesLittleEndian(splitMix64(System.nanoTime()));
+    public static byte[] nanoTimeHash(){
+        return ByteDecoding.intToBytesBigEndian(splitMix64(System.nanoTime()));
     }
 
-    public static byte[] littleEndianCurrentTime(){
-        return ByteDecoding.longToBytesLittleEndian(System.currentTimeMillis());
-    }
-
-    public static int getAndIncrementInteger(){
-        return m_atomicInteger.updateAndGet((i)->i + 1);
-
+    public static byte[] currentTimeStampBytes(){
+        return ByteDecoding.longToBytesBigEndian(System.currentTimeMillis());
     }
 
     public static NoteUUID createLocalUUID128(){
@@ -60,7 +55,7 @@ public class NoteUUID extends NoteBytesReadOnly {
     }
 
     public static byte[] createTimeRndBytes(){
-		byte[] nanoTime = littleEndianNanoTimeHash();
+		byte[] nanoTime = nanoTimeHash();
 		byte[] randomBytes = RandomService.getRandomBytes(4);
 		byte[] timeSequence = createTimeSequenceBytes64();
 
@@ -121,14 +116,18 @@ public class NoteUUID extends NoteBytesReadOnly {
         return getNextSequenceRand(getIntTimeStamp());
     }
 
+    private static int createSequenceRand(){
+        return ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4)) & 0x7FFFFFFF;
+    }
+
     private static int getNextSequenceRand(int now) {
-        int rand = ByteDecoding.bytesToIntBigEndian(RandomService.getRandomBytes(4));
+        int rand = createSequenceRand();
         
         while (true) {
             int last = m_lastTime.get();
 
             if (last == now) {
-                // Same time window → increment and return
+                
                 return m_atomicInteger.incrementAndGet();
             }
 

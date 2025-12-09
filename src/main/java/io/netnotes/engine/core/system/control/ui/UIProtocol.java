@@ -34,8 +34,7 @@ public class UIProtocol {
             itemsArray.add(new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.ITEM_NAME, item.name()),
                new NoteBytesPair(Keys.ITEM_DESCRIPTION, item.description()),
-               new NoteBytesPair(Keys.ITEM_TYPE, item.type().name()),
-               new NoteBytesPair(Keys.ITEM_PROTECTED, item.isProtected())
+               new NoteBytesPair(Keys.ITEM_TYPE, item.type().name())
             }));
         }
         cmd.put(Keys.MENU_ITEMS, itemsArray);
@@ -142,8 +141,7 @@ public class UIProtocol {
     public record MenuItem(
         String name,
         String description,
-        MenuItemType type,
-        boolean isProtected
+        MenuItemType type
     ) {}
     
     public enum MenuItemType {

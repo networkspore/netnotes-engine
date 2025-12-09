@@ -18,7 +18,7 @@ public final class KeyCharEvent implements RoutedEvent {
 
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
-    public NoteBytes getCodepointBytes() { return codepointBytes; }
+    public NoteBytes getCodepointData() { return codepointBytes; }
     public int getCodepoint(){
         if(codepointCache != -1){
             return codepointCache;

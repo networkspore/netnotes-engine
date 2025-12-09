@@ -27,10 +27,10 @@ import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 public class SettingsData {
-    public static final NoteBytes BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 1});
-    public static final NoteBytes SALT_KEY = new NoteBytes(new byte[]{(byte) 2}); 
-    public static final NoteBytes OLD_BCRYPT_KEY = new NoteBytes(new byte[]{(byte) 3});
-    public static final NoteBytes OLD_SALT_KEY = new NoteBytes(new byte[]{(byte) 4}); 
+    public static final NoteBytes BCRYPT_KEY = new NoteBytes("bcrypt_key");
+    public static final NoteBytes SALT_KEY = new NoteBytes("salt_key"); 
+    public static final NoteBytes OLD_BCRYPT_KEY = new NoteBytes("old_bcrypt");
+    public static final NoteBytes OLD_SALT_KEY = new NoteBytes("old_salt"); 
 
     public static class InvalidPasswordException extends RuntimeException {
         public InvalidPasswordException(String msg) { super(msg); }
@@ -80,6 +80,17 @@ public class SettingsData {
     
     public static File getDataDir() {
         return getAppDataDir();
+    }
+
+    public static File getIdDataFile(){
+        File dataDir = SettingsData.getDataDir();
+        File idDataFile = new File(dataDir.getAbsolutePath() + "/data.dat");
+        return idDataFile;
+    }
+
+    public static boolean isIdDataFile(){
+        File dataFile = getIdDataFile();
+        return dataFile.isFile() && dataFile.exists();
     }
     
 
@@ -265,7 +276,7 @@ public class SettingsData {
         m_bcryptKey = hash;
     }
 
-    private static File getSettingsFile() throws IOException{
+    public static File getSettingsFile(){
         File dataDir = getDataDir();
         
         return new File(dataDir.getAbsolutePath() + "/" + SETTINGS_FILE_NAME);
@@ -297,7 +308,7 @@ public class SettingsData {
 
     }
 
-    public static boolean isSettingsData() throws IOException{
+    public static boolean isSettingsData(){
         File settingsFile = getSettingsFile();
         if(settingsFile.exists() && settingsFile.isFile()){
             return true;

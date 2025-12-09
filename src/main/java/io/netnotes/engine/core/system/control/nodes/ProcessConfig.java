@@ -1,6 +1,6 @@
 package io.netnotes.engine.core.system.control.nodes;
 
-import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -52,8 +52,8 @@ public class ProcessConfig {
      */
     public ProcessConfig(NoteBytesReadOnly processId) {
         this.processId = processId;
-        this.dataRootPath = SystemProcess.NODE_DATA_PATH.append(processId);
-        this.flowBasePath = SystemProcess.NODES_PATH.append(processId);
+        this.dataRootPath = CoreConstants.NODE_DATA_PATH.append(processId);
+        this.flowBasePath = CoreConstants.NODES_PATH.append(processId);
     }
     
     // ===== GETTERS =====

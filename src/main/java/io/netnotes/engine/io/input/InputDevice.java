@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.input;
 
-import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import java.util.function.Consumer;
+
 import io.netnotes.engine.io.input.events.RoutedEvent;
 
 /**
@@ -25,23 +26,16 @@ public interface InputDevice {
      * @param id Unique consumer ID
      * @param consumer Event consumer (thread-safe)
      */
-    void addEventConsumer(String id, ExecutorConsumer<RoutedEvent> consumer);
+    void setEventConsumer(Consumer<RoutedEvent> consumer);
     
-    /**
-     * Remove event consumer
-     * 
-     * @param id Consumer ID
-     * @return Removed consumer, or null if not found
-     */
-    ExecutorConsumer<RoutedEvent> removeEventConsumer(String id);
-    
+ 
     /**
      * Get event consumer
      * 
      * @param id Consumer ID
      * @return Consumer, or null if not found
      */
-    ExecutorConsumer<RoutedEvent> getEventConsumer(String id);
+    Consumer<RoutedEvent> getEventConsumer();
     
     /**
      * Check if device is active

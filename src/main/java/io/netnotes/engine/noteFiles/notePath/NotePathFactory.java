@@ -100,10 +100,7 @@ public class NotePathFactory {
     
 
     public File getFilePathLedger() {
-        File dataDir = SettingsData.getDataDir();
-
-        File idDataFile = new File(dataDir.getAbsolutePath() + "/data.dat");
-        return idDataFile;
+        return SettingsData.getIdDataFile();
     }
 
     public SettingsData getSettingsData(){

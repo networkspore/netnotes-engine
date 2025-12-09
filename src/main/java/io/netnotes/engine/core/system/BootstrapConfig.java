@@ -1,148 +1,566 @@
 package io.netnotes.engine.core.system;
 
+import io.netnotes.engine.core.CoreConstants;
+import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * BootstrapConfig - System bootstrap configuration management
+ * BootstrapConfig - Singleton process managing system bootstrap configuration
  * 
- * Structure mirrors ContextPath hierarchy for intuitive navigation:
+ * NEW ARCHITECTURE:
+ * - Lives at: /system/bootstrap-config
+ * - Manages bootstrap config as FlowProcess
+ * - Handles concurrent reads/writes with ReadWriteLock
+ * - Auto-saves changes to disk
+ * - Notifies subscribers of changes
+ * - Thread-safe access from multiple sessions
  * 
+ * Structure remains the same:
  * bootstrap/
  *   system/
  *     base/
- *       secure-input/           # IODaemon (USB security layer)
- *         installed: boolean
- *         socket_path: string
- *         auto_start: boolean
- *       command-shell/          # Command interface
- *         input-source: string  # Path to active input source
- *         history_size: integer
- *       input/                  # Input source registry
- *         sources/              # Available input sources
- *           gui-native/
- *             enabled: boolean
- *             priority: integer
- *           secure-input/
- *             enabled: boolean
- *             priority: integer
- *     network/                  # Network services
- *       enabled: boolean
- *       listen_port: integer
- *     gui/                      # GUI environment
- *       native/
- *         enabled: boolean
- *         
+ *       secure-input/
+ *       command-shell/
+ *       input/
+ *     network/
+ *     gui/
+ * 
+ * Commands:
+ * - GET: Get value at path
+ * - SET: Set value at path (auto-saves)
+ * - MERGE: Merge updates (auto-saves)
+ * - VALIDATE: Check structure
+ * - SUBSCRIBE: Get notified of changes
+ * - UNSUBSCRIBE: Stop notifications
+ * 
  * Usage:
- *   NoteBytesMap config = BootstrapConfig.createDefault();
- *   NoteBytes value = BootstrapConfig.get(config, "system", "base", "secure-input", "installed");
- *   BootstrapConfig.set(config, "system/base/secure-input/installed", new NoteBytes(true));
+ * <pre>
+ * // Request value
+ * NoteBytesMap request = BootstrapConfig.CMD.get("system/base/secure-input/installed");
+ * processInterface.request(BOOTSTRAP_CONFIG_PATH, request)
+ *     .thenAccept(response -> {
+ *         boolean installed = response.get(Keys.DATA).getAsBoolean();
+ *     });
+ * 
+ * // Set value (auto-saves)
+ * NoteBytesMap setReq = BootstrapConfig.CMD.set(
+ *     "system/base/secure-input/installed", 
+ *     new NoteBytes(true)
+ * );
+ * processInterface.sendMessage(BOOTSTRAP_CONFIG_PATH, setReq);
+ * </pre>
  */
-public class BootstrapConfig {
+public class BootstrapConfig extends FlowProcess {
     
-    // ===== ROOT KEYS =====
+    public static final String NAME = "bootstrap-config";
+    public static final ContextPath BOOTSTRAP_CONFIG_PATH = CoreConstants.SYSTEM_PATH.append(NAME);
+    
+    // ===== SINGLETON INSTANCE =====
+    private static volatile BootstrapConfig instance = null;
+    private static final Object INSTANCE_LOCK = new Object();
+    
+    // ===== STATE =====
+    private final BitFlagStateMachine state;
+    private NoteBytesMap data;
+    private final ReadWriteLock dataLock = new ReentrantReadWriteLock();
+    
+    // ===== SUBSCRIBERS =====
+    private final Map<ContextPath, ConfigChangeListener> subscribers = new ConcurrentHashMap<>();
+    
+    // ===== MESSAGE HANDLERS =====
+    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> msgHandlers = new ConcurrentHashMap<>();
+    
+    // ===== CONSTANTS (same as before) =====
     public static final String SYSTEM = "system";
-    
-    // ===== SYSTEM.BASE KEYS =====
     public static final String BASE = "base";
     public static final String SECURE_INPUT = "secure-input";
     public static final String COMMAND_SHELL = "command-shell";
     public static final String INPUT = "input";
-    
-    // ===== SYSTEM.BASE.SECURE-INPUT KEYS =====
     public static final String INSTALLED = "installed";
     public static final String SOCKET_PATH = "socket_path";
     public static final String AUTO_START = "auto_start";
-    
-    // ===== SYSTEM.BASE.COMMAND-SHELL KEYS =====
     public static final String INPUT_SOURCE = "input-source";
     public static final String HISTORY_SIZE = "history_size";
     public static final String ECHO_ENABLED = "echo_enabled";
-    
-    // ===== SYSTEM.BASE.INPUT KEYS =====
     public static final String SOURCES = "sources";
     public static final String GUI_NATIVE = "gui-native";
     public static final String ENABLED = "enabled";
     public static final String PRIORITY = "priority";
-    
-    // ===== SYSTEM.NETWORK KEYS =====
     public static final String NETWORK = "network";
     public static final String LISTEN_PORT = "listen_port";
-    
-    // ===== SYSTEM.GUI KEYS =====
     public static final String GUI = "gui";
     public static final String NATIVE = "native";
-    
-    // ===== DEFAULT VALUES =====
     public static final String DEFAULT_SOCKET_PATH = "/var/run/io-daemon.sock";
     public static final String DEFAULT_INPUT_SOURCE = "system/gui/native";
     public static final int DEFAULT_HISTORY_SIZE = 1000;
     public static final int DEFAULT_NETWORK_PORT = 8080;
     
-    // ===== FACTORY METHODS =====
+    // ===== COMMANDS =====
+    public static final class CMD {
+        public static final NoteBytesReadOnly GET = new NoteBytesReadOnly("get");
+        public static final NoteBytesReadOnly SET = new NoteBytesReadOnly("set");
+        public static final NoteBytesReadOnly MERGE = new NoteBytesReadOnly("merge");
+        public static final NoteBytesReadOnly VALIDATE = new NoteBytesReadOnly("validate");
+        public static final NoteBytesReadOnly SUBSCRIBE = new NoteBytesReadOnly("subscribe");
+        public static final NoteBytesReadOnly UNSUBSCRIBE = new NoteBytesReadOnly("unsubscribe");
+        public static final NoteBytesReadOnly GET_ALL = new NoteBytesReadOnly("get_all");
+        
+        // Helper methods to build command messages
+        public static NoteBytesMap get(String path) {
+            NoteBytesMap msg = new NoteBytesMap();
+            msg.put(Keys.CMD, GET);
+            msg.put(Keys.PATH, new NoteBytes(path));
+            return msg;
+        }
+        
+        public static NoteBytesMap set(String path, NoteBytes value) {
+            NoteBytesMap msg = new NoteBytesMap();
+            msg.put(Keys.CMD, SET);
+            msg.put(Keys.PATH, new NoteBytes(path));
+            msg.put(Keys.DATA, value);
+            return msg;
+        }
+        
+        public static NoteBytesMap merge(NoteBytesMap updates) {
+            NoteBytesMap msg = new NoteBytesMap();
+            msg.put(Keys.CMD, MERGE);
+            msg.put(Keys.DATA, updates);
+            return msg;
+        }
+        
+        public static NoteBytesMap getAll() {
+            NoteBytesMap msg = new NoteBytesMap();
+            msg.put(Keys.CMD, GET_ALL);
+            return msg;
+        }
+        
+        public static NoteBytesMap subscribe() {
+            NoteBytesMap msg = new NoteBytesMap();
+            msg.put(Keys.CMD, SUBSCRIBE);
+            return msg;
+        }
+    }
+    
+    // ===== STATES =====
+    public static final long INITIALIZING = 1L << 0;
+    public static final long LOADING = 1L << 1;
+    public static final long READY = 1L << 2;
+    public static final long SAVING = 1L << 3;
+    public static final long ERROR = 1L << 4;
+    
+    // ===== CONSTRUCTOR =====
+    
+    private BootstrapConfig() {
+        super(NAME, ProcessType.BIDIRECTIONAL);
+        this.state = new BitFlagStateMachine("bootstrap-config");
+        
+        setupMessageHandlers();
+        setupStateTransitions();
+    }
     
     /**
-     * Create default bootstrap configuration
+     * Get singleton instance (must be initialized first)
+     */
+    public static BootstrapConfig getInstance() {
+        if (instance == null) {
+            throw new IllegalStateException("BootstrapConfig not initialized - call initialize() first");
+        }
+        return instance;
+    }
+    
+    /**
+     * Check if initialized
+     */
+    public static boolean isInitialized() {
+        return instance != null;
+    }
+    
+    /**
+     * Initialize singleton instance
+     * Called by SystemProcess during startup
+     */
+    public static CompletableFuture<BootstrapConfig> initialize() {
+        synchronized (INSTANCE_LOCK) {
+            if (instance != null) {
+                System.out.println("[BootstrapConfig] Already initialized");
+                return CompletableFuture.completedFuture(instance);
+            }
+            
+            instance = new BootstrapConfig();
+            
+            return instance.loadConfig()
+                .thenApply(v -> {
+                    System.out.println("[BootstrapConfig] Singleton initialized at: " + 
+                        BOOTSTRAP_CONFIG_PATH);
+                    return instance;
+                })
+                .exceptionally(ex -> {
+                    System.err.println("[BootstrapConfig] Initialization failed: " + ex.getMessage());
+                    instance = null;
+                    throw new RuntimeException("Failed to initialize BootstrapConfig", ex);
+                });
+        }
+    }
+    
+    /**
+     * Shutdown singleton
+     */
+    public static CompletableFuture<Void> shutdown() {
+        synchronized (INSTANCE_LOCK) {
+            if (instance == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            
+            BootstrapConfig toShutdown = instance;
+            instance = null;
+            
+            return toShutdown.saveConfig()
+                .thenRun(() -> {
+                    toShutdown.kill();
+                    System.out.println("[BootstrapConfig] Singleton shutdown");
+                });
+        }
+    }
+    
+    // ===== LIFECYCLE =====
+    
+    private void setupMessageHandlers() {
+        msgHandlers.put(CMD.GET, this::handleGet);
+        msgHandlers.put(CMD.SET, this::handleSet);
+        msgHandlers.put(CMD.MERGE, this::handleMerge);
+        msgHandlers.put(CMD.VALIDATE, this::handleValidate);
+        msgHandlers.put(CMD.SUBSCRIBE, this::handleSubscribe);
+        msgHandlers.put(CMD.UNSUBSCRIBE, this::handleUnsubscribe);
+        msgHandlers.put(CMD.GET_ALL, this::handleGetAll);
+    }
+    
+    private void setupStateTransitions() {
+        state.onStateAdded(INITIALIZING, (old, now, bit) -> {
+            System.out.println("[BootstrapConfig] Initializing...");
+        });
+        
+        state.onStateAdded(LOADING, (old, now, bit) -> {
+            System.out.println("[BootstrapConfig] Loading from disk...");
+        });
+        
+        state.onStateAdded(READY, (old, now, bit) -> {
+            System.out.println("[BootstrapConfig] Ready - accepting requests");
+        });
+        
+        state.onStateAdded(SAVING, (old, now, bit) -> {
+            System.out.println("[BootstrapConfig] Saving to disk...");
+        });
+        
+        state.onStateAdded(ERROR, (old, now, bit) -> {
+            System.err.println("[BootstrapConfig] ERROR state");
+        });
+    }
+    
+    @Override
+    public CompletableFuture<Void> run() {
+        state.addState(INITIALIZING);
+        state.addState(READY);
+        state.removeState(INITIALIZING);
+        
+        return getCompletionFuture();
+    }
+    
+    /**
+     * Load config from disk or create default
+     */
+    private CompletableFuture<Void> loadConfig() {
+        state.addState(LOADING);
+        
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                boolean exists = SettingsData.isBootstrapData();
+                
+                if (exists) {
+                    System.out.println("[BootstrapConfig] Loading existing config");
+                    return SettingsData.loadBootStrapConfig().join();
+                } else {
+                    System.out.println("[BootstrapConfig] Creating default config");
+                    return createDefault();
+                }
+                
+            } catch (Exception e) {
+                System.err.println("[BootstrapConfig] Load error: " + e.getMessage());
+                return createDefault();
+            }
+        }, VirtualExecutors.getVirtualExecutor())
+        .thenAccept(config -> {
+            dataLock.writeLock().lock();
+            try {
+                this.data = config;
+            } finally {
+                dataLock.writeLock().unlock();
+            }
+            
+            state.removeState(LOADING);
+            System.out.println("[BootstrapConfig] Config loaded");
+        });
+    }
+    
+    /**
+     * Save config to disk
+     */
+    private CompletableFuture<Void> saveConfig() {
+        if (!state.hasState(READY)) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        state.addState(SAVING);
+        
+        NoteBytesMap toSave;
+        dataLock.readLock().lock();
+        try {
+            toSave = data;
+        } finally {
+            dataLock.readLock().unlock();
+        }
+        
+        return SettingsData.saveBootstrapConfig(toSave)
+            .thenRun(() -> {
+                state.removeState(SAVING);
+                System.out.println("[BootstrapConfig] Config saved to disk");
+            })
+            .exceptionally(ex -> {
+                state.removeState(SAVING);
+                System.err.println("[BootstrapConfig] Save failed: " + ex.getMessage());
+                return null;
+            });
+    }
+    
+    // ===== MESSAGE HANDLERS =====
+    
+    @Override
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+        if (!state.hasState(READY)) {
+            return replyError(packet, "Not ready");
+        }
+        
+        try {
+            NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+            NoteBytes cmdBytes = msg.get(Keys.CMD);
+            
+            if (cmdBytes == null) {
+                return replyError(packet, "'cmd' required");
+            }
+            
+            RoutedMessageExecutor handler = msgHandlers.get(cmdBytes);
+            if (handler != null) {
+                return handler.execute(msg, packet);
+            } else {
+                return replyError(packet, "Unknown command: " + cmdBytes);
+            }
+            
+        } catch (Exception e) {
+            return replyError(packet, "Error: " + e.getMessage());
+        }
+    }
+    
+    private CompletableFuture<Void> handleGet(NoteBytesMap msg, RoutedPacket packet) {
+        String path = msg.get(Keys.PATH).getAsString();
+        
+        NoteBytes value;
+        dataLock.readLock().lock();
+        try {
+            value = get(data, path);
+        } finally {
+            dataLock.readLock().unlock();
+        }
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        
+        if (value != null) {
+            response.put(Keys.DATA, value);
+        } else {
+            response.put(Keys.STATUS, ProtocolMesssages.ERROR);
+            response.put(Keys.MSG, new NoteBytes("Path not found: " + path));
+        }
+        
+        reply(packet, response.getNoteBytesObject());
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private CompletableFuture<Void> handleSet(NoteBytesMap msg, RoutedPacket packet) {
+        String path = msg.get(Keys.PATH).getAsString();
+        NoteBytes value = msg.get(Keys.DATA);
+        
+        if (value == null) {
+            return replyError(packet, "No value provided");
+        }
+        
+        dataLock.writeLock().lock();
+        try {
+            set(data, path, value);
+        } finally {
+            dataLock.writeLock().unlock();
+        }
+        
+        // Auto-save and notify
+        return saveConfig()
+            .thenRun(() -> {
+                notifySubscribers(path, value);
+                replySuccess(packet);
+            });
+    }
+    
+    private CompletableFuture<Void> handleMerge(NoteBytesMap msg, RoutedPacket packet) {
+        NoteBytes updatesBytes = msg.get(Keys.DATA);
+        
+        if (updatesBytes == null) {
+            return replyError(packet, "No updates provided");
+        }
+        
+        NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
+        
+        dataLock.writeLock().lock();
+        try {
+            merge(data, updates);
+        } finally {
+            dataLock.writeLock().unlock();
+        }
+        
+        // Auto-save and notify
+        return saveConfig()
+            .thenRun(() -> {
+                emit(updates);
+                replySuccess(packet);
+            });
+    }
+    
+    private CompletableFuture<Void> handleValidate(NoteBytesMap msg, RoutedPacket packet) {
+        boolean valid;
+        
+        dataLock.readLock().lock();
+        try {
+            valid = validate(data);
+        } finally {
+            dataLock.readLock().unlock();
+        }
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        response.put("valid", new NoteBytes(valid));
+        
+        reply(packet, response.getNoteBytesObject());
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private CompletableFuture<Void> handleGetAll(NoteBytesMap msg, RoutedPacket packet) {
+        NoteBytesMap dataCopy;
+        
+        dataLock.readLock().lock();
+        try {
+            dataCopy = data;
+        } finally {
+            dataLock.readLock().unlock();
+        }
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        response.put(Keys.DATA, dataCopy);
+        
+        reply(packet, response.getNoteBytesObject());
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private CompletableFuture<Void> handleSubscribe(NoteBytesMap msg, RoutedPacket packet) {
+        ContextPath subscriber = packet.getSourcePath();
+        
+        ConfigChangeListener listener = new ConfigChangeListener(subscriber);
+        subscribers.put(subscriber, listener);
+        
+        System.out.println("[BootstrapConfig] Subscriber added: " + subscriber);
+        
+        replySuccess(packet);
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private CompletableFuture<Void> handleUnsubscribe(NoteBytesMap msg, RoutedPacket packet) {
+        ContextPath subscriber = packet.getSourcePath();
+        
+        subscribers.remove(subscriber);
+        
+        System.out.println("[BootstrapConfig] Subscriber removed: " + subscriber);
+        
+        replySuccess(packet);
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    @Override
+    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        System.err.println("[BootstrapConfig] Unexpected stream from: " + fromPath);
+    }
+    
+    // ===== NOTIFICATION =====
+    
+    private void notifySubscribers(String path, NoteBytes value) {
+        NoteBytesMap event = new NoteBytesMap();
+        event.put("event", new NoteBytes("config_changed"));
+        event.put(Keys.PATH, new NoteBytes(path));
+        event.put(Keys.DATA, value);
+        
+        subscribers.values().forEach(listener -> {
+            try {
+                emitTo(listener.path, event.getNoteBytesObject());
+            } catch (Exception e) {
+                System.err.println("[BootstrapConfig] Failed to notify " + 
+                    listener.path + ": " + e.getMessage());
+            }
+        });
+    }
+    
+    // ===== STATIC HELPERS (for backward compatibility) =====
+    
+    /**
+     * Create default configuration structure
      */
     public static NoteBytesMap createDefault() {
         NoteBytesMap root = new NoteBytesMap();
-        
-        // Build system branch
         NoteBytesMap system = createSystemConfig();
         root.put(SYSTEM, system);
-        
         return root;
     }
     
-    /**
-     * Create system-level configuration
-     */
     private static NoteBytesMap createSystemConfig() {
         NoteBytesMap system = new NoteBytesMap();
-        
-        // system/base
-        NoteBytesMap base = createBaseConfig();
-        system.put(BASE, base);
-        
-        // system/network
-        NoteBytesMap network = createNetworkConfig();
-        system.put(NETWORK, network);
-        
-        // system/gui
-        NoteBytesMap gui = createGUIConfig();
-        system.put(GUI, gui);
-        
+        system.put(BASE, createBaseConfig());
+        system.put(NETWORK, createNetworkConfig());
+        system.put(GUI, createGUIConfig());
         return system;
     }
     
-    /**
-     * Create base services configuration
-     */
     private static NoteBytesMap createBaseConfig() {
         NoteBytesMap base = new NoteBytesMap();
-        
-        // system/base/secure-input
-        NoteBytesMap secureInput = createSecureInputConfig();
-        base.put(SECURE_INPUT, secureInput);
-        
-        // system/base/command-shell
-        NoteBytesMap commandShell = createCommandShellConfig();
-        base.put(COMMAND_SHELL, commandShell);
-        
-        // system/base/input
-        NoteBytesMap input = createInputConfig();
-        base.put(INPUT, input);
-        
+        base.put(SECURE_INPUT, createSecureInputConfig());
+        base.put(COMMAND_SHELL, createCommandShellConfig());
+        base.put(INPUT, createInputConfig());
         return base;
     }
     
-    /**
-     * Create secure input (IODaemon) configuration
-     */
     private static NoteBytesMap createSecureInputConfig() {
         NoteBytesMap secureInput = new NoteBytesMap();
         secureInput.put(INSTALLED, new NoteBytes(false));
@@ -151,9 +569,6 @@ public class BootstrapConfig {
         return secureInput;
     }
     
-    /**
-     * Create command shell configuration
-     */
     private static NoteBytesMap createCommandShellConfig() {
         NoteBytesMap commandShell = new NoteBytesMap();
         commandShell.put(INPUT_SOURCE, new NoteBytes(DEFAULT_INPUT_SOURCE));
@@ -162,35 +577,24 @@ public class BootstrapConfig {
         return commandShell;
     }
     
-    /**
-     * Create input sources configuration
-     */
     private static NoteBytesMap createInputConfig() {
         NoteBytesMap input = new NoteBytesMap();
-        
-        // sources map
         NoteBytesMap sources = new NoteBytesMap();
         
-        // sources/gui-native
         NoteBytesMap guiNative = new NoteBytesMap();
         guiNative.put(ENABLED, new NoteBytes(true));
         guiNative.put(PRIORITY, new NoteBytes(10));
         sources.put(GUI_NATIVE, guiNative);
         
-        // sources/secure-input
         NoteBytesMap secureInputSource = new NoteBytesMap();
         secureInputSource.put(ENABLED, new NoteBytes(false));
         secureInputSource.put(PRIORITY, new NoteBytes(5));
         sources.put(SECURE_INPUT, secureInputSource);
         
         input.put(SOURCES, sources);
-        
         return input;
     }
     
-    /**
-     * Create network configuration
-     */
     private static NoteBytesMap createNetworkConfig() {
         NoteBytesMap network = new NoteBytesMap();
         network.put(ENABLED, new NoteBytes(false));
@@ -198,31 +602,16 @@ public class BootstrapConfig {
         return network;
     }
     
-    /**
-     * Create GUI configuration
-     */
     private static NoteBytesMap createGUIConfig() {
         NoteBytesMap gui = new NoteBytesMap();
-        
         NoteBytesMap nativeGui = new NoteBytesMap();
         nativeGui.put(ENABLED, new NoteBytes(true));
         gui.put(NATIVE, nativeGui);
-        
         return gui;
     }
     
     // ===== NAVIGATION METHODS =====
     
-    /**
-     * Get value at path (varargs)
-     * 
-     * Example:
-     *   get(config, "system", "base", "secure-input", "installed")
-     * 
-     * @param config Root configuration map
-     * @param path Path segments
-     * @return Value at path, or null if not found
-     */
     public static NoteBytes get(NoteBytesMap config, String... path) {
         if (config == null || path == null || path.length == 0) {
             return null;
@@ -230,37 +619,19 @@ public class BootstrapConfig {
         
         NoteBytesMap current = config;
         
-        // Navigate to parent
         for (int i = 0; i < path.length - 1; i++) {
             NoteBytes segment = current.get(path[i]);
             
-            if (segment == null) {
-                return null;
-            }
-            
-            byte type = segment.getType();
-            if (type != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                // Not a map, can't traverse further
+            if (segment == null || segment.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                 return null;
             }
             
             current = segment.getAsNoteBytesMap();
         }
         
-        // Get final value
         return current.get(path[path.length - 1]);
     }
     
-    /**
-     * Get value at path (string with separators)
-     * 
-     * Example:
-     *   get(config, "system/base/secure-input/installed")
-     * 
-     * @param config Root configuration map
-     * @param path Path string with '/' separators
-     * @return Value at path, or null if not found
-     */
     public static NoteBytes get(NoteBytesMap config, String path) {
         if (path == null || path.isEmpty()) {
             return null;
@@ -270,17 +641,6 @@ public class BootstrapConfig {
         return get(config, segments);
     }
     
-    /**
-     * Set value at path (string with separators)
-     * Creates intermediate maps if they don't exist
-     * 
-     * Example:
-     *   set(config, "system/base/secure-input/installed", new NoteBytes(true))
-     * 
-     * @param config Root configuration map
-     * @param path Path string with '/' separators
-     * @param value Value to set
-     */
     public static void set(NoteBytesMap config, String path, NoteBytes value) {
         if (config == null || path == null || path.isEmpty() || value == null) {
             throw new IllegalArgumentException("Config, path, and value must not be null");
@@ -290,14 +650,6 @@ public class BootstrapConfig {
         set(config, segments, value);
     }
     
-    /**
-     * Set value at path (varargs)
-     * Creates intermediate maps if they don't exist
-     * 
-     * @param config Root configuration map
-     * @param segments Path segments
-     * @param value Value to set (last element in segments array is the key)
-     */
     public static void set(NoteBytesMap config, String[] segments, NoteBytes value) {
         if (config == null || segments == null || segments.length == 0 || value == null) {
             throw new IllegalArgumentException("Invalid arguments for set");
@@ -305,13 +657,11 @@ public class BootstrapConfig {
         
         NoteBytesMap current = config;
         
-        // Navigate/create intermediate maps
         for (int i = 0; i < segments.length - 1; i++) {
             String key = segments[i];
             NoteBytes segment = current.get(key);
             
             if (segment == null || segment.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                // Create missing intermediate map
                 NoteBytesMap newMap = new NoteBytesMap();
                 current.put(key, newMap);
                 current = newMap;
@@ -320,67 +670,52 @@ public class BootstrapConfig {
             }
         }
         
-        // Set final value
         String finalKey = segments[segments.length - 1];
         current.put(finalKey, value);
     }
     
-    /**
-     * Check if path exists in config
-     * 
-     * @param config Root configuration map
-     * @param path Path string with '/' separators
-     * @return true if path exists, false otherwise
-     */
-    public static boolean exists(NoteBytesMap config, String path) {
-        return get(config, path) != null;
+    public static void merge(NoteBytesMap base, NoteBytesMap updates) {
+        if (base == null || updates == null) {
+            return;
+        }
+        
+        updates.forEach((key, value) -> {
+            if (value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                NoteBytes existing = base.get(key);
+                if (existing != null && existing.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    merge(existing.getAsNoteBytesMap(), value.getAsNoteBytesMap());
+                } else {
+                    base.put(key, value);
+                }
+            } else {
+                base.put(key, value);
+            }
+        });
     }
     
-    /**
-     * Remove value at path
-     * 
-     * @param config Root configuration map
-     * @param path Path string with '/' separators
-     * @return true if value was removed, false if path didn't exist
-     */
-    public static boolean remove(NoteBytesMap config, String path) {
-        if (config == null || path == null || path.isEmpty()) {
+    public static boolean validate(NoteBytesMap config) {
+        if (config == null) {
             return false;
         }
         
-        String[] segments = path.split("/");
-        if (segments.length == 0) {
+        try {
+            NoteBytesMap system = get(config, SYSTEM) != null ? 
+                get(config, SYSTEM).getAsNoteBytesMap() : null;
+            
+            if (system == null) return false;
+            
+            NoteBytesMap base = get(config, SYSTEM + "/" + BASE) != null ?
+                get(config, SYSTEM + "/" + BASE).getAsNoteBytesMap() : null;
+            
+            return base != null;
+            
+        } catch (Exception e) {
             return false;
         }
-        
-        NoteBytesMap current = config;
-        
-        // Navigate to parent
-        for (int i = 0; i < segments.length - 1; i++) {
-            NoteBytes segment = current.get(segments[i]);
-            
-            if (segment == null || segment.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                return false;
-            }
-            
-            current = segment.getAsNoteBytesMap();
-        }
-        
-        // Remove final key
-        String finalKey = segments[segments.length - 1];
-        return current.remove(finalKey) != null;
     }
     
     // ===== TYPED GETTERS =====
     
-    /**
-     * Get boolean value at path
-     * 
-     * @param config Root configuration map
-     * @param path Path string
-     * @param defaultValue Default if not found or wrong type
-     * @return Boolean value
-     */
     public static boolean getBoolean(NoteBytesMap config, String path, boolean defaultValue) {
         NoteBytes value = get(config, path);
         if (value == null || value.getType() != NoteBytesMetaData.BOOLEAN_TYPE) {
@@ -389,14 +724,6 @@ public class BootstrapConfig {
         return value.getAsBoolean();
     }
     
-    /**
-     * Get integer value at path
-     * 
-     * @param config Root configuration map
-     * @param path Path string
-     * @param defaultValue Default if not found or wrong type
-     * @return Integer value
-     */
     public static int getInt(NoteBytesMap config, String path, int defaultValue) {
         NoteBytes value = get(config, path);
         if (value == null || value.getType() != NoteBytesMetaData.INTEGER_TYPE) {
@@ -405,14 +732,6 @@ public class BootstrapConfig {
         return value.getAsInt();
     }
     
-    /**
-     * Get string value at path
-     * 
-     * @param config Root configuration map
-     * @param path Path string
-     * @param defaultValue Default if not found or wrong type
-     * @return String value
-     */
     public static String getString(NoteBytesMap config, String path, String defaultValue) {
         NoteBytes value = get(config, path);
         if (value == null || value.getType() != NoteBytesMetaData.STRING_TYPE) {
@@ -421,225 +740,128 @@ public class BootstrapConfig {
         return value.getAsString();
     }
     
-    /**
-     * Get map value at path
-     * 
-     * @param config Root configuration map
-     * @param path Path string
-     * @return NoteBytesMap at path, or null if not found
-     */
-    public static NoteBytesMap getMap(NoteBytesMap config, String path) {
-        NoteBytes value = get(config, path);
-        if (value == null || value.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-            return null;
-        }
-        return value.getAsNoteBytesMap();
-    }
+    // ===== CONVENIENCE METHODS (use singleton) =====
     
-    // ===== CONVENIENCE METHODS =====
-    
-    /**
-     * Get secure input installation status
-     */
-    public static boolean isSecureInputInstalled(NoteBytesMap config) {
-        return getBoolean(config, SYSTEM + "/" + BASE + "/" + SECURE_INPUT + "/" + INSTALLED, false);
-    }
-    
-    /**
-     * Set secure input installation status
-     */
-    public static void setSecureInputInstalled(NoteBytesMap config, boolean installed) {
-        set(config, SYSTEM + "/" + BASE + "/" + SECURE_INPUT + "/" + INSTALLED, 
-            new NoteBytes(installed));
-    }
-    
-    /**
-     * Get secure input socket path
-     */
-    public static String getSecureInputSocketPath(NoteBytesMap config) {
-        return getString(config, SYSTEM + "/" + BASE + "/" + SECURE_INPUT + "/" + SOCKET_PATH, 
-            DEFAULT_SOCKET_PATH);
-    }
-    
-    /**
-     * Get shell input source path
-     */
-    public static String getShellInputSource(NoteBytesMap config) {
-        return getString(config, SYSTEM + "/" + BASE + "/" + COMMAND_SHELL + "/" + INPUT_SOURCE,
-            DEFAULT_INPUT_SOURCE);
-    }
-    
-    /**
-     * Set shell input source path
-     */
-    public static void setShellInputSource(NoteBytesMap config, String sourcePath) {
-        set(config, SYSTEM + "/" + BASE + "/" + COMMAND_SHELL + "/" + INPUT_SOURCE,
-            new NoteBytes(sourcePath));
-    }
-    
-    /**
-     * Get all configured input sources
-     * 
-     * @return List of input source names
-     */
-    public static List<String> getInputSources(NoteBytesMap config) {
-        NoteBytesMap sources = getMap(config, SYSTEM + "/" + BASE + "/" + INPUT + "/" + SOURCES);
-        
-        if (sources == null) {
-            return new ArrayList<>();
-        }
-        
-        List<String> sourceNames = new ArrayList<>();
-        sources.forEach((key, value) -> {
-            if (value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                NoteBytesMap sourceConfig = value.getAsNoteBytesMap();
-                NoteBytes enabled = sourceConfig.get(ENABLED);
-                if (enabled != null && enabled.getAsBoolean()) {
-                    sourceNames.add(key.getAsString());
-                }
-            }
-        });
-        
-        return sourceNames;
-    }
-    
-    /**
-     * Enable/disable an input source
-     */
-    public static void setInputSourceEnabled(NoteBytesMap config, String sourceName, boolean enabled) {
-        String path = SYSTEM + "/" + BASE + "/" + INPUT + "/" + SOURCES + "/" + sourceName + "/" + ENABLED;
-        set(config, path, new NoteBytes(enabled));
-    }
-    
-    /**
-     * Check if network is enabled
-     */
-    public static boolean isNetworkEnabled(NoteBytesMap config) {
-        return getBoolean(config, SYSTEM + "/" + NETWORK + "/" + ENABLED, false);
-    }
-    
-    /**
-     * Get network listen port
-     */
-    public static int getNetworkPort(NoteBytesMap config) {
-        return getInt(config, SYSTEM + "/" + NETWORK + "/" + LISTEN_PORT, DEFAULT_NETWORK_PORT);
-    }
-    
-    // ===== VALIDATION =====
-    
-    /**
-     * Validate configuration structure
-     * Ensures all required keys exist with correct types
-     * 
-     * @param config Configuration to validate
-     * @return true if valid, false otherwise
-     */
-    public static boolean validate(NoteBytesMap config) {
-        if (config == null) {
-            return false;
-        }
-        
+    public boolean isSecureInputInstalled() {
+        dataLock.readLock().lock();
         try {
-            // Check system branch exists
-            NoteBytesMap system = getMap(config, SYSTEM);
-            if (system == null) {
-                return false;
-            }
-            
-            // Check base branch exists
-            NoteBytesMap base = getMap(config, SYSTEM + "/" + BASE);
-            if (base == null) {
-                return false;
-            }
-            
-            // Check secure-input config
-            NoteBytesMap secureInput = getMap(config, SYSTEM + "/" + BASE + "/" + SECURE_INPUT);
-            if (secureInput == null) {
-                return false;
-            }
-            
-            // Check command-shell config
-            NoteBytesMap commandShell = getMap(config, SYSTEM + "/" + BASE + "/" + COMMAND_SHELL);
-            if (commandShell == null) {
-                return false;
-            }
-            
-            // All required branches exist
-            return true;
-            
-        } catch (Exception e) {
-            return false;
+            return getBoolean(data, SYSTEM + "/" + BASE + "/" + SECURE_INPUT + "/" + INSTALLED, false);
+        } finally {
+            dataLock.readLock().unlock();
         }
     }
     
-    /**
-     * Merge updates into existing config
-     * Updates existing keys, adds new keys, preserves unmentioned keys
-     * 
-     * @param base Base configuration
-     * @param updates Updates to apply
-     */
-    public static void merge(NoteBytesMap base, NoteBytesMap updates) {
-        if (base == null || updates == null) {
-            return;
+    public String getSecureInputSocketPath() {
+        dataLock.readLock().lock();
+        try {
+            return getString(data, SYSTEM + "/" + BASE + "/" + SECURE_INPUT + "/" + SOCKET_PATH, 
+                DEFAULT_SOCKET_PATH);
+        } finally {
+            dataLock.readLock().unlock();
         }
-        
-        updates.forEach((key, value) -> {
-            if (value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                // Recursive merge for maps
-                NoteBytes existing = base.get(key);
-                if (existing != null && existing.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    merge(existing.getAsNoteBytesMap(), value.getAsNoteBytesMap());
-                } else {
-                    base.put(key, value);
+    }
+    
+    public String getShellInputSource() {
+        dataLock.readLock().lock();
+        try {
+            return getString(data, SYSTEM + "/" + BASE + "/" + COMMAND_SHELL + "/" + INPUT_SOURCE,
+                DEFAULT_INPUT_SOURCE);
+        } finally {
+            dataLock.readLock().unlock();
+        }
+    }
+    
+    public List<String> getInputSources() {
+        dataLock.readLock().lock();
+        try {
+            NoteBytes sourcesBytes = get(data, SYSTEM + "/" + BASE + "/" + INPUT + "/" + SOURCES);
+            
+            if (sourcesBytes == null) {
+                return new ArrayList<>();
+            }
+            
+            NoteBytesMap sources = sourcesBytes.getAsNoteBytesMap();
+            List<String> sourceNames = new ArrayList<>();
+            
+            sources.forEach((key, value) -> {
+                if (value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    NoteBytesMap sourceConfig = value.getAsNoteBytesMap();
+                    NoteBytes enabled = sourceConfig.get(ENABLED);
+                    if (enabled != null && enabled.getAsBoolean()) {
+                        sourceNames.add(key.getAsString());
+                    }
                 }
-            } else {
-                // Direct replacement for values
-                base.put(key, value);
-            }
-        });
+            });
+            
+            return sourceNames;
+        } finally {
+            dataLock.readLock().unlock();
+        }
     }
     
-    // ===== DEBUG / DISPLAY =====
+    public boolean isNetworkEnabled() {
+        dataLock.readLock().lock();
+        try {
+            return getBoolean(data, SYSTEM + "/" + NETWORK + "/" + ENABLED, false);
+        } finally {
+            dataLock.readLock().unlock();
+        }
+    }
+    
+    public int getNetworkPort() {
+        dataLock.readLock().lock();
+        try {
+            return getInt(data, SYSTEM + "/" + NETWORK + "/" + LISTEN_PORT, DEFAULT_NETWORK_PORT);
+        } finally {
+            dataLock.readLock().unlock();
+        }
+    }
     
     /**
-     * Print configuration structure for debugging
+     * Get read-only copy of entire config
      */
-    public static void print(NoteBytesMap config) {
-        System.out.println("Bootstrap Configuration:");
-        printMap(config, "", 0);
+    public NoteBytesMap getData() {
+        dataLock.readLock().lock();
+        try {
+            return data;
+        } finally {
+            dataLock.readLock().unlock();
+        }
     }
     
-    private static void printMap(NoteBytesMap map, String prefix, int indent) {
-        String indentStr = "  ".repeat(indent);
-        
-        map.forEach((key, value) -> {
-            String fullPath = prefix.isEmpty() ? key.getAsString() : prefix + "/" + key;
-            
-            if (value.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                System.out.println(indentStr + key + "/");
-                printMap(value.getAsNoteBytesMap(), fullPath, indent + 1);
-            } else {
-                String valueStr = formatValue(value);
-                System.out.println(indentStr + key + ": " + valueStr);
-            }
-        });
+    // ===== HELPERS =====
+    
+    private void replySuccess(RoutedPacket packet) {
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        reply(packet, response.getNoteBytesObject());
     }
     
-    private static String formatValue(NoteBytes value) {
-        byte type = value.getType();
+    private CompletableFuture<Void> replyError(RoutedPacket packet, String message) {
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.ERROR);
+        response.put(Keys.MSG, new NoteBytes(message));
+        reply(packet, response.getNoteBytesObject());
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    // ===== GETTERS =====
+    
+    public BitFlagStateMachine getState() {
+        return state;
+    }
+    
+    public boolean isReady() {
+        return state.hasState(READY);
+    }
+    
+    // ===== INNER CLASSES =====
+    
+    private static class ConfigChangeListener {
+        final ContextPath path;
         
-        switch (type) {
-            case NoteBytesMetaData.BOOLEAN_TYPE:
-                return String.valueOf(value.getAsBoolean());
-            case NoteBytesMetaData.INTEGER_TYPE:
-                return String.valueOf(value.getAsInt());
-            case NoteBytesMetaData.LONG_TYPE:
-                return String.valueOf(value.getAsLong());
-            case NoteBytesMetaData.STRING_TYPE:
-                return "\"" + value.getAsString() + "\"";
-            default:
-                return "<" + value.getType() + ">";
+        ConfigChangeListener(ContextPath path) {
+            this.path = path;
         }
     }
 }

@@ -1,9 +1,9 @@
 package io.netnotes.engine.core.system.control;
 
-import io.netnotes.engine.core.system.control.ui.UIProtocol;
-import io.netnotes.engine.core.system.control.ui.UIRenderer;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
@@ -25,6 +25,12 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 /**
  * SecureInputInstaller - Menu-driven installation process
  * 
+ * REFACTORED to use TerminalContainerHandle:
+ * - Uses terminal for all output
+ * - Uses MenuNavigatorProcess for interactive menus
+ * - Keyboard-driven navigation
+ * - Real-time progress updates
+ * 
  * Flow:
  * 1. Show release selection menu
  * 2. User selects version
@@ -36,7 +42,8 @@ public class SecureInputInstaller extends FlowProcess {
     private static final GitHubInfo GITHUB_INFO = new GitHubInfo("networkspore", "NoteDaemon");
     
     private final String os;
-    private final UIRenderer uiRenderer;
+    private final TerminalContainerHandle terminal;
+    private final InputDevice keyboard;
     private final BitFlagStateMachine state;
     
     private MenuNavigatorProcess menuNavigator;
@@ -61,10 +68,16 @@ public class SecureInputInstaller extends FlowProcess {
     public static final long COMPLETE = 1L << 6;
     public static final long FAILED = 1L << 7;
     
-    public SecureInputInstaller(String name, String os, UIRenderer uiRenderer) {
+    public SecureInputInstaller(
+        String name, 
+        String os, 
+        TerminalContainerHandle terminal,
+        InputDevice keyboard
+    ) {
         super(name, ProcessType.SINK);
         this.os = os;
-        this.uiRenderer = uiRenderer;
+        this.terminal = terminal;
+        this.keyboard = keyboard;
         this.state = new BitFlagStateMachine(name);
         
         setupStateTransitions();
@@ -105,7 +118,7 @@ public class SecureInputInstaller extends FlowProcess {
         state.addState(IDLE);
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess("installer-menu", uiRenderer);
+        menuNavigator = new MenuNavigatorProcess("installer-menu", terminal, keyboard);
         
         return spawnChild(menuNavigator)
             .thenCompose(path -> registry.startProcess(path))
@@ -126,7 +139,10 @@ public class SecureInputInstaller extends FlowProcess {
     // ===== MENU CONSTRUCTION =====
     
     private CompletableFuture<GitHubAsset[]> fetchReleases() {
-        uiRenderer.render(UIProtocol.showMessage("Fetching available releases from GitHub..."));
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Fetching available releases from GitHub...", 
+                TerminalContainerHandle.TextStyle.INFO))
+            .thenCompose(v -> terminal.println(""));
         
         GitHubAPI api = new GitHubAPI(GITHUB_INFO);
         
@@ -137,12 +153,35 @@ public class SecureInputInstaller extends FlowProcess {
                     .filter(asset -> asset.getName().endsWith(".tar.gz"))
                     .filter(asset -> !asset.getName().contains("checksums"))
                     .toArray(GitHubAsset[]::new);
+            })
+            .exceptionally(ex -> {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError(
+                        "Failed to fetch releases: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.println(""))
+                    .thenCompose(v -> terminal.println("Press ESC to exit"));
+                return new GitHubAsset[0];
             });
     }
     
     private CompletableFuture<Void> showReleaseSelectionMenu() {
+        if (availableReleases.length == 0) {
+            terminal.clear()
+                .thenCompose(v -> terminal.printError("No releases found"))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Press any key to exit"))
+                .thenRun(() -> complete());
+            return CompletableFuture.completedFuture(null);
+        }
+        
         ContextPath menuPath = contextPath.append("release-selection");
-        MenuContext menu = new MenuContext(menuPath, "Select NoteDaemon Release", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Select NoteDaemon Release");
+        
+        // Show description
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Available Releases:", 
+                TerminalContainerHandle.TextStyle.BOLD))
+            .thenCompose(v -> terminal.println(""));
         
         // Add menu items for each release
         for (int i = 0; i < availableReleases.length; i++) {
@@ -150,15 +189,18 @@ public class SecureInputInstaller extends FlowProcess {
             String itemName = "release-" + i;
             String description = buildReleaseDescription(asset);
             
+            final GitHubAsset selectedAsset = asset;
             menu.addItem(itemName, description, () -> {
-                onReleaseSelected(asset);
+                onReleaseSelected(selectedAsset);
             });
         }
         
         // Add cancel option
         menu.addItem("cancel", "Cancel Installation", () -> {
-            uiRenderer.render(UIProtocol.showMessage("Installation cancelled"));
-            complete();
+            terminal.clear()
+                .thenCompose(v -> terminal.println("Installation cancelled", 
+                    TerminalContainerHandle.TextStyle.WARNING))
+                .thenRun(() -> complete());
         });
         
         // Show the menu
@@ -173,8 +215,7 @@ public class SecureInputInstaller extends FlowProcess {
             ? asset.getCreatedAt().toString().substring(0, 10) 
             : "unknown";
         
-        return String.format("%s | Tag: %s | %s | %s | %d downloads",
-            asset.getName(),
+        return String.format("%s (%s, %s, %d downloads)",
             asset.getTagName(),
             sizeStr,
             dateStr,
@@ -195,26 +236,26 @@ public class SecureInputInstaller extends FlowProcess {
     
     private void showConfirmationMenu() {
         ContextPath menuPath = contextPath.append("confirm-installation");
-        MenuContext menu = new MenuContext(menuPath, "Confirm Installation", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Confirm Installation");
         
-        String message = String.format(
-            "Ready to install NoteDaemon %s\n\n" +
-            "File: %s\n" +
-            "Size: %s\n\n" +
-            "This will:\n" +
-            "- Install system dependencies\n" +
-            "- Download and build NoteDaemon\n" +
-            "- Create system user and group\n" +
-            "- Install systemd service\n" +
-            "- Configure udev rules\n\n" +
-            "Root access required.\n\n" +
-            "Continue?",
-            selectedVersion,
-            selectedAsset.getName(),
-            formatSize(selectedAsset.getSize())
-        );
-        
-        uiRenderer.render(UIProtocol.showMessage(message));
+        // Show detailed info
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Ready to install NoteDaemon " + selectedVersion, 
+                TerminalContainerHandle.TextStyle.BOLD))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("File: " + selectedAsset.getName()))
+            .thenCompose(v -> terminal.println("Size: " + formatSize(selectedAsset.getSize())))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("This will:"))
+            .thenCompose(v -> terminal.println("- Install system dependencies"))
+            .thenCompose(v -> terminal.println("- Download and build NoteDaemon"))
+            .thenCompose(v -> terminal.println("- Create system user and group"))
+            .thenCompose(v -> terminal.println("- Install systemd service"))
+            .thenCompose(v -> terminal.println("- Configure udev rules"))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Root access required.", 
+                TerminalContainerHandle.TextStyle.WARNING))
+            .thenCompose(v -> terminal.println(""));
         
         menu.addItem("install", "Install Now", () -> {
             startInstallation();
@@ -222,6 +263,8 @@ public class SecureInputInstaller extends FlowProcess {
         
         menu.addItem("cancel", "Cancel", () -> {
             // Go back to release selection
+            state.removeState(CONFIRMING);
+            state.addState(SHOWING_MENU);
             showReleaseSelectionMenu();
         });
         
@@ -235,7 +278,10 @@ public class SecureInputInstaller extends FlowProcess {
         // Reset progress
         currentStep = 0;
         
-        uiRenderer.render(UIProtocol.showMessage("Starting installation..."));
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Starting installation...", 
+                TerminalContainerHandle.TextStyle.BOLD))
+            .thenCompose(v -> terminal.println(""));
         
         performInstallation()
             .thenRun(() -> {
@@ -267,37 +313,40 @@ public class SecureInputInstaller extends FlowProcess {
     
     private void showCompletionMenu(boolean success, String errorMessage) {
         ContextPath menuPath = contextPath.append("completion");
-        MenuContext menu = new MenuContext(menuPath, "Installation Complete", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, 
+            success ? "Installation Complete" : "Installation Failed");
         
         if (success) {
-            String message = String.format(
-                "NoteDaemon %s installed successfully!\n\n" +
-                "Service Status: Active\n" +
-                "Socket: /var/run/io-daemon.sock\n\n" +
-                "Installation completed in %d steps.\n\n" +
-                "You may need to log out and back in for group membership to take effect.\n" +
-                "Or run: newgrp netnotes",
-                selectedVersion,
-                currentStep
-            );
-            
-            uiRenderer.render(UIProtocol.showMessage(message));
+            terminal.clear()
+                .thenCompose(v -> terminal.println("NoteDaemon " + selectedVersion + 
+                    " installed successfully!", TerminalContainerHandle.TextStyle.SUCCESS))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Service Status: Active"))
+                .thenCompose(v -> terminal.println("Socket: /var/run/io-daemon.sock"))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Installation completed in " + 
+                    currentStep + " steps."))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println(
+                    "You may need to log out and back in for group membership to take effect.",
+                    TerminalContainerHandle.TextStyle.WARNING))
+                .thenCompose(v -> terminal.println("Or run: newgrp netnotes"))
+                .thenCompose(v -> terminal.println(""));
             
             menu.addItem("finish", "Finish", () -> {
                 complete();
             });
             
         } else {
-            String message = String.format(
-                "Installation failed at step %d of %d!\n\n" +
-                "Error: %s\n\n" +
-                "Please check the logs for details.",
-                currentStep,
-                totalSteps,
-                errorMessage != null ? errorMessage : "Unknown error"
-            );
-            
-            uiRenderer.render(UIProtocol.showError(message));
+            terminal.clear()
+                .thenCompose(v -> terminal.printError(
+                    "Installation failed at step " + currentStep + " of " + totalSteps + "!"))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Error: " + 
+                    (errorMessage != null ? errorMessage : "Unknown error")))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Please check the logs for details."))
+                .thenCompose(v -> terminal.println(""));
             
             menu.addItem("retry", "Retry Installation", () -> {
                 state.removeState(FAILED);
@@ -614,7 +663,6 @@ public class SecureInputInstaller extends FlowProcess {
     }
     
     private void updateProgress(String message, int step) {
-        // Ensure we're in INSTALLING state
         if (!state.hasState(INSTALLING)) {
             return;
         }
@@ -622,7 +670,10 @@ public class SecureInputInstaller extends FlowProcess {
         int percent = totalSteps > 0 ? (step * 100) / totalSteps : 0;
         
         System.out.println("[" + step + "/" + totalSteps + "] " + message);
-        uiRenderer.render(UIProtocol.showProgress(message, percent));
+        
+        // Update terminal with progress
+        terminal.println(String.format("[%d/%d] %s (%d%%)", 
+            step, totalSteps, message, percent));
     }
     
     private void executeCommand(String... command) throws Exception {
@@ -636,6 +687,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println("  " + line);
+                terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
             }
         }
         
@@ -657,6 +709,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println("  " + line);
+                terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
             }
         }
         

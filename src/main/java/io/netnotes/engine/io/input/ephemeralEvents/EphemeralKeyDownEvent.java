@@ -25,7 +25,7 @@ public class EphemeralKeyDownEvent extends EphemeralRoutedEvent {
     /**
      * Get key code bytes (caller must not modify)
      */
-    public NoteBytesEphemeral getKeyData() {
+    public NoteBytesEphemeral getKeyCodeBytes() {
         return keyData;
     }
     

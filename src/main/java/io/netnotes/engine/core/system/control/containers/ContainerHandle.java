@@ -5,11 +5,16 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
+import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -40,10 +45,22 @@ public class ContainerHandle extends FlowProcess {
      * Constructor
      * 
      * @param containerId ID of the container to control
+     * @param name name of the container
+     * 
+     */
+    public ContainerHandle(ContainerId containerId, String name){
+        this(containerId, name, ServicesProcess.CONTAINER_SERVICE_PATH);
+    }
+
+    /**
+     * Constructor
+     * 
+     * @param containerId ID of the container to control
+     * @param name name of the container
      * @param containerServicePath Path to ContainerService
      */
-    public ContainerHandle(ContainerId containerId, ContextPath containerServicePath) {
-        super("container-" + containerId.toString(), ProcessType.BIDIRECTIONAL);
+    public ContainerHandle(ContainerId containerId, String name, ContextPath containerServicePath) {
+        super(name, ProcessType.BIDIRECTIONAL);
         this.containerId = containerId;
         this.containerServicePath = containerServicePath;
     }
@@ -187,14 +204,18 @@ public class ContainerHandle extends FlowProcess {
             .thenAccept(reply -> {
                 // Validate acknowledgment and propagate errors
                 NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
-                NoteBytesReadOnly status = response.getReadOnly("status");
+                NoteBytesReadOnly status = response.getReadOnly(Keys.STATUS);
                 
-                if (status != null && !status.equalsString("success")) {
-                    NoteBytesReadOnly errorBytes = response.getReadOnly("error");
-                    String error = errorBytes != null ? errorBytes.getAsString() : "Unknown error";
-                    String msg = "[ContainerHandle] Command failed: " + error;
+                if (status != null && !status.equals(ProtocolMesssages.SUCCESS)) {
+                    NoteBytes errorBytes = response.get(Keys.ERROR_CODE);
+                    int errorCode = errorBytes != null
+                        ? errorBytes.getAsInt() 
+                        : 0;
+                    String errorMsg = NoteMessaging.ErrorCodes.getMessage(errorCode);
+
+                    String msg = "[ContainerHandle] Command failed: " + errorMsg;
                     System.err.println(msg);
-                    throw new CompletionException(msg, new IOException(error));
+                    throw new CompletionException(msg, new IOException(errorMsg));
                 }
             });
     }

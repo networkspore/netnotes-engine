@@ -10,7 +10,7 @@ public final class KeyDownEvent implements RoutedEvent {
     private final int stateFlags;
 
     private int keyCodeCache = -1;
-    private int scaneCodeCache = -1;
+    private int scanCodeCache = -1;
     
 
     public KeyDownEvent(ContextPath sourcePath, NoteBytes key, NoteBytes scancode, int stateFlags) {
@@ -26,15 +26,15 @@ public final class KeyDownEvent implements RoutedEvent {
     public NoteBytes getScancodeBytes() { return scancodeBytes; }
     public int stateFlags() { return stateFlags; }
 
-    public int getKeyCode(){
-        if(scaneCodeCache != -1){
-            return scaneCodeCache;
+    public int getScanCode(){
+        if(scanCodeCache != -1){
+            return scanCodeCache;
         }
-        scaneCodeCache = scancodeBytes.getAsInt();
-        return scaneCodeCache;
+        scanCodeCache = scancodeBytes.getAsInt();
+        return scanCodeCache;
     }
 
-    public int getScanCode(){
+    public int getKeyCode(){
         if(keyCodeCache != -1){
             return keyCodeCache;
         }

@@ -55,14 +55,14 @@ public final class InputEventFactory {
 
         REGISTRY.put(EventBytes.EVENT_KEY_UP, (src, flags, p) ->
             new KeyUpEvent(src,
-                p[0].getAsInt(),
-                p[1].getAsInt(),
+                p[0],
+                p[1],
                 flags));
         //NoteBytesReadOnly sourceId, int key, int scancode, int stateFlags
         REGISTRY.put(EventBytes.EVENT_KEY_REPEAT, (src, flags, p) ->
             new KeyRepeatEvent(src,
-                p[0].getAsInt(),
-                p[1].getAsInt(),
+                p[0],
+                p[1],
                 flags));
 
         //NoteBytesReadOnly sourceId, int codepoint, int stateFlags

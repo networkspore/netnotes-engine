@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 
 import org.bouncycastle.util.Arrays;
 
+import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
@@ -17,7 +18,6 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
-import io.netnotes.engine.noteBytes.collections.NoteBytesRunnableLookup;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support
@@ -53,8 +53,8 @@ public class PasswordReader {
     private int m_currentLength = 0; // Total bytes used
     private int m_keystrokeCount = 0; // Number of keystrokes
     
-    private volatile boolean active = true;
-    private final NoteBytesRunnableLookup m_keyCodes = new NoteBytesRunnableLookup(
+  
+    private final KeyRunTable m_keyRunTable = new KeyRunTable(
         new NoteBytesRunnablePair(KeyCodeBytes.ENTER, ()->onComplete()),
         new NoteBytesRunnablePair(KeyCodeBytes.BACKSPACE ,()->handleBackspace()),
         new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE ,()->escape())
@@ -62,22 +62,19 @@ public class PasswordReader {
    
     
     // Event consumer for input device
-    private final ExecutorConsumer<RoutedEvent> eventConsumer;
+    private final Consumer<RoutedEvent> eventConsumer;
     private Consumer<NoteBytesEphemeral> onPassword;
     
     public PasswordReader() {
         // Create event consumer with virtual thread executor
-        this.eventConsumer = new ExecutorConsumer<>(
-            Executors.newVirtualThreadPerTaskExecutor(),
-            this::handleEvent
-        );
+        this.eventConsumer = this::handleEvent;
 
     }
     
     /**
      * Get event consumer for registration with input device
      */
-    public ExecutorConsumer<RoutedEvent> getEventConsumer() {
+    public Consumer<RoutedEvent> getEventConsumer() {
         return eventConsumer;
     }
 
@@ -90,8 +87,7 @@ public class PasswordReader {
      * Supports both regular and ephemeral events
      */
     private void handleEvent(RoutedEvent event) {
-        if (!active) return;
-    
+  
         // Handle ephemeral events (from encrypted devices)
         if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
             try (ephemeralEvent) { // Auto-close to wipe memory
@@ -125,7 +121,7 @@ public class PasswordReader {
      */
     private void handleEphemeralKeyDown(EphemeralKeyDownEvent event) {
         // lookup keycode and run
-        m_keyCodes.run(event.getKeyData());
+        m_keyRunTable.run(event.getKeyCodeBytes());
     }
     
     /**
@@ -169,7 +165,7 @@ public class PasswordReader {
      * Handle key down events (for special keys) - Regular events
      */
     private void handleKeyDown(KeyDownEvent event) {
-        m_keyCodes.run(event.getKeyCodeBytes());
+        m_keyRunTable.run(event.getKeyCodeBytes());
     }
     
     /**
@@ -229,9 +225,7 @@ public class PasswordReader {
      * Complete password entry (ENTER pressed)
      */
     private void onComplete() {
-        if (!active) return;
-        
-        active = false;
+
         
         if (onPassword != null) {
             // Create new ephemeral containing only the password bytes
@@ -250,14 +244,10 @@ public class PasswordReader {
         m_currentLength = 0;
         m_keystrokeCount = 0;
         Arrays.fill(m_keystrokeLengths, (byte) 0);
-        active = false;
     }
     
     public void close() {
         escape();
     }
     
-    public boolean isActive() {
-        return active;
-    }
 }

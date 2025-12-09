@@ -2,6 +2,7 @@ package io.netnotes.engine.noteBytes.collections;
 
 import java.math.BigDecimal;
 
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
@@ -39,6 +40,10 @@ public class NoteBytesPair {
     public NoteBytesPair(NoteBytes key, long value){
         this(key, new NoteBytes(value));
     }
+    public NoteBytesPair(NoteBytes key, ContextPath value){
+        this(key, value.getSegments());
+    }
+
 
     public NoteBytesPair(String key, String value){
         this(new NoteString(key), new NoteString(value));

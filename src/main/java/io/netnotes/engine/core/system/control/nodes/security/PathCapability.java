@@ -1,6 +1,7 @@
 package io.netnotes.engine.core.system.control.nodes.security;
 
-import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.CoreConstants;
+import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
@@ -188,7 +189,7 @@ public class PathCapability {
      */
     public static PathCapability messageController() {
         return new PathCapability(
-            SystemProcess.NODE_CONTROLLER_PATH,
+            CoreConstants.NODE_CONTROLLER_PATH,
             Set.of(Operation.MESSAGE),
             true,
             "Communicate with NodeController for lifecycle and discovery",
@@ -205,7 +206,7 @@ public class PathCapability {
      * TODO: packageId is not used
      */
     public static PathCapability ownRuntimeData(NoteBytesReadOnly packageId) {
-        ContextPath pattern = SystemProcess.NODES_PATH.append(SELF);
+        ContextPath pattern = CoreConstants.NODES_PATH.append(SELF);
         
         return new PathCapability(
             pattern,
@@ -231,7 +232,7 @@ public class PathCapability {
         List<String> names = Arrays.asList(serviceNames);
         
         return new PathCapability(
-            SystemProcess.SERVICES_PATH,  // Use constant!
+            CoreConstants.SERVICES_PATH,  // Use constant!
             operations,
             false,
             "Access system services: " + String.join(", ", serviceNames),
@@ -263,7 +264,7 @@ public class PathCapability {
      */
     public static PathCapability accessIODaemon(Set<Operation> operations) {
         return accessService(
-            SystemProcess.IO_SERVICE_PATH,
+            ServicesProcess.IO_DAEMON_PATH,
             operations,
             "Access IO Service for hardware and system IO"
         );
@@ -274,7 +275,7 @@ public class PathCapability {
      */
     public static PathCapability messageNodes() {
         return new PathCapability(
-            SystemProcess.NODES_PATH,
+            CoreConstants.NODES_PATH,
             Set.of(Operation.MESSAGE),
             false,
             "Send messages to other nodes",
@@ -288,7 +289,7 @@ public class PathCapability {
      */
     public static PathCapability streamNodes() {
         return new PathCapability(
-            SystemProcess.NODES_PATH,
+            CoreConstants.NODES_PATH,
             Set.of(Operation.STREAM),
             false,
             "Open streaming channels to other nodes",

@@ -469,7 +469,11 @@ public class NoteStringArrayReadOnly extends NoteBytesArrayReadOnly {
         return pathIdx == size() && patternIdx == patternSegments.length;
     }
 
-   
+
+    public static NoteStringArrayReadOnly fromList(List<String> list){
+        return new NoteStringArrayReadOnly(list);
+    }
+
     /**
      * Trim all segments in place
      */

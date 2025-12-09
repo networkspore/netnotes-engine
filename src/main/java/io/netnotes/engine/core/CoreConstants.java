@@ -1,0 +1,49 @@
+package io.netnotes.engine.core;
+
+import io.netnotes.engine.io.ContextPath;
+
+public class CoreConstants {
+
+    public static final String NAME = "system";
+    
+
+    public static final String SERVICES = "services";
+    public static final String RUNTIME = "runtime";
+    public static final String NODE_CONTROLLER = "node-controller";
+    public static final String REPOSITORIES = "repositories";
+    public static final String NODE_REGISTRY = "node-registry";
+    public static final String NODE_LOADER = "node-loader";
+    public static final String CONTAINER_SERVICE = "container-service";
+
+    public static final String NODES = "nodes";
+    public static final String CONTROLLERS = "controllers";
+
+   
+
+    public static final String SYSTEM_CONTAINER_NAME = "sys-term";
+
+
+    public static final ContextPath SYSTEM_PATH = ContextPath.of(CoreConstants.NAME);
+    public static final ContextPath REPOSITORIES_PATH = SYSTEM_PATH.append(REPOSITORIES);
+    public static final ContextPath SYSTEM_CONTAINER_PATH = SYSTEM_PATH.append(SYSTEM_CONTAINER_NAME);
+
+    public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append(SERVICES);
+    public static final ContextPath CONTAINER_SERVICE_PATH = SERVICES_PATH.append(CONTAINER_SERVICE);
+    
+    public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
+    public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);
+
+    public static final ContextPath CONTROLLERS_PATH = RUNTIME_PATH.append(CONTROLLERS);
+    public static final ContextPath NODE_CONTROLLER_PATH = CONTROLLERS_PATH.append(NODE_CONTROLLER);
+    public static final ContextPath NODE_LOADER_PATH = CONTROLLERS_PATH.append(NODE_LOADER);
+    public static final ContextPath NODE_REGISTRY_PATH = CONTROLLERS_PATH.append(NODE_REGISTRY);
+
+    // DATA PATHS
+    public static final ContextPath NODE_DATA_PATH = ContextPath.of("data");
+    public static final ContextPath RUNTIME_DATA = ContextPath.of("run");
+    public static final ContextPath PACKAGE_STORE_PATH = RUNTIME_DATA.append("pkg");
+    public static final ContextPath REPOSITORIES_DATA_PATH = RUNTIME_DATA.append(REPOSITORIES);
+    public static final ContextPath NODE_LOADER_DATA_PATH = RUNTIME_DATA.append(NODE_LOADER);
+    public static final ContextPath NODE_REGISTRY_DATA_PATH = RUNTIME_DATA.append(NODE_REGISTRY);
+
+}

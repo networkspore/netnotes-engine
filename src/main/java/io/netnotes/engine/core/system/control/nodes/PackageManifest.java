@@ -8,6 +8,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
@@ -229,9 +230,7 @@ public class PackageManifest {
         if (entry != null) map.put(Keys.ENTRY, entry);
         
         if (!dependencies.isEmpty()) {
-            JsonArray deps = new JsonArray();
-            dependencies.forEach(deps::add);
-            map.put(Keys.DEPENDENCIES, deps);
+            map.put(Keys.DEPENDENCIES, NoteStringArrayReadOnly.fromList(dependencies));
         }
         
         map.put(Keys.AUTOLOAD, autoload);

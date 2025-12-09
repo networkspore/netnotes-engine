@@ -2,34 +2,52 @@ package io.netnotes.engine.core.system.control;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.BootstrapConfig;
-import io.netnotes.engine.core.system.control.ui.*;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.input.InputDevice;
+import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 /**
  * BootstrapWizardProcess - Menu-driven first-run configuration
  * 
+ * REFACTORED to use TerminalContainerHandle + keyboard events:
+ * - Uses terminal for all output (no direct UIRenderer)
+ * - Uses MenuNavigatorProcess for interactive menus
+ * - Keyboard-driven navigation with ExecutorConsumer
+ * - Saves config to disk on completion
+ * 
  * Flow:
- * 1. Welcome Screen
+ * 1. Welcome Screen → wait for key
  * 2. Detect secure input
  * 3. Present installation options as menu
  * 4. Execute selected option
- * 5. Save configuration
+ * 5. Save configuration to disk
+ * 6. Complete (SystemProcess initializes singleton)
  */
 public class BootstrapWizardProcess extends FlowProcess {
 
     private final BitFlagStateMachine state;
-    private final UIRenderer uiRenderer;
+    private final TerminalContainerHandle terminal;
+    private final InputDevice keyboard;
     
     private MenuNavigatorProcess menuNavigator;
     private NoteBytesMap bootstrapConfig;
     private SecureInputDetectionResult detectionResult;
+    
+    // Keyboard event handling
+    private final Consumer<RoutedEvent> keyboardConsumer;
+    private volatile boolean waitingForKey = false;
+    private CompletableFuture<Void> keyWaitFuture = null;
 
     // States
     public static final long DETECTING = 1L << 0;
@@ -37,11 +55,21 @@ public class BootstrapWizardProcess extends FlowProcess {
     public static final long INSTALLING = 1L << 2;
     public static final long VERIFYING = 1L << 3;
     public static final long COMPLETE = 1L << 4;
+    public static final long WAITING_FOR_KEY = 1L << 5;
     
-    public BootstrapWizardProcess(String name, UIRenderer uiRenderer) {
+    public BootstrapWizardProcess(
+        String name, 
+        TerminalContainerHandle terminal,
+        InputDevice keyboard
+    ) {
         super(name, ProcessType.BIDIRECTIONAL);
-        this.uiRenderer = uiRenderer;
+        this.terminal = terminal;
+        this.keyboard = keyboard;
         this.state = new BitFlagStateMachine("bootstrap-wizard");
+    
+        // Create keyboard event consumer
+        this.keyboardConsumer =  this::handleKeyboardEvent;
+      
     }
     
     @Override
@@ -52,8 +80,8 @@ public class BootstrapWizardProcess extends FlowProcess {
         bootstrapConfig = BootstrapConfig.createDefault();
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess("menu-navigator", uiRenderer);
-
+        menuNavigator = new MenuNavigatorProcess("menu-navigator", terminal, keyboard);
+        
         return spawnChild(menuNavigator)
             .thenCompose(path -> registry.startProcess(path))
             .thenCompose(v -> showWelcomeScreen())
@@ -67,28 +95,80 @@ public class BootstrapWizardProcess extends FlowProcess {
             .thenCompose(v -> getCompletionFuture());
     }
     
+    // ===== KEYBOARD EVENT HANDLING =====
+    
+    /**
+     * Handle keyboard events from input device
+     */
+    private void handleKeyboardEvent(RoutedEvent event) {
+        if (!(event instanceof KeyDownEvent)) {
+            return;
+        }
+        
+        // If waiting for any key press
+        if (state.hasState(WAITING_FOR_KEY) && waitingForKey) {
+            waitingForKey = false;
+            state.removeState(WAITING_FOR_KEY);
+            
+            // Complete the waiting future
+            if (keyWaitFuture != null) {
+                keyWaitFuture.complete(null);
+                keyWaitFuture = null;
+            }
+            
+            // Unregister keyboard consumer
+            keyboard.setEventConsumer(null);
+        }
+    }
+    
+    /**
+     * Wait for any key press
+     */
+    private CompletableFuture<Void> waitForKeyPress() {
+        state.addState(WAITING_FOR_KEY);
+        waitingForKey = true;
+        keyWaitFuture = new CompletableFuture<>();
+        
+        // Register keyboard consumer
+        keyboard.setEventConsumer(keyboardConsumer);
+        
+        return keyWaitFuture;
+    }
+    
     // ===== WELCOME =====
     
     private CompletableFuture<Void> showWelcomeScreen() {
-        NoteBytesMap welcome = UIProtocol.showMessage(
-            "Welcome to Netnotes!\n\n" +
-            "This wizard will help you configure your system.\n\n" +
-            "First, we'll check if you have secure input (NoteDaemon) installed."
-        );
-        
-        return uiRenderer.render(welcome)
-            .thenApply(response -> null);
+        return terminal.clear()
+            .thenCompose(v -> terminal.println("=".repeat(60)))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("    Welcome to Netnotes!", TerminalContainerHandle.TextStyle.BOLD))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("=".repeat(60)))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("This wizard will help you configure your system."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("First, we'll check if you have secure input (NoteDaemon) installed."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Press any key to continue...", TerminalContainerHandle.TextStyle.INFO))
+            .thenCompose(v -> waitForKeyPress());
     }
     
     // ===== DETECTION =====
     
     private CompletableFuture<SecureInputDetectionResult> detectSecureInput() {
-        uiRenderer.render(UIProtocol.showProgress("Detecting secure input...", 50));
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Detecting secure input...", 
+                TerminalContainerHandle.TextStyle.INFO))
+            .thenCompose(v -> terminal.println(""));
         
         return CompletableFuture.supplyAsync(() -> {
             SecureInputDetectionResult result = new SecureInputDetectionResult();
             
-            String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
+            String socketPath = BootstrapConfig.getString(bootstrapConfig, 
+                BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+                BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.SOCKET_PATH,
+                BootstrapConfig.DEFAULT_SOCKET_PATH);
+            
             result.socketExists = SecureInputDetector.socketExists(socketPath);
             
             if (result.socketExists) {
@@ -121,17 +201,21 @@ public class BootstrapWizardProcess extends FlowProcess {
      */
     private CompletableFuture<Void> showAlreadyInstalledMenu() {
         ContextPath menuPath = contextPath.append("secure-input-detected");
-        MenuContext menu = new MenuContext(menuPath, "Secure Input Detected", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Secure Input Detected");
         
-        String message = String.format(
-            "NoteDaemon is already installed!\n\n" +
-            "Found %d USB keyboard(s) available.\n\n" +
-            "Secure input allows password entry directly from USB keyboards,\n" +
-            "providing protection against keyloggers and screen capture.",
-            detectionResult.keyboardCount
-        );
-        
-        uiRenderer.render(UIProtocol.showMessage(message));
+        // Show description
+        terminal.clear()
+            .thenCompose(v -> terminal.println("NoteDaemon is already installed!", 
+                TerminalContainerHandle.TextStyle.SUCCESS))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println(String.format(
+                "Found %d USB keyboard(s) available.", detectionResult.keyboardCount)))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println(
+                "Secure input allows password entry directly from USB keyboards,"))
+            .thenCompose(v -> terminal.println(
+                "providing protection against keyloggers and screen capture."))
+            .thenCompose(v -> terminal.println(""));
         
         menu.addItem("enable", "Enable Secure Input (Recommended)", () -> {
             enableSecureInput();
@@ -150,17 +234,21 @@ public class BootstrapWizardProcess extends FlowProcess {
      */
     private CompletableFuture<Void> showInstallationOptionsMenu() {
         ContextPath menuPath = contextPath.append("installation-options");
-        MenuContext menu = new MenuContext(menuPath, "Secure Input Installation", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Secure Input Installation");
         
-        String message = 
-            "NoteDaemon is not installed.\n\n" +
-            "Secure input provides hardware-level protection for password entry.\n\n" +
-            "You can:\n" +
-            "- Install it now (requires root access)\n" +
-            "- View manual installation instructions\n" +
-            "- Skip and use GUI keyboard only";
-        
-        uiRenderer.render(UIProtocol.showMessage(message));
+        // Show description
+        terminal.clear()
+            .thenCompose(v -> terminal.println("NoteDaemon is not installed.", 
+                TerminalContainerHandle.TextStyle.WARNING))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println(
+                "Secure input provides hardware-level protection for password entry."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("You can:"))
+            .thenCompose(v -> terminal.println("- Install it now (requires root access)"))
+            .thenCompose(v -> terminal.println("- View manual installation instructions"))
+            .thenCompose(v -> terminal.println("- Skip and use GUI keyboard only"))
+            .thenCompose(v -> terminal.println(""));
         
         if (detectionResult.canInstall) {
             menu.addItem("auto-install", "Install Now (Recommended)", () -> {
@@ -189,10 +277,12 @@ public class BootstrapWizardProcess extends FlowProcess {
      */
     private void showManualInstructions() {
         ContextPath menuPath = contextPath.append("manual-instructions");
-        MenuContext menu = new MenuContext(menuPath, "Manual Installation", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Manual Installation");
         
         String instructions = generateInstallInstructions(detectionResult.os);
-        uiRenderer.render(UIProtocol.showMessage(instructions));
+        
+        terminal.clear()
+            .thenCompose(v -> terminal.println(instructions));
         
         menu.addItem("done", "Done Reading", () -> {
             showInstallationOptionsMenu();
@@ -200,7 +290,13 @@ public class BootstrapWizardProcess extends FlowProcess {
         
         menu.addItem("copy-command", "Copy Quick Install Command", () -> {
             copyToClipboard(getQuickInstallCommand(detectionResult.os));
-            uiRenderer.render(UIProtocol.showMessage("Command copied to clipboard!"));
+            terminal.clear()
+                .thenCompose(v -> terminal.println("Command copied to clipboard!", 
+                    TerminalContainerHandle.TextStyle.SUCCESS))
+                .thenCompose(v -> terminal.println(""))
+                .thenCompose(v -> terminal.println("Press any key to continue..."))
+                .thenCompose(v -> waitForKeyPress())
+                .thenRun(() -> showManualInstructions());
         });
         
         menuNavigator.showMenu(menu);
@@ -211,7 +307,7 @@ public class BootstrapWizardProcess extends FlowProcess {
      */
     private void showAdvancedConfigMenu() {
         ContextPath menuPath = contextPath.append("advanced-config");
-        MenuContext menu = new MenuContext(menuPath, "Advanced Configuration", uiRenderer);
+        MenuContext menu = new MenuContext(menuPath, "Advanced Configuration");
         
         menu.addItem("socket-path", "Custom Socket Path", () -> {
             promptForSocketPath();
@@ -231,27 +327,55 @@ public class BootstrapWizardProcess extends FlowProcess {
     // ===== ACTIONS =====
     
     private void enableSecureInput() {
-        BootstrapConfig.setSecureInputInstalled(bootstrapConfig, true);
-        BootstrapConfig.setInputSourceEnabled(bootstrapConfig, "secure-input", true);
+        BootstrapConfig.set(bootstrapConfig,
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+            BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.INSTALLED,
+            new NoteBytes(true)
+        );
         
-        uiRenderer.render(UIProtocol.showMessage(
-            "Secure input enabled!\n\n" +
-            "Your passwords will be captured directly from USB keyboards."
-        ));
+        BootstrapConfig.set(bootstrapConfig,
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+            BootstrapConfig.INPUT + "/" + BootstrapConfig.SOURCES + "/" + 
+            BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.ENABLED,
+            new NoteBytes(true)
+        );
         
-        finishConfiguration();
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Secure input enabled!", 
+                TerminalContainerHandle.TextStyle.SUCCESS))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println(
+                "Your passwords will be captured directly from USB keyboards."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Press any key to continue..."))
+            .thenCompose(v -> waitForKeyPress())
+            .thenRun(() -> finishConfiguration());
     }
     
     private void skipSecureInput() {
-        BootstrapConfig.setSecureInputInstalled(bootstrapConfig, false);
-        BootstrapConfig.setInputSourceEnabled(bootstrapConfig, "secure-input", false);
+        BootstrapConfig.set(bootstrapConfig,
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+            BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.INSTALLED,
+            new NoteBytes(false)
+        );
         
-        uiRenderer.render(UIProtocol.showMessage(
-            "Secure input disabled.\n\n" +
-            "You can install NoteDaemon later through system settings."
-        ));
+        BootstrapConfig.set(bootstrapConfig,
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+            BootstrapConfig.INPUT + "/" + BootstrapConfig.SOURCES + "/" + 
+            BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.ENABLED,
+            new NoteBytes(false)
+        );
         
-        finishConfiguration();
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Secure input disabled.", 
+                TerminalContainerHandle.TextStyle.INFO))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println(
+                "You can install NoteDaemon later through system settings."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Press any key to continue..."))
+            .thenCompose(v -> waitForKeyPress())
+            .thenRun(() -> finishConfiguration());
     }
     
     private void startAutomatedInstallation() {
@@ -259,7 +383,14 @@ public class BootstrapWizardProcess extends FlowProcess {
         state.addState(INSTALLING);
         
         String os = detectionResult.os;
-        SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
+        
+        // Create installer with terminal and keyboard
+        SecureInputInstaller installer = new SecureInputInstaller(
+            "secure-input-installer", 
+            os, 
+            terminal,
+            keyboard
+        );
         
         spawnChild(installer)
             .thenCompose(path -> registry.startProcess(path))
@@ -269,47 +400,73 @@ public class BootstrapWizardProcess extends FlowProcess {
                 state.addState(VERIFYING);
                 return verifyInstallation();
             })
-            .thenAccept(success -> {
+            .thenCompose(success -> {
                 state.removeState(VERIFYING);
                 state.addState(CONFIGURING);
                 
                 if (success) {
-                    BootstrapConfig.setSecureInputInstalled(bootstrapConfig, true);
-                    BootstrapConfig.setInputSourceEnabled(bootstrapConfig, "secure-input", true);
+                    BootstrapConfig.set(bootstrapConfig,
+                        BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+                        BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.INSTALLED,
+                        new NoteBytes(true)
+                    );
                     
-                    uiRenderer.render(UIProtocol.showMessage(
-                        "Installation successful!\n\n" +
-                        "NoteDaemon is now running."
-                    ));
+                    BootstrapConfig.set(bootstrapConfig,
+                        BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+                        BootstrapConfig.INPUT + "/" + BootstrapConfig.SOURCES + "/" + 
+                        BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.ENABLED,
+                        new NoteBytes(true)
+                    );
                     
-                    finishConfiguration();
+                    return terminal.clear()
+                        .thenCompose(v -> terminal.println("Installation successful!", 
+                            TerminalContainerHandle.TextStyle.SUCCESS))
+                        .thenCompose(v -> terminal.println(""))
+                        .thenCompose(v -> terminal.println("NoteDaemon is now running."))
+                        .thenCompose(v -> terminal.println(""))
+                        .thenCompose(v -> terminal.println("Press any key to continue..."))
+                        .thenCompose(v -> waitForKeyPress())
+                        .thenRun(() -> finishConfiguration());
                 } else {
-                    uiRenderer.render(UIProtocol.showError(
-                        "Installation verification failed.\n\n" +
-                        "You may need to install manually."
-                    ));
-                    
-                    showInstallationOptionsMenu();
+                    return terminal.clear()
+                        .thenCompose(v -> terminal.printError(
+                            "Installation verification failed."))
+                        .thenCompose(v -> terminal.println(""))
+                        .thenCompose(v -> terminal.println(
+                            "You may need to install manually."))
+                        .thenCompose(v -> terminal.println(""))
+                        .thenCompose(v -> terminal.println("Press any key to continue..."))
+                        .thenCompose(v -> waitForKeyPress())
+                        .thenRun(() -> showInstallationOptionsMenu());
                 }
             })
             .exceptionally(ex -> {
                 state.removeState(INSTALLING);
                 state.addState(CONFIGURING);
                 
-                uiRenderer.render(UIProtocol.showError(
-                    "Installation failed: " + ex.getMessage()
-                ));
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError(
+                        "Installation failed: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.println(""))
+                    .thenCompose(v -> terminal.println("Press any key to continue..."))
+                    .thenCompose(v -> waitForKeyPress())
+                    .thenRun(() -> showInstallationOptionsMenu());
                 
-                showInstallationOptionsMenu();
                 return null;
             });
     }
     
     private CompletableFuture<Boolean> verifyInstallation() {
-        uiRenderer.render(UIProtocol.showProgress("Verifying installation...", 80));
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Verifying installation...", 
+                TerminalContainerHandle.TextStyle.INFO))
+            .thenCompose(v -> terminal.println(""));
         
         return CompletableFuture.supplyAsync(() -> {
-            String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
+            String socketPath = BootstrapConfig.getString(bootstrapConfig,
+                BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+                BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.SOCKET_PATH,
+                BootstrapConfig.DEFAULT_SOCKET_PATH);
             
             try {
                 Thread.sleep(2000);
@@ -326,47 +483,60 @@ public class BootstrapWizardProcess extends FlowProcess {
     }
     
     private void promptForSocketPath() {
-        // This would show a text input dialog
-        // For now, just show message
-        uiRenderer.render(UIProtocol.showMessage(
-            "Socket path configuration not yet implemented.\n\n" +
-            "Default: /var/run/io-daemon.sock"
-        ));
-        
-        showAdvancedConfigMenu();
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Socket path configuration not yet implemented.", 
+                TerminalContainerHandle.TextStyle.WARNING))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Default: /var/run/io-daemon.sock"))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Press any key to continue..."))
+            .thenCompose(v -> waitForKeyPress())
+            .thenRun(() -> showAdvancedConfigMenu());
     }
     
     private void toggleNetworkServices() {
-        boolean current = BootstrapConfig.isNetworkEnabled(bootstrapConfig);
+        boolean current = BootstrapConfig.getBoolean(bootstrapConfig,
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.NETWORK + "/" + 
+            BootstrapConfig.ENABLED,
+            false);
+        
         BootstrapConfig.set(bootstrapConfig, 
-            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.NETWORK + "/" + BootstrapConfig.ENABLED,
-            new io.netnotes.engine.noteBytes.NoteBytes(!current)
+            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.NETWORK + "/" + 
+            BootstrapConfig.ENABLED,
+            new NoteBytes(!current)
         );
         
-        uiRenderer.render(UIProtocol.showMessage(
-            "Network services " + (!current ? "enabled" : "disabled")
-        ));
-        
-        showAdvancedConfigMenu();
+        terminal.clear()
+            .thenCompose(v -> terminal.println("Network services " + (!current ? "enabled" : "disabled"), 
+                TerminalContainerHandle.TextStyle.SUCCESS))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Press any key to continue..."))
+            .thenCompose(v -> waitForKeyPress())
+            .thenRun(() -> showAdvancedConfigMenu());
     }
     
     private void finishConfiguration() {
         state.removeState(CONFIGURING);
         state.addState(COMPLETE);
         
+        // Save to disk - BootstrapConfig singleton will load it
         SettingsData.saveBootstrapConfig(bootstrapConfig)
-            .thenAccept(v -> {
-                uiRenderer.render(UIProtocol.showMessage(
-                    "Configuration saved!\n\n" +
-                    "Your system is now configured."
-                ));
-                
-                complete();
-            })
+            .thenCompose(v -> terminal.clear())
+            .thenCompose(v -> terminal.println("Configuration saved!", 
+                TerminalContainerHandle.TextStyle.SUCCESS))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Your system is now configured."))
+            .thenCompose(v -> terminal.println(""))
+            .thenCompose(v -> terminal.println("Starting system..."))
+            .thenRun(() -> complete())
             .exceptionally(ex -> {
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to save configuration: " + ex.getMessage()
-                ));
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError(
+                        "Failed to save configuration: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.println(""))
+                    .thenCompose(v -> terminal.println("Press any key to retry..."))
+                    .thenCompose(v -> waitForKeyPress())
+                    .thenRun(() -> finishConfiguration());
                 return null;
             });
     }
@@ -458,7 +628,6 @@ public class BootstrapWizardProcess extends FlowProcess {
     }
     
     private void copyToClipboard(String text) {
-        // Platform-specific clipboard implementation
         try {
             java.awt.Toolkit.getDefaultToolkit()
                 .getSystemClipboard()
@@ -474,13 +643,24 @@ public class BootstrapWizardProcess extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        // Menu navigator handles all messages
         return CompletableFuture.completedFuture(null);
     }
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         throw new UnsupportedOperationException();
+    }
+    
+    // ===== CLEANUP =====
+    
+    @Override
+    public void onStop() {
+        // Unregister keyboard consumer if still registered
+        if (keyboard != null && waitingForKey) {
+            keyboard.setEventConsumer(null);
+        }
+        
+        super.onStop();
     }
     
     // ===== RESULT HOLDER =====

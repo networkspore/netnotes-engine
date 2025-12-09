@@ -1,8 +1,7 @@
 package io.netnotes.engine.core.system.control;
 
-
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.BootstrapConfig;
-import io.netnotes.engine.core.system.SystemProcess;
 import io.netnotes.engine.core.system.control.containers.ContainerService;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
@@ -10,7 +9,6 @@ import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.IODaemon;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 
 import java.util.ArrayList;
@@ -20,20 +18,22 @@ import java.util.concurrent.CompletableFuture;
 /**
  * ServicesProcess - Manages system-level services
  * 
+ * REFACTORED to use BootstrapConfig singleton:
+ * - Accesses config through BootstrapConfig.getInstance()
+ * - No stale config - always reads fresh values
+ * - Can react to config changes dynamically
+ * 
  * Lives at: /system/services
  * 
  * Services:
  * - ContainerService: Window/UI container management (core)
- * - IODaemon: Input/output device management (optional)
+ * - IODaemon: Input/output device management (optional, based on config)
  * - Future: NetworkService, StorageService, etc.
- * 
- * Services are registered as children and can be accessed by INodes
- * via standard message passing to their known paths.
  */
 public class ServicesProcess extends FlowProcess {
     
     public static final String NAME = "services";
-    public static final ContextPath SERVICES_PATH = SystemProcess.SYSTEM_PATH.append(NAME);
+    public static final ContextPath SERVICES_PATH = CoreConstants.SYSTEM_PATH.append(NAME);
     
     // Service names
     public static final String CONTAINER_SERVICE = "container-service";
@@ -42,24 +42,17 @@ public class ServicesProcess extends FlowProcess {
     // Service paths (publicly accessible)
     public static final ContextPath CONTAINER_SERVICE_PATH = SERVICES_PATH.append(CONTAINER_SERVICE);
     public static final ContextPath IO_DAEMON_PATH = SERVICES_PATH.append(IO_DAEMON);
-    
-    private final UIRenderer uiRenderer;
-    private final NoteBytesMap bootstrapConfig;
+
     private final BitFlagStateMachine state;
     
     // Services
-    private ContainerService containerService;
+    private final ContainerService containerService;
     private IODaemon ioDaemon;
     
-    public ServicesProcess(
-        UIRenderer uiRenderer,
-        NoteBytesMap bootstrapConfig
-    ) {
+    public ServicesProcess(ContainerService containerService) {
         super(NAME, ProcessType.BIDIRECTIONAL);
-        this.uiRenderer = uiRenderer;
-        this.bootstrapConfig = bootstrapConfig;
         this.state = new BitFlagStateMachine("services");
-        
+        this.containerService = containerService;
         setupStateTransitions();
     }
     
@@ -144,19 +137,33 @@ public class ServicesProcess extends FlowProcess {
     }
     
     /**
-     * Start optional services (based on configuration)
+     * Start optional services (based on configuration from singleton)
      */
     private CompletableFuture<Void> startOptionalServices() {
         List<CompletableFuture<Void>> optionalFutures = new ArrayList<>();
         
+        // Check if BootstrapConfig singleton is initialized
+        if (!BootstrapConfig.isInitialized()) {
+            System.err.println("[ServicesProcess] BootstrapConfig not initialized!");
+            return CompletableFuture.completedFuture(null);
+        }
+        
         // IODaemon (if secure input is configured)
-        if (BootstrapConfig.isSecureInputInstalled(bootstrapConfig)) {
+        // Access config through singleton - always fresh!
+        BootstrapConfig config = BootstrapConfig.getInstance();
+        
+        if (config.isSecureInputInstalled()) {
+            System.out.println("[ServicesProcess] Secure input configured, starting IODaemon");
             optionalFutures.add(startIODaemon());
         } else {
-            System.out.println("[ServicesProcess] IODaemon not configured, skipping");
+            System.out.println("[ServicesProcess] Secure input not configured, skipping IODaemon");
         }
         
         // Future services can be added here
+        // Example:
+        // if (config.isNetworkEnabled()) {
+        //     optionalFutures.add(startNetworkService());
+        // }
         
         if (optionalFutures.isEmpty()) {
             return CompletableFuture.completedFuture(null);
@@ -173,7 +180,6 @@ public class ServicesProcess extends FlowProcess {
     private CompletableFuture<Void> startContainerService() {
         System.out.println("[ServicesProcess] Starting ContainerService...");
         
-        containerService = new ContainerService(CONTAINER_SERVICE, uiRenderer);
         
         return spawnChild(containerService)
             .thenCompose(path -> registry.startProcess(path))
@@ -192,12 +198,17 @@ public class ServicesProcess extends FlowProcess {
     }
     
     /**
-     * Start IODaemon
+     * Start IODaemon (accesses config through singleton)
      */
     private CompletableFuture<Void> startIODaemon() {
         System.out.println("[ServicesProcess] Starting IODaemon...");
         
-        String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
+        // Get socket path from singleton - always fresh!
+        BootstrapConfig config = BootstrapConfig.getInstance();
+        String socketPath = config.getSecureInputSocketPath();
+        
+        System.out.println("[ServicesProcess] Using socket path: " + socketPath);
+        
         ioDaemon = new IODaemon(IO_DAEMON, socketPath);
         
         return spawnChild(ioDaemon)

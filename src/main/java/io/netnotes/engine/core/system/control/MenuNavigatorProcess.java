@@ -1,54 +1,73 @@
 package io.netnotes.engine.core.system.control;
 
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.ui.*;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.BoxStyle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.TextStyle;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.input.InputDevice;
+import io.netnotes.engine.io.input.KeyRunTable;
+import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
+import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 
 /**
- * MenuNavigatorProcess - Manages menu navigation state and flow
+ * MenuNavigatorProcess - Keyboard-driven terminal menu navigation
  * 
- * Responsibilities:
- * - Maintain navigation stack (for back button)
- * - Route menu selections to appropriate handlers
- * - Track current menu context
- * - Coordinate with UIRenderer for display
- * - Handle password-protected menu unlocking
+ * FIXED: Now handles BOTH regular and ephemeral keyboard events
+ * - Regular events from GUI keyboards
+ * - Ephemeral events from secure input devices (USB keyboards)
  * 
- * States:
- * - IDLE: No menu displayed
- * - DISPLAYING_MENU: Menu visible to user
- * - NAVIGATING: Transitioning between menus
- * - WAITING_PASSWORD: Password required for protected menu
- * - EXECUTING_ACTION: Running menu item action
- * 
- * Path: /system/base/system-session/{session-id}/menu-navigator
+ * Integration:
+ * - Registers with InputDevice via setEventConsumer()
+ * - Handles up/down/enter/escape navigation
+ * - Renders to TerminalContainerHandle
  */
 public class MenuNavigatorProcess extends FlowProcess {
 
     private final BitFlagStateMachine state;
-    private final UIRenderer uiRenderer;
+    private final TerminalContainerHandle terminal;
+    private final InputDevice keyboardInput;
     
     // Navigation state
     private final Stack<MenuContext> navigationStack = new Stack<>();
     private MenuContext currentMenu;
-    private String pendingMenuItem; // Item waiting for password unlock
     
-    // Message dispatch
-    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgMap = 
-        new ConcurrentHashMap<>();
+    // Selection state
+    private int selectedIndex = 0;
+    private int scrollOffset = 0;
+    
+    // Layout parameters
+    private static final int MENU_START_ROW = 3;
+    private static final int MENU_MARGIN = 2;
+    private static final int MAX_VISIBLE_ITEMS = 15;
+    
+    // Keyboard event consumer
+    private final Consumer<RoutedEvent> keyboardConsumer;
+    private final KeyRunTable keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
+        new NoteBytesRunnablePair(KeyCodeBytes.UP, this::handleNavigateUp),
+        new NoteBytesRunnablePair(KeyCodeBytes.DOWN, this::handleNavigateDown),
+        new NoteBytesRunnablePair(KeyCodeBytes.ENTER, this::handleSelectCurrent),
+        new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::handleBack),
+        new NoteBytesRunnablePair(KeyCodeBytes.PAGE_UP, this::handlePageUp),
+        new NoteBytesRunnablePair(KeyCodeBytes.PAGE_DOWN, this::handlePageDown),
+        new NoteBytesRunnablePair(KeyCodeBytes.HOME, this::handleHome),
+        new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd),
+    });
     
     // States
     public static final long IDLE = 1L << 0;
@@ -57,55 +76,54 @@ public class MenuNavigatorProcess extends FlowProcess {
     public static final long WAITING_PASSWORD = 1L << 3;
     public static final long EXECUTING_ACTION = 1L << 4;
     
-    public MenuNavigatorProcess(String name, UIRenderer uiRenderer) {
+    public MenuNavigatorProcess(
+            String name, 
+            TerminalContainerHandle terminal,
+            InputDevice keyboardInput) {
+        
         super(name, ProcessType.BIDIRECTIONAL);
-        this.uiRenderer = uiRenderer;
+        this.terminal = terminal;
+        this.keyboardInput = keyboardInput;
         this.state = new BitFlagStateMachine("menu-navigator");
         
-        setupMessageMapping();
+        // Create keyboard event consumer with executor
+        this.keyboardConsumer = new ExecutorConsumer<>(
+            Executors.newVirtualThreadPerTaskExecutor(),
+            this::handleKeyboardEvent
+        );
+        
         setupStateTransitions();
-    }
-    
-    private void setupMessageMapping() {
-        m_routedMsgMap.put(UICommands.UI_MENU_SELECTED, this::handleMenuSelection);
-        m_routedMsgMap.put(UICommands.UI_BACK, this::handleBack);
-        m_routedMsgMap.put(UICommands.UI_PASSWORD_ENTERED, this::handlePasswordEntered);
-        m_routedMsgMap.put(UICommands.UI_CANCELLED, this::handleCancelled);
     }
     
     private void setupStateTransitions() {
         state.onStateAdded(IDLE, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] IDLE - No menu displayed");
-        });
-        
-        state.onStateAdded(DISPLAYING_MENU, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] DISPLAYING_MENU - Menu visible");
-            if (currentMenu != null) {
-                displayCurrentMenu();
+            if (keyboardInput != null) {
+                keyboardInput.setEventConsumer(null);
             }
         });
         
-        state.onStateAdded(NAVIGATING, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] NAVIGATING - Transitioning between menus");
+        state.onStateAdded(DISPLAYING_MENU, (old, now, bit) -> {
+            if (keyboardInput != null) {
+                keyboardInput.setEventConsumer(keyboardConsumer);
+            }
+            
+            if (currentMenu != null) {
+                renderMenu();
+            }
         });
         
         state.onStateAdded(WAITING_PASSWORD, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] WAITING_PASSWORD - Password required");
-            // Parent will handle password session
-        });
-        
-        state.onStateAdded(EXECUTING_ACTION, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] EXECUTING_ACTION - Running menu action");
-        });
-        
-        // State exit handlers
-        state.onStateRemoved(DISPLAYING_MENU, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] Left DISPLAYING_MENU state");
+            // Unregister - password reader will handle input
+            if (keyboardInput != null) {
+                keyboardInput.setEventConsumer(null);
+            }
         });
         
         state.onStateRemoved(WAITING_PASSWORD, (old, now, bit) -> {
-            System.out.println("[MenuNavigator] Password session ended");
-            pendingMenuItem = null; // Clear pending item
+            // Re-register when password session ends
+            if (state.hasState(DISPLAYING_MENU) && keyboardInput != null) {
+                keyboardInput.setEventConsumer(keyboardConsumer);
+            }
         });
     }
     
@@ -117,28 +135,7 @@ public class MenuNavigatorProcess extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        try {
-            NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
-            NoteBytesReadOnly cmd = msg.getReadOnly(Keys.CMD);
-            
-            if (cmd == null) {
-                System.err.println("[MenuNavigator] Received message without 'cmd' field");
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            RoutedMessageExecutor executor = m_routedMsgMap.get(cmd);
-            if (executor != null) {
-                return executor.execute(msg, packet);
-            } else {
-                System.err.println("[MenuNavigator] Unknown command: " + cmd);
-            }
-            
-            return CompletableFuture.completedFuture(null);
-            
-        } catch (Exception e) {
-            System.err.println("[MenuNavigator] Error handling message: " + e.getMessage());
-            return CompletableFuture.failedFuture(e);
-        }
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
@@ -146,341 +143,411 @@ public class MenuNavigatorProcess extends FlowProcess {
         throw new UnsupportedOperationException("MenuNavigator does not handle streams");
     }
     
-    // ===== MENU DISPLAY =====
+    // ===== KEYBOARD EVENT HANDLING (FIXED) =====
     
     /**
-     * Show a menu (called by parent process)
+     * Handle keyboard events - BOTH regular and ephemeral
+     * FIXED: Now properly handles ephemeral events from secure input devices
      */
-    public void showMenu(MenuContext menu) {
-        if (menu == null) {
-            System.err.println("[MenuNavigator] Cannot show null menu");
+    private void handleKeyboardEvent(RoutedEvent event) {
+        if (!state.hasState(DISPLAYING_MENU)) {
             return;
         }
         
-        // Save current menu to stack if we have one
+        // Handle ephemeral events (from secure input devices)
+        if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
+            try (ephemeralEvent) {
+                if (ephemeralEvent instanceof EphemeralKeyDownEvent ekd) {
+                    keyRunTable.run(ekd.getKeyCodeBytes());
+                }
+            }
+            return;
+        }
+        
+        // Handle regular events (from GUI keyboards)
+        if (event instanceof KeyDownEvent keyDown) {
+            keyRunTable.run(keyDown.getKeyCodeBytes());
+        }
+    }
+    
+    // ===== NAVIGATION HANDLERS =====
+    
+    private void handleNavigateUp() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty()) return;
+        
+        selectedIndex = (selectedIndex - 1 + selectableItems.size()) % selectableItems.size();
+        
+        if (selectedIndex < scrollOffset) {
+            scrollOffset = selectedIndex;
+        }
+        
+        renderMenu();
+    }
+    
+    private void handleNavigateDown() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty()) return;
+        
+        selectedIndex = (selectedIndex + 1) % selectableItems.size();
+        
+        if (selectedIndex >= scrollOffset + MAX_VISIBLE_ITEMS) {
+            scrollOffset = selectedIndex - MAX_VISIBLE_ITEMS + 1;
+        }
+        
+        renderMenu();
+    }
+    
+    private void handleSelectCurrent() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        
+        if (selectedIndex < 0 || selectedIndex >= selectableItems.size()) {
+            return;
+        }
+        
+        MenuContext.MenuItem selectedItem = selectableItems.get(selectedIndex);
+        
+        state.removeState(DISPLAYING_MENU);
+        state.addState(NAVIGATING);
+        
+        currentMenu.navigate(selectedItem.name)
+            .thenAccept(targetMenu -> {
+                state.removeState(NAVIGATING);
+                
+                if (targetMenu == null) {
+                    // Password required
+                    state.addState(WAITING_PASSWORD);
+                    notifyParentPasswordRequired(selectedItem.name);
+                } else if (targetMenu == currentMenu) {
+                    // Action executed, stay on same menu
+                    state.addState(DISPLAYING_MENU);
+                } else {
+                    // Navigate to new menu
+                    showMenu(targetMenu);
+                }
+            })
+            .exceptionally(ex -> {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError(
+                        "Navigation failed: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.println("\nPress any key to continue..."));
+                
+                state.removeState(NAVIGATING);
+                state.addState(DISPLAYING_MENU);
+                return null;
+            });
+    }
+    
+    private void handleBack() {
+        if (navigationStack.isEmpty()) {
+            notifyParentAtRoot();
+        } else {
+            MenuContext previousMenu = navigationStack.pop();
+            currentMenu = previousMenu;
+            selectedIndex = 0;
+            scrollOffset = 0;
+            
+            state.removeState(WAITING_PASSWORD);
+            state.removeState(EXECUTING_ACTION);
+            state.addState(DISPLAYING_MENU);
+        }
+    }
+    
+    private void handlePageUp() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty()) return;
+        
+        selectedIndex = Math.max(0, selectedIndex - MAX_VISIBLE_ITEMS);
+        scrollOffset = Math.max(0, scrollOffset - MAX_VISIBLE_ITEMS);
+        renderMenu();
+    }
+    
+    private void handlePageDown() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty()) return;
+        
+        selectedIndex = Math.min(selectableItems.size() - 1, 
+            selectedIndex + MAX_VISIBLE_ITEMS);
+        
+        int maxScroll = Math.max(0, selectableItems.size() - MAX_VISIBLE_ITEMS);
+        scrollOffset = Math.min(maxScroll, scrollOffset + MAX_VISIBLE_ITEMS);
+        
+        renderMenu();
+    }
+    
+    private void handleHome() {
+        selectedIndex = 0;
+        scrollOffset = 0;
+        renderMenu();
+    }
+    
+    private void handleEnd() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty()) return;
+        
+        selectedIndex = selectableItems.size() - 1;
+        scrollOffset = Math.max(0, selectableItems.size() - MAX_VISIBLE_ITEMS);
+        renderMenu();
+    }
+    
+    private List<MenuContext.MenuItem> getSelectableItems() {
+        if (currentMenu == null) {
+            return List.of();
+        }
+        
+        return new ArrayList<>(currentMenu.getItems()).stream()
+            .filter(item -> item.type != MenuContext.MenuItemType.SEPARATOR &&
+                           item.type != MenuContext.MenuItemType.INFO)
+            .toList();
+    }
+    
+    // ===== MENU DISPLAY =====
+    
+    public void showMenu(MenuContext menu) {
+        if (menu == null) {
+            return;
+        }
+        
         if (currentMenu != null && currentMenu != menu) {
             navigationStack.push(currentMenu);
-            System.out.println("[MenuNavigator] Pushed menu to stack: " + currentMenu.getTitle());
         }
         
         currentMenu = menu;
+        selectedIndex = 0;
+        scrollOffset = 0;
         
-        // Transition to displaying state
         state.removeState(IDLE);
         state.removeState(NAVIGATING);
         state.removeState(EXECUTING_ACTION);
         state.addState(DISPLAYING_MENU);
     }
     
-    /**
-     * Display current menu via UIRenderer
-     */
-    private void displayCurrentMenu() {
+    private void renderMenu() {
         if (currentMenu == null) {
-            System.err.println("[MenuNavigator] No current menu to display");
             return;
         }
         
-        currentMenu.display()
+        terminal.beginBatch()
+            .thenCompose(v -> terminal.clear())
+            .thenCompose(v -> renderHeader())
+            .thenCompose(v -> renderBreadcrumb())
+            .thenCompose(v -> renderMenuItems())
+            .thenCompose(v -> renderDescription())
+            .thenCompose(v -> renderFooter())
+            .thenCompose(v -> terminal.endBatch())
             .exceptionally(ex -> {
-                System.err.println("[MenuNavigator] Failed to display menu: " + ex.getMessage());
-                
-                // Show error message via renderer
-                uiRenderer.render(UIProtocol.showError(
-                    "Failed to display menu: " + ex.getMessage()
-                ));
-                
-                // Return to previous menu if available
-                if (!navigationStack.isEmpty()) {
-                    currentMenu = navigationStack.pop();
-                    state.addState(DISPLAYING_MENU);
-                } else {
-                    state.removeState(DISPLAYING_MENU);
-                    state.addState(IDLE);
-                }
-                
+                terminal.clear()
+                    .thenCompose(v1 -> terminal.printError(
+                        "Failed to display menu: " + ex.getMessage()))
+                    .thenCompose(v1 -> terminal.println("\nPress ESC to go back"));
                 return null;
             });
     }
     
-    /**
-     * Refresh current menu (re-display)
-     */
+    private CompletableFuture<Void> renderHeader() {
+        String title = currentMenu.getTitle();
+        int cols = terminal.getCols();
+        int titleLen = title.length();
+        int boxWidth = Math.min(cols - 4, Math.max(titleLen + 4, 40));
+        
+        return terminal.drawBox(0, MENU_MARGIN, boxWidth, 3, title, BoxStyle.SINGLE);
+    }
+    
+    private CompletableFuture<Void> renderBreadcrumb() {
+        List<String> trail = new ArrayList<>();
+        MenuContext current = currentMenu;
+        
+        while (current != null) {
+            trail.add(0, current.getTitle());
+            current = current.getParent();
+        }
+        
+        String breadcrumb = String.join(" > ", trail);
+        return terminal.printAt(2, MENU_MARGIN, breadcrumb, TextStyle.INFO);
+    }
+    
+    private CompletableFuture<Void> renderMenuItems() {
+        List<MenuContext.MenuItem> items = new ArrayList<>(currentMenu.getItems());
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        
+        if (selectedIndex >= selectableItems.size()) {
+            selectedIndex = Math.max(0, selectableItems.size() - 1);
+        }
+        
+        int totalItems = items.size();
+        int visibleStart = scrollOffset;
+        int visibleEnd = Math.min(visibleStart + MAX_VISIBLE_ITEMS, totalItems);
+        
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        final int startRow = MENU_START_ROW;
+        int selectableIndex = 0;
+        
+        for (int i = visibleStart; i < visibleEnd; i++) {
+            MenuContext.MenuItem item = items.get(i);
+            final int currentRow = startRow + (i - visibleStart);
+            
+            boolean isSelected = (item.type != MenuContext.MenuItemType.SEPARATOR &&
+                                 item.type != MenuContext.MenuItemType.INFO &&
+                                 selectableIndex == selectedIndex);
+            
+            future = future.thenCompose(v -> renderMenuItem(item, currentRow, isSelected));
+            
+            if (item.type != MenuContext.MenuItemType.SEPARATOR &&
+                item.type != MenuContext.MenuItemType.INFO) {
+                selectableIndex++;
+            }
+        }
+        
+        if (scrollOffset > 0) {
+            future = future.thenCompose(v -> 
+                terminal.printAt(MENU_START_ROW - 1, MENU_MARGIN, "↑ More above", 
+                    TextStyle.INFO));
+        }
+        
+        int moreBelowRow = startRow + (visibleEnd - visibleStart);
+        
+        if (visibleEnd < totalItems) {
+            future = future.thenCompose(v -> 
+                terminal.printAt(moreBelowRow, MENU_MARGIN, "↓ More below", TextStyle.INFO));
+        }
+        
+        return future;
+    }
+    
+    private CompletableFuture<Void> renderMenuItem(
+            MenuContext.MenuItem item, 
+            int row, 
+            boolean isSelected) {
+        
+        CompletableFuture<Void> future;
+        
+        switch (item.type) {
+            case SEPARATOR:
+                future = terminal.printAt(row, MENU_MARGIN, "─".repeat(40), TextStyle.NORMAL)
+                    .thenCompose(v -> {
+                        if (item.description != null && !item.description.isEmpty()) {
+                            return terminal.printAt(row, MENU_MARGIN + 2, 
+                                " " + item.description + " ", TextStyle.BOLD);
+                        }
+                        return CompletableFuture.completedFuture(null);
+                    });
+                break;
+                
+            case INFO:
+                future = terminal.printAt(row, MENU_MARGIN + 2, 
+                    item.description, TextStyle.INFO);
+                break;
+                
+            default:
+                String prefix = isSelected ? "▶ " : "  ";
+                String badge = item.badge != null ? " [" + item.badge + "]" : "";
+                String text = prefix + item.description + badge;
+                
+                TextStyle style = isSelected ? TextStyle.INVERSE : TextStyle.NORMAL;
+                
+                if (!item.enabled) {
+                    style = TextStyle.INFO;
+                }
+                
+                future = terminal.printAt(row, MENU_MARGIN, text, style);
+                break;
+        }
+        
+        return future;
+    }
+    
+    private CompletableFuture<Void> renderDescription() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        
+        if (selectedIndex >= 0 && selectedIndex < selectableItems.size()) {
+            MenuContext.MenuItem selected = selectableItems.get(selectedIndex);
+            
+            int descRow = terminal.getRows() - 4;
+            
+            String info = "";
+            if (selected.type == MenuContext.MenuItemType.SUBMENU) {
+                info = "→ Opens submenu";
+            }
+            
+            if (!info.isEmpty()) {
+                return terminal.printAt(descRow, MENU_MARGIN, info, TextStyle.INFO);
+            }
+        }
+        
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    private CompletableFuture<Void> renderFooter() {
+        int footerRow = terminal.getRows() - 2;
+        
+        String help = currentMenu.hasParent() || !navigationStack.isEmpty() 
+            ? "↑↓: Navigate  Enter: Select  ESC: Back  Home/End: Jump  PgUp/PgDn: Scroll"
+            : "↑↓: Navigate  Enter: Select  Home/End: Jump  PgUp/PgDn: Scroll";
+        
+        return terminal.drawHLine(footerRow - 1, 0, terminal.getCols())
+            .thenCompose(v -> terminal.printAt(footerRow, MENU_MARGIN, help, 
+                TextStyle.INFO));
+    }
+    
     public void refreshMenu() {
         if (state.hasState(DISPLAYING_MENU) && currentMenu != null) {
-            displayCurrentMenu();
+            renderMenu();
         }
-    }
-    
-    // ===== MESSAGE HANDLERS =====
-    
-    /**
-     * Handle menu item selection
-     */
-    private CompletableFuture<Void> handleMenuSelection(
-            NoteBytesMap msg, RoutedPacket packet) {
-        
-        NoteBytes itemNameBytes = msg.get(Keys.ITEM_NAME);
-        if (itemNameBytes == null) {
-            System.err.println("[MenuNavigator] Menu selection without item_name");
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        String itemName = itemNameBytes.getAsString();
-        System.out.println("[MenuNavigator] Item selected: " + itemName);
-        
-        // Transition to navigating state
-        state.removeState(DISPLAYING_MENU);
-        state.addState(NAVIGATING);
-        
-        return currentMenu.navigate(itemName)
-            .thenAccept(targetMenu -> {
-                state.removeState(NAVIGATING);
-                
-                if (targetMenu == null) {
-                    // Password required - notify parent
-                    System.out.println("[MenuNavigator] Password required for: " + itemName);
-                    state.addState(WAITING_PASSWORD);
-                    pendingMenuItem = itemName;
-                    
-                    notifyParentPasswordRequired(itemName);
-                    
-                } else if (targetMenu == currentMenu) {
-                    // Action executed, stay on same menu
-                    System.out.println("[MenuNavigator] Action executed, staying on current menu");
-                    state.addState(DISPLAYING_MENU);
-                    
-                } else {
-                    // Navigate to new menu
-                    System.out.println("[MenuNavigator] Navigating to: " + targetMenu.getTitle());
-                    showMenu(targetMenu);
-                }
-            })
-            .exceptionally(ex -> {
-                System.err.println("[MenuNavigator] Navigation error: " + ex.getMessage());
-                
-                // Show error via renderer
-                uiRenderer.render(UIProtocol.showError(
-                    "Navigation failed: " + ex.getMessage()
-                ));
-                
-                // Return to displaying current menu
-                state.removeState(NAVIGATING);
-                state.addState(DISPLAYING_MENU);
-                return null;
-            });
-    }
-    
-    /**
-     * Handle back button
-     */
-    private CompletableFuture<Void> handleBack(
-            NoteBytesMap msg, RoutedPacket packet) {
-        
-        System.out.println("[MenuNavigator] Back requested");
-        
-        if (navigationStack.isEmpty()) {
-            // Already at root
-            System.out.println("[MenuNavigator] At root menu, notifying parent");
-            notifyParentAtRoot();
-            
-        } else {
-            // Pop back to previous menu
-            MenuContext previousMenu = navigationStack.pop();
-            System.out.println("[MenuNavigator] Returning to: " + previousMenu.getTitle());
-            
-            currentMenu = previousMenu;
-            
-            state.removeState(WAITING_PASSWORD);
-            state.removeState(EXECUTING_ACTION);
-            state.addState(DISPLAYING_MENU);
-        }
-        
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    /**
-     * Handle password entered (for protected menus)
-     */
-    private CompletableFuture<Void> handlePasswordEntered(
-            NoteBytesMap msg, RoutedPacket packet) {
-        
-        // This should be handled by parent's password session
-        // We just forward the message
-        if (parentPath != null) {
-            emitTo(parentPath, msg.getNoteBytesObject());
-        }
-        
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    /**
-     * Handle cancellation
-     */
-    private CompletableFuture<Void> handleCancelled(
-            NoteBytesMap msg, RoutedPacket packet) {
-        
-        System.out.println("[MenuNavigator] Cancellation received");
-        
-        // If waiting for password, return to menu
-        if (state.hasState(WAITING_PASSWORD)) {
-            state.removeState(WAITING_PASSWORD);
-            state.addState(DISPLAYING_MENU);
-            pendingMenuItem = null;
-        }
-        
-        // Notify parent
-        if (parentPath != null) {
-            NoteBytesMap notify = new NoteBytesMap();
-            notify.put(Keys.CMD, new NoteBytes("menu_cancelled"));
-            emitTo(parentPath, notify.getNoteBytesObject());
-        }
-        
-        return CompletableFuture.completedFuture(null);
     }
     
     // ===== PARENT COMMUNICATION =====
     
-    /**
-     * Called by parent when password session succeeds
-     */
     public void onPasswordSuccess(String menuItemName) {
         if (!state.hasState(WAITING_PASSWORD)) {
-            System.err.println("[MenuNavigator] Password success but not waiting for password");
             return;
         }
-        
-        System.out.println("[MenuNavigator] Password verified, navigating to: " + menuItemName);
         
         state.removeState(WAITING_PASSWORD);
         state.addState(NAVIGATING);
         
-        // Try navigation again (should succeed now)
         currentMenu.navigate(menuItemName)
             .thenAccept(targetMenu -> {
                 state.removeState(NAVIGATING);
                 if (targetMenu != null) {
                     showMenu(targetMenu);
                 } else {
-                    // Still can't access? Return to menu
-                    System.err.println("[MenuNavigator] Still can't access menu after password");
                     state.addState(DISPLAYING_MENU);
                 }
             })
             .exceptionally(ex -> {
-                System.err.println("[MenuNavigator] Post-password navigation failed: " + ex.getMessage());
                 state.removeState(NAVIGATING);
                 state.addState(DISPLAYING_MENU);
                 return null;
             });
     }
     
-    /**
-     * Called by parent when password session fails/cancelled
-     */
     public void onPasswordCancelled() {
-        System.out.println("[MenuNavigator] Password cancelled, returning to menu");
-        
         state.removeState(WAITING_PASSWORD);
         state.addState(DISPLAYING_MENU);
-        pendingMenuItem = null;
     }
     
-    /**
-     * Notify parent that password is required
-     */
     private void notifyParentPasswordRequired(String itemName) {
-        if (parentPath == null) {
-            System.err.println("[MenuNavigator] No parent to notify about password requirement");
-            return;
-        }
-        
-        NoteBytesMap request = new NoteBytesMap();
-        request.put(Keys.CMD, new NoteBytes("request_unlock"));
-        request.put(Keys.ITEM_NAME, new NoteBytes(itemName));
-        
-        emitTo(parentPath, request.getNoteBytesObject());
+        // Parent should listen for state change
     }
     
-    /**
-     * Notify parent that we're at root menu (back pressed at top)
-     */
     private void notifyParentAtRoot() {
-        if (parentPath == null) {
-            return;
-        }
-        
-        NoteBytesMap notify = new NoteBytesMap();
-        notify.put(Keys.CMD, new NoteBytes("at_root_menu"));
-        
-        emitTo(parentPath, notify.getNoteBytesObject());
+        // Parent should handle closing or showing main menu
     }
     
-    // ===== NAVIGATION CONTROL =====
-    
-    /**
-     * Clear navigation stack
-     */
-    public void clearNavigationStack() {
-        navigationStack.clear();
-        System.out.println("[MenuNavigator] Navigation stack cleared");
-    }
-    
-    /**
-     * Get navigation depth (how many menus deep)
-     */
-    public int getNavigationDepth() {
-        return navigationStack.size();
-    }
-    
-    /**
-     * Navigate to root menu
-     */
-    public void navigateToRoot() {
-        if (navigationStack.isEmpty()) {
-            return;
+    @Override
+    public void onStop() {
+        if (keyboardInput != null) {
+            keyboardInput.setEventConsumer(null);
         }
-        
-        // Pop to root
-        while (navigationStack.size() > 1) {
-            navigationStack.pop();
-        }
-        
-        if (!navigationStack.isEmpty()) {
-            currentMenu = navigationStack.pop();
-            state.removeState(WAITING_PASSWORD);
-            state.removeState(EXECUTING_ACTION);
-            state.addState(DISPLAYING_MENU);
-        }
+        super.onStop();
     }
     
     // ===== GETTERS =====
     
-    public BitFlagStateMachine getState() {
-        return state;
-    }
-    
-    public MenuContext getCurrentMenu() {
-        return currentMenu;
-    }
-    
-    public boolean hasMenu() {
-        return currentMenu != null;
-    }
-    
-    public boolean isDisplayingMenu() {
-        return state.hasState(DISPLAYING_MENU);
-    }
-    
-    public boolean isWaitingForPassword() {
-        return state.hasState(WAITING_PASSWORD);
-    }
-    
-    public String getPendingMenuItem() {
-        return pendingMenuItem;
-    }
-    
-    public UIRenderer getUIRenderer() {
-        return uiRenderer;
-    }
+    public BitFlagStateMachine getState() { return state; }
+    public MenuContext getCurrentMenu() { return currentMenu; }
+    public boolean hasMenu() { return currentMenu != null; }
+    public boolean isDisplayingMenu() { return state.hasState(DISPLAYING_MENU); }
+    public boolean isWaitingForPassword() { return state.hasState(WAITING_PASSWORD); }
+    public TerminalContainerHandle getTerminal() { return terminal; }
 }

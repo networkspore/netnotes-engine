@@ -3,7 +3,7 @@ package io.netnotes.engine.core.system.control.nodes;
 /**
  * NodeState - Lifecycle states for nodes
  */
-enum NodeState {
+public enum NodeState {
     LOADING,        // Being loaded from package
     INITIALIZING,   // INode.initialize() in progress
     RUNNING,        // Active and ready

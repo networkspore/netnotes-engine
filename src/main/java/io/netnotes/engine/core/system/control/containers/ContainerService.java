@@ -171,6 +171,13 @@ public class ContainerService extends FlowProcess {
                 msg.get(Keys.CONFIG).getAsNoteBytesMap()
             );
         }
+
+        UIRenderer containerRenderer = uiRenderer;
+        //TODO: createRenderer does not exist
+        if (msg.has("renderer_type")) {
+            String rendererType = msg.get("renderer_type").getAsString();
+            containerRenderer = createRenderer(rendererType); // Factory method
+        }
         
         System.out.println(String.format(
             "[ContainerService] Creating %s container: %s (owner: %s)",
@@ -187,7 +194,7 @@ public class ContainerService extends FlowProcess {
             type,
             ownerPath,
             config != null ? config : new ContainerConfig(),
-            uiRenderer
+            containerRenderer
         );
         
         // Initialize container
@@ -239,6 +246,11 @@ public class ContainerService extends FlowProcess {
                 reply(packet, errorResponse.getNoteBytesObject());
                 return null;
             });
+    }
+    
+    //TODO: verify
+    private UIRenderer createRenderer(String type){
+        return uiRenderer;
     }
     
     private CompletableFuture<Void> handleDestroyContainer(RoutedPacket packet) {
@@ -438,7 +450,7 @@ public class ContainerService extends FlowProcess {
         response.put("count", infoList.size());
         response.put("containers", infoList.stream()
             .map(ContainerInfo::toNoteBytes)
-            .toArray());
+            .toArray(NoteBytes[]::new));
         
         reply(packet, response.getNoteBytesObject());
         

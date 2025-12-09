@@ -1,6 +1,6 @@
 package io.netnotes.engine.core.system.control.nodes;
 
-import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
@@ -54,7 +54,7 @@ public class PackageInfo {
     public PackageManifest getManifest() { return manifest; }
 
     public ContextPath createInstallPath(){
-        return SystemProcess.PACKAGE_STORE_PATH.append(
+        return CoreConstants.PACKAGE_STORE_PATH.append(
             name,
             version
         );

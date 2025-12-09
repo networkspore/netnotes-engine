@@ -8,6 +8,10 @@ import java.util.concurrent.CompletionException;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.messaging.NoteMessaging;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
@@ -149,14 +153,18 @@ public class ContainerHandleWrapper {
             // Validate acknowledgment and propagate errors
             NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
             if (response.has("status")) {
-                String status = response.get("status").getAsString();
-                if (!"success".equals(status)) {
-                    String error = response.has("error") 
-                        ? response.get("error").getAsString() 
-                        : "Unknown error";
-                    String msg = "[ContainerHandle] Command failed: " + error;
+                NoteBytes statusBytes = response.get(ProtocolMesssages.STATUS);
+                
+                if (!statusBytes.equals(ProtocolMesssages.SUCCESS)) {
+                    NoteBytes errorBytes = response.get(Keys.ERROR_CODE);
+                    int errorCode = errorBytes != null
+                        ? errorBytes.getAsInt() 
+                        : 0;
+                    String errorMsg = NoteMessaging.ErrorCodes.getMessage(errorCode);
+
+                    String msg = "[ContainerHandle] Command failed: " + errorMsg;
                     System.err.println(msg);
-                    throw new CompletionException(msg, new IOException(error));
+                    throw new CompletionException(msg, new IOException(errorMsg));
                 }
             }
         });

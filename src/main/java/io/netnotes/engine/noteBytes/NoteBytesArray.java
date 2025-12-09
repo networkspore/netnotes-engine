@@ -54,6 +54,7 @@ public class NoteBytesArray extends NoteBytes{
         return bytes;
     }
 
+  
 
 
     public static int getByteLength(NoteBytes[] noteBytesArray){

@@ -408,6 +408,10 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         
         return future;
     }
+
+     public void reply(RoutedPacket originalRequest, NoteBytesPair... payload) {
+        reply(originalRequest, new NoteBytesObject(payload));
+    }
     
     public void reply(RoutedPacket originalRequest, NoteBytes payload) {
         reply(originalRequest, payload.readOnly());

@@ -4,7 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.core.system.SystemProcess;
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.control.nodes.security.PathCapability.MatchMode;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.*;
@@ -107,11 +107,11 @@ public class PolicyManifest {
             ContextPath pattern = cap.getPathPattern();
             
             // System services are sensitive
-            if (pattern.startsWith(SystemProcess.SERVICES_PATH)) {
+            if (pattern.startsWith(CoreConstants.SERVICES_PATH)) {
                 return true;
             }
 
-            if (pattern.startsWith(SystemProcess.NODES_PATH)){
+            if (pattern.startsWith(CoreConstants.NODES_PATH)){
                 return true;
             }
         }
@@ -254,7 +254,7 @@ public class PolicyManifest {
         
         public Builder requestNodeMessaging(String reason) {
             capabilities.add(new PathCapability(
-                SystemProcess.NODES_PATH,
+                CoreConstants.NODES_PATH,
                 Set.of(PathCapability.Operation.MESSAGE),
                 false,
                 reason,null,MatchMode.PREFIX

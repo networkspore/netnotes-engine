@@ -1,19 +1,23 @@
 package io.netnotes.engine.core.system;
 
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.BootstrapWizardProcess;
 import io.netnotes.engine.core.system.control.SecureInputInstaller;
+import io.netnotes.engine.core.system.control.ServicesProcess;
+import io.netnotes.engine.core.system.control.containers.*;
 import io.netnotes.engine.core.system.control.ui.*;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.ClaimedDevice;
 import io.netnotes.engine.io.daemon.ClientSession;
 import io.netnotes.engine.io.daemon.IODaemon;
+import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyboardInput;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.FlowProcessService;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.ErrorCodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
@@ -21,10 +25,12 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,179 +38,124 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * SystemProcess - Bootstrap and service manager
  * 
- * Architecture:
- * - GUI keyboard is ALWAYS available (injected)
- * - IODaemon is CONDITIONALLY started (if configured)
- * - UIRenderer is injected (GUI, console, web, etc.)
- * - Input device requests route intelligently
+ * SIMPLIFIED: One SystemTerminalContainer manages everything
  * 
- * States:
- * - INITIALIZING: Starting up, loading config
- * - BOOTSTRAP_NEEDED: No bootstrap config, wizard needed
- * - BOOTSTRAP_RUNNING: Wizard in progress
- * - SERVICES_STARTING: Starting configured services
- * - READY: Fully operational
- * - ERROR: Fatal error occurred
+ * Architecture:
+ * /system/
+ *   bootstrap-config/      # BootstrapConfig singleton
+ *   services/              # ServicesProcess
+ *     container-service/   # Container management
+ *     io-daemon/           # Optional secure input
+ *   system-terminal/       # THE terminal (handles auth, screens, SystemRuntime)
  */
 public class SystemProcess extends FlowProcess {
-
-    public static final class SYSTEM_INIT_CMDS{
-        public static final NoteBytesReadOnly GET_SECURE_INPUT_DEVICE   = new NoteBytesReadOnly("get_secure_input_device");
-        public static final NoteBytesReadOnly RECCONFIGURE_BOOTSTRAP    = new NoteBytesReadOnly("reconfigure_bootstrap");
-        public static final NoteBytesReadOnly INSTALL_SECURE_INPUT      = new NoteBytesReadOnly("install_secure_input");
-        public static final NoteBytesReadOnly GET_BOOSTRAP_CONFIG       = new NoteBytesReadOnly("get_bootstrap_config");
-        public static final NoteBytesReadOnly UPDATE_BOOSTRAP_CONFIG    = new NoteBytesReadOnly("update_bootstrap_config");
+    
+    public static final class SYSTEM_INIT_CMDS {
+        public static final NoteBytesReadOnly GET_SECURE_INPUT_DEVICE = 
+            new NoteBytesReadOnly("get_secure_input_device");
+        public static final NoteBytesReadOnly RECONFIGURE_BOOTSTRAP = 
+            new NoteBytesReadOnly("reconfigure_bootstrap");
+        public static final NoteBytesReadOnly INSTALL_SECURE_INPUT = 
+            new NoteBytesReadOnly("install_secure_input");
+        public static final NoteBytesReadOnly OPEN_TERMINAL = 
+            new NoteBytesReadOnly("open_terminal");
     }
-
-    public static final String NAME = "system";
-    public static final String IO_DAEMON_NAME = "io-service";
-    public static final String RUNTIME = "runtime";
-    public static final String NODE_CONTROLLER = "node-controller";
-    public static final String REPOSITORIES = "repositories";
-    public static final String NODE_REGISTRY = "node-registry";
-    public static final String NODE_LOADER = "node-loader";
-    public static final String PACKAGE_STORE = "pkg-store";
-
-    public static final String NODES = "nodes";
-    public static final String CONTROLLERS = "controllers";
-
-    public static final ContextPath SYSTEM_PATH = ContextPath.of(NAME);
-    public static final ContextPath REPOSITORIES_PATH = SYSTEM_PATH.append(REPOSITORIES);
-
-    public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append("services");
-    public static final ContextPath IO_SERVICE_PATH = SERVICES_PATH.append(IO_DAEMON_NAME);
-
-    
-    public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
-
-    public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);
-
-    public static final ContextPath CONTROLLERS_PATH = RUNTIME_PATH.append(CONTROLLERS);
-    public static final ContextPath NODE_CONTROLLER_PATH = CONTROLLERS_PATH.append(NODE_CONTROLLER);
-    public static final ContextPath NODE_LOADER_PATH = CONTROLLERS_PATH.append(NODE_LOADER);
-    public static final ContextPath NODE_REGISTRY_PATH = CONTROLLERS_PATH.append(NODE_REGISTRY);
-
-    //DATA PATHS
-
-    public static final ContextPath NODE_DATA_PATH = ContextPath.of("data");
-    
-
-
-    public static final ContextPath RUNTIME_DATA            = ContextPath.of("run");
-    public static final ContextPath PACKAGE_STORE_PATH      = RUNTIME_DATA.append("pkg");
-    public static final ContextPath REPOSITORIES_DATA_PATH  = RUNTIME_DATA.append(REPOSITORIES);
-    public static final ContextPath NODE_LOADER_DATA_PATH   = RUNTIME_DATA.append(NODE_LOADER);
-    public static final ContextPath NODE_REGISTRY_DATA_PATH = RUNTIME_DATA.append(NODE_REGISTRY);
-
-    //public static final ContextPath PACKAGE_CONTROLLER_PATH = CONTROLLERS_PATH.append("package-controller");
-    //public static final ContextPath SECURITY_CONTROLLER_PATH = CONTROLLERS_PATH.append("security-controller");
-
 
     private final FlowProcessService processService;
     private final BitFlagStateMachine state;
-   // private final ProcessRegistryInterface bootstrapInterface;
-    private NoteBytesMap bootstrapConfig;
-    private final Map<ContextPath, SystemSessionProcess> activeSessions = new ConcurrentHashMap<>();
-    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_execMsgMap = 
+        new ConcurrentHashMap<>();
 
- 
-    // Services
-    private IODaemon ioDaemon;
-    private ClientSession systemClientSession; // Session for system's own device access
-    private final KeyboardInput guiKeyboard; // Injected, always available
-    private final UIRenderer uiRenderer; // Injected UI implementation
+    // Core components
+    private final KeyboardInput guiKeyboard;
+    private final UIRenderer uiRenderer;
+    private ContainerService containerService;
+    private ServicesProcess servicesProcess;
+    private ClientSession systemClientSession;
     
-    // Bootstrap wizard (if needed)
+    // THE system terminal (singular, persistent)
+    private SystemTerminalContainer systemTerminal;
+    
+    // Bootstrap wizard (temporary)
     private BootstrapWizardProcess bootstrapWizard;
     
     // States
     public static final long INITIALIZING = 1L << 0;
     public static final long BOOTSTRAP_NEEDED = 1L << 1;
     public static final long BOOTSTRAP_RUNNING = 1L << 2;
-    public static final long SERVICES_STARTING = 1L << 3;
-    public static final long READY = 1L << 4;
-    public static final long ERROR = 1L << 5;
+    public static final long CONFIG_INITIALIZING = 1L << 3;
+    public static final long SERVICES_STARTING = 1L << 4;
+    public static final long TERMINAL_CREATING = 1L << 5;
+    public static final long READY = 1L << 6;
+    public static final long ERROR = 1L << 7;
     
-    /**
-     * Private constructor - use factory method
-     */
-    private SystemProcess(FlowProcessService processService, KeyboardInput guiKeyboard, UIRenderer uiRenderer) {
-        super(NAME, ProcessType.BIDIRECTIONAL);
+    private SystemProcess(
+        FlowProcessService processService,
+        KeyboardInput guiKeyboard,
+        UIRenderer uiRenderer
+    ) {
+        super(CoreConstants.NAME, ProcessType.BIDIRECTIONAL);
+        this.processService = processService;
         this.guiKeyboard = guiKeyboard;
         this.uiRenderer = uiRenderer;
-        this.processService = processService;
-        
-
         this.state = new BitFlagStateMachine(contextPath.toString());
-        
-        if (guiKeyboard == null) {
-            throw new IllegalArgumentException("GUI keyboard required (null provided)");
-        }
-        
-        if (uiRenderer == null) {
-            throw new IllegalArgumentException("UIRenderer required (null provided)");
-        }
         
         setupStateTransitions();
         setupMsgExecutorMap();
     }
-    private void setupMsgExecutorMap(){
-        m_execMsgMap.put(SYSTEM_INIT_CMDS.GET_SECURE_INPUT_DEVICE, (msg, packet)-> handleGetSecureInputDevice(packet));
-        m_execMsgMap.put(SYSTEM_INIT_CMDS.RECCONFIGURE_BOOTSTRAP, (msg, packet)-> handleReconfigureBootstrap(packet));
-        m_execMsgMap.put(SYSTEM_INIT_CMDS.INSTALL_SECURE_INPUT, (msg, packet)-> handleInstallSecureInput(packet));
-        m_execMsgMap.put(SYSTEM_INIT_CMDS.GET_BOOSTRAP_CONFIG, (msg, packet)-> handleGetBootstrapConfig(packet));
-        m_execMsgMap.put(SYSTEM_INIT_CMDS.UPDATE_BOOSTRAP_CONFIG, (msg, packet)-> handleUpdateBootstrapConfig(packet));
+    
+    private void setupMsgExecutorMap() {
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.GET_SECURE_INPUT_DEVICE, 
+            (msg, packet) -> handleGetSecureInputDevice(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.RECONFIGURE_BOOTSTRAP, 
+            (msg, packet) -> handleReconfigureBootstrap(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.INSTALL_SECURE_INPUT, 
+            (msg, packet) -> handleInstallSecureInput(packet));
+        m_execMsgMap.put(SYSTEM_INIT_CMDS.OPEN_TERMINAL, 
+            (msg, packet) -> handleOpenTerminal(packet));
     }
     
-    /**
-     * Bootstrap entry point with injected dependencies
-     * 
-     * @param guiKeyboard GUI keyboard input source (must be compatible with ClaimedDevice)
-     * @param uiRenderer UI implementation (GUI, console, web, etc.)
-     * @return Initialized SystemProcess
-     */
     public static CompletableFuture<SystemProcess> bootstrap(
         KeyboardInput guiKeyboard,
         UIRenderer uiRenderer
     ) {
         return CompletableFuture.supplyAsync(() -> {
-            // Synchronous construction
             FlowProcessService flowProcessService = new FlowProcessService();
-            ProcessRegistryInterface bootstrapInterface = flowProcessService.getRegistryInterface();
-
-            SystemProcess process = new SystemProcess(flowProcessService, guiKeyboard, uiRenderer);
-            bootstrapInterface.registerChild(SYSTEM_PATH, process);
-
+            ProcessRegistryInterface bootstrapInterface = 
+                flowProcessService.getRegistryInterface();
+            
+            SystemProcess process = new SystemProcess(
+                flowProcessService,
+                guiKeyboard,
+                uiRenderer
+            );
+            
+            bootstrapInterface.registerChild(CoreConstants.SYSTEM_PATH, process);
             return process;
-        }, VirtualExecutors.getVirtualExecutor()) 
-            .thenCompose(process ->process.initialize()
-            .thenApply(v -> process));
+            
+        }, VirtualExecutors.getVirtualExecutor())
+            .thenCompose(process -> process.initialize()
+                .thenApply(v -> process));
     }
     
     private void setupStateTransitions() {
-        state.onStateAdded(INITIALIZING, (old, now, bit) -> {
-            System.out.println("[BaseSystem] INITIALIZING - Starting up...");
-        });
+        state.onStateAdded(INITIALIZING, (old, now, bit) -> 
+            System.out.println("[SystemProcess] INITIALIZING"));
         
-        state.onStateAdded(BOOTSTRAP_NEEDED, (old, now, bit) -> {
-            System.out.println("[BaseSystem] BOOTSTRAP_NEEDED - First run detected");
-        });
+        state.onStateAdded(BOOTSTRAP_NEEDED, (old, now, bit) -> 
+            System.out.println("[SystemProcess] BOOTSTRAP_NEEDED"));
         
-        state.onStateAdded(BOOTSTRAP_RUNNING, (old, now, bit) -> {
-            System.out.println("[BaseSystem] BOOTSTRAP_RUNNING - Wizard active");
-        });
+        state.onStateAdded(BOOTSTRAP_RUNNING, (old, now, bit) -> 
+            System.out.println("[SystemProcess] BOOTSTRAP_RUNNING"));
         
-        state.onStateAdded(SERVICES_STARTING, (old, now, bit) -> {
-            System.out.println("[BaseSystem] SERVICES_STARTING - Starting configured services");
-        });
+        state.onStateAdded(SERVICES_STARTING, (old, now, bit) -> 
+            System.out.println("[SystemProcess] SERVICES_STARTING"));
         
-        state.onStateAdded(READY, (old, now, bit) -> {
-            System.out.println("[BaseSystem] READY - System operational");
-        });
+        state.onStateAdded(TERMINAL_CREATING, (old, now, bit) -> 
+            System.out.println("[SystemProcess] TERMINAL_CREATING"));
         
-        state.onStateAdded(ERROR, (old, now, bit) -> {
-            System.err.println("[BaseSystem] ERROR - Fatal error occurred");
-        });
+        state.onStateAdded(READY, (old, now, bit) -> 
+            System.out.println("[SystemProcess] READY - System operational"));
     }
     
     private CompletableFuture<Void> initialize() {
@@ -212,193 +163,266 @@ public class SystemProcess extends FlowProcess {
         
         return startGUIKeyboard()
             .thenCompose(v -> initializeUIRenderer())
-            .thenCompose(v -> loadOrCreateBootstrapConfig())
-            .thenCompose(config -> {
-                this.bootstrapConfig = config;
+            .thenCompose(v -> startContainerService())
+            .thenCompose(v -> checkBootstrapNeeded())
+            .thenCompose(wizardNeeded -> {
+                if (wizardNeeded) {
+                    state.addState(BOOTSTRAP_NEEDED);
+                    state.addState(BOOTSTRAP_RUNNING);
+                    return launchBootstrapWizard();
+                }
+                return CompletableFuture.completedFuture(null);
+            })
+            .thenCompose(v -> {
                 state.removeState(INITIALIZING);
+                state.addState(CONFIG_INITIALIZING);
+                return initializeBootstrapConfig();
+            })
+            .thenCompose(v -> {
+                state.removeState(CONFIG_INITIALIZING);
                 state.addState(SERVICES_STARTING);
-                return startConfiguredServices();
+                return startServicesProcess();
+            })
+            .thenCompose(v -> {
+                state.removeState(SERVICES_STARTING);
+                state.addState(TERMINAL_CREATING);
+                return createSystemTerminal();
             })
             .thenRun(() -> {
-                state.removeState(SERVICES_STARTING);
+                state.removeState(TERMINAL_CREATING);
                 state.addState(READY);
             })
             .exceptionally(ex -> {
-                System.err.println("[BaseSystem] Initialization failed: " + ex.getMessage());
-                state.removeState(INITIALIZING);
-                state.removeState(SERVICES_STARTING);
+                System.err.println("[SystemProcess] Init failed: " + ex.getMessage());
                 state.addState(ERROR);
                 return null;
             });
     }
     
-    /**
-     * Start GUI keyboard as child process (always available)
-     */
     private CompletableFuture<Void> startGUIKeyboard() {
         return spawnChild(guiKeyboard)
             .thenCompose(path -> registry.startProcess(path))
-            .thenRun(() -> {
-                System.out.println("[BaseSystem] GUI keyboard available at: " + 
-                    guiKeyboard.getContextPath());
-            });
+            .thenRun(() -> System.out.println(
+                "[SystemProcess] GUI keyboard: " + guiKeyboard.getContextPath()));
     }
     
-    /**
-     * Initialize UI renderer
-     */
     private CompletableFuture<Void> initializeUIRenderer() {
         return uiRenderer.initialize()
-            .thenRun(() -> {
-                System.out.println("[BaseSystem] UIRenderer initialized: " + 
-                    uiRenderer.getClass().getSimpleName());
-            });
+            .thenRun(() -> System.out.println(
+                "[SystemProcess] UIRenderer: " + uiRenderer.getClass().getSimpleName()));
     }
     
-    /**
-     * Interactive bootstrap configuration if needed
-     */
-    private CompletableFuture<NoteBytesMap> loadOrCreateBootstrapConfig() {
-        try {
-            boolean exists = SettingsData.isBootstrapData();
-            
-            if (exists) {
-                // Load existing config
-                System.out.println("[BaseSystem] Loading existing bootstrap config");
-                return SettingsData.loadBootStrapConfig();
-            } else {
-                // Launch bootstrap wizard
-                System.out.println("[BaseSystem] No bootstrap config found, launching wizard");
-                state.removeState(INITIALIZING);
-                state.addState(BOOTSTRAP_NEEDED);
-                state.addState(BOOTSTRAP_RUNNING);
-                return launchBootstrapWizard();
+    private CompletableFuture<Void> startContainerService() {
+        containerService = new ContainerService(
+            CoreConstants.CONTAINER_SERVICE, 
+            uiRenderer
+        );
+        
+        return spawnChild(containerService)
+            .thenCompose(path -> registry.startProcess(path))
+            .thenRun(() -> System.out.println(
+                "[SystemProcess] ContainerService: " + containerService.getContextPath()));
+    }
+    
+    private CompletableFuture<Boolean> checkBootstrapNeeded() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return !SettingsData.isBootstrapData();
+            } catch (IOException e) {
+                System.err.println("[SystemProcess] Bootstrap check error: " + 
+                    e.getMessage());
+                return true;
             }
-            
-        } catch (IOException e) {
-            System.err.println("[BaseSystem] Error checking bootstrap config: " + e.toString());
-            // Launch wizard on error
-            state.addState(BOOTSTRAP_NEEDED);
-            state.addState(BOOTSTRAP_RUNNING);
-            return launchBootstrapWizard();
-        }
+        }, VirtualExecutors.getVirtualExecutor());
     }
     
-    /**
-     * Launch interactive bootstrap wizard
-     */
-    private CompletableFuture<NoteBytesMap> launchBootstrapWizard() {
-        bootstrapWizard = new BootstrapWizardProcess("bootstrap-wizard", uiRenderer);
+    private CompletableFuture<Void> launchBootstrapWizard() {
+        System.out.println("[SystemProcess] Launching bootstrap wizard");
         
-        return spawnChild(bootstrapWizard)
-            .thenCompose(path -> startProcess(path))
-            .thenCompose(v -> bootstrapWizard.getCompletionFuture())
-            .thenApply(v -> {
-                NoteBytesMap config = bootstrapWizard.getBootstrapConfig();
+        return createWizardContainer()
+            .thenCompose(containerHandle -> {
+                bootstrapWizard = new BootstrapWizardProcess(
+                    "bootstrap-wizard",
+                    containerHandle,
+                    guiKeyboard
+                );
                 
-                // Clean up wizard
-                unregisterProcess(bootstrapWizard.getContextPath());
-                bootstrapWizard = null;
-                
-                state.removeState(BOOTSTRAP_RUNNING);
-                state.removeState(BOOTSTRAP_NEEDED);
-                
-                System.out.println("[BaseSystem] Bootstrap wizard completed");
-                
-                return config;
+                return spawnChild(bootstrapWizard)
+                    .thenCompose(path -> startProcess(path))
+                    .thenCompose(v -> bootstrapWizard.getCompletionFuture())
+                    .thenRun(() -> {
+                        unregisterProcess(bootstrapWizard.getContextPath());
+                        bootstrapWizard = null;
+                        state.removeState(BOOTSTRAP_RUNNING);
+                        state.removeState(BOOTSTRAP_NEEDED);
+                        System.out.println("[SystemProcess] Bootstrap wizard complete");
+                    });
             });
     }
     
-    private CompletableFuture<Void> startConfiguredServices() {
-        if (BootstrapConfig.isSecureInputInstalled(bootstrapConfig)) {
-            System.out.println("[BaseSystem] Starting IODaemon (secure input enabled)");
-            return startIODaemon()
-                .thenCompose(v -> createSystemSession());
-        } else {
-            System.out.println("[BaseSystem] Secure input not enabled, skipping IODaemon");
-            return CompletableFuture.completedFuture(null);
-        }
-    }
-    
-    private CompletableFuture<Void> startIODaemon() {
-        String socketPath = BootstrapConfig.getSecureInputSocketPath(bootstrapConfig);
-        ioDaemon = new IODaemon(IO_DAEMON_NAME, socketPath);
-        registry.registerChild(IO_SERVICE_PATH, ioDaemon);
-        return startProcess(IO_SERVICE_PATH)
-            .thenRun(() -> {
-                System.out.println("[BaseSystem] IODaemon started at: " + socketPath);
-            })
-            .exceptionally(ex -> {
-                System.err.println("[BaseSystem] Failed to start IODaemon: " + ex.getMessage());
-                // Don't fail entire bootstrap, just log error
-                return null;
+    private CompletableFuture<TerminalContainerHandle> createWizardContainer() {
+        NoteBytesMap createMsg = ContainerProtocol.createContainer(
+            "Bootstrap Wizard",
+            ContainerType.TERMINAL,
+            contextPath,
+            new ContainerConfig()
+                .withClosable(false)
+                .withResizable(true)
+        );
+        
+        return request(containerService.getContextPath(), 
+                createMsg.readOnlyObject(), 
+                Duration.ofMillis(500))
+            .thenApply(response -> {
+                NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
+                ContainerId containerId = ContainerId.fromNoteBytes(
+                    resp.get(Keys.CONTAINER_ID)
+                );
+                
+                return new TerminalContainerHandle(
+                    containerId,
+                    "Bootstrap Wizard",
+                    containerService.getContextPath()
+                );
             });
     }
     
-    /**
-     * Create system's own client session for accessing devices
-     */
-    private CompletableFuture<Void> createSystemSession() {
+    private CompletableFuture<Void> initializeBootstrapConfig() {
+        System.out.println("[SystemProcess] Initializing BootstrapConfig");
+        
+        return BootstrapConfig.initialize()
+            .thenCompose(config -> spawnChild(config)
+                .thenCompose(path -> registry.startProcess(path))
+                .thenRun(() -> System.out.println(
+                    "[SystemProcess] BootstrapConfig: " + 
+                    BootstrapConfig.BOOTSTRAP_CONFIG_PATH)));
+    }
+    
+    private CompletableFuture<Void> startServicesProcess() {
+        System.out.println("[SystemProcess] Starting ServicesProcess");
+        
+        servicesProcess = new ServicesProcess(containerService);
+        
+        return spawnChild(servicesProcess)
+            .thenCompose(path -> registry.startProcess(path))
+            .thenCompose(v -> {
+                System.out.println("[SystemProcess] ServicesProcess: " + 
+                    CoreConstants.SERVICES_PATH);
+                
+                if (servicesProcess.getIODaemon() != null) {
+                    return createIOClientSession();
+                }
+                
+                return CompletableFuture.completedFuture(null);
+            });
+    }
+    
+    private CompletableFuture<Void> createIOClientSession() {
+        IODaemon ioDaemon = servicesProcess.getIODaemon();
+        
         if (ioDaemon == null || !ioDaemon.isConnected()) {
-            System.err.println("[BaseSystem] Cannot create session - IODaemon not connected");
             return CompletableFuture.completedFuture(null);
         }
         
-        String sessionId = IO_DAEMON_NAME + "-session-" + NoteUUID.createSafeUUID128();
+        String sessionId = "io-session-" + NoteUUID.createSafeUUID128();
         int pid = (int) ProcessHandle.current().pid();
         
         return ioDaemon.createSession(sessionId, pid)
             .thenCompose(sessionPath -> {
                 systemClientSession = (ClientSession) processService.getProcess(sessionPath);
-                System.out.println("[BaseSystem] System session created: " + sessionPath);
+                System.out.println("[SystemProcess] IODaemon session: " + sessionPath);
                 
-                // Discover devices immediately
                 return systemClientSession.discoverDevices()
                     .thenRun(() -> {
-                        System.out.println("[BaseSystem] Initial device discovery complete");
+                        System.out.println("[SystemProcess] Initial device discovery complete");
                     });
-            })
-            .exceptionally(ex -> {
-                System.err.println("[BaseSystem] Failed to create system session: " + 
-                    ex.getMessage());
-                return null;
             });
     }
     
+
+ 
     /**
-     * Create a new system session (local or remote)
+     * Create THE system terminal (singular, persistent)
+     * 
+     * Terminal handles:
+     * - Authentication (first run + login + unlock)
+     * - SystemRuntime creation
+     * - All screens and menus
      */
-    public CompletableFuture<ContextPath> createSession(
-            String sessionId,
-            SystemSessionProcess.SessionType type,
-            UIRenderer sessionUIRenderer) {
+    private CompletableFuture<Void> createSystemTerminal() {
+        System.out.println("[SystemProcess] Creating system terminal");
         
-        SystemSessionProcess session = new SystemSessionProcess(
-            sessionId, type, sessionUIRenderer);
+        NoteBytesMap createMsg = ContainerProtocol.createContainer(
+            CoreConstants.SYSTEM_CONTAINER_NAME,
+            ContainerType.TERMINAL,
+            contextPath,
+            new ContainerConfig()
+                .withClosable(true)
+                .withResizable(true)
+        );
         
-        return CompletableFuture.supplyAsync(() -> {
-            ContextPath sessionPath = registerChild(session);
-            activeSessions.put(sessionPath, session);
-            
-            startProcess(sessionPath);
-            
-            System.out.println("[BaseSystem] Created session: " + sessionId + 
-                " (type: " + type + ")");
-            
-            return sessionPath;
-        });
+        return request(containerService.getContextPath(),
+                createMsg.readOnlyObject(),
+                Duration.ofMillis(500))
+            .thenApply(response -> {
+                NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
+                ContainerId containerId = ContainerId.fromNoteBytes(
+                    resp.get(Keys.CONTAINER_ID)
+                );
+                
+                // Get best input device (secure if available)
+                InputDevice terminalKeyboard = getBestInputDevice();
+                
+                // Create stateful terminal
+                // Terminal will handle authentication and SystemRuntime creation
+                systemTerminal = new SystemTerminalContainer(
+                    containerId,
+                    CoreConstants.SYSTEM_CONTAINER_NAME,
+                    containerService.getContextPath(),
+                    terminalKeyboard,
+                    registry,
+                    contextPath  // Session path for SystemRuntime
+                );
+                
+                return systemTerminal;
+            })
+            .thenCompose(terminal -> spawnChild(terminal)
+                .thenCompose(path -> registry.startProcess(path))
+                .thenRun(() -> System.out.println(
+                    "[SystemProcess] System terminal: " + 
+                    systemTerminal.getContextPath())));
     }
+    
+    private InputDevice getBestInputDevice() {
+        // Try to get secure keyboard from IODaemon
+        if (systemClientSession != null) {
+            var devices = systemClientSession.getDiscoveredDevices().getAllDevices();
+            for (var device : devices) {
+                if ("keyboard".equals(device.usbDevice().get_device_type()) && 
+                    device.claimed()) {
+                    
+                    String deviceId = device.usbDevice().get_device_id();
+                    var claimedDevice = systemClientSession.getClaimedDevice(deviceId);
+                    if (claimedDevice != null && claimedDevice.isActive()) {
+                        System.out.println("[SystemProcess] Using secure keyboard");
+                        return claimedDevice;
+                    }
+                }
+            }
+        }
+        
+        // Fallback to GUI keyboard
+        System.out.println("[SystemProcess] Using GUI keyboard");
+        return guiKeyboard;
+    }
+    
+    // ===== MESSAGE HANDLERS =====
     
     @Override
     public CompletableFuture<Void> run() {
         return getCompletionFuture();
     }
     
- 
-
-    /**
-     * Handle input device requests and system commands
-     */
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         try {
@@ -406,368 +430,151 @@ public class SystemProcess extends FlowProcess {
             NoteBytes cmdBytes = msg.get(Keys.CMD);
             
             if (cmdBytes == null) {
-                System.err.println("[BaseSystem] Received message without 'cmd' field");
-                return CompletableFuture.completedFuture(null);
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("'cmd' required"));
             }
             
             RoutedMessageExecutor msgExec = m_execMsgMap.get(cmdBytes);
-            if(msgExec != null){
+            if (msgExec != null) {
                 return msgExec.execute(msg, packet);
-            }else{
-                System.err.println("[BaseSystem] Unknown command: " + cmdBytes);
-                return CompletableFuture.completedFuture(null);
             }
-  
+            
+            System.err.println("[SystemProcess] Unknown command: " + cmdBytes);
+            return CompletableFuture.completedFuture(null);
+            
         } catch (Exception e) {
-            System.err.println("[BaseSystem] Error handling message: " + e.getMessage());
             return CompletableFuture.failedFuture(e);
         }
     }
     
-    /**
-     * Route to appropriate input device
-     * Priority: IODaemon keyboards > GUI Keyboard (always available)
-     * 
-     * Flow:
-     * 1. Check if IODaemon is available
-     * 2. Get discovered keyboards from system session
-     * 3. Claim first available keyboard (if not already claimed)
-     * 4. Return ClaimedDevice path
-     * 5. Fallback to GUI keyboard if no IODaemon
-     */
-    private CompletableFuture<Void> handleGetSecureInputDevice(RoutedPacket packet) {
-        // Try IODaemon first (if installed and active)
-        if (ioDaemon != null && ioDaemon.isConnected() && systemClientSession != null) {
-            return getOrClaimKeyboard()
-                .thenAccept(devicePath -> {
-                    if (devicePath != null) {
-                        // Got IODaemon keyboard
-                        NoteBytesMap response = new NoteBytesMap();
-                        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                        response.put(Keys.PATH, new NoteBytes(devicePath.toString()));
-                        response.put(Keys.ITEM_TYPE, new NoteBytes("secure"));
-                        
-                        reply(packet, response.getNoteBytesObject());
-                        System.out.println("[BaseSystem] Provided IODaemon keyboard: " + devicePath);
-                    } else {
-                        // Fall back to GUI keyboard
-                        provideGUIKeyboard(packet);
-                    }
-                })
-                .exceptionally(ex -> {
-                    System.err.println("[BaseSystem] Error getting IODaemon keyboard: " + 
-                        ex.getMessage());
-                    // Fall back to GUI keyboard
-                    provideGUIKeyboard(packet);
-                    return null;
-                });
-        } else {
-            // No IODaemon available, use GUI keyboard
-            provideGUIKeyboard(packet);
-            return CompletableFuture.completedFuture(null);
-        }
+    @Override
+    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        throw new UnsupportedOperationException("SystemProcess does not handle streams");
     }
     
-    /**
-     * Get or claim a keyboard from IODaemon
-     * Returns null if no keyboards available
-     */
-    private CompletableFuture<ContextPath> getOrClaimKeyboard() {
-        // Check if we already have a claimed keyboard
-        var discoveredDevices = systemClientSession.getDiscoveredDevices();
-        var allDevices = discoveredDevices.getAllDevices();
-        
-        // Look for already claimed keyboard
-        for (var deviceInfo : allDevices) {
-            if ("keyboard".equals(deviceInfo.usbDevice().get_device_type()) && 
-                deviceInfo.claimed()) {
-                
-                String deviceId = deviceInfo.usbDevice().get_device_id();
-                ClaimedDevice claimedDevice = systemClientSession.getClaimedDevice(deviceId);
-                if (claimedDevice != null && claimedDevice.isActive()) {
-                    System.out.println("[BaseSystem] Reusing claimed keyboard: " + deviceId);
-                    return CompletableFuture.completedFuture(claimedDevice.getDevicePath());
-                }
-            }
+    private CompletableFuture<Void> handleOpenTerminal(RoutedPacket packet) {
+        if (systemTerminal == null) {
+            NoteBytesMap error = new NoteBytesMap();
+            error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+            error.put(Keys.MSG, new NoteBytes("Terminal not initialized"));
+            reply(packet, error.getNoteBytesObject());
+            return CompletableFuture.completedFuture(null);
         }
         
-        // No claimed keyboard, find and claim first available
-        for (var deviceInfo : allDevices) {
-            if ("keyboard".equals(deviceInfo.usbDevice().get_device_type()) && 
-                !deviceInfo.claimed()) {
-                
-                String deviceId = deviceInfo.usbDevice().get_device_id();
-                System.out.println("[BaseSystem] Claiming keyboard: " + deviceId);
-                
-                return systemClientSession.claimDevice(deviceId, "standard")
-                    .thenApply(devicePath -> {
-                        System.out.println("[BaseSystem] Claimed keyboard at: " + devicePath);
-                        return devicePath;
-                    });
-            }
+        return systemTerminal.open()
+            .thenRun(() -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                response.put(Keys.PATH, new NoteBytes(
+                    systemTerminal.getContextPath().toString()));
+                reply(packet, response.getNoteBytesObject());
+            });
+    }
+    
+    private CompletableFuture<Void> handleGetSecureInputDevice(RoutedPacket packet) {
+        InputDevice device = getBestInputDevice();
+        if(device != null && device instanceof FlowProcess process){
+            NoteBytesMap response = new NoteBytesMap();
+            response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+            response.put(Keys.PATH, process.getContextPath());
+            response.put(Keys.ITEM_TYPE, new NoteBytes(
+                device == guiKeyboard ? "gui" : "secure"));
+            
+            reply(packet, response.getNoteBytesObject());
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return replyErrorCode(packet, ErrorCodes.UNKNOWN);
         }
+    }
+
+    public CompletableFuture<Void> replyErrorCode(RoutedPacket packet, int errorCode){
+        reply(packet, 
+            new NoteBytesPair(Keys.STATUS, ProtocolMesssages.FAILED),
+            new NoteBytesPair(Keys.ERROR_CODE, errorCode));
         
-        // No keyboards available
-        System.err.println("[BaseSystem] No keyboards available from IODaemon");
         return CompletableFuture.completedFuture(null);
     }
     
-    /**
-     * Provide GUI keyboard as fallback
-     */
-    private void provideGUIKeyboard(RoutedPacket packet) {
-        if (guiKeyboard != null && guiKeyboard.isActive()) {
-            ContextPath devicePath = guiKeyboard.getContextPath();
-            
-            NoteBytesMap response = new NoteBytesMap();
-            response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-            response.put(Keys.PATH, new NoteBytes(devicePath.toString()));
-            response.put(Keys.ITEM_TYPE, new NoteBytes("gui"));
-            
-            reply(packet, response.getNoteBytesObject());
-            System.out.println("[BaseSystem] Provided GUI keyboard: " + devicePath);
-        } else {
-            // No input device available at all!
-            NoteBytesMap response = new NoteBytesMap();
-            response.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            response.put(Keys.MSG, new NoteBytes("No input device available"));
-            
-            reply(packet, response.getNoteBytesObject());
-            System.err.println("[BaseSystem] No input device available!");
-        }
-    }
     
-    /**
-     * Allow runtime reconfiguration
-     */
+    
     private CompletableFuture<Void> handleReconfigureBootstrap(RoutedPacket packet) {
-        System.out.println("[BaseSystem] Reconfiguration requested");
+        System.out.println("[SystemProcess] Reconfiguration requested");
         
-        // Launch wizard again for reconfiguration
         state.addState(BOOTSTRAP_RUNNING);
         
         return launchBootstrapWizard()
-            .thenCompose(newConfig -> {
-                this.bootstrapConfig = newConfig;
-                
-                System.out.println("[BaseSystem] Reconfiguration complete, restarting services");
-                
-                // Restart services with new config
-                return restartServices();
-            })
+            .thenCompose(v -> restartServices())
             .thenRun(() -> {
                 state.removeState(BOOTSTRAP_RUNNING);
                 
-                // Send success response
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(packet, response.getNoteBytesObject());
-                
-                System.out.println("[BaseSystem] Reconfiguration successful");
-            })
-            .exceptionally(ex -> {
-                state.removeState(BOOTSTRAP_RUNNING);
-                
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
-                reply(packet, errorResponse.getNoteBytesObject());
-                
-                System.err.println("[BaseSystem] Reconfiguration failed: " + ex.getMessage());
-                return null;
             });
     }
     
-    /**
-     * Install secure input on demand
-     */
     private CompletableFuture<Void> handleInstallSecureInput(RoutedPacket packet) {
-        System.out.println("[BaseSystem] Secure input installation requested");
+        System.out.println("[SystemProcess] Secure input installation requested");
         
         String os = System.getProperty("os.name");
-        SecureInputInstaller installer = new SecureInputInstaller("secure-input-installer", os, uiRenderer);
         
-        return spawnChild(installer)
-            .thenCompose(path -> startProcess(installer.getContextPath()))
-            .thenCompose(v -> installer.getCompletionFuture())
-            .thenCompose(v -> {
-                if (!installer.isComplete()) {
-                    throw new RuntimeException("Installation failed or cancelled");
-                }
+        return createWizardContainer()
+            .thenCompose(terminal -> {
+                SecureInputInstaller installer = new SecureInputInstaller(
+                    "secure-input-installer",
+                    os,
+                    terminal,
+                    guiKeyboard
+                );
                 
-                // Update config
-                BootstrapConfig.setSecureInputInstalled(bootstrapConfig, true);
-                return SettingsData.saveBootstrapConfig(bootstrapConfig);
+                return spawnChild(installer)
+                    .thenCompose(path -> startProcess(path))
+                    .thenCompose(v -> installer.getCompletionFuture())
+                    .thenCompose(v -> {
+                        if (!installer.isComplete()) {
+                            throw new RuntimeException("Installation failed");
+                        }
+                        
+                        // Update config
+                        NoteBytesMap setCmd = BootstrapConfig.CMD.set(
+                            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" +
+                            BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.INSTALLED,
+                            new NoteBytes(true)
+                        );
+                        
+                        return request(BootstrapConfig.BOOTSTRAP_CONFIG_PATH,
+                            setCmd.getNoteBytesObject(),
+                            Duration.ofMillis(500));
+                    });
             })
-            .thenCompose(v -> {
-                // Start IODaemon
-                System.out.println("[BaseSystem] Starting IODaemon after installation");
-                return startIODaemon();
-            })
+            .thenCompose(v -> restartServices())
             .thenRun(() -> {
-                // Send success
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(packet, response.getNoteBytesObject());
-                
-                System.out.println("[BaseSystem] Secure input installation successful");
-            })
-            .exceptionally(ex -> {
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
-                reply(packet, errorResponse.getNoteBytesObject());
-                
-                System.err.println("[BaseSystem] Secure input installation failed: " + 
-                    ex.getMessage());
-                return null;
             });
-    }
-    
-    /**
-     * Get current bootstrap configuration
-     */
-    private CompletableFuture<Void> handleGetBootstrapConfig(RoutedPacket packet) {
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        response.put(Keys.DATA, bootstrapConfig);
-        
-        reply(packet, response.getNoteBytesObject());
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    /**
-     * Update bootstrap configuration
-     */
-    private CompletableFuture<Void> handleUpdateBootstrapConfig(RoutedPacket packet) {
-        try {
-            NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
-            NoteBytes updatesBytes = msg.get(Keys.DATA);
-            
-            if (updatesBytes == null) {
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, new NoteBytes("No update data provided"));
-                reply(packet, errorResponse.getNoteBytesObject());
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
-            BootstrapConfig.merge(bootstrapConfig, updates);
-            
-            return SettingsData.saveBootstrapConfig(bootstrapConfig)
-                .thenRun(() -> {
-                    NoteBytesMap response = new NoteBytesMap();
-                    response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                    reply(packet, response.getNoteBytesObject());
-                    
-                    System.out.println("[BaseSystem] Bootstrap config updated");
-                });
-            
-        } catch (Exception e) {
-            NoteBytesMap errorResponse = new NoteBytesMap();
-            errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            errorResponse.put(Keys.MSG, new NoteBytes(e.getMessage()));
-            reply(packet, errorResponse.getNoteBytesObject());
-            
-            return CompletableFuture.completedFuture(null);
-        }
     }
     
     private CompletableFuture<Void> restartServices() {
-        // Release any claimed devices first
-        if (systemClientSession != null) {
-            var discoveredDevices = systemClientSession.getDiscoveredDevices();
-            var allDevices = discoveredDevices.getAllDevices();
-            
-            for (var deviceInfo : allDevices) {
-                if (deviceInfo.claimed()) {
-                    String deviceId = deviceInfo.usbDevice().get_device_id();
-                    systemClientSession.releaseDevice(deviceId)
-                        .exceptionally(ex -> {
-                            System.err.println("[BaseSystem] Error releasing device: " + 
-                                ex.getMessage());
-                            return null;
-                        });
-                }
-            }
-            
-            systemClientSession = null;
+        if (servicesProcess != null) {
+            return servicesProcess.shutdown()
+                .thenCompose(v -> {
+                    unregisterProcess(servicesProcess.getContextPath());
+                    servicesProcess = null;
+                    return startServicesProcess();
+                });
         }
         
-        // Stop IODaemon
-        if (ioDaemon != null) {
-            System.out.println("[BaseSystem] Stopping IODaemon");
-            ioDaemon.kill();
-            unregisterProcess(ioDaemon.getContextPath());
-            ioDaemon = null;
-        }
-        
-        // Start new services based on config
-        return startConfiguredServices();
-    }
-    
-    @Override
-    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        throw new UnsupportedOperationException("BaseSystem does not handle streams");
+        return CompletableFuture.completedFuture(null);
     }
     
     // ===== GETTERS =====
     
-    public BitFlagStateMachine getState() {
-        return state;
-    }
-    
-    public KeyboardInput getGuiKeyboard() {
-        return guiKeyboard;
-    }
-    
-    public IODaemon getIODaemon() {
-        return ioDaemon;
-    }
-    
-    public UIRenderer getUIRenderer() {
-        return uiRenderer;
-    }
-    
-    public NoteBytesMap getBootstrapConfig() {
-        return bootstrapConfig;
+    public SystemTerminalContainer getSystemTerminal() {
+        return systemTerminal;
     }
     
     public boolean isReady() {
         return state.hasState(READY);
-    }
-    
-    public boolean hasSecureInput() {
-        return ioDaemon != null && ioDaemon.isConnected();
-    }
-    
-    public Map<ContextPath, SystemSessionProcess> getActiveSessions() {
-        return activeSessions;
-    }
-    
-    public ClientSession getSystemClientSession() {
-        return systemClientSession;
-    }
-    
-    public Map<String, ClaimedDevice> getClaimedDevices() {
-        Map<String, ClaimedDevice> devices = new ConcurrentHashMap<>();
-        
-        if (systemClientSession != null) {
-            var discoveredDevices = systemClientSession.getDiscoveredDevices();
-            var allDevices = discoveredDevices.getAllDevices();
-            
-            for (var deviceInfo : allDevices) {
-                if (deviceInfo.claimed()) {
-                    String deviceId = deviceInfo.usbDevice().get_device_id();
-                    ClaimedDevice claimedDevice = systemClientSession.getClaimedDevice(deviceId);
-                    if (claimedDevice != null) {
-                        devices.put(deviceId, claimedDevice);
-                    }
-                }
-            }
-        }
-        
-        return devices;
     }
 }

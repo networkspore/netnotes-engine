@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -24,7 +25,6 @@ import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
 import io.netnotes.engine.io.daemon.IODaemonProtocol.AsyncNoteBytesWriter;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.events.EventBytes;
-import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.io.input.events.InputEventFactory;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
@@ -49,10 +49,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private final String deviceId;
     private final ContextPath devicePath;
     private final String deviceType;
-    private final ContextPath ioDaemonPath;  // INJECTED - no guessing!
+    private final ContextPath ioDaemonPath;
     private DeviceState deviceState;
   
-    private Map<String, ExecutorConsumer<RoutedEvent>> m_consumerMap = new ConcurrentHashMap<>();
+    private Consumer<RoutedEvent> m_onRoutedEvent = null;
 
     // TWO channels: incoming events + outgoing control
     private StreamChannel incomingEventStream;
@@ -245,19 +245,19 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
 
     
     private void emitEvent(RoutedEvent event){
-        m_consumerMap.forEach((k,consumer)->consumer.accept(event));
+        if(m_onRoutedEvent != null){
+            m_onRoutedEvent.accept(event);
+        }
     }
     
-    public void addEventConsumer(String id, ExecutorConsumer<RoutedEvent> eventConsumer){
-        m_consumerMap.computeIfAbsent(id, (k)->eventConsumer);
+    public void setEventConsumer(Consumer<RoutedEvent> eventConsumer){
+        m_onRoutedEvent = eventConsumer;
     }
     
-    public ExecutorConsumer<RoutedEvent> removeEventConsumer(String id){
-        return m_consumerMap.remove(id);
-    }
 
-    public ExecutorConsumer<RoutedEvent> getEventConsumer(String id){
-        return m_consumerMap.get(id);
+
+    public Consumer<RoutedEvent> getEventConsumer(){
+        return m_onRoutedEvent;
     }
 
     // ===== ENCRYPTION NEGOTIATION =====
@@ -416,7 +416,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             encryptionSession = null;
         }
         
-        m_consumerMap.clear();
+        m_onRoutedEvent = null;
         
         // Release device state
         if (deviceState != null) {

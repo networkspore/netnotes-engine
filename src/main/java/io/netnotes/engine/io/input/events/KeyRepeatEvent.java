@@ -1,23 +1,43 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteBytes;
 
 public final class KeyRepeatEvent implements RoutedEvent {
     private final ContextPath sourcePath;
-    private final int key;
-    private final int scancode;
+    private final NoteBytes keyCodeBytes;
+    private final NoteBytes scanCodeBytes;
     private final int stateFlags;
 
-    public KeyRepeatEvent(ContextPath sourcePath, int key, int scancode, int stateFlags) {
+    private int keyCodeCache = -1;
+    private int scanCodeCache = -1;
+
+    public KeyRepeatEvent(ContextPath sourcePath,  NoteBytes key, NoteBytes scancode, int stateFlags) {
         this.sourcePath = sourcePath;
-        this.key = key;
-        this.scancode = scancode;
+        this.keyCodeBytes = key;
+        this.scanCodeBytes = scancode;
         this.stateFlags = stateFlags;
     }
 
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
-    public int key() { return key; }
-    public int scancode() { return scancode; }
+    public NoteBytes getKeyCodeBytes() { return keyCodeBytes; }
+    public NoteBytes getScancodeBytes() { return scanCodeBytes; }
     public int stateFlags() { return stateFlags; }
+
+    public int getScanCode(){
+        if(scanCodeCache != -1){
+            return scanCodeCache;
+        }
+        scanCodeCache = scanCodeBytes.getAsInt();
+        return scanCodeCache;
+    }
+
+    public int getKeyCode(){
+        if(keyCodeCache != -1){
+            return keyCodeCache;
+        }
+        keyCodeCache = keyCodeBytes.getAsInt();
+        return keyCodeCache;
+    }
 }

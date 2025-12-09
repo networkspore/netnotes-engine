@@ -1037,7 +1037,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                                     File tmpFile = new File(file.getAbsolutePath() + ".tmp");
                                     
                                     if (progressWriter != null) {
-                                        ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
+                                        ProgressMessage.writeAsync(ProtocolMesssages.ITEM_INFO,
                                             completed.get(), filePaths.size(),
                                             operation + ": " + filePath,
                                             progressWriter);

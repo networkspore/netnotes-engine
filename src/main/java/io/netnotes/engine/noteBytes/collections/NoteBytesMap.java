@@ -11,7 +11,9 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteString;
@@ -300,9 +302,36 @@ public class NoteBytesMap{
         return m_pairs.keySet();
     }
 
-    
-    public NoteBytes put(Object key, Object value) {
-        return m_pairs.put(NoteBytes.of(key), NoteBytes.of(value));
+    public void put(NoteBytes key, ContextPath contextPath){
+        m_pairs.put(key, contextPath.getSegments());
+    }
+
+    public void put(NoteBytes key, NoteBytesMap map){
+        m_pairs.put(key, map.getNoteBytesObject());
+    }
+
+    public void put(NoteBytes key, boolean b){
+        m_pairs.put(key, new NoteBytes(b));
+    }
+
+    public void put(String key, NoteBytesMap map){
+        m_pairs.put(new NoteBytes( key), map.getNoteBytesObject());
+    }
+
+    public void put(String key, long l){
+        m_pairs.put(new NoteBytes( key), new NoteBytes(l));
+    }
+
+    public void put(String key, int i){
+        m_pairs.put(new NoteBytes( key), new NoteBytes(i));
+    }
+
+    public void put(String key, boolean b){
+        m_pairs.put(new NoteBytes( key), new NoteBytes(b));
+    }
+
+    public void put(String key, NoteBytes[] n){
+        m_pairs.put(new NoteBytes( key), new NoteBytesArrayReadOnly(n));
     }
 
     public void put(NoteBytes key, NoteBytes value) {
@@ -311,6 +340,10 @@ public class NoteBytesMap{
 
     public void put(String key, String value) {
         m_pairs.put(new NoteString(key), new NoteString(value));
+    }
+
+    public void put(NoteBytes key, String value) {
+        m_pairs.put(key, new NoteString(value));
     }
 
      public void put(String key, NoteBytes value) {

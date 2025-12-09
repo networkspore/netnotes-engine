@@ -7,7 +7,7 @@ import java.util.function.Function;
 
 import io.netnotes.engine.core.system.control.ui.*;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
@@ -29,28 +29,24 @@ public class MenuContext {
     private final Map<String, MenuItem> items = new LinkedHashMap<>();
     private final String title;
     private final String description; // Optional subtitle/description
-    private final UIRenderer uiRenderer;
-    
-    private PasswordGate passwordGate;
-    private volatile boolean unlocked = false;
+   
     
     // Callbacks
     private Consumer<String> onItemSelected;
     private Runnable onBack;
     
-    public MenuContext(ContextPath path, String title, UIRenderer uiRenderer) {
-        this(path, title, null, uiRenderer, null);
+    public MenuContext(ContextPath path, String title) {
+        this(path, title, null, null);
     }
     
-    public MenuContext(ContextPath path, String title, UIRenderer uiRenderer, MenuContext parent) {
-        this(path, title, null, uiRenderer, parent);
+    public MenuContext(ContextPath path, String title, MenuContext parent) {
+        this(path, title, null, parent);
     }
     
-    public MenuContext(ContextPath path, String title, String description, UIRenderer uiRenderer, MenuContext parent) {
+    public MenuContext(ContextPath path, String title, String description, MenuContext parent) {
         this.currentPath = path;
         this.title = title;
         this.description = description;
-        this.uiRenderer = uiRenderer;
         this.parent = parent;
     }
     
@@ -83,31 +79,14 @@ public class MenuContext {
             Function<MenuContext, MenuContext> builder) {
         
         ContextPath subPath = currentPath.append(name);
-        MenuContext subMenu = new MenuContext(subPath, description, uiRenderer, this);
+        MenuContext subMenu = new MenuContext(subPath, description, this);
         builder.apply(subMenu);
         
         items.put(name, new MenuItem(name, description, MenuItemType.SUBMENU, subMenu));
         return this;
     }
     
-    /**
-     * Add password-protected sub-menu
-     */
-    public MenuContext addProtectedSubMenu(
-            String name,
-            String description,
-            PasswordGate gate,
-            Function<MenuContext, MenuContext> builder) {
-        
-        ContextPath subPath = currentPath.append(name);
-        MenuContext subMenu = new MenuContext(subPath, description, uiRenderer, this);
-        subMenu.setPasswordGate(gate);
-        builder.apply(subMenu);
-        
-        items.put(name, new MenuItem(name, description, MenuItemType.PROTECTED_SUBMENU, subMenu));
-        return this;
-    }
-    
+
     /**
      * Add information item (displays text, no action)
      */
@@ -139,7 +118,7 @@ public class MenuContext {
     
     /**
      * Display this menu via UI protocol
-     */
+     
     public CompletableFuture<NoteBytesMap> display() {
         // Convert items to protocol format
         List<UIProtocol.MenuItem> uiItems = new ArrayList<>();
@@ -172,7 +151,45 @@ public class MenuContext {
         
         // Render and wait for user selection
         return uiRenderer.render(menuCmd);
+    }*/
+
+          /**
+     * Build display command (caller will send through container)
+     */
+    public NoteBytesMap buildDisplayCommand() {
+        List<UIProtocol.MenuItem> uiItems = new ArrayList<>();
+        
+        for (MenuItem item : items.values()) {
+            uiItems.add(new UIProtocol.MenuItem(
+                item.name,
+                item.description,
+                convertType(item.type)
+            ));
+        }
+        
+        NoteBytesMap menuCmd = UIProtocol.showMenu(
+            title,
+            currentPath.toString(),
+            uiItems,
+            parent != null
+        );
+
+        // Add description if present
+        if (description != null && !description.isEmpty()) {
+            menuCmd.put("description", new NoteBytes(description));
+        }
+        
+        // Add breadcrumb trail
+        menuCmd.put("breadcrumb", new NoteBytes(getBreadcrumb()));
+        
+        
+        if (description != null) {
+            menuCmd.put("description", new NoteBytes(description));
+        }
+        
+        return menuCmd;
     }
+
     
     /**
      * Get breadcrumb trail (path from root to current)
@@ -212,15 +229,6 @@ public class MenuContext {
                 yield CompletableFuture.completedFuture(this); // Stay on same menu
             }
             case SUBMENU -> CompletableFuture.completedFuture((MenuContext) item.target);
-            case PROTECTED_SUBMENU -> {
-                MenuContext menu = (MenuContext) item.target;
-                if (menu.needsUnlock()) {
-                    // Return null to signal password needed
-                    yield CompletableFuture.completedFuture(null);
-                } else {
-                    yield CompletableFuture.completedFuture(menu);
-                }
-            }
             case BACK -> {
                 if (onBack != null) {
                     onBack.run();
@@ -254,29 +262,7 @@ public class MenuContext {
     public Collection<MenuItem> getItems() {
         return Collections.unmodifiableCollection(items.values());
     }
-    
-    // ===== PASSWORD PROTECTION =====
-    
-    public void setPasswordGate(PasswordGate gate) {
-        this.passwordGate = gate;
-    }
-    
-    public boolean needsUnlock() {
-        return passwordGate != null && !unlocked;
-    }
-    
-    public CompletableFuture<Boolean> unlock(NoteBytesEphemeral password) {
-        if (passwordGate == null) {
-            return CompletableFuture.completedFuture(true);
-        }
-        
-        return passwordGate.verify(password)
-            .thenApply(success -> {
-                if (success) unlocked = true;
-                return success;
-            });
-    }
-    
+
     // ===== CALLBACKS =====
     
     /**
@@ -324,7 +310,6 @@ public class MenuContext {
         return switch (type) {
             case ACTION -> UIProtocol.MenuItemType.ACTION;
             case SUBMENU -> UIProtocol.MenuItemType.SUBMENU;
-            case PROTECTED_SUBMENU -> UIProtocol.MenuItemType.PROTECTED_SUBMENU;
             case INFO, SEPARATOR, BACK -> UIProtocol.MenuItemType.ACTION;
         };
     }
@@ -364,7 +349,6 @@ public class MenuContext {
     public enum MenuItemType {
         ACTION,              // Execute runnable
         SUBMENU,            // Navigate to sub-menu
-        PROTECTED_SUBMENU,  // Navigate after password
         INFO,               // Display only (no action)
         SEPARATOR,          // Visual separator
         BACK                // Explicit back navigation

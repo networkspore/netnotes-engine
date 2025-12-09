@@ -1,5 +1,6 @@
 package io.netnotes.engine.utils;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -48,6 +49,15 @@ public class TimeHelpers {
 
         return LocalDateTime.ofInstant(timeInstant, ZoneId.systemDefault());
     }
+
+    public static void timeDelay(int seconds){
+        try {
+            Thread.sleep(Duration.ofSeconds(seconds));
+        } catch (InterruptedException e) {
+            
+        }
+    }
+    
 
 
     public static TimeUnit stringToTimeUnit(String str) {
