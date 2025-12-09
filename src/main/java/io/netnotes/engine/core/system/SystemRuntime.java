@@ -11,6 +11,7 @@ import io.netnotes.engine.core.system.control.nodes.NodeController;
 import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 
@@ -206,6 +207,109 @@ public class SystemRuntime {
         access.setFileCounter(() -> {
             return noteFileService.getFileCount();
         });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // NODE MANAGEMENT OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Package browsing - delegates to RepositoryManager
+        access.setPackageBrowser(() -> {
+            return repositoryManager.updateAllRepositories();
+        });
+
+        // Package installation - delegates to NodeController
+        access.setPackageInstaller(request -> {
+            return nodeController.installPackage(request);
+        });
+
+        // Get installed packages - delegates to NodeController's registry
+        access.setInstalledPackagesProvider(() -> {
+            return CompletableFuture.completedFuture(
+                nodeController.getInstallationRegistry().getInstalledPackages()
+            );
+        });
+
+        // Uninstall package - delegates to NodeController
+        access.setPackageUninstaller((packageId, progress) -> {
+            return nodeController.uninstallPackage(packageId, progress);
+        });
+
+        // Load node - delegates to NodeController
+        access.setNodeLoader(request -> {
+            return nodeController.loadNode(request);
+        });
+
+        // Unload node - delegates to NodeController
+        access.setNodeUnloader(instanceId -> {
+            return nodeController.unloadInstance(instanceId);
+        });
+
+        // Get running instances - delegates to NodeController
+        access.setRunningInstancesProvider(() -> {
+            return CompletableFuture.completedFuture(
+                nodeController.getAllInstances()
+            );
+        });
+
+        // Get installation registry - provides direct access for complex operations
+        access.setInstallationRegistryProvider(() -> {
+            return nodeController.getInstallationRegistry();
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADDITIONAL NODE OPERATIONS (for enhanced screens)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Get instances by package
+        access.setInstancesByPackageProvider(packageId -> {
+            return CompletableFuture.completedFuture(
+                nodeController.getInstancesByPackage(packageId)
+            );
+        });
+
+        // Get instances by process
+        access.setInstancesByProcessProvider(processId -> {
+            return CompletableFuture.completedFuture(
+                nodeController.getInstancesByProcess(processId)
+            );
+        });
+
+        // Enhanced uninstall with data deletion option
+        access.setPackageUninstallerWithData((packageId, deleteData, password, progress) -> {
+            // First verify password (redundant check for safety)
+            return noteFileService.getSettingsData().verifyPassword(password)
+                .thenCompose(valid -> {
+                    if (!valid) {
+                        return CompletableFuture.failedFuture(
+                            new SecurityException("Invalid password"));
+                    }
+                    
+                    // Uninstall package
+                    return nodeController.uninstallPackage(packageId, progress)
+                        .thenCompose(v -> {
+                            // If deleteData is true, also delete data directory
+                            if (deleteData) {
+                                return nodeController.deletePackageData(packageId, progress);
+                            }
+                            return CompletableFuture.completedFuture(null);
+                        });
+                });
+        });
+
+        // Package configuration update
+        access.setPackageConfigUpdater((packageId, newProcessConfig, password) -> {
+            // Verify password first
+            return noteFileService.getSettingsData().verifyPassword(password)
+                .thenCompose(valid -> {
+                    if (!valid) {
+                        return CompletableFuture.failedFuture(
+                            new SecurityException("Invalid password"));
+                    }
+                    
+                    // Delegate to NodeController
+                    return nodeController.updatePackageConfiguration(packageId, newProcessConfig);
+                });
+        });
     }
 
     /**
@@ -263,6 +367,11 @@ public class SystemRuntime {
             @Override
             public ContextPath getDataRootPath() {
                 return CoreConstants.NODE_DATA_PATH;
+            }
+
+            @Override
+            public CompletableFuture<Void> deleteNoteFile(ContextPath path, boolean recurrsive, AsyncNoteBytesWriter progress){
+                return SystemRuntime.this.noteFileService.deleteNoteFilePath(path, false, progress);
             }
 
         };

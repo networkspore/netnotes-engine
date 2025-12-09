@@ -798,7 +798,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
    
     // ===== FILE DELETION =====
     
-    public CompletableFuture<NotePath> deleteNoteFilePath(
+    public CompletableFuture<Void> deleteNoteFilePath(
         ContextPath contextPath, 
         boolean recursive, 
         AsyncNoteBytesWriter progressWriter
@@ -860,7 +860,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
             
             StreamUtils.safeClose(progressWriter);
             releaseLock();
-        });
+        }).thenApply(notePath->null);
     }
     
     private CompletableFuture<Void> prepareForShutdown(

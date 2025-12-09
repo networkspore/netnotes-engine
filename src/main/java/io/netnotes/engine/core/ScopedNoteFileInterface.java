@@ -3,6 +3,7 @@ package io.netnotes.engine.core;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.utils.VirtualExecutors;
 
@@ -89,6 +90,32 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
         }, VirtualExecutors.getVirtualExecutor())
         .thenCompose(path -> fileInterface.getNoteFile(path));
     }
+
+   @Override
+    public CompletableFuture<Void> deleteNoteFile(ContextPath deletePath, boolean recurrsive, AsyncNoteBytesWriter progress) {
+        if (deletePath == null) {
+            return CompletableFuture.failedFuture(
+                new NullPointerException("Path is null"));
+        }
+        
+        return CompletableFuture.supplyAsync(() -> {
+            
+            // Resolve and validate path via hop validation
+            PathResolution resolution = resolvePath(deletePath);
+            
+            if (resolution == null || !resolution.allowed) {
+                throw new SecurityException(String.format(
+                    "Cannot access '%s' from base '%s'%s",
+                    deletePath,
+                    dataRootPath
+                ));
+            }
+            
+            return resolution.resolvedPath;
+            
+        }, VirtualExecutors.getVirtualExecutor())
+        .thenCompose(path -> fileInterface.deleteNoteFile(deletePath, recurrsive, progress));
+    }
     
 
     // =========================================================================
@@ -143,4 +170,6 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
             dataRootPath
         );
     }
+
+    
 }

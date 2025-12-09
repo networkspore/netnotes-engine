@@ -589,6 +589,56 @@ public final class Keyboard {
             codepoint[0] = 0;
             return charBytes;
         }
+
+        public static NoteBytes getNumeric(int i, boolean numpad){
+            if(!numpad){
+                switch(i){
+                    case 1:
+                        return KeyCodeBytes.DIGIT_1;
+                    case 2:
+                        return KeyCodeBytes.DIGIT_2;
+                    case 3:
+                        return KeyCodeBytes.DIGIT_3;
+                    case 4:
+                        return KeyCodeBytes.DIGIT_4;
+                    case 5:
+                        return KeyCodeBytes.DIGIT_5;
+                    case 6:
+                        return KeyCodeBytes.DIGIT_6;
+                    case 7:
+                        return KeyCodeBytes.DIGIT_7;
+                    case 8:
+                        return KeyCodeBytes.DIGIT_8;
+                    case 9:
+                        return KeyCodeBytes.DIGIT_9;
+                    default:
+                        return KeyCodeBytes.DIGIT_0;
+                }
+            }else{
+                switch(i){
+                    case 1:
+                        return KeyCodeBytes.KP_1;
+                    case 2:
+                        return KeyCodeBytes.KP_2;
+                    case 3:
+                        return KeyCodeBytes.KP_3;
+                    case 4:
+                        return KeyCodeBytes.KP_4;
+                    case 5:
+                        return KeyCodeBytes.KP_5;
+                    case 6:
+                        return KeyCodeBytes.KP_6;
+                    case 7:
+                        return KeyCodeBytes.KP_7;
+                    case 8:
+                        return KeyCodeBytes.KP_8;
+                    case 9:
+                        return KeyCodeBytes.KP_9;
+                    default:
+                        return KeyCodeBytes.KP_0;
+                }
+            }
+        }
     }
 
     

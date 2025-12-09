@@ -23,7 +23,7 @@ public class NotePathDelete {
     private static final int  metaDataSize  = NoteBytesMetaData.STANDARD_META_DATA_SIZE;
     
 
-    public static CompletableFuture<Void> parseStreamForRoot(NotePath notePath, SecretKey secretKey, 
+    public static CompletableFuture<Void> deleteFromPath(NotePath notePath, SecretKey secretKey, 
         PipedOutputStream decryptionOutput, PipedOutputStream parsedOutputStream, ExecutorService execService
     ) {
         return CompletableFuture

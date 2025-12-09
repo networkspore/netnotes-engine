@@ -199,7 +199,7 @@ public class NotePathFactory {
             FileStreamUtils.performDecryption(ledger, decryptedOutput, secretKey, execService);
         
         CompletableFuture<Void> parseFuture = 
-            NotePathDelete.parseStreamForRoot(notePath, secretKey, decryptedOutput, parsedOutput, execService);
+            NotePathDelete.deleteFromPath(notePath, secretKey, decryptedOutput, parsedOutput, execService);
         
         CompletableFuture<NoteBytesObject> saveFuture = 
             FileStreamUtils.saveEncryptedFileSwap(ledger, secretKey, parsedOutput, execService);

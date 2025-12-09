@@ -56,8 +56,30 @@ public class RuntimeAccess {
     private RunningInstancesProvider runningInstancesProvider;
     private InstallationRegistryProvider installationRegistryProvider;
 
+    private InstancesByPackageProvider instancesByPackageProvider;
+    private InstancesByProcessProvider instancesByProcessProvider;
+    private PackageUninstallerWithData packageUninstallerWithData;
+    private PackageConfigUpdater packageConfigUpdater;
+
     
     // === PACKAGE-PRIVATE SETTERS (called by SystemRuntime.grantSystemAccess) ===
+
+
+    void setInstancesByPackageProvider(InstancesByPackageProvider provider) {
+        this.instancesByPackageProvider = provider;
+    }
+
+    void setInstancesByProcessProvider(InstancesByProcessProvider provider) {
+        this.instancesByProcessProvider = provider;
+    }
+
+    void setPackageUninstallerWithData(PackageUninstallerWithData uninstaller) {
+        this.packageUninstallerWithData = uninstaller;
+    }
+
+    void setPackageConfigUpdater(PackageConfigUpdater updater) {
+        this.packageConfigUpdater = updater;
+    }
     
     void setPasswordChanger(PasswordChanger changer) {
         this.passwordChanger = changer;
@@ -427,12 +449,12 @@ public class RuntimeAccess {
     /**
      * Uninstall a package
      */
-    CompletableFuture<Void> uninstallPackage(PackageId packageId) {
+    CompletableFuture<Void> uninstallPackage(PackageId packageId, AsyncNoteBytesWriter progress) {
         if (packageUninstaller == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Package uninstaller capability not granted"));
         }
-        return packageUninstaller.uninstall(packageId);
+        return packageUninstaller.uninstall(packageId, progress);
     }
 
     /**
@@ -479,6 +501,60 @@ public class RuntimeAccess {
         return installationRegistryProvider.provide();
     }
 
+
+    /**
+     * Get instances of a specific package
+     */
+    public CompletableFuture<List<NodeInstance>> getInstancesByPackage(PackageId packageId) {
+        if (instancesByPackageProvider == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Instances by package provider capability not granted"));
+        }
+        return instancesByPackageProvider.provide(packageId);
+    }
+
+    /**
+     * Get instances in a specific process namespace
+     */
+    public CompletableFuture<List<NodeInstance>> getInstancesByProcess(String processId) {
+        if (instancesByProcessProvider == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Instances by process provider capability not granted"));
+        }
+        return instancesByProcessProvider.provide(processId);
+    }
+
+    /**
+     * Uninstall package with data deletion option (requires password)
+     */
+    public CompletableFuture<Void> uninstallPackage(
+        PackageId packageId,
+        boolean deleteData,
+        NoteBytesEphemeral password,
+        AsyncNoteBytesWriter progress
+    ) {
+        if (packageUninstallerWithData == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Package uninstaller with data capability not granted"));
+        }
+        return packageUninstallerWithData.uninstall(packageId, deleteData, password, progress);
+    }
+
+    /**
+     * Update package configuration (requires password)
+     */
+    public CompletableFuture<Void> updatePackageConfiguration(
+        PackageId packageId,
+        io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig,
+        NoteBytesEphemeral password
+    ) {
+        if (packageConfigUpdater == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Package config updater capability not granted"));
+        }
+        return packageConfigUpdater.update(packageId, newProcessConfig, password);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // ADD THESE FUNCTIONAL INTERFACES (at end of file, with existing ones)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -500,7 +576,7 @@ public class RuntimeAccess {
 
     @FunctionalInterface
     interface PackageUninstaller {
-        CompletableFuture<Void> uninstall(PackageId packageId);
+        CompletableFuture<Void> uninstall(PackageId packageId, AsyncNoteBytesWriter progresss);
     }
 
     @FunctionalInterface
@@ -521,5 +597,35 @@ public class RuntimeAccess {
     @FunctionalInterface
     interface InstallationRegistryProvider {
         InstallationRegistry provide();
+    }
+
+
+    @FunctionalInterface
+    interface InstancesByPackageProvider {
+        CompletableFuture<List<NodeInstance>> provide(PackageId packageId);
+    }
+
+    @FunctionalInterface
+    interface InstancesByProcessProvider {
+        CompletableFuture<List<NodeInstance>> provide(String processId);
+    }
+
+    @FunctionalInterface
+    interface PackageUninstallerWithData {
+        CompletableFuture<Void> uninstall(
+            PackageId packageId,
+            boolean deleteData,
+            NoteBytesEphemeral password,
+            AsyncNoteBytesWriter progress
+        );
+    }
+
+    @FunctionalInterface
+    interface PackageConfigUpdater {
+        CompletableFuture<Void> update(
+            PackageId packageId,
+            io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig,
+            NoteBytesEphemeral password
+        );
     }
 }

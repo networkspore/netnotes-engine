@@ -1,5 +1,6 @@
 package io.netnotes.engine.core.system.control.nodes;
 
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.ScopedNoteFileInterface;
 import io.netnotes.engine.io.ContextPath;
@@ -8,6 +9,7 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.core.system.control.nodes.security.NodeSecurityPolicy;
 
 import java.util.*;
@@ -38,6 +40,9 @@ public class NodeController extends FlowProcess {
     private final NoteFileServiceInterface fileService;
     private final NodeLoader nodeLoader;
     private final NodeInstanceRegistry instanceRegistry;
+    private InstallationRegistry installationRegistry;
+    private InstallationExecutor installationExecutor;
+
     
     public NodeController(
         String name,
@@ -47,6 +52,7 @@ public class NodeController extends FlowProcess {
         this.fileService = fileService;
         this.nodeLoader = new NodeLoader(name + "-loader", registry, fileService);
         this.instanceRegistry = new NodeInstanceRegistry();
+        this.installationExecutor = new InstallationExecutor(fileService);
     }
     
     // ═══════════════════════════════════════════════════════════════════════
@@ -61,8 +67,40 @@ public class NodeController extends FlowProcess {
     
     private CompletableFuture<Void> initialize() {
         System.out.println("[NodeController] Initializing at: " + contextPath);
-        // Load auto-start nodes if needed
-        return CompletableFuture.completedFuture(null);
+        
+        // Initialize installation registry
+        return initializeInstallationRegistry()
+            .thenRun(() -> {
+                System.out.println("[NodeController] Initialization complete");
+            });
+    }
+
+    private CompletableFuture<Void> initializeInstallationRegistry() {
+        // Get registry file path
+        ContextPath registryPath = CoreConstants.NODE_DATA_PATH
+                .append("installation-registry");
+        
+        return fileService.getNoteFile(registryPath)
+            .thenCompose(registryFile -> {
+                this.installationRegistry = new InstallationRegistry(
+                    "installation-registry",
+                    registryFile
+                );
+                
+                // Register as child process
+                io.netnotes.engine.io.ContextPath regPath = registry.registerProcess(
+                    installationRegistry,
+                    contextPath.append("registry"),
+                    contextPath,
+                    registry
+                );
+                
+                System.out.println("[NodeController] Registered InstallationRegistry at: " + regPath);
+                
+                // Start and initialize
+                return registry.startProcess(regPath)
+                    .thenCompose(v -> installationRegistry.initialize());
+            });
     }
     
     // ═══════════════════════════════════════════════════════════════════════
@@ -293,6 +331,165 @@ public class NodeController extends FlowProcess {
     public boolean isLoaded(PackageId packageId, NoteBytesReadOnly processId) {
         return instanceRegistry.isLoaded(packageId, processId);
     }
+
+
+    /**
+     * Install a package
+     */
+    public CompletableFuture<InstalledPackage> installPackage(InstallationRequest request) {
+        System.out.println("[NodeController] Installing package: " + 
+            request.getPackageInfo().getName());
+        
+        // Execute installation
+        return installationExecutor.executeInstallation(request)
+            .thenCompose(installedPackage -> {
+                // Register in installation registry
+                return installationRegistry.registerPackage(installedPackage)
+                    .thenApply(v -> installedPackage);
+            })
+            .thenCompose(installedPackage -> {
+                // If loadImmediately flag is set, load it now
+                if (request.shouldLoadImmediately()) {
+                    NodeLoadRequest loadRequest = new NodeLoadRequest(installedPackage);
+                    return loadNode(loadRequest)
+                        .thenApply(instance -> installedPackage);
+                }
+                return CompletableFuture.completedFuture(installedPackage);
+            });
+    }
+
+    /**
+     * Uninstall a package
+     */
+    public CompletableFuture<Void> uninstallPackage(PackageId packageId, AsyncNoteBytesWriter progress) {
+        System.out.println("[NodeController] Uninstalling package: " + packageId);
+        
+        // Check if package has running instances
+        List<NodeInstance> instances = getInstancesByPackage(packageId);
+        if (!instances.isEmpty()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException(
+                    "Cannot uninstall package with running instances. Stop " + 
+                    instances.size() + " instance(s) first."));
+        }
+        
+        // Get installed package info
+        InstalledPackage pkg = installationRegistry.getPackage(packageId);
+        if (pkg == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Package not found: " + packageId));
+        }
+        
+        // Unregister from installation registry
+        return installationRegistry.unregisterPackage(packageId)
+            .thenCompose(v -> {
+                // Delete package files from storage
+                return deletePackageFiles(pkg, progress);
+            })
+            .thenRun(() -> {
+                System.out.println("[NodeController] Package uninstalled: " + packageId);
+            });
+    }
+
+    /**
+     * Delete package files from storage
+     */
+    private CompletableFuture<Void> deletePackageFiles(InstalledPackage pkg, AsyncNoteBytesWriter progress) {
+        ContextPath installPath = pkg.getInstallPath();
+        
+        // Get the NoteFile for the install path
+        return fileService.deleteNoteFile(installPath, false, progress)
+            .thenAccept((notePath) -> {
+                System.out.println("[NodeController] Deleted package files at: " + installPath);
+            })
+            .exceptionally(ex -> {
+                System.err.println("[NodeController] Failed to delete package files: " + 
+                    ex.getMessage());
+                // Don't fail the uninstall if file deletion fails
+                return null;
+            });
+        
+    }
+
+    /**
+     * Delete package data directory
+     */
+    public CompletableFuture<Void> deletePackageData(PackageId packageId, AsyncNoteBytesWriter progress) {
+        InstalledPackage pkg = installationRegistry.getPackage(packageId);
+        if (pkg == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Package not found: " + packageId));
+        }
+        
+        ContextPath dataPath = pkg.getProcessConfig().getDataRootPath();
+        
+        System.out.println("[NodeController] Deleting package data at: " + dataPath);
+        
+        return fileService.deleteNoteFile(dataPath, false, progress)
+            .thenRun(() -> {
+                System.out.println("[NodeController] Package data deleted");
+            })
+            .exceptionally(ex -> {
+                System.err.println("[NodeController] Failed to delete package data: " + 
+                    ex.getMessage());
+                // Log but don't fail
+                return null;
+            });
+    }
+
+    /**
+     * Update package configuration
+     */
+    public CompletableFuture<Void> updatePackageConfiguration(
+        PackageId packageId,
+        io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig
+    ) {
+        System.out.println("[NodeController] Updating package configuration: " + packageId);
+        
+        // Check if package has running instances
+        List<NodeInstance> instances = getInstancesByPackage(packageId);
+        if (!instances.isEmpty()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException(
+                    "Cannot update configuration with running instances. Stop " + 
+                    instances.size() + " instance(s) first."));
+        }
+        
+        // Get current package
+        InstalledPackage currentPkg = installationRegistry.getPackage(packageId);
+        if (currentPkg == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Package not found: " + packageId));
+        }
+        
+        // Create updated package with new ProcessConfig
+        InstalledPackage updatedPkg = new InstalledPackage(
+            currentPkg.getPackageId(),
+            currentPkg.getName(),
+            currentPkg.getDescription(),
+            currentPkg.getManifest(),
+            newProcessConfig,  // NEW configuration
+            currentPkg.getSecurityPolicy(),
+            currentPkg.getRepository(),
+            currentPkg.getInstalledDate(),
+            currentPkg.getInstallPath()
+        );
+        
+        // Update in registry (this will trigger save)
+        return installationRegistry.registerPackage(updatedPkg)
+            .thenRun(() -> {
+                System.out.println("[NodeController] Configuration updated for: " + packageId);
+                System.out.println("  New ProcessId: " + newProcessConfig.getProcessId());
+            });
+    }
+
+
+    /**
+     * Get installation registry (for RuntimeAccess)
+     */
+    public InstallationRegistry getInstallationRegistry() {
+        return installationRegistry;
+    }
     
     // ═══════════════════════════════════════════════════════════════════════
     // MESSAGE HANDLING
@@ -320,14 +517,21 @@ public class NodeController extends FlowProcess {
     // SHUTDOWN
     // ═══════════════════════════════════════════════════════════════════════
     
+
     public CompletableFuture<Void> shutdown() {
         System.out.println("[NodeController] Shutting down - unloading " + 
             instanceRegistry.getAllInstances().size() + " instances");
         
         List<CompletableFuture<Void>> shutdownFutures = new ArrayList<>();
         
+        // Unload all instances
         for (NodeInstance instance : instanceRegistry.getAllInstances()) {
             shutdownFutures.add(unloadInstance(instance.getInstanceId()));
+        }
+        
+        // Shutdown installation registry
+        if (installationRegistry != null) {
+            shutdownFutures.add(installationRegistry.shutdown());
         }
         
         return CompletableFuture.allOf(
