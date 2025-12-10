@@ -193,7 +193,7 @@ public class NodeSecurityPolicy {
             map.put("runtime_grants", grantsArr);
         }
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
     
     public static NodeSecurityPolicy fromNoteBytes(NoteBytesMap map) {
@@ -248,7 +248,7 @@ public class NodeSecurityPolicy {
             map.put("operation", operation);
             map.put("reason", reason);
             map.put("granted_at", grantedAt);
-            return map.getNoteBytesObject();
+            return map.toNoteBytes();
         }
         
         public static RuntimePermissionGrant fromNoteBytes(NoteBytesObject obj) {

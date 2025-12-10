@@ -6,6 +6,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 
 /**
@@ -74,28 +75,25 @@ public class InstalledPackage {
      * Serialize to NoteBytes for storage
      */
     public NoteBytesObject toNoteBytes() {
-        NoteBytesMap map = new NoteBytesMap();
-        
-        // Package identity
-        map.put(Keys.PACKAGE_ID, packageId.getId());
-        map.put(Keys.NAME, name);
-        map.put(Keys.VERSION, packageId.getVersion());
-        map.put(Keys.DESCRIPTION, description);
-        
-        // Manifest
-        map.put("manifest", manifest.toNoteBytes());
-        
-        // Process configuration
-        map.put("process_config", processConfig.toNoteBytes());
-        
-        // Security policy
-        map.put("security_policy", securityPolicy.toNoteBytes());
-        
-        // Install metadata
-        map.put("repository", repository);
-        map.put("installed_date", installedDate);
-        map.put("install_path", installPath.getSegments());
-        return map.getNoteBytesObject();
+
+        //Alternative use NoteBytesMap.put then NoteBytesObject obj = NoteBytesMap.toNoteBytes() 
+
+        return new NoteBytesObject(
+            new NoteBytesPair(Keys.PACKAGE_ID, packageId.getId()),
+            new NoteBytesPair(Keys.NAME, name),
+            new NoteBytesPair(Keys.VERSION, packageId.getVersion()),
+            new NoteBytesPair(Keys.DESCRIPTION, description),
+            // Manifest
+            new NoteBytesPair("manifest", manifest.toNoteBytes()),
+            // Process configuration
+            new NoteBytesPair("process_config", processConfig.toNoteBytes()),
+            // Security policy
+            new NoteBytesPair("security_policy", securityPolicy.toNoteBytes()),
+            // Install metadata
+            new NoteBytesPair("repository", repository),
+            new NoteBytesPair("installed_date", installedDate),
+            new NoteBytesPair("install_path", installPath.getSegments()) //ContextPath
+        );
     }
     
     /**

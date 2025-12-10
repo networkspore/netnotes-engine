@@ -194,7 +194,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     public void emit(NoteBytesMap map) {
-        emit(map.getNoteBytesObject());
+        emit(map.toNoteBytes());
     }
     
     public void emit(NoteBytesObject object) {
@@ -210,7 +210,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     public void emitTo(ContextPath destination, NoteBytesMap payload) {
-        emitTo(destination, payload.getNoteBytesObject());
+        emitTo(destination, payload.toNoteBytes());
     }
     
     public void emitTo(ContextPath destination, NoteBytesObject payload) {
@@ -365,7 +365,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             ContextPath targetPath,
             NoteBytesMap map,
             Duration timeout) {
-        return request(targetPath, map.getNoteBytesObject(), timeout);
+        return request(targetPath, map.toNoteBytes(), timeout);
     }
     
     public CompletableFuture<RoutedPacket> request(

@@ -233,7 +233,7 @@ public class NoteBytesReadOnly extends NoteBytes {
         } else if (obj instanceof NoteBytesPair[]) {
             return new NoteBytesObject((NoteBytesPair[]) obj).readOnly();
         } else if(obj instanceof NoteBytesMap){
-            return ((NoteBytesMap)obj).getNoteBytesObject().readOnly();
+            return ((NoteBytesMap)obj).toNoteBytes().readOnly();
         }else if(obj instanceof NoteSerializable){
             return ((NoteSerializable) obj).readOnly();
         }else if(obj instanceof NoteBytes){

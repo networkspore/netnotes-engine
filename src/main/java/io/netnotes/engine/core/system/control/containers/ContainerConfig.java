@@ -114,7 +114,7 @@ public class ContainerConfig {
         if (icon != null) map.put("icon", icon);
         if (metadata != null) map.put("metadata", metadata);
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
     
     public static ContainerConfig fromNoteBytes(NoteBytesMap map) {

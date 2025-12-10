@@ -280,7 +280,7 @@ public final class RoutedPacket {
     }
 
     public static RoutedPacket create(ContextPath sourcePath, NoteBytesMap payload) {
-        return create(sourcePath, payload.getNoteBytesObject());
+        return create(sourcePath, payload.toNoteBytes());
     }
     
     public static RoutedPacket create(ContextPath sourcePath, NoteBytes payload) {

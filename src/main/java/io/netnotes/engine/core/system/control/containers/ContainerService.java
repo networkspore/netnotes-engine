@@ -226,7 +226,7 @@ public class ContainerService extends FlowProcess {
                 response.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
                 response.put(Keys.PATH, container.getPath().toString());
                 
-                reply(packet, response.getNoteBytesObject());
+                reply(packet, response.toNoteBytes());
                 
                 // Send event to owner
                 sendEvent(ownerPath, ContainerProtocol.containerCreated(
@@ -243,7 +243,7 @@ public class ContainerService extends FlowProcess {
                 errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
                 
-                reply(packet, errorResponse.getNoteBytesObject());
+                reply(packet, errorResponse.toNoteBytes());
                 return null;
             });
     }
@@ -304,7 +304,7 @@ public class ContainerService extends FlowProcess {
                 // Reply success
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(packet, response.getNoteBytesObject());
+                reply(packet, response.toNoteBytes());
                 
                 // Send event to owner
                 sendEvent(container.getOwnerPath(), 
@@ -435,7 +435,7 @@ public class ContainerService extends FlowProcess {
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
         response.put(Keys.DATA, info.toNoteBytes());
         
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         
         return CompletableFuture.completedFuture(null);
     }
@@ -452,7 +452,7 @@ public class ContainerService extends FlowProcess {
             .map(ContainerInfo::toNoteBytes)
             .toArray(NoteBytes[]::new));
         
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         
         return CompletableFuture.completedFuture(null);
     }
@@ -475,21 +475,21 @@ public class ContainerService extends FlowProcess {
     private void sendEvent(ContextPath target, NoteBytesMap event) {
     
         if (registry.exists(target)) {
-            emitTo(target, event.getNoteBytesObject());
+            emitTo(target, event.toNoteBytes());
         }
     }
     
     private void replySuccess(RoutedPacket packet) {
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
     }
     
     private CompletableFuture<Void> replyError(RoutedPacket packet, String message) {
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.ERROR);
         response.put(Keys.MSG, new NoteBytes(message));
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     

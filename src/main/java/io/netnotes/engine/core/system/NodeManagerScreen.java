@@ -2,7 +2,9 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
+
 import io.netnotes.engine.core.system.control.MenuContext;
+import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
@@ -39,18 +41,58 @@ class NodeManagerScreen extends TerminalScreen {
     private InstalledPackagesScreen installedScreen;
     private RunningInstancesScreen instancesScreen;
     private BrowsePackagesScreen browseScreen;
-    
+    private NodeCommands nodeCommands = null;
     private MenuContext currentMenu;
     
     public NodeManagerScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
         super(name, terminal, keyboard);
         this.basePath = ContextPath.parse("node-manager");
+        
     }
     
     @Override
     public CompletableFuture<Void> onShow() {
+        if (nodeCommands == null) {
+            return promptForPassword();
+        }
         currentView = View.MAIN_MENU;
         return render();
+    }
+
+    private CompletableFuture<Void> promptForPassword() {
+    return terminal.clear()
+        .thenCompose(v -> terminal.printTitle("Node Manager Authentication"))
+        .thenCompose(v -> terminal.printAt(7, 10, "Enter password:"))
+        .thenCompose(v -> terminal.moveCursor(7, 26))
+        .thenRun(this::startPasswordAuth);
+    }
+
+    private void startPasswordAuth() {
+        PasswordReader passwordReader = new PasswordReader();
+        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+        
+        passwordReader.setOnPassword(password -> {
+            keyboard.setEventConsumer(null);
+            
+            terminal.printAt(9, 10, "Authenticating...")
+                .thenCompose(v -> terminal.getSystemAccess().getAsymmetricPairs(password))
+                .thenAccept(pairs -> {
+                    password.close();
+                    this.nodeCommands = new NodeCommands(terminal, pairs);
+                    currentView = View.MAIN_MENU;
+                    render();
+                })
+                .exceptionally(ex -> {
+                    password.close();
+                    terminal.clear()
+                        .thenCompose(v -> terminal.printError("Authentication failed: " + ex.getMessage()))
+                        .thenCompose(v -> terminal.printAt(11, 10, "Press any key to go back..."))
+                        .thenRun(() -> waitForKeyPress(keyboard, () -> goBack()));
+                    return null;
+                });
+            
+            passwordReader.close();
+        });
     }
     
     @Override
@@ -95,11 +137,12 @@ class NodeManagerScreen extends TerminalScreen {
         keyboard.setEventConsumer(null);
         currentView = View.INSTALLED_PACKAGES;
         
-        if (installedScreen == null) {
+        if (installedScreen == null && nodeCommands != null) {
             installedScreen = new InstalledPackagesScreen(
                 "installed-packages",
                 terminal,
-                keyboard
+                keyboard,
+                nodeCommands
             );
             installedScreen.setOnBack(() -> {
                 installedScreen = null;
@@ -119,7 +162,8 @@ class NodeManagerScreen extends TerminalScreen {
             instancesScreen = new RunningInstancesScreen(
                 "running-instances",
                 terminal,
-                keyboard
+                keyboard,
+                nodeCommands
             );
             instancesScreen.setOnBack(() -> {
                 instancesScreen = null;
@@ -139,7 +183,8 @@ class NodeManagerScreen extends TerminalScreen {
             browseScreen = new BrowsePackagesScreen(
                 "browse-packages",
                 terminal,
-                keyboard
+                keyboard,
+                nodeCommands
             );
             browseScreen.setOnBack(() -> {
                 browseScreen = null;

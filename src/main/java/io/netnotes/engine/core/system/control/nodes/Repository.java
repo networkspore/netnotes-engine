@@ -78,7 +78,7 @@ public class Repository {
         
         map.put(Keys.ENABLED, new NoteBytes(enabled));
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
     
     /**

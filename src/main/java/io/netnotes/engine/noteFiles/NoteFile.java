@@ -170,7 +170,7 @@ public class NoteFile implements AutoCloseable  {
     }
 
     public CompletableFuture<Void> write(NoteBytesMap noteBytesMap) {
-        return write(noteBytesMap.getNoteBytesObject());
+        return write(noteBytesMap.toNoteBytes());
     }
     /**
      * Appends initial 5 bytes of metadata, then writes value

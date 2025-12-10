@@ -400,7 +400,7 @@ public class BootstrapConfig extends FlowProcess {
             response.put(Keys.MSG, new NoteBytes("Path not found: " + path));
         }
         
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     
@@ -465,7 +465,7 @@ public class BootstrapConfig extends FlowProcess {
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
         response.put("valid", new NoteBytes(valid));
         
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     
@@ -483,7 +483,7 @@ public class BootstrapConfig extends FlowProcess {
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
         response.put(Keys.DATA, dataCopy);
         
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     
@@ -525,7 +525,7 @@ public class BootstrapConfig extends FlowProcess {
         
         subscribers.values().forEach(listener -> {
             try {
-                emitTo(listener.path, event.getNoteBytesObject());
+                emitTo(listener.path, event.toNoteBytes());
             } catch (Exception e) {
                 System.err.println("[BootstrapConfig] Failed to notify " + 
                     listener.path + ": " + e.getMessage());
@@ -834,14 +834,14 @@ public class BootstrapConfig extends FlowProcess {
     private void replySuccess(RoutedPacket packet) {
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
     }
     
     private CompletableFuture<Void> replyError(RoutedPacket packet, String message) {
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.ERROR);
         response.put(Keys.MSG, new NoteBytes(message));
-        reply(packet, response.getNoteBytesObject());
+        reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     

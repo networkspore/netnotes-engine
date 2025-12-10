@@ -271,7 +271,7 @@ public class SystemProcess extends FlowProcess {
         );
         
         return request(containerService.getContextPath(), 
-                createMsg.readOnlyObject(), 
+                createMsg.toNoteBytesReadOnly(), 
                 Duration.ofMillis(500))
             .thenApply(response -> {
                 NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
@@ -362,7 +362,7 @@ public class SystemProcess extends FlowProcess {
         );
         
         return request(containerService.getContextPath(),
-                createMsg.readOnlyObject(),
+                createMsg.toNoteBytesReadOnly(),
                 Duration.ofMillis(500))
             .thenApply(response -> {
                 NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
@@ -457,7 +457,7 @@ public class SystemProcess extends FlowProcess {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.STATUS, ProtocolMesssages.ERROR);
             error.put(Keys.MSG, new NoteBytes("Terminal not initialized"));
-            reply(packet, error.getNoteBytesObject());
+            reply(packet, error.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }
         
@@ -467,7 +467,7 @@ public class SystemProcess extends FlowProcess {
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 response.put(Keys.PATH, new NoteBytes(
                     systemTerminal.getContextPath().toString()));
-                reply(packet, response.getNoteBytesObject());
+                reply(packet, response.toNoteBytes());
             });
     }
     
@@ -480,7 +480,7 @@ public class SystemProcess extends FlowProcess {
             response.put(Keys.ITEM_TYPE, new NoteBytes(
                 device == guiKeyboard ? "gui" : "secure"));
             
-            reply(packet, response.getNoteBytesObject());
+            reply(packet, response.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }else{
             return replyErrorCode(packet, ErrorCodes.UNKNOWN);
@@ -509,7 +509,7 @@ public class SystemProcess extends FlowProcess {
                 
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(packet, response.getNoteBytesObject());
+                reply(packet, response.toNoteBytes());
             });
     }
     
@@ -543,7 +543,7 @@ public class SystemProcess extends FlowProcess {
                         );
                         
                         return request(BootstrapConfig.BOOTSTRAP_CONFIG_PATH,
-                            setCmd.getNoteBytesObject(),
+                            setCmd.toNoteBytes(),
                             Duration.ofMillis(500));
                     });
             })
@@ -551,7 +551,7 @@ public class SystemProcess extends FlowProcess {
             .thenRun(() -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(packet, response.getNoteBytesObject());
+                reply(packet, response.toNoteBytes());
             });
     }
     

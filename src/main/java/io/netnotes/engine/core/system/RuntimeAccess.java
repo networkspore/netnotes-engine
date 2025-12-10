@@ -3,14 +3,7 @@ package io.netnotes.engine.core.system;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.nodes.InstallationRegistry;
-import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
-import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
-import io.netnotes.engine.core.system.control.nodes.InstanceId;
-import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.nodes.NodeLoadRequest;
-import io.netnotes.engine.core.system.control.nodes.PackageId;
-import io.netnotes.engine.core.system.control.nodes.PackageInfo;
+import io.netnotes.engine.crypto.AsymmetricPairs;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
@@ -34,6 +27,7 @@ public class RuntimeAccess {
     private PasswordChanger passwordChanger;
     private PasswordVerifier passwordVerifier;
     private PasswordVerifier oldPasswordVerifier;
+    private AsymetricPairsVerifier asymVerifier;
     private InvestigationProvider investigator;
     private RecoveryPerformer recoveryPerformer;
     private RollbackPerformer rollbackPerformer;
@@ -47,46 +41,19 @@ public class RuntimeAccess {
     private CorruptedFilesDeleter corruptedFilesDeleter;
     private FileCounter fileCounter;
 
-    private PackageBrowser packageBrowser;
-    private PackageInstaller packageInstaller;
-    private InstalledPackagesProvider installedPackagesProvider;
-    private PackageUninstaller packageUninstaller;
-    private NodeLoader nodeLoader;
-    private NodeUnloader nodeUnloader;
-    private RunningInstancesProvider runningInstancesProvider;
-    private InstallationRegistryProvider installationRegistryProvider;
-
-    private InstancesByPackageProvider instancesByPackageProvider;
-    private InstancesByProcessProvider instancesByProcessProvider;
-    private PackageUninstallerWithData packageUninstallerWithData;
-    private PackageConfigUpdater packageConfigUpdater;
-
     
     // === PACKAGE-PRIVATE SETTERS (called by SystemRuntime.grantSystemAccess) ===
 
-
-    void setInstancesByPackageProvider(InstancesByPackageProvider provider) {
-        this.instancesByPackageProvider = provider;
-    }
-
-    void setInstancesByProcessProvider(InstancesByProcessProvider provider) {
-        this.instancesByProcessProvider = provider;
-    }
-
-    void setPackageUninstallerWithData(PackageUninstallerWithData uninstaller) {
-        this.packageUninstallerWithData = uninstaller;
-    }
-
-    void setPackageConfigUpdater(PackageConfigUpdater updater) {
-        this.packageConfigUpdater = updater;
-    }
-    
     void setPasswordChanger(PasswordChanger changer) {
         this.passwordChanger = changer;
     }
     
     void setPasswordVerifier(PasswordVerifier verifier) {
         this.passwordVerifier = verifier;
+    }
+
+    void setAsymVerifier(AsymetricPairsVerifier asymVerifier){
+        this.asymVerifier = asymVerifier;
     }
     
     void setOldPasswordVerifier(PasswordVerifier oldVerifier) {
@@ -141,39 +108,6 @@ public class RuntimeAccess {
         this.fileCounter = counter;
     }
 
-
-    void setPackageBrowser(PackageBrowser browser) {
-        this.packageBrowser = browser;
-    }
-
-    void setPackageInstaller(PackageInstaller installer) {
-        this.packageInstaller = installer;
-    }
-
-    void setInstalledPackagesProvider(InstalledPackagesProvider provider) {
-        this.installedPackagesProvider = provider;
-    }
-
-    void setPackageUninstaller(PackageUninstaller uninstaller) {
-        this.packageUninstaller = uninstaller;
-    }
-
-    void setNodeLoader(NodeLoader loader) {
-        this.nodeLoader = loader;
-    }
-
-    void setNodeUnloader(NodeUnloader unloader) {
-        this.nodeUnloader = unloader;
-    }
-
-    void setRunningInstancesProvider(RunningInstancesProvider provider) {
-        this.runningInstancesProvider = provider;
-    }
-
-    void setInstallationRegistryProvider(InstallationRegistryProvider provider) {
-        this.installationRegistryProvider = provider;
-    }
-
         
     // === PUBLIC GETTERS (called by SystemSessionProcess) ===
     
@@ -196,6 +130,14 @@ public class RuntimeAccess {
                 new IllegalStateException("Password verifier capability not granted"));
         }
         return passwordVerifier.verify(password);
+    }
+
+    CompletableFuture<AsymmetricPairs> getAsymmetricPairs(NoteBytesEphemeral password){
+        if (asymVerifier == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("AsymmetricPairs verifier capability not granted"));
+        }
+        return asymVerifier.verify(password);
     }
     
     CompletableFuture<Boolean> verifyOldPassword(NoteBytesEphemeral oldPassword) {
@@ -331,6 +273,11 @@ public class RuntimeAccess {
     interface PasswordVerifier {
         CompletableFuture<Boolean> verify(NoteBytesEphemeral password);
     }
+
+    @FunctionalInterface
+    interface AsymetricPairsVerifier {
+        CompletableFuture<AsymmetricPairs> verify(NoteBytesEphemeral password);
+    }
     
     @FunctionalInterface
     interface InvestigationProvider {
@@ -407,225 +354,4 @@ public class RuntimeAccess {
         CompletableFuture<Integer> count();
     }
 
-
-    /**
-     * Browse available packages from repositories
-     */
-    CompletableFuture<List<PackageInfo>> browseAvailablePackages() {
-        if (packageBrowser == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Package browser capability not granted"));
-        }
-        return packageBrowser.browse();
-    }
-
-    /**
-     * Install a package (password already verified by caller)
-     * 
-     * The password in the request was already verified by SystemSessionProcess,
-     * so we can proceed with installation directly.
-     */
-    CompletableFuture<InstalledPackage> installPackage(
-        InstallationRequest request
-    ) {
-        if (packageInstaller == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Package installer capability not granted"));
-        }
-        return packageInstaller.install(request);
-    }
-
-    /**
-     * Get list of installed packages
-     */
-    CompletableFuture<List<InstalledPackage>> getInstalledPackages() {
-        if (installedPackagesProvider == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Installed packages provider capability not granted"));
-        }
-        return installedPackagesProvider.provide();
-    }
-
-    /**
-     * Uninstall a package
-     */
-    CompletableFuture<Void> uninstallPackage(PackageId packageId, AsyncNoteBytesWriter progress) {
-        if (packageUninstaller == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Package uninstaller capability not granted"));
-        }
-        return packageUninstaller.uninstall(packageId, progress);
-    }
-
-    /**
-     * Load a node instance
-     */
-    CompletableFuture<NodeInstance> loadNode(NodeLoadRequest request) {
-        if (nodeLoader == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Node loader capability not granted"));
-        }
-        return nodeLoader.load(request);
-    }
-
-    /**
-     * Unload a node instance
-     */
-    CompletableFuture<Void> unloadNode(InstanceId instanceId) {
-        if (nodeUnloader == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Node unloader capability not granted"));
-        }
-        return nodeUnloader.unload(instanceId);
-    }
-
-    /**
-     * Get all running node instances
-     */
-    CompletableFuture<List<NodeInstance>> getRunningInstances() {
-        if (runningInstancesProvider == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Running instances provider capability not granted"));
-        }
-        return runningInstancesProvider.provide();
-    }
-
-    /**
-     * Get installation registry (needed by InstallationFlowCoordinator)
-     */
-    InstallationRegistry getInstallationRegistry() {
-        if (installationRegistryProvider == null) {
-            throw new IllegalStateException(
-                "Installation registry provider capability not granted");
-        }
-        return installationRegistryProvider.provide();
-    }
-
-
-    /**
-     * Get instances of a specific package
-     */
-    public CompletableFuture<List<NodeInstance>> getInstancesByPackage(PackageId packageId) {
-        if (instancesByPackageProvider == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Instances by package provider capability not granted"));
-        }
-        return instancesByPackageProvider.provide(packageId);
-    }
-
-    /**
-     * Get instances in a specific process namespace
-     */
-    public CompletableFuture<List<NodeInstance>> getInstancesByProcess(String processId) {
-        if (instancesByProcessProvider == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Instances by process provider capability not granted"));
-        }
-        return instancesByProcessProvider.provide(processId);
-    }
-
-    /**
-     * Uninstall package with data deletion option (requires password)
-     */
-    public CompletableFuture<Void> uninstallPackage(
-        PackageId packageId,
-        boolean deleteData,
-        NoteBytesEphemeral password,
-        AsyncNoteBytesWriter progress
-    ) {
-        if (packageUninstallerWithData == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Package uninstaller with data capability not granted"));
-        }
-        return packageUninstallerWithData.uninstall(packageId, deleteData, password, progress);
-    }
-
-    /**
-     * Update package configuration (requires password)
-     */
-    public CompletableFuture<Void> updatePackageConfiguration(
-        PackageId packageId,
-        io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig,
-        NoteBytesEphemeral password
-    ) {
-        if (packageConfigUpdater == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Package config updater capability not granted"));
-        }
-        return packageConfigUpdater.update(packageId, newProcessConfig, password);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ADD THESE FUNCTIONAL INTERFACES (at end of file, with existing ones)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    @FunctionalInterface
-    interface PackageBrowser {
-        CompletableFuture<List<PackageInfo>> browse();
-    }
-
-    @FunctionalInterface
-    interface PackageInstaller {
-        CompletableFuture<InstalledPackage> install(InstallationRequest request);
-    }
-
-    @FunctionalInterface
-    interface InstalledPackagesProvider {
-        CompletableFuture<List<InstalledPackage>> provide();
-    }
-
-    @FunctionalInterface
-    interface PackageUninstaller {
-        CompletableFuture<Void> uninstall(PackageId packageId, AsyncNoteBytesWriter progresss);
-    }
-
-    @FunctionalInterface
-    interface NodeLoader {
-        CompletableFuture<NodeInstance> load(NodeLoadRequest request);
-    }
-
-    @FunctionalInterface
-    interface NodeUnloader {
-        CompletableFuture<Void> unload(InstanceId instanceId);
-    }
-
-    @FunctionalInterface
-    interface RunningInstancesProvider {
-        CompletableFuture<List<NodeInstance>> provide();
-    }
-
-    @FunctionalInterface
-    interface InstallationRegistryProvider {
-        InstallationRegistry provide();
-    }
-
-
-    @FunctionalInterface
-    interface InstancesByPackageProvider {
-        CompletableFuture<List<NodeInstance>> provide(PackageId packageId);
-    }
-
-    @FunctionalInterface
-    interface InstancesByProcessProvider {
-        CompletableFuture<List<NodeInstance>> provide(String processId);
-    }
-
-    @FunctionalInterface
-    interface PackageUninstallerWithData {
-        CompletableFuture<Void> uninstall(
-            PackageId packageId,
-            boolean deleteData,
-            NoteBytesEphemeral password,
-            AsyncNoteBytesWriter progress
-        );
-    }
-
-    @FunctionalInterface
-    interface PackageConfigUpdater {
-        CompletableFuture<Void> update(
-            PackageId packageId,
-            io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig,
-            NoteBytesEphemeral password
-        );
-    }
 }

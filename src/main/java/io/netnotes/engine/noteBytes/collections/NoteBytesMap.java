@@ -156,7 +156,7 @@ public class NoteBytesMap{
 
 
 
-    public NoteBytesObject getNoteBytesObject() {
+    public NoteBytesObject toNoteBytes() {
 
         byte[] bytes = new byte[byteLength_w_MetaData()];
         int offset = 0;
@@ -167,7 +167,7 @@ public class NoteBytesMap{
         return new NoteBytesObject(bytes);
     }
 
-    public NoteBytesReadOnly readOnlyObject() {
+    public NoteBytesReadOnly toNoteBytesReadOnly() {
 
         byte[] bytes = new byte[byteLength_w_MetaData()];
         int offset = 0;
@@ -307,7 +307,7 @@ public class NoteBytesMap{
     }
 
     public void put(NoteBytes key, NoteBytesMap map){
-        m_pairs.put(key, map.getNoteBytesObject());
+        m_pairs.put(key, map.toNoteBytes());
     }
 
     public void put(NoteBytes key, boolean b){
@@ -315,15 +315,23 @@ public class NoteBytesMap{
     }
 
     public void put(String key, NoteBytesMap map){
-        m_pairs.put(new NoteBytes( key), map.getNoteBytesObject());
+        m_pairs.put(new NoteBytes( key), map.toNoteBytes());
     }
 
     public void put(String key, long l){
         m_pairs.put(new NoteBytes( key), new NoteBytes(l));
     }
 
+    public void put(NoteBytes key, long l){
+        m_pairs.put(key, new NoteBytes(l));
+    }
+
     public void put(String key, int i){
         m_pairs.put(new NoteBytes( key), new NoteBytes(i));
+    }
+
+    public void put(NoteBytes key, int i){
+        m_pairs.put( key, new NoteBytes(i));
     }
 
     public void put(String key, boolean b){

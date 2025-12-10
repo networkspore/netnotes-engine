@@ -53,6 +53,6 @@ public class ContainerInfo {
         map.put("owner_path", ownerPath.toString());
         map.put("config", config.toNoteBytes());
         map.put("created_time", createdTime);
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 }

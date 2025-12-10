@@ -467,13 +467,13 @@ public class IODaemon extends FlowProcess {
                 // Reply immediately - device list comes via broadcast
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
                 NoteBytesMap error = new NoteBytesMap();
                 error.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 error.put(Keys.MSG, ex.getMessage());
-                reply(request, error.getNoteBytesObject());
+                reply(request, error.toNoteBytes());
                 return null;
             });
     }
@@ -492,7 +492,7 @@ public class IODaemon extends FlowProcess {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.STATUS, ProtocolMesssages.ERROR);
             error.put(Keys.MSG, "Session not found: " + sessionId);
-            reply(request, error.getNoteBytesObject());
+            reply(request, error.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }
         
@@ -501,7 +501,7 @@ public class IODaemon extends FlowProcess {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.STATUS, ProtocolMesssages.ERROR);
             error.put(Keys.MSG, "Device not found in session: " + deviceId);
-            reply(request, error.getNoteBytesObject());
+            reply(request, error.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }
         
@@ -535,7 +535,7 @@ public class IODaemon extends FlowProcess {
             .thenRun(() -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
                 
                 System.out.println("Setup event stream for device: " + deviceId);
             })
@@ -543,7 +543,7 @@ public class IODaemon extends FlowProcess {
                 NoteBytesMap error = new NoteBytesMap();
                 error.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 error.put(Keys.MSG, ex.getMessage());
-                reply(request, error.getNoteBytesObject());
+                reply(request, error.toNoteBytes());
                 return null;
             });
     }
@@ -563,13 +563,13 @@ public class IODaemon extends FlowProcess {
             .thenRun(() -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
                 NoteBytesMap error = new NoteBytesMap();
                 error.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 error.put(Keys.MSG, ex.getMessage());
-                reply(request, error.getNoteBytesObject());
+                reply(request, error.toNoteBytes());
                 return null;
             });
     }

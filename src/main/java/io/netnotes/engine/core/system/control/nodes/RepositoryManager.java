@@ -335,7 +335,7 @@ public class RepositoryManager extends FlowProcess {
         }
         
         // Write to cached NoteFile (no ledger access!)
-        return sourcesFile.write(reposMap.getNoteBytesObject())
+        return sourcesFile.write(reposMap.toNoteBytes())
             .exceptionally(ex -> {
                 System.err.println("[RepositoryManager] Failed to save: " + 
                     ex.getMessage());

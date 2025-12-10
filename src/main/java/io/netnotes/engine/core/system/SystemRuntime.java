@@ -4,9 +4,12 @@ import java.util.concurrent.CompletableFuture;
 
 import javax.crypto.SecretKey;
 
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
+
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.core.SignatureVerifier;
 import io.netnotes.engine.core.system.control.nodes.NodeController;
 import io.netnotes.engine.core.system.control.nodes.RepositoryManager;
 import io.netnotes.engine.io.ContextPath;
@@ -72,7 +75,7 @@ public class SystemRuntime {
         // Password change - coordinates SettingsData + NoteFileService
         access.setPasswordChanger((currentPassword, newPassword, batchSize, progressWriter) -> {
             // Closure captures this.settingsData and this.noteFileService
-            return noteFileService.updateFilePathLedgerEncryption(
+            return SystemRuntime.this.noteFileService.updateFilePathLedgerEncryption(
                 progressWriter,
                 currentPassword,
                 newPassword,
@@ -82,23 +85,27 @@ public class SystemRuntime {
         
         // Password verification
         access.setPasswordVerifier(password -> {
-            return noteFileService.getSettingsData().verifyPassword(password);
+            return SystemRuntime.this.noteFileService.getSettingsData().verifyPassword(password);
+        });
+
+        access.setAsymVerifier(password ->{
+            return SystemRuntime.this.noteFileService.getSettingsData().getAsymmetricPairs(password);
         });
         
         access.setOldPasswordVerifier(oldPassword -> {
-            return noteFileService.getSettingsData().verifyOldPassword(oldPassword);
+            return SystemRuntime.this.noteFileService.getSettingsData().verifyOldPassword(oldPassword);
         });
         
         // Recovery operations
         access.setInvestigator(() -> {
-            return noteFileService.investigateFileEncryptionState();
+            return SystemRuntime.this.noteFileService.investigateFileEncryptionState();
         });
         
         access.setRecoveryPerformer((analysis, progressWriter, batchSize) -> {
-            SecretKey currentKey = noteFileService.getSettingsData().getSecretKey();
-            SecretKey oldKey = noteFileService.getSettingsData().getOldKey();
+            SecretKey currentKey = SystemRuntime.this.noteFileService.getSettingsData().getSecretKey();
+            SecretKey oldKey = SystemRuntime.this.noteFileService.getSettingsData().getOldKey();
             
-            return noteFileService.reEncryptFilesAdaptive(
+            return SystemRuntime.this.noteFileService.reEncryptFilesAdaptive(
                 analysis.getFilesNeedingUpdate(),
                 oldKey,           // Decrypt with old
                 currentKey,       // Encrypt with current
@@ -113,18 +120,18 @@ public class SystemRuntime {
             // First rollback settings (swap keys)
             return CompletableFuture.runAsync(() -> {
                 try {
-                    noteFileService.getSettingsData().rollbackToOldPassword();
+                    SystemRuntime.this.noteFileService.getSettingsData().rollbackToOldPassword();
                 } catch (Exception e) {
                     throw new RuntimeException("Settings rollback failed", e);
                 }
             })
             .thenCompose(v -> {
                 // Now keys are swapped: current=old, old=current
-                SecretKey nowCurrent = noteFileService.getSettingsData().getSecretKey(); // Was old
-                SecretKey nowOld = noteFileService.getSettingsData().getOldKey();        // Was current
+                SecretKey nowCurrent = SystemRuntime.this.noteFileService.getSettingsData().getSecretKey(); // Was old
+                SecretKey nowOld = SystemRuntime.this.noteFileService.getSettingsData().getOldKey();        // Was current
                 
                 // Re-encrypt files that were updated back to "old" (now current) key
-                return noteFileService.reEncryptFilesAdaptive(
+                return SystemRuntime.this.noteFileService.reEncryptFilesAdaptive(
                     analysis.getAllFilesNeedingUpdate(), // All files that were changed
                     nowOld,        // Decrypt with new key (was current)
                     nowCurrent,    // Encrypt with old key (now current)
@@ -137,11 +144,11 @@ public class SystemRuntime {
         });
         
         access.setComprehensiveRecoveryPerformer((analysis, progressWriter, batchSize) -> {
-            SecretKey currentKey = noteFileService.getSettingsData().getSecretKey();
-            SecretKey oldKey = noteFileService.getSettingsData().getOldKey();
+            SecretKey currentKey = SystemRuntime.this.noteFileService.getSettingsData().getSecretKey();
+            SecretKey oldKey = SystemRuntime.this.noteFileService.getSettingsData().getOldKey();
             
             // Step 1: Re-encrypt files needing update
-            return noteFileService.reEncryptFilesAdaptive(
+            return SystemRuntime.this.noteFileService.reEncryptFilesAdaptive(
                 analysis.getFilesNeedingUpdate(),
                 oldKey,
                 currentKey,
@@ -152,26 +159,26 @@ public class SystemRuntime {
             )
             .thenCompose(reencryptSuccess -> {
                 // Step 2: Finish swaps
-                return noteFileService.performFinishSwaps(
+                return SystemRuntime.this.noteFileService.performFinishSwaps(
                     analysis.getFilesNeedingSwap()
                 );
             })
             .thenCompose(swapSuccess -> {
                 // Step 3: Cleanup tmp files
-                return noteFileService.cleanupFiles(
+                return SystemRuntime.this.noteFileService.cleanupFiles(
                     analysis.getFilesNeedingCleanup()
                 );
             });
         });
         
         access.setSwapPerformer((analysis, progressWriter) -> {
-            return noteFileService.performFinishSwaps(
+            return SystemRuntime.this.noteFileService.performFinishSwaps(
                 analysis.getFilesNeedingSwap()
             );
         });
         
         access.setCleanupPerformer(analysis -> {
-            return noteFileService.cleanupFiles(
+            return SystemRuntime.this.noteFileService.cleanupFiles(
                 analysis.getFilesNeedingCleanup()
             );
         });
@@ -180,7 +187,7 @@ public class SystemRuntime {
         access.setSettingsRollback(() -> {
             return CompletableFuture.runAsync(() -> {
                 try {
-                    noteFileService.getSettingsData().rollbackToOldPassword();
+                    SystemRuntime.this.noteFileService.getSettingsData().rollbackToOldPassword();
                 } catch (Exception e) {
                     throw new RuntimeException("Settings rollback failed", e);
                 }
@@ -188,128 +195,27 @@ public class SystemRuntime {
         });
         
         access.setOldKeyChecker(() -> {
-            return noteFileService.getSettingsData().hasOldKey();
+            return SystemRuntime.this.noteFileService.getSettingsData().hasOldKey();
         });
         
         access.setOldKeyClearer(() -> {
-            noteFileService.getSettingsData().clearOldKey();
+            SystemRuntime.this.noteFileService.getSettingsData().clearOldKey();
         });
         
         // File service operations
         access.setDiskSpaceValidator(() -> {
-            return noteFileService.validateDiskSpaceForReEncryption();
+            return SystemRuntime.this.noteFileService.validateDiskSpaceForReEncryption();
         });
         
         access.setCorruptedFilesDeleter(files -> {
-            return noteFileService.deleteCorruptedFiles(files);
+            return SystemRuntime.this.noteFileService.deleteCorruptedFiles(files);
         });
         
         access.setFileCounter(() -> {
-            return noteFileService.getFileCount();
+            return SystemRuntime.this.noteFileService.getFileCount();
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
-        // NODE MANAGEMENT OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════════
-
-        // Package browsing - delegates to RepositoryManager
-        access.setPackageBrowser(() -> {
-            return repositoryManager.updateAllRepositories();
-        });
-
-        // Package installation - delegates to NodeController
-        access.setPackageInstaller(request -> {
-            return nodeController.installPackage(request);
-        });
-
-        // Get installed packages - delegates to NodeController's registry
-        access.setInstalledPackagesProvider(() -> {
-            return CompletableFuture.completedFuture(
-                nodeController.getInstallationRegistry().getInstalledPackages()
-            );
-        });
-
-        // Uninstall package - delegates to NodeController
-        access.setPackageUninstaller((packageId, progress) -> {
-            return nodeController.uninstallPackage(packageId, progress);
-        });
-
-        // Load node - delegates to NodeController
-        access.setNodeLoader(request -> {
-            return nodeController.loadNode(request);
-        });
-
-        // Unload node - delegates to NodeController
-        access.setNodeUnloader(instanceId -> {
-            return nodeController.unloadInstance(instanceId);
-        });
-
-        // Get running instances - delegates to NodeController
-        access.setRunningInstancesProvider(() -> {
-            return CompletableFuture.completedFuture(
-                nodeController.getAllInstances()
-            );
-        });
-
-        // Get installation registry - provides direct access for complex operations
-        access.setInstallationRegistryProvider(() -> {
-            return nodeController.getInstallationRegistry();
-        });
-
-        // ═══════════════════════════════════════════════════════════════════════
-        // ADDITIONAL NODE OPERATIONS (for enhanced screens)
-        // ═══════════════════════════════════════════════════════════════════════
-
-        // Get instances by package
-        access.setInstancesByPackageProvider(packageId -> {
-            return CompletableFuture.completedFuture(
-                nodeController.getInstancesByPackage(packageId)
-            );
-        });
-
-        // Get instances by process
-        access.setInstancesByProcessProvider(processId -> {
-            return CompletableFuture.completedFuture(
-                nodeController.getInstancesByProcess(processId)
-            );
-        });
-
-        // Enhanced uninstall with data deletion option
-        access.setPackageUninstallerWithData((packageId, deleteData, password, progress) -> {
-            // First verify password (redundant check for safety)
-            return noteFileService.getSettingsData().verifyPassword(password)
-                .thenCompose(valid -> {
-                    if (!valid) {
-                        return CompletableFuture.failedFuture(
-                            new SecurityException("Invalid password"));
-                    }
-                    
-                    // Uninstall package
-                    return nodeController.uninstallPackage(packageId, progress)
-                        .thenCompose(v -> {
-                            // If deleteData is true, also delete data directory
-                            if (deleteData) {
-                                return nodeController.deletePackageData(packageId, progress);
-                            }
-                            return CompletableFuture.completedFuture(null);
-                        });
-                });
-        });
-
-        // Package configuration update
-        access.setPackageConfigUpdater((packageId, newProcessConfig, password) -> {
-            // Verify password first
-            return noteFileService.getSettingsData().verifyPassword(password)
-                .thenCompose(valid -> {
-                    if (!valid) {
-                        return CompletableFuture.failedFuture(
-                            new SecurityException("Invalid password"));
-                    }
-                    
-                    // Delegate to NodeController
-                    return nodeController.updatePackageConfiguration(packageId, newProcessConfig);
-                });
-        });
+   
     }
 
     /**
@@ -338,7 +244,7 @@ public class SystemRuntime {
         ContextPath repoPath = ContextPath.of(CoreConstants.REPOSITORIES);
 
         ContextPath repoFilePath = repoPath.append("repository-list");
-        return noteFileService.getNoteFile(repoFilePath.getSegments())
+        return SystemRuntime.this.noteFileService.getNoteFile(repoFilePath.getSegments())
             .thenCompose(repoFile -> {
                this.repositoryManager = new RepositoryManager(CoreConstants.REPOSITORIES, repoFile);
                 ContextPath path = registryInterface.registerProcess(
@@ -376,12 +282,21 @@ public class SystemRuntime {
 
         };
 
+        SignatureVerifier sigVerifier = new SignatureVerifier() {
+
+            @Override
+            public Ed25519PublicKeyParameters getSigningPublicKey() {
+                return SystemRuntime.this.noteFileService.getSettingsData().getSigningPublicKey();
+            }
+            
+        };
        
 
         // Create controller
         this.nodeController = new NodeController(
             CoreConstants.NODE_CONTROLLER,
-            noteFileServiceInterface
+            noteFileServiceInterface,
+            sigVerifier
         );
         ContextPath path = registryInterface.registerProcess(
                     nodeController, 

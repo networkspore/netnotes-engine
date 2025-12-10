@@ -94,7 +94,7 @@ public class SecureMessageV1 extends MessageHeader {
         }
     }
 
-      public static NoteBytes readSignature(NoteBytesReader reader) throws EOFException, IOException{
+    public static NoteBytes readSignature(NoteBytesReader reader) throws EOFException, IOException{
 
         NoteBytes signatureKey = reader.nextNoteBytes();
 
@@ -311,8 +311,6 @@ public class SecureMessageV1 extends MessageHeader {
     ){
         return CompletableFuture.runAsync(() -> {
 
-            
-           
             try(
                 NoteBytesPairEphemeral header = getSecuritySignedHeader(senderId, senderPublicKey, dataLength);
                 PipedInputStream inputStream = new PipedInputStream(startStream, StreamUtils.PIPE_BUFFER_SIZE);

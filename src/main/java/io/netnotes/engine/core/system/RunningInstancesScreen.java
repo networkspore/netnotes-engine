@@ -6,12 +6,12 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
 import io.netnotes.engine.core.system.control.PasswordReader;
+import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.nodes.NodeState;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.utils.TimeHelpers;
 
 /**
@@ -38,13 +38,16 @@ class RunningInstancesScreen extends TerminalScreen {
     
     private MenuNavigatorProcess menuNavigator;
     private PasswordReader passwordReader;
+    private final NodeCommands nodeCommands;
     
     public RunningInstancesScreen(
         String name, 
         SystemTerminalContainer terminal, 
-        InputDevice keyboard
-    ) {
+        InputDevice keyboard,
+        NodeCommands nodeCommands
+    ){
         super(name, terminal, keyboard);
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnBack(Runnable onBack) {
@@ -80,7 +83,7 @@ class RunningInstancesScreen extends TerminalScreen {
     // ===== INSTANCE LIST =====
     
     private CompletableFuture<Void> renderInstanceList() {
-        return terminal.getSystemAccess().getRunningInstances()
+        return nodeCommands.getRunningInstances()
             .thenCompose(instances -> {
                 return terminal.clear()
                     .thenCompose(v -> terminal.printTitle("Running Node Instances"))
@@ -252,57 +255,44 @@ class RunningInstancesScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(11, 12, "• Gracefully shutdown the node"))
             .thenCompose(v -> terminal.printAt(12, 12, "• Close all connections"))
             .thenCompose(v -> terminal.printAt(13, 12, "• Unload from runtime"))
-            .thenCompose(v -> terminal.printAt(15, 10, "Enter password to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(15, 36))
-            .thenRun(this::startPasswordConfirmation);
+            .thenCompose(v -> terminal.printAt(15, 10, "Type 'STOP' to confirm:"))
+            .thenCompose(v -> terminal.moveCursor(15, 30))
+            .thenRun(this::startStopConfirmation);
     }
-    
-    private void startPasswordConfirmation() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+
+    private void startStopConfirmation() {
+        TerminalInputReader inputReader = new TerminalInputReader(terminal, 15, 30, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
         
-        passwordReader.setOnPassword(password -> {
+        inputReader.setOnComplete(input -> {
             keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+            inputReader.close();
             
-            verifyPasswordAndStop(password);
-        });
-    }
-    
-    private void verifyPasswordAndStop(NoteBytesEphemeral password) {
-        terminal.printAt(17, 10, "Verifying password...")
-            .thenCompose(v -> terminal.getSystemAccess().verifyPassword(password))
-            .thenCompose(valid -> {
-                password.close();
-                
-                if (!valid) {
-                    return terminal.printError("Invalid password")
-                        .thenCompose(x -> terminal.printAt(19, 10, "Press any key to try again..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> {
-                            currentView = View.CONFIRM_STOP;
-                            render();
-                        }));
-                } else {
-                    return performStop();
-                }
-            })
-            .exceptionally(ex -> {
-                password.close();
-                terminal.printError("Error: " + ex.getMessage())
-                    .thenCompose(x -> terminal.printAt(19, 10, "Press any key..."))
+            if ("STOP".equals(input)) {
+                performStop();
+            } else {
+                terminal.printError("Confirmation failed")
+                    .thenCompose(x -> terminal.printAt(17, 10, "Press any key to try again..."))
                     .thenRun(() -> waitForKeyPress(keyboard, () -> {
-                        selectedInstance = null;
-                        currentView = View.INSTANCE_LIST;
+                        currentView = View.CONFIRM_STOP;
                         render();
                     }));
-                return null;
-            });
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            selectedInstance = null;
+            currentView = View.INSTANCE_LIST;
+            render();
+        });
     }
+        
     
     private CompletableFuture<Void> performStop() {
         return terminal.printAt(17, 10, "Stopping instance...                    ")
-            .thenCompose(v -> terminal.getSystemAccess().unloadNode(selectedInstance.getInstanceId()))
+            .thenCompose(v -> nodeCommands.unloadNode(selectedInstance.getInstanceId()))
             .thenCompose(v -> terminal.printSuccess("Instance stopped successfully"))
             .thenCompose(v -> terminal.printAt(19, 10, "Returning to instance list..."))
             .thenRunAsync(() -> TimeHelpers.timeDelay(2))
@@ -313,16 +303,15 @@ class RunningInstancesScreen extends TerminalScreen {
             })
             .exceptionally(ex -> {
                 terminal.printError("Failed to stop: " + ex.getMessage())
-                    .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
-                        selectedInstance = null;
-                        currentView = View.INSTANCE_LIST;
-                        render();
-                    }));
-                return null;
-            });
+                .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
+                .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                    selectedInstance = null;
+                    currentView = View.INSTANCE_LIST;
+                    render();
+                }));
+            return null;
+        });
     }
-    
     // ===== UTILITY =====
     
     private void goBack() {

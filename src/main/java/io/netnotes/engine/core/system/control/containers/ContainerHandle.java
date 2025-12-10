@@ -182,7 +182,7 @@ public class ContainerHandle extends FlowProcess {
         NoteBytesMap msg = ContainerProtocol.queryContainer(containerId);
         
         // Query can be slightly slower than commands - 1 second timeout
-        return request(containerServicePath, msg.readOnlyObject(), Duration.ofSeconds(1));
+        return request(containerServicePath, msg.toNoteBytesReadOnly(), Duration.ofSeconds(1));
     }
     
     // ===== COMMAND SENDING =====
@@ -200,7 +200,7 @@ public class ContainerHandle extends FlowProcess {
         
         // Use FlowProcess's request() method - goes through reactive streams
         // UI commands should be fast - 500ms timeout
-        return request(containerServicePath, command.readOnlyObject(), Duration.ofMillis(500))
+        return request(containerServicePath, command.toNoteBytesReadOnly(), Duration.ofMillis(500))
             .thenAccept(reply -> {
                 // Validate acknowledgment and propagate errors
                 NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();

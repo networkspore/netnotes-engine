@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.PasswordReader;
+import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
@@ -54,15 +55,19 @@ class PackageInstallScreen extends TerminalScreen {
     private MenuContext currentMenu;
     private PasswordReader passwordReader;
     private Runnable onCompleteCallback;
-    
+    private final NodeCommands nodeCommands;
+
     public PackageInstallScreen(
-            String name, 
-            SystemTerminalContainer terminal, 
-            InputDevice keyboard,
-            PackageInfo packageInfo) {
+        String name, 
+        SystemTerminalContainer terminal, 
+        InputDevice keyboard,
+        PackageInfo packageInfo,
+        NodeCommands nodeCommands
+    ) {
         super(name, terminal, keyboard);
         this.packageInfo = packageInfo;
         this.basePath = ContextPath.parse("install/" + packageInfo.getName());
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnComplete(Runnable callback) {
@@ -293,9 +298,34 @@ class PackageInstallScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(7, 10, "Package: " + packageInfo.getName()))
             .thenCompose(v -> terminal.printAt(8, 10, 
                 "Namespace: " + chosenProcessConfig.getProcessId()))
-            .thenCompose(v -> terminal.printAt(10, 10, "Enter password to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(10, 40))
-            .thenRun(this::startPasswordEntry);
+            .thenCompose(v -> terminal.printAt(10, 10, "Type 'INSTALL' to proceed:"))
+            .thenCompose(v -> terminal.moveCursor(10, 36))
+            .thenRun(this::startConfirmationEntry);
+    }
+
+    private void startConfirmationEntry() {
+        TerminalInputReader inputReader = new TerminalInputReader(terminal, 10, 36, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
+        
+        inputReader.setOnComplete(input -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            
+            if ("INSTALL".equals(input)) {
+                performInstallation();
+            } else {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Installation cancelled"))
+                    .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
+                    .thenRun(() -> waitForAnyKey(() -> render()));
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            cancelInstallation();
+        });
     }
     
     private void startPasswordEntry() {
@@ -311,7 +341,7 @@ class PackageInstallScreen extends TerminalScreen {
             access.verifyPassword(password)
                 .thenAccept(valid -> {
                     if (valid) {
-                        performInstallation(password);
+                        performInstallation();
                     } else {
                         password.close();
                         terminal.clear()
@@ -342,34 +372,25 @@ class PackageInstallScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(7, 10, "This may take a moment."));
     }
     
-    private void performInstallation(NoteBytesEphemeral password) {
+    private void performInstallation() {
         currentStep = Step.INSTALLING;
         render();
-        
-        RuntimeAccess access = terminal.getSystemAccess();
         
         PolicyManifest policyManifest = PolicyManifest.fromNoteBytes(
             packageInfo.getManifest().getMetadata()
         );
         
-        InstallationRequest request = new InstallationRequest(
-            packageInfo,
-            chosenProcessConfig,
-            policyManifest,
-            password,
-            false,
-            false,
-            null
-        );
-        
-        access.installPackage(request)
+        nodeCommands.installPackage(
+                packageInfo,
+                chosenProcessConfig,
+                policyManifest,
+                false
+            )
             .thenAccept(installedPackage -> {
-                password.close();
                 currentStep = Step.ASK_LOAD_IMMEDIATELY;
                 render();
             })
             .exceptionally(ex -> {
-                password.close();
                 terminal.clear()
                     .thenCompose(v -> terminal.printError(
                         "✗ Installation failed\n\n" +
@@ -406,11 +427,23 @@ class PackageInstallScreen extends TerminalScreen {
     private void loadPackageNow() {
         keyboard.setEventConsumer(null);
         loadImmediately = true;
-        // TODO: Load the node
-        terminal.printAt(12, 10, "Loading node not yet implemented...")
-            .thenRun(() -> {
-                currentStep = Step.COMPLETE;
-                render();
+        
+        // Load using the package ID from the installed package
+        nodeCommands.loadNode(packageInfo.getPackageId())
+            .thenAccept(instance -> {
+                terminal.printAt(12, 10, "✓ Node loaded: " + instance.getInstanceId())
+                    .thenRun(() -> {
+                        currentStep = Step.COMPLETE;
+                        render();
+                    });
+            })
+            .exceptionally(ex -> {
+                terminal.printError("Failed to load: " + ex.getMessage())
+                    .thenRun(() -> {
+                        currentStep = Step.COMPLETE;
+                        render();
+                    });
+                return null;
             });
     }
     

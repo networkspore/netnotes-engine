@@ -10,16 +10,13 @@ import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.TerminalInputReader;
-import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
-import io.netnotes.engine.core.system.control.nodes.NodeLoadRequest;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.TimeHelpers;
 
@@ -59,15 +56,18 @@ class BrowsePackagesScreen extends TerminalScreen {
     private MenuNavigatorProcess menuNavigator;
     private PasswordReader passwordReader;
     private TerminalInputReader inputReader;
+    private final NodeCommands nodeCommands;
     
     public BrowsePackagesScreen(
         String name, 
         SystemTerminalContainer terminal, 
-        InputDevice keyboard
+        InputDevice keyboard,
+        NodeCommands nodeCommands
     ) {
         super(name, terminal, keyboard);
         this.availablePackages = new ArrayList<>();
         this.installedPackages = new ArrayList<>();
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnBack(Runnable onBack) {
@@ -119,12 +119,11 @@ class BrowsePackagesScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(9, 10, "This may take a moment..."));
     }
     
-    private void updatePackageCache() {
-        // Fetch both available and installed packages concurrently
+   private void updatePackageCache() {
         CompletableFuture<List<PackageInfo>> availableFuture = 
-            terminal.getSystemAccess().browseAvailablePackages();
+            nodeCommands.browseAvailablePackages();
         CompletableFuture<List<InstalledPackage>> installedFuture = 
-            terminal.getSystemAccess().getInstalledPackages();
+            nodeCommands.getInstalledPackages();
         
         CompletableFuture.allOf(availableFuture, installedFuture)
             .thenAccept(v -> {
@@ -467,77 +466,63 @@ class BrowsePackagesScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(13, 10, "This will download and install the package."))
             .thenCompose(v -> terminal.printAt(15, 10, "Enter password to confirm:"))
             .thenCompose(v -> terminal.moveCursor(15, 36))
-            .thenRun(this::startPasswordConfirmation);
+            .thenRun(this::verifyPasswordAndInstall);
     }
     
-    private void startPasswordConfirmation() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+  
+    private void verifyPasswordAndInstall() {
+        terminal.printAt(17, 10, "Type 'INSTALL' to confirm:")
+            .thenCompose(v -> terminal.moveCursor(17, 38))
+            .thenRun(this::startInstallConfirmation);
+    }
+
+    private void startInstallConfirmation() {
+        inputReader = new TerminalInputReader(terminal, 17, 38, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
         
-        passwordReader.setOnPassword(password -> {
+        inputReader.setOnComplete(input -> {
             keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+            inputReader.close();
+            inputReader = null;
             
-            verifyPasswordAndInstall(password);
+            if ("INSTALL".equals(input)) {
+                performInstallation();
+            } else {
+                terminal.printError("Installation cancelled")
+                    .thenCompose(x -> terminal.printAt(19, 10, "Press any key..."))
+                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                        currentView = View.CONFIRM_INSTALL;
+                        render();
+                    }));
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            inputReader = null;
+            selectedPackage = null;
+            installConfig = null;
+            currentView = View.CATEGORY_LIST;
+            render();
         });
     }
     
-    private void verifyPasswordAndInstall(NoteBytesEphemeral password) {
-        terminal.printAt(17, 10, "Verifying password...")
-            .thenCompose(v -> terminal.getSystemAccess().verifyPassword(password))
-            .thenCompose(valid -> {
-                if (!valid) {
-                    password.close();
-                    return terminal.printError("Invalid password")
-                        .thenCompose(x -> terminal.printAt(19, 10, "Press any key to try again..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> {
-                            currentView = View.CONFIRM_INSTALL;
-                            render();
-                        }));
-                } else {
-                    return performInstallation(password);
-                }
-            })
-            .exceptionally(ex -> {
-                password.close();
-                terminal.printError("Error: " + ex.getMessage())
-                    .thenCompose(x -> terminal.printAt(19, 10, "Press any key..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
-                        selectedPackage = null;
-                        installConfig = null;
-                        currentView = View.CATEGORY_LIST;
-                        render();
-                    }));
-                return null;
-            });
-    }
-    
-    private CompletableFuture<Void> performInstallation(NoteBytesEphemeral password) {
-        // Create installation request with default policy
+    private CompletableFuture<Void> performInstallation() {
         PolicyManifest policy = PolicyManifest.fromNoteBytes(
             selectedPackage.getManifest().getMetadata()
         );
         
-        InstallationRequest request = new InstallationRequest(
-            selectedPackage,
-            installConfig,
-            policy,
-            password,
-            loadImmediately,
-            false,  // userReviewedSource
-            null    // sourceRepo
-        );
-        
         return terminal.printAt(17, 10, "Installing package...                  ")
-            .thenCompose(v -> terminal.getSystemAccess().installPackage(request))
+            .thenCompose(v -> nodeCommands.installPackage(
+                selectedPackage,
+                installConfig,
+                policy,
+                loadImmediately
+            ))
             .thenCompose(installedPkg -> {
-                password.close();
-                
-                // If loadImmediately, load the node
                 if (loadImmediately) {
-                    NodeLoadRequest loadRequest = new NodeLoadRequest(installedPkg);
-                    return terminal.getSystemAccess().loadNode(loadRequest)
+                    return nodeCommands.loadNode(installedPkg.getPackageId().getId())
                         .thenCompose(instance -> 
                             terminal.printSuccess("Package installed and loaded successfully!")
                                 .thenCompose(x -> terminal.printAt(19, 10, "Instance running at: " + 
@@ -558,7 +543,6 @@ class BrowsePackagesScreen extends TerminalScreen {
                 render();
             })
             .exceptionally(ex -> {
-                password.close();
                 terminal.printError("Installation failed: " + ex.getMessage())
                     .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
                     .thenRun(() -> waitForKeyPress(keyboard, () -> {

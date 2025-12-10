@@ -146,7 +146,7 @@ public class ContainerHandleWrapper {
         // UI commands should be fast - 500ms timeout
         return owner.request(
             containerServicePath, 
-            command.readOnlyObject(), 
+            command.toNoteBytesReadOnly(), 
             Duration.ofMillis(500)
         )
         .thenAccept(reply -> {
@@ -183,7 +183,7 @@ public class ContainerHandleWrapper {
         // Query can be slightly slower than commands - 1 second timeout
         return owner.request(
             containerServicePath,
-            command.readOnlyObject(),
+            command.toNoteBytesReadOnly(),
             Duration.ofSeconds(1)
         );
     }

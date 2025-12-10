@@ -71,7 +71,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly SET_FILTER            = new NoteBytesReadOnly("set_filter");
         public static final NoteBytesReadOnly ENABLE_FEATURE        = new NoteBytesReadOnly("enable_feature");
         public static final NoteBytesReadOnly DISABLE_FEATURE       = new NoteBytesReadOnly("disable_feature");
-        
+        public static final NoteBytesReadOnly ALL                   = new NoteBytesReadOnly("all");
         
 
         public static final NoteBytesReadOnly DISCONNECT            = new NoteBytesReadOnly("disconnect");
@@ -142,6 +142,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly PACKAGE_ID    = new NoteBytesReadOnly("package_id");
         public static final NoteBytesReadOnly PROCESS_ID    = new NoteBytesReadOnly("process_id");
         public static final NoteBytesReadOnly NODE_ID       = new NoteBytesReadOnly("node_id");
+        public static final NoteBytesReadOnly INSTANCE_ID   = new NoteBytesReadOnly("instance_id");
         public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
         
         public static final NoteBytesReadOnly PID           = new NoteBytesReadOnly("pid");
@@ -158,7 +159,9 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly DEPENDENCIES  = new NoteBytesReadOnly("dependencies");
         public static final NoteBytesReadOnly AUTOLOAD      = new NoteBytesReadOnly("autoload");
         public static final NoteBytesReadOnly APPROVED      = new NoteBytesReadOnly("approved");
-        
+        public static final NoteBytesReadOnly FILTER        = new NoteBytesReadOnly("filter");
+        public static final NoteBytesReadOnly INSTANCES     = new NoteBytesReadOnly("instances");
+        public static final NoteBytesReadOnly INSTANCE     = new NoteBytesReadOnly("instance");
         // Metadata
         public static final NoteBytesReadOnly NAME          = new NoteBytesReadOnly("name");
         public static final NoteBytesReadOnly TIMESTAMP     = new NoteBytesReadOnly("time_stamp");
@@ -168,13 +171,17 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly ALLOW_COPY    = new NoteBytesReadOnly("allow_copy");
         public static final NoteBytesReadOnly DESCRIPTION   = new NoteBytesReadOnly("description");
         public static final NoteBytesReadOnly CONFIG        = new NoteBytesReadOnly("config");
-
+        public static final NoteBytesReadOnly CATEGORY      = new NoteBytesReadOnly("category");
+        public static final NoteBytesReadOnly SIZE          = new NoteBytesReadOnly("size");
+        
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");
         public static final NoteBytesReadOnly CMD           = new NoteBytesReadOnly("cmd");
         public static final NoteBytesReadOnly STRING_LIST   = new NoteBytesReadOnly("string_list");
-
+        public static final NoteBytesReadOnly SIGN_PRIV_KEY = new NoteBytesReadOnly("sign_priv");
+        public static final NoteBytesReadOnly SIGN_PUB_KEY  = new NoteBytesReadOnly("sign_pub");
+        public static final NoteBytesReadOnly SIGNATURE     = new NoteBytesReadOnly("signature");
         // Status & Results
         public static final NoteBytesReadOnly INFO          = new NoteBytesReadOnly("info");
         public static final NoteBytesReadOnly STATUS        = new NoteBytesReadOnly("status");
@@ -396,6 +403,13 @@ public class NoteMessaging {
         
         public static String getMessage(int errorCode) {
             return ERROR_MESSAGES.getOrDefault(errorCode, "Unknown error");
+        }
+
+        public static String getMessage(NoteBytes errorCode){
+
+            return errorCode != null 
+                ?  ERROR_MESSAGES.getOrDefault(errorCode.getAsInt(), "Unknown error")
+                : "Unknown error";
         }
     }
     

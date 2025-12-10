@@ -365,7 +365,7 @@ public class PathCapability {
             map.put("service_names", namesArr);
         }
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
     
     public static PathCapability fromNoteBytes(NoteBytesObject obj) {

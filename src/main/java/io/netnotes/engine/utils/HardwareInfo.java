@@ -37,7 +37,7 @@ public class HardwareInfo {
         for(PhysicalProcessor physicalProcessor : physicalProcessorList){
             map.put(new NoteBytes(physicalProcessor.getPhysicalPackageNumber()), new NoteString( physicalProcessor.getIdString()));
         }
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 
     public static byte[] filterHexStringToBytes(String mac, Set<Integer> filterSet){
@@ -60,7 +60,7 @@ public class HardwareInfo {
             String mac = networkIf.getMacaddr();
             map.put(new NoteString(networkIf.getName()), new NoteString(mac));
         }
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 
 
@@ -71,7 +71,7 @@ public class HardwareInfo {
         for(PhysicalMemory physicalMemory : pysicalMemoryList){
             map.put(new NoteString(physicalMemory.getBankLabel()), new NoteString( physicalMemory.getSerialNumber()));
         }
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 
     private static NoteBytesObject hdUuidBytes(SystemInfo systemInfo){
@@ -82,7 +82,7 @@ public class HardwareInfo {
             OSFileStore store = fileStores.get(i);
             map.put(new NoteBytes(store.getName()), new NoteString((store.getUUID())));
         }
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 
     public static final String NIC_STRING      = "nic";
@@ -124,7 +124,7 @@ public class HardwareInfo {
             if(keys.contains(HDD_KEY)){
                 hardwareInfo.put(HDD_KEY,  hdUuidBytes(systemInfo));
             }
-            return hardwareInfo.getNoteBytesObject();
+            return hardwareInfo.toNoteBytes();
         }, VirtualExecutors.getVirtualExecutor());
     }
 

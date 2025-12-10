@@ -53,7 +53,7 @@ public class SecureInputDetector {
                 hello.put(Keys.CMD, ProtocolMesssages.HELLO);
                 hello.put(Keys.VERSION, new NoteBytes("1.0.0"));
                 
-                byte[] helloBytes = hello.getNoteBytesObject().get();
+                byte[] helloBytes = hello.toNoteBytes().get();
                 ByteBuffer buffer = ByteBuffer.wrap(helloBytes);
                 channel.write(buffer);
                 
@@ -93,7 +93,7 @@ public class SecureInputDetector {
                 NoteBytesMap discover = new NoteBytesMap();
                 discover.put(Keys.CMD, ProtocolMesssages.REQUEST_DISCOVERY);
                 
-                byte[] discoverBytes = discover.getNoteBytesObject().get();
+                byte[] discoverBytes = discover.toNoteBytes().get();
                 ByteBuffer buffer = ByteBuffer.wrap(discoverBytes);
                 channel.write(buffer);
                 

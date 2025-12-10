@@ -213,7 +213,7 @@ public class PolicyManifest {
         requestedCapabilities.forEach(cap -> capsArr.add(cap.toNoteBytes()));
         map.put("requested_capabilities", capsArr);
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
     
     public static PolicyManifest fromNoteBytes(NoteBytesMap map) {

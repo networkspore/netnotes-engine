@@ -189,7 +189,7 @@ public class InstallationRegistry extends FlowProcess {
             );
         }
         
-        return registryFile.write(packagesMap.getNoteBytesObject())
+        return registryFile.write(packagesMap.toNoteBytes())
             .thenRun(() -> {
                 System.out.println("[InstallationRegistry] Saved " + 
                     installed.size() + " packages to file");
@@ -210,7 +210,7 @@ public class InstallationRegistry extends FlowProcess {
         event.put(Keys.PACKAGE_ID, packageId);
         event.put(Keys.TIMESTAMP, new NoteBytes(System.currentTimeMillis()));
         
-        emit(event.getNoteBytesObject());
+        emit(event.toNoteBytes());
     }
     
     @Override

@@ -7,8 +7,6 @@ import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
-import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.nodes.PackageId;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
@@ -17,10 +15,7 @@ import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
-import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
  * PackageConfigurationScreen - Modify package configuration
@@ -49,15 +44,19 @@ class PackageConfigurationScreen extends TerminalScreen {
     private PasswordReader passwordReader;
     private TerminalInputReader inputReader;
     private Runnable onCompleteCallback;
+    private final NodeCommands nodeCommands;
     
     public PackageConfigurationScreen(
-            String name,
-            SystemTerminalContainer terminal,
-            InputDevice keyboard,
-            InstalledPackage pkg) {
+        String name,
+        SystemTerminalContainer terminal,
+        InputDevice keyboard,
+        InstalledPackage pkg,
+        NodeCommands nodeCommands
+    ) {
         super(name, terminal, keyboard);
         this.originalPackage = pkg;
         this.newProcessConfig = pkg.getProcessConfig();
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnComplete(Runnable callback) {
@@ -225,48 +224,38 @@ class PackageConfigurationScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(11, 12, 
                 "New ProcessId: " + newProcessConfig.getProcessId()))
             .thenCompose(v -> terminal.printAt(13, 10, 
-                "⚠️  Warning: This will require reloading any running instances"))
+                "⚠️ Warning: This will require reloading any running instances"))
             .thenCompose(v -> terminal.printAt(15, 10, 
-                "Enter password to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(15, 40))
-            .thenRun(this::startPasswordEntry);
+                "Type 'CONFIRM' to proceed:"))
+            .thenCompose(v -> terminal.moveCursor(15, 36))
+            .thenRun(this::startConfirmationEntry);
     }
     
-    private void startPasswordEntry() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+    private void startConfirmationEntry() {
+        inputReader = new TerminalInputReader(terminal, 15, 36, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
         
-        passwordReader.setOnPassword(password -> {
+        inputReader.setOnComplete(input -> {
             keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+            inputReader.close();
+            inputReader = null;
             
-            RuntimeAccess access = terminal.getSystemAccess();
-            access.verifyPassword(password)
-                .thenAccept(valid -> {
-                    if (valid) {
-                        saveConfiguration(password);
-                    } else {
-                        password.close();
-                        terminal.clear()
-                            .thenCompose(v -> terminal.printError("Invalid password"))
-                            .thenCompose(v -> terminal.printAt(10, 10, 
-                                "Press any key to try again..."))
-                            .thenRun(() -> waitForAnyKey(() -> render()));
-                    }
-                })
-                .exceptionally(ex -> {
-                    password.close();
-                    terminal.printError("Verification failed: " + ex.getMessage())
-                        .thenCompose(v -> terminal.printAt(10, 10, 
-                            "Press any key to return..."))
-                        .thenRun(() -> waitForAnyKey(() -> {
-                            if (onCompleteCallback != null) {
-                                onCompleteCallback.run();
-                            }
-                        }));
-                    return null;
-                });
+            if ("CONFIRM".equals(input)) {
+                saveConfiguration();
+            } else {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Confirmation failed"))
+                    .thenCompose(v -> terminal.printAt(10, 10, 
+                        "Press any key to try again..."))
+                    .thenRun(() -> waitForAnyKey(() -> render()));
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            inputReader = null;
+            cancelConfiguration();
         });
     }
     
@@ -278,31 +267,19 @@ class PackageConfigurationScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(7, 10, "Please wait..."));
     }
     
-    private void saveConfiguration(NoteBytesEphemeral password) {
+    private void saveConfiguration() {
         currentStep = Step.SAVING;
         render();
         
-        RuntimeAccess access = terminal.getSystemAccess();
-        
-        // TODO: Implement updatePackageConfiguration in RuntimeAccess
-        // This would:
-        // 1. Update the InstalledPackage with new ProcessConfig
-        // 2. Save to InstallationRegistry
-        // 3. Stop any running instances
-        // 4. Update file system paths if necessary
-        
-        access.updatePackageConfiguration(
+        nodeCommands.updatePackageConfiguration(
                 originalPackage.getPackageId(),
-                newProcessConfig,
-                password
+                newProcessConfig
             )
             .thenAccept(v -> {
-                password.close();
                 currentStep = Step.COMPLETE;
                 render();
             })
             .exceptionally(ex -> {
-                password.close();
                 terminal.clear()
                     .thenCompose(v -> terminal.printError(
                         "Failed to save configuration: " + ex.getMessage()))
@@ -316,6 +293,7 @@ class PackageConfigurationScreen extends TerminalScreen {
                 return null;
             });
     }
+
     
     // ===== STEP 5: COMPLETE =====
     

@@ -11,7 +11,10 @@ import java.util.concurrent.CompletionException;
 
 import javax.crypto.SecretKey;
 
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
+import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 
+import io.netnotes.engine.crypto.AsymmetricPairs;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.crypto.RandomService;
@@ -97,6 +100,10 @@ public class SettingsData {
 
     private SecretKey m_oldKey = null;
     private SecretKey m_secretKey = null;
+
+    private AsymmetricPairs m_asymPairs = new AsymmetricPairs();
+    private AsymmetricPairs m_oldAsymPairs = null;
+    
     private NoteBytes m_oldSalt = null;
     private NoteBytes m_oldBcrypt = null;
     private NoteBytes m_salt = null;
@@ -189,6 +196,7 @@ public class SettingsData {
             m_oldKey = m_secretKey;
             m_oldSalt = m_salt;
             m_oldBcrypt = m_bcryptKey;
+
             NoteBytes salt = new NoteBytes(RandomService.getRandomBytes(16));
 
             NoteBytes bcrypt = HashServices.getBcryptHash(newPassword);
@@ -257,6 +265,67 @@ public class SettingsData {
 
     public SecretKey getSecretKey(){
         return m_secretKey;
+    }
+
+    public CompletableFuture<AsymmetricPairs> getAsymmetricPairs(NoteBytesEphemeral password){
+        return verifyPassword(password)
+            .thenApply(verified->{
+                if(verified){
+                    return m_asymPairs;
+                }else{
+                    throw new CompletionException("Verification required", new InvalidPasswordException("Invalid password"));
+                }
+
+            });
+    }
+
+    
+
+    public CompletableFuture<AsymmetricPairs> rotateKeys(NoteBytesEphemeral password){
+        return verifyPassword(password)
+            .thenApply(verified->{
+                if(verified){
+                    m_oldAsymPairs = m_asymPairs;
+                    m_asymPairs = new AsymmetricPairs();
+
+                    return m_asymPairs;
+                }else{
+                    throw new CompletionException("Verification required", new InvalidPasswordException("Invalid password"));
+                }
+
+            });
+    }
+
+    public CompletableFuture<AsymmetricPairs> undoRotateKeys(NoteBytesEphemeral password){
+        if(m_oldAsymPairs != null){
+            return verifyPassword(password)
+                .thenApply(verified->{
+                    if(verified){
+                    
+                        m_asymPairs = m_oldAsymPairs;
+                        m_oldAsymPairs = m_asymPairs;
+
+                        return m_asymPairs;
+                    }else{
+                        throw new CompletionException("Verification required", new InvalidPasswordException("Invalid password"));
+                    }
+
+                });
+        }else{
+            return CompletableFuture.failedFuture(new NullPointerException("Asym pairs are null"));
+        }
+    }
+
+    public void clearOldAsymmetricPairs(){
+        m_oldAsymPairs = null;
+    }
+
+    public Ed25519PublicKeyParameters getSigningPublicKey(){
+        return m_asymPairs.getSigningPublicKey();
+    }
+
+    public X25519PublicKeyParameters getExchangePublicKey(){
+        return m_asymPairs.getExchangePublicKey();
     }
 
     public void setSecretKey(SecretKey secretKey){
@@ -329,7 +398,7 @@ public class SettingsData {
     public static CompletableFuture<Void> saveBootstrapConfig( NoteBytesMap map){
         return CompletableFuture.runAsync(()->{
             try {
-                saveBootstrapConfig( map.getNoteBytesObject());
+                saveBootstrapConfig( map.toNoteBytes());
             } catch (IOException e) {
                 throw new CompletionException("Failed to save", e);
             }

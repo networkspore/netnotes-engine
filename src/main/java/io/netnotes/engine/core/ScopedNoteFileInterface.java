@@ -1,6 +1,7 @@
 package io.netnotes.engine.core;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
@@ -68,8 +69,8 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
     @Override
     public CompletableFuture<NoteFile> getNoteFile(ContextPath requestedPath) {
         if (requestedPath == null) {
-            return CompletableFuture.failedFuture(
-                new NullPointerException("Path is null"));
+            return  CompletableFuture.failedFuture(new CompletionException("Invalid path",
+                new NullPointerException("Path is null")));
         }
         
         return CompletableFuture.supplyAsync(() -> {
@@ -78,11 +79,11 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
             PathResolution resolution = resolvePath(requestedPath);
             
             if (resolution == null || !resolution.allowed) {
-                throw new SecurityException(String.format(
+                throw new CompletionException("Access denied", new SecurityException(String.format(
                     "Cannot access '%s' from base '%s'%s",
                     requestedPath,
                     dataRootPath
-                ));
+                )));
             }
             
             return resolution.resolvedPath;
@@ -94,8 +95,8 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
    @Override
     public CompletableFuture<Void> deleteNoteFile(ContextPath deletePath, boolean recurrsive, AsyncNoteBytesWriter progress) {
         if (deletePath == null) {
-            return CompletableFuture.failedFuture(
-                new NullPointerException("Path is null"));
+            return  CompletableFuture.failedFuture(new CompletionException("Invalid path",
+                new NullPointerException("Path is null")));
         }
         
         return CompletableFuture.supplyAsync(() -> {
@@ -104,11 +105,11 @@ public class ScopedNoteFileInterface implements NoteFileServiceInterface {
             PathResolution resolution = resolvePath(deletePath);
             
             if (resolution == null || !resolution.allowed) {
-                throw new SecurityException(String.format(
+                throw new CompletionException("Access denied", new SecurityException(String.format(
                     "Cannot access '%s' from base '%s'%s",
                     deletePath,
                     dataRootPath
-                ));
+                )));
             }
             
             return resolution.resolvedPath;

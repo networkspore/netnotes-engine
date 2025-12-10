@@ -2,7 +2,10 @@ package io.netnotes.engine.core.system.control.nodes;
 
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
  * NodeInstance - Wrapper around INode with lifecycle state
@@ -62,6 +65,76 @@ public class NodeInstance {
     public int getCrashCount() { return crashCount; }
     public void incrementCrashCount() { crashCount++; }
 
+
+
+
+    /**
+     * Serialize to NoteBytes for transmission
+     * 
+     * Note: INode cannot be serialized, so this creates a metadata-only
+     * representation suitable for queries and UI display
+     */
+    public NoteBytesObject toNoteBytes() {
+        NoteBytesMap map = new NoteBytesMap();
+        
+        // Identity
+        map.put(Keys.INSTANCE_ID, instanceId.toString());
+        
+        // Package info (full InstalledPackage)
+        map.put(NodeConstants.INSTALLED_PACKAGE, pkg.toNoteBytes());
+        
+        // State
+        map.put(Keys.STATE, state.name());
+        
+        // Runtime info
+        map.put(NodeConstants.LOAD_TIME, loadTime);
+        map.put(NodeConstants.UPTIME, getUptime());
+        map.put(NodeConstants.CRASH_COUNT, crashCount);
+        
+        return map.toNoteBytes();
+    }
+
+    /**
+     * Partial deserialization from NoteBytes
+     * 
+     * Creates a metadata-only NodeInstance (without actual INode)
+     * Used for remote queries and UI display
+     */
+    public static NodeInstance fromNoteBytesMetadata(NoteBytesMap map) {
+        try {
+            // Parse installed package
+            InstalledPackage pkg = InstalledPackage.fromNoteBytes(
+                map.get(NodeConstants.INSTALLED_PACKAGE).getAsNoteBytesMap()
+            );
+            
+            // Create instance without INode (null)
+            NodeInstance instance = new NodeInstance(pkg, null);
+            
+            // Set state
+            String stateStr = map.get(Keys.STATE).getAsString();
+            instance.setState(NodeState.valueOf(stateStr));
+            
+            // Note: instanceId from map is ignored - generate() was called in constructor
+            // For full reconstruction, would need additional constructor
+            
+            return instance;
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize NodeInstance metadata", e);
+        }
+    }
+
+    /**
+     * Create metadata-only instance from full instance
+     * Used when transmitting instance info over network
+     */
+    public NodeInstance toMetadataOnly() {
+        NodeInstance metadata = new NodeInstance(pkg, null);
+        metadata.setState(this.state);
+        // Copy other fields as needed
+        return metadata;
+    }
+
     @Override
     public String toString() {
         return String.format(
@@ -72,4 +145,6 @@ public class NodeInstance {
             state
         );
     }
+
+
 }

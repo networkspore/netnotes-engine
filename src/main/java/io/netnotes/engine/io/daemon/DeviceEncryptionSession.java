@@ -1,7 +1,8 @@
 package io.netnotes.engine.io.daemon;
 
 
-import io.netnotes.engine.crypto.CryptoService;
+import io.netnotes.engine.crypto.DHKeyExchange;
+import io.netnotes.engine.crypto.EncryptedSession;
 import io.netnotes.engine.io.ContextPath;
 
 /**
@@ -23,8 +24,8 @@ public class DeviceEncryptionSession {
     private final String deviceId;
     private final ContextPath devicePath;
     
-    private CryptoService.DHKeyExchange keyExchange;
-    private CryptoService.EncryptedSession encryptedSession;
+    private DHKeyExchange keyExchange;
+    private EncryptedSession encryptedSession;
     
     private volatile boolean active = false;
     
@@ -43,7 +44,7 @@ public class DeviceEncryptionSession {
         }
         
         // Generate DH key pair
-        keyExchange = new CryptoService.DHKeyExchange();
+        keyExchange = new DHKeyExchange();
         keyExchange.generateKeyPair();
         
         // Set peer's public key
@@ -67,7 +68,7 @@ public class DeviceEncryptionSession {
         }
         
         // Create encrypted session
-        encryptedSession = new CryptoService.EncryptedSession();
+        encryptedSession = new EncryptedSession();
         encryptedSession.init(keyExchange.getSharedSecret());
         encryptedSession.setIV(serverIV);
         

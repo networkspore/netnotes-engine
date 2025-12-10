@@ -17,7 +17,7 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
-public class NodeKeyPairs{
+public class AsymmetricPairs{
    
     public static final NoteBytesReadOnly EXCHANGE_PRIVATE_KEY = new NoteBytesReadOnly("x25519PK");
     public static final NoteBytesReadOnly SIGNATURE_PRIVATE_KEY = new NoteBytesReadOnly("ed25519PK");
@@ -40,7 +40,7 @@ public class NodeKeyPairs{
         return m_isInternal;
     }
 
-    public NodeKeyPairs(){
+    public AsymmetricPairs(){
         
         Ed25519KeyPairGenerator signingGen = new Ed25519KeyPairGenerator();
         X25519KeyPairGenerator exchangeGen = new X25519KeyPairGenerator();
@@ -59,7 +59,7 @@ public class NodeKeyPairs{
         this.m_exchangePublicKey = (X25519PublicKeyParameters) exchangePair.getPublic(); 
     }
 
-    public NodeKeyPairs(NoteBytesObject obj){
+    public AsymmetricPairs(NoteBytesObject obj){
         m_isInternal = false;
         NoteBytesPair exPrivKeyPair = obj.get(EXCHANGE_PRIVATE_KEY);
         NoteBytesPair sigPrivKeyPair = obj.get(SIGNATURE_PRIVATE_KEY);
@@ -98,11 +98,11 @@ public class NodeKeyPairs{
         return m_exchangePrivateKey;
     }
 
-     public Ed25519PublicKeyParameters m_signPublicKey() {
+     public Ed25519PublicKeyParameters getSigningPublicKey() {
         return m_signPublicKey;
     }
 
-    public Ed25519PrivateKeyParameters m_signPrivateKey() {
+    public Ed25519PrivateKeyParameters getSigningPrivateKey() {
         return m_signPrivateKey;
     }
 

@@ -5,9 +5,10 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.PasswordReader;
+import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.nodes.PackageId;
+
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
@@ -15,7 +16,6 @@ import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 
 /**
  * PackageUninstallScreen - Comprehensive package uninstall
@@ -45,14 +45,18 @@ class PackageUninstallScreen extends TerminalScreen {
     private boolean deleteData = false;
     private PasswordReader passwordReader;
     private Runnable onCompleteCallback;
+    private final NodeCommands nodeCommands;
     
     public PackageUninstallScreen(
-            String name,
-            SystemTerminalContainer terminal,
-            InputDevice keyboard,
-            InstalledPackage pkg) {
+        String name,
+        SystemTerminalContainer terminal,
+        InputDevice keyboard,
+        InstalledPackage pkg,
+        NodeCommands nodeCommands
+    ) {
         super(name, terminal, keyboard);
         this.packageToUninstall = pkg;
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnComplete(Runnable callback) {
@@ -80,7 +84,7 @@ class PackageUninstallScreen extends TerminalScreen {
                     case SHOW_OPTIONS:
                         return renderUninstallOptions();
                     case PASSWORD_CONFIRM:
-                        return renderPasswordConfirm();
+                        return renderConfirm();
                     case UNINSTALLING:
                         return renderUninstalling();
                     case COMPLETE:
@@ -97,24 +101,15 @@ class PackageUninstallScreen extends TerminalScreen {
         return terminal.printTitle("Uninstall Package")
             .thenCompose(v -> terminal.printAt(5, 10, 
                 "Checking for running instances..."))
-            .thenCompose(v -> {
-                RuntimeAccess access = terminal.getSystemAccess();
-                // TODO: Implement getInstancesByPackage in RuntimeAccess
-                return access.getRunningInstances()
-                    .thenApply(instances -> instances.stream()
-                        .filter(inst -> inst.getPackageId().equals(
-                            packageToUninstall.getPackageId()))
-                        .collect(java.util.stream.Collectors.toList()));
-            })
+            .thenCompose(v -> nodeCommands.getInstancesByPackage(
+                packageToUninstall.getPackageId()))
             .thenCompose(instances -> {
                 this.runningInstances = instances;
                 
                 if (instances.isEmpty()) {
-                    // No running instances, proceed to options
                     currentStep = Step.SHOW_OPTIONS;
                     return render();
                 } else {
-                    // Must stop instances first
                     return showRunningInstancesWarning();
                 }
             });
@@ -162,9 +157,8 @@ class PackageUninstallScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(5, 10, 
                 "Stopping " + runningInstances.size() + " instances..."))
             .thenCompose(v -> {
-                RuntimeAccess access = terminal.getSystemAccess();
                 List<CompletableFuture<Void>> stopFutures = runningInstances.stream()
-                    .map(inst -> access.unloadNode(inst.getInstanceId()))
+                    .map(inst -> nodeCommands.unloadNode(inst.getInstanceId()))
                     .toList();
                 
                 return CompletableFuture.allOf(
@@ -172,8 +166,7 @@ class PackageUninstallScreen extends TerminalScreen {
             })
             .thenAccept(v -> {
                 terminal.clear()
-                    .thenCompose(v2 -> terminal.printSuccess(
-                        "✓ All instances stopped"))
+                    .thenCompose(v2 -> terminal.printSuccess("✓ All instances stopped"))
                     .thenCompose(v2 -> terminal.printAt(7, 10, 
                         "Press any key to continue..."))
                     .thenRun(() -> waitForAnyKey(() -> {
@@ -242,9 +235,9 @@ class PackageUninstallScreen extends TerminalScreen {
     
     // ===== STEP 3: PASSWORD CONFIRM =====
     
-    private CompletableFuture<Void> renderPasswordConfirm() {
+    private CompletableFuture<Void> renderConfirm() {
         return terminal.printTitle("Confirm Uninstall")
-            .thenCompose(v -> terminal.printAt(5, 10, "⚠️  WARNING"))
+            .thenCompose(v -> terminal.printAt(5, 10, "⚠️ WARNING"))
             .thenCompose(v -> terminal.printAt(7, 10, 
                 "You are about to uninstall:"))
             .thenCompose(v -> terminal.printAt(8, 12, 
@@ -254,42 +247,34 @@ class PackageUninstallScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(11, 10, 
                 deleteData ? "Data will be DELETED" : "Data will be KEPT"))
             .thenCompose(v -> terminal.printAt(13, 10, 
-                "Enter password to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(13, 40))
-            .thenRun(this::startPasswordEntry);
+                "Type 'CONFIRM' to proceed:"))
+            .thenCompose(v -> terminal.moveCursor(13, 36))
+            .thenRun(this::startConfirmationEntry);
     }
     
-    private void startPasswordEntry() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+    private void startConfirmationEntry() {
+        TerminalInputReader inputReader = new TerminalInputReader(terminal, 13, 36, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
         
-        passwordReader.setOnPassword(password -> {
+        inputReader.setOnComplete(input -> {
             keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+            inputReader.close();
             
-            RuntimeAccess access = terminal.getSystemAccess();
-            access.verifyPassword(password)
-                .thenAccept(valid -> {
-                    if (valid) {
-                        performUninstall(password);
-                    } else {
-                        password.close();
-                        terminal.clear()
-                            .thenCompose(v -> terminal.printError("Invalid password"))
-                            .thenCompose(v -> terminal.printAt(10, 10, 
-                                "Press any key to try again..."))
-                            .thenRun(() -> waitForAnyKey(() -> render()));
-                    }
-                })
-                .exceptionally(ex -> {
-                    password.close();
-                    terminal.printError("Verification failed: " + ex.getMessage())
-                        .thenCompose(v -> terminal.printAt(10, 10, 
-                            "Press any key to return..."))
-                        .thenRun(() -> waitForAnyKey(this::cancelUninstall));
-                    return null;
-                });
+            if ("CONFIRM".equals(input)) {
+                performUninstall();
+            } else {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Confirmation failed"))
+                    .thenCompose(v -> terminal.printAt(10, 10, 
+                        "Press any key to return..."))
+                    .thenRun(() -> waitForAnyKey(() -> render()));
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            cancelUninstall();
         });
     }
     
@@ -300,31 +285,21 @@ class PackageUninstallScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(5, 10, "Uninstalling..."))
             .thenCompose(v -> terminal.printAt(7, 10, "Please wait..."));
             // TODO: Add progress bar here when progress API is ready
-    }
-    
-    private void performUninstall(NoteBytesEphemeral password) {
+        }
+        
+        private void performUninstall() {
         currentStep = Step.UNINSTALLING;
         render();
         
-        RuntimeAccess access = terminal.getSystemAccess();
-        PackageId packageId = packageToUninstall.getPackageId();
-
-        
-        // TODO: Use enhanced uninstallPackage(packageId, deleteData, password)
-        // For now, use basic version 
-        // TODO: implement progress tracking
-        access.uninstallPackage(packageId, null)
+        nodeCommands.uninstallPackage(
+                packageToUninstall.getPackageId(),
+                deleteData
+            )
             .thenAccept(v -> {
-                password.close();
-                
-                // TODO: If deleteData was true, also delete data directory
-                // This would be part of the enhanced uninstallPackage method
-                
                 currentStep = Step.COMPLETE;
                 render();
             })
             .exceptionally(ex -> {
-                password.close();
                 terminal.clear()
                     .thenCompose(v -> terminal.printError(
                         "Uninstall failed: " + ex.getMessage()))

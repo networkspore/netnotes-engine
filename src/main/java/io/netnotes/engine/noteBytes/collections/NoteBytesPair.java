@@ -44,6 +44,10 @@ public class NoteBytesPair {
         this(key, value.getSegments());
     }
 
+    public NoteBytesPair(NoteBytes key, NoteBytesMap map){
+        this(key, map.toNoteBytes());
+    }
+
 
     public NoteBytesPair(String key, String value){
         this(new NoteString(key), new NoteString(value));

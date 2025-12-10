@@ -156,13 +156,13 @@ public class ClientSession extends FlowProcess {
                 }
                 response.put(Keys.ITEMS, deviceArray);
                 
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
                 NoteBytesMap errorResponse = new NoteBytesMap();
                 errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 errorResponse.put(Keys.MSG, ex.getMessage());
-                reply(request, errorResponse.getNoteBytesObject());
+                reply(request, errorResponse.toNoteBytes());
                 return null;
             });
     }
@@ -207,7 +207,7 @@ public class ClientSession extends FlowProcess {
         }
         response.put(Keys.ITEMS, deviceArray);
         
-        reply(request, response.getNoteBytesObject());
+        reply(request, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }
     
@@ -236,13 +236,13 @@ public class ClientSession extends FlowProcess {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 response.put(Keys.ITEM_PATH, new NoteBytes(devicePath.toString()));
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
                 NoteBytesMap errorResponse = new NoteBytesMap();
                 errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
-                reply(request, errorResponse.getNoteBytesObject());
+                reply(request, errorResponse.toNoteBytes());
                 return null;
             });
     }
@@ -319,7 +319,7 @@ public class ClientSession extends FlowProcess {
             .thenAccept(v -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(request, response.getNoteBytesObject());
+                reply(request, response.toNoteBytes());
             });
     }
     

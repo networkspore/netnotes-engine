@@ -872,7 +872,7 @@ public class NoteBytes {
         }else if( obj instanceof NoteBytesConcurrentMapEphemeral){
             return ((NoteBytesConcurrentMapEphemeral) obj).getNoteBytesEphemeral();
         } else if(obj instanceof NoteBytesMap){
-            return ((NoteBytesMap)obj).getNoteBytesObject();
+            return ((NoteBytesMap)obj).toNoteBytes();
         }else if(obj instanceof NoteSerializable){
             return (NoteSerializable) obj;
         }else if(obj instanceof NoteBytes){

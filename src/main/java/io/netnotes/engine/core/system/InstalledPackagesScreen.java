@@ -5,9 +5,9 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.PasswordReader;
+import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.nodes.NodeLoadRequest;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
@@ -36,7 +36,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         UNINSTALLING
     }
     
-    private final ContextPath basePath;
+    private final ContextPath menuBasePath;
     private View currentView = View.PACKAGE_LIST;
     
     private List<InstalledPackage> packages;
@@ -49,10 +49,12 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     // For tracking running instances
     private List<NodeInstance> runningInstances;
+    private final NodeCommands nodeCommands;
     
-    public InstalledPackagesScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
+    public InstalledPackagesScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard, NodeCommands nodeCommands) {
         super(name, terminal, keyboard);
-        this.basePath = ContextPath.parse("installed-packages");
+        this.menuBasePath = ContextPath.parse("installed-packages");
+        this.nodeCommands = nodeCommands;
     }
     
     public void setOnBack(Runnable callback) {
@@ -91,18 +93,12 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== PACKAGE LIST =====
     
     private CompletableFuture<Void> loadPackages() {
-        RuntimeAccess access = terminal.getSystemAccess();
-        if (access == null) {
-            return showError("System access not available");
-        }
-        
-        // Load both packages and running instances
         return terminal.clear()
             .thenCompose(v -> terminal.printTitle("Installed Packages"))
             .thenCompose(v -> terminal.printAt(5, 10, "Loading..."))
             .thenCompose(v -> CompletableFuture.allOf(
-                access.getInstalledPackages().thenAccept(pkgs -> this.packages = pkgs),
-                access.getRunningInstances().thenAccept(inst -> this.runningInstances = inst)
+                nodeCommands.getInstalledPackages().thenAccept(pkgs -> this.packages = pkgs),
+                nodeCommands.getRunningInstances().thenAccept(inst -> this.runningInstances = inst)
             ))
             .thenRun(() -> {
                 this.selectedIndex = 0;
@@ -190,7 +186,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         
         boolean isRunning = isPackageRunning(selectedPackage);
         
-        currentMenu = new MenuContext(basePath.append("details"), selectedPackage.getName())
+        currentMenu = new MenuContext(menuBasePath.append("details"), selectedPackage.getName())
             .addItem("load", "Load Instance", 
                 isRunning ? "Start another instance of this package" : "Start this package",
                 this::loadInstance)
@@ -223,10 +219,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         currentView = View.LOADING_INSTANCE;
         render();
         
-        RuntimeAccess access = terminal.getSystemAccess();
-        NodeLoadRequest request = new NodeLoadRequest(selectedPackage);
-        
-        access.loadNode(request)
+        nodeCommands.loadNode(selectedPackage.getPackageId().getId())
             .thenAccept(instance -> {
                 terminal.clear()
                     .thenCompose(v -> terminal.printSuccess("✓ Package loaded successfully"))
@@ -238,10 +231,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                         "State: " + instance.getState()))
                     .thenCompose(v -> terminal.printAt(11, 10, 
                         "Press any key to continue..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
-                        // Reload to show updated status
-                        loadPackages();
-                    }));
+                    .thenRun(() -> waitForAnyKey(() -> loadPackages()));
             })
             .exceptionally(ex -> {
                 terminal.clear()
@@ -275,7 +265,8 @@ class InstalledPackagesScreen extends TerminalScreen {
             "package-config",
             terminal,
             keyboard,
-            selectedPackage
+            selectedPackage,
+            nodeCommands
         );
         
         configScreen.setOnComplete(() -> {
@@ -350,7 +341,8 @@ class InstalledPackagesScreen extends TerminalScreen {
             "package-uninstall",
             terminal,
             keyboard,
-            selectedPackage
+            selectedPackage,
+            nodeCommands
         );
         
         uninstallScreen.setOnComplete(() -> {
@@ -362,13 +354,6 @@ class InstalledPackagesScreen extends TerminalScreen {
         uninstallScreen.onShow();
     }
     
-    // Old simple uninstall (kept as fallback)
-    private void startUninstall() {
-        keyboard.setEventConsumer(null);
-        currentView = View.CONFIRM_UNINSTALL;
-        render();
-    }
-    
     private void backToList() {
         keyboard.setEventConsumer(null);
         currentView = View.PACKAGE_LIST;
@@ -378,55 +363,50 @@ class InstalledPackagesScreen extends TerminalScreen {
     private CompletableFuture<Void> renderConfirmUninstall() {
         return terminal.clear()
             .thenCompose(v -> terminal.printTitle("Confirm Uninstall"))
-            .thenCompose(v -> terminal.printAt(5, 10, "⚠️  Uninstall package?"))
+            .thenCompose(v -> terminal.printAt(5, 10, "⚠️ Uninstall package?"))
             .thenCompose(v -> terminal.printAt(7, 10, "Package: " + selectedPackage.getName()))
             .thenCompose(v -> terminal.printAt(8, 10, "Version: " + selectedPackage.getVersion()))
             .thenCompose(v -> terminal.printAt(10, 10, "This action cannot be undone."))
-            .thenCompose(v -> terminal.printAt(12, 10, "Enter password to confirm:"))
+            .thenCompose(v -> terminal.printAt(12, 10, "Type 'CONFIRM' to proceed:"))
             .thenCompose(v -> terminal.moveCursor(12, 40))
-            .thenRun(this::startPasswordConfirmation);
+            .thenRun(this::startConfirmation);
     }
     
-    private void startPasswordConfirmation() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+    private void startConfirmation() {
+        TerminalInputReader inputReader = new TerminalInputReader(terminal, 12, 40, 20);
+        keyboard.setEventConsumer(inputReader.getEventConsumer());
         
-        passwordReader.setOnPassword(password -> {
+        inputReader.setOnComplete(input -> {
             keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+            inputReader.close();
             
-            RuntimeAccess access = terminal.getSystemAccess();
-            access.verifyPassword(password)
-                .thenAccept(valid -> {
-                    password.close();
-                    if (valid) {
-                        performUninstall();
-                    } else {
-                        terminal.clear()
-                            .thenCompose(v -> terminal.printError("Invalid password"))
-                            .thenCompose(v -> terminal.printAt(10, 10, "Press any key..."))
-                            .thenRun(() -> waitForAnyKey(() -> {
-                                currentView = View.PACKAGE_DETAILS;
-                                render();
-                            }));
-                    }
-                })
-                .exceptionally(ex -> {
-                    password.close();
-                    showError("Password verification failed: " + ex.getMessage());
-                    return null;
-                });
+            if ("CONFIRM".equals(input)) {
+                performUninstall();
+            } else {
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Confirmation failed"))
+                    .thenCompose(v -> terminal.printAt(10, 10, "Press any key..."))
+                    .thenRun(() -> waitForAnyKey(() -> {
+                        currentView = View.PACKAGE_DETAILS;
+                        render();
+                    }));
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            keyboard.setEventConsumer(null);
+            inputReader.close();
+            currentView = View.PACKAGE_DETAILS;
+            render();
         });
     }
+    
     
     private void performUninstall() {
         currentView = View.UNINSTALLING;
         render();
         
-        RuntimeAccess access = terminal.getSystemAccess();
-        //TODO: implement progress tracking
-        access.uninstallPackage(selectedPackage.getPackageId(), null)
+        nodeCommands.uninstallPackage(selectedPackage.getPackageId(), false)
             .thenAccept(v -> {
                 terminal.clear()
                     .thenCompose(v2 -> terminal.printSuccess("✓ Package uninstalled"))

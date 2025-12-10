@@ -245,7 +245,7 @@ public class PackageManifest {
             }
         }
         
-        return map.getNoteBytesObject();
+        return map.toNoteBytes();
     }
 
     public static PackageManifest fromNoteBytes(NoteBytesObject obj) {
@@ -342,7 +342,7 @@ public class PackageManifest {
             if (namespace != null) {
                 map.put("namespace", namespace);
             }
-            return map.getNoteBytesObject();
+            return map.toNoteBytes();
         }
         
         public static NamespaceRequirement fromNoteBytes(NoteBytesMap map) {
