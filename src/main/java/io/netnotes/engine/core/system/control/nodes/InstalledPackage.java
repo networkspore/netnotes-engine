@@ -84,15 +84,15 @@ public class InstalledPackage {
             new NoteBytesPair(Keys.VERSION, packageId.getVersion()),
             new NoteBytesPair(Keys.DESCRIPTION, description),
             // Manifest
-            new NoteBytesPair("manifest", manifest.toNoteBytes()),
+            new NoteBytesPair(NodeConstants.MANIFEST, manifest.toNoteBytes()),
             // Process configuration
-            new NoteBytesPair("process_config", processConfig.toNoteBytes()),
+            new NoteBytesPair(NodeConstants.PROCESS_CONFIG, processConfig.toNoteBytes()),
             // Security policy
-            new NoteBytesPair("security_policy", securityPolicy.toNoteBytes()),
+            new NoteBytesPair(NodeConstants.SECURITY_POLICY, securityPolicy.toNoteBytes()),
             // Install metadata
-            new NoteBytesPair("repository", repository),
-            new NoteBytesPair("installed_date", installedDate),
-            new NoteBytesPair("install_path", installPath.getSegments()) //ContextPath
+            new NoteBytesPair(NodeConstants.REPOSITORY, repository),
+            new NoteBytesPair(NodeConstants.INSTALLED_DATE, installedDate),
+            new NoteBytesPair(NodeConstants.INSTALLED_PATH, installPath.getSegments()) //ContextPath
         );
     }
     
@@ -104,29 +104,29 @@ public class InstalledPackage {
             // Package identity
             NoteBytesReadOnly pkgIdBytes = map.getReadOnly(Keys.PACKAGE_ID);
             String name = map.get(Keys.NAME).getAsString();
-            String version = map.get("version").getAsString();
+            String version = map.get(Keys.VERSION).getAsString();
             String description = map.get(Keys.DESCRIPTION).getAsString();
             
             PackageId packageId = new PackageId(pkgIdBytes, version);
             
             // Manifest
             PackageManifest manifest = PackageManifest.fromNoteBytes(
-                map.get("manifest").getAsNoteBytesObject()
+                map.get(NodeConstants.MANIFEST).getAsNoteBytesObject()
             );
             
             // Process configuration
             ProcessConfig processConfig = ProcessConfig.fromNoteBytes(
-                map.get("process_config").getAsNoteBytesMap()
+                map.get(NodeConstants.PROCESS_CONFIG).getAsNoteBytesMap()
             );
             
             // Security policy
             NodeSecurityPolicy securityPolicy = NodeSecurityPolicy.fromNoteBytes(
-                map.get("security_policy").getAsNoteBytesMap()
+                map.get(NodeConstants.SECURITY_POLICY).getAsNoteBytesMap()
             );
             
             // Install metadata
-            String repository = map.get("repository").getAsString();
-            long installedDate = map.get("installed_date").getAsLong();
+            String repository = map.get(NodeConstants.REPOSITORY).getAsString();
+            long installedDate = map.get(NodeConstants.INSTALLED_DATE).getAsLong();
             ContextPath installPath = ContextPath.of(map.get("install_path").getAsNoteBytesArrayReadOnly());
             
             return new InstalledPackage(

@@ -21,6 +21,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.core.system.control.nodes.security.NodeSecurityPolicy;
+import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -82,10 +83,10 @@ public class NodeController extends FlowProcess {
     // LIFECYCLE
     // ═══════════════════════════════════════════════════════════════════════
     
-    private void setupExecutorMap(){
+    private void setupExecutorMap() {
         m_executorMap.put(NodeConstants.LIST_INSTALLED, this::handleListInstalled);
         m_executorMap.put(NodeConstants.LIST_INSTANCES, this::handleListInstances);
-        m_executorMap.put(NodeConstants.INSTALLED_PACKAGE, this::handleInstallPackage);
+        m_executorMap.put(NodeConstants.INSTALL_PACKAGE, this::handleInstallPackage);
         m_executorMap.put(NodeConstants.UNINSTALL_PACKAGE, this::handleUninstallPackage);
         m_executorMap.put(NodeConstants.LOAD_NODE, this::handleLoadNode);
         m_executorMap.put(NodeConstants.UNLOAD_INSTANCE, this::handleUnloadInstance);
@@ -584,19 +585,22 @@ public class NodeController extends FlowProcess {
         
         
     }
-    private NoteBytesMap verifySignedMessage(NoteBytesReadOnly payload) throws SecurityException{
+    private NoteBytesMap verifySignedMessage(NoteBytesReadOnly payload) throws SecurityException {
         NoteBytesMap signedMessage = payload.getAsMap();
 
         NoteBytes signatureBytes = signedMessage.get(Keys.SIGNATURE);
         NoteBytes payloadBytes = signedMessage.get(Keys.PAYLOAD);
         NoteBytes timeStampBytes = signedMessage.get(Keys.TIMESTAMP);
 
-        if(signatureBytes != null && payloadBytes != null && timeStampBytes != null){
-            throw new IllegalArgumentException("[NodeController] Signed payload required");
+        // FIX: These should check if null (not if NOT null)
+        if (signatureBytes == null || payloadBytes == null || timeStampBytes == null) {
+            throw new IllegalArgumentException("[NodeController] Signed payload required with signature, payload, and timestamp");
         }
-        if(payloadBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+        
+        if (payloadBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
             throw new IllegalArgumentException("[NodeController] NoteBytesObject type required");
         }
+        
         checkTimestamp(timeStampBytes.getAsLong());
 
         Ed25519Signer verifier = new Ed25519Signer();
@@ -604,8 +608,8 @@ public class NodeController extends FlowProcess {
         byte[] dataBytes = payloadBytes.getBytes();
         verifier.update(dataBytes, 0, dataBytes.length);
         
-        if(verifier.verifySignature(signatureBytes.getBytes())){
-           return payloadBytes.getAsMap();
+        if (verifier.verifySignature(signatureBytes.getBytes())) {
+            return payloadBytes.getAsMap();
         }
 
         throw new SecurityException("[NodeController] Invalid signature");
@@ -734,24 +738,6 @@ public class NodeController extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
     
-    private CompletableFuture<Void> handleInstallPackage(
-        NoteBytesMap message,
-        RoutedPacket packet
-    ) {
-        // Parse request
-        PackageInfo packageInfo = PackageInfo.fromNoteBytes(
-            message.get(NodeConstants.PACKAGE_INFO).getAsNoteBytesMap());
-        // ... parse other fields
-        
-        // Note: Password already verified by caller!
-        // Just execute the installation
-        
-        // Build InstallationRequest
-        // Execute installation
-        // Send response
-        
-        return CompletableFuture.completedFuture(null); // TODO
-    }
     
     private CompletableFuture<Void> handleUninstallPackage(
         NoteBytesMap message,
@@ -765,7 +751,6 @@ public class NodeController extends FlowProcess {
         );
         boolean deleteData = message.get(NodeConstants.DELETE_DATA).getAsBoolean();
         
-        // Note: Password already verified by caller!
         // TODO: progress
         return uninstallPackage(packageId, null)
             .thenCompose(v -> {
@@ -801,27 +786,225 @@ public class NodeController extends FlowProcess {
         }
     }
     
+    private CompletableFuture<Void> handleInstallPackage(
+        NoteBytesMap message,
+        RoutedPacket packet
+    ) {
+        try {
+            // Parse installation request components
+            PackageInfo packageInfo = PackageInfo.fromNoteBytes(
+                message.get(NodeConstants.PACKAGE_INFO).getAsNoteBytesMap());
+            
+            ProcessConfig processConfig = ProcessConfig.fromNoteBytes(
+                message.get(NodeConstants.PROCESS_CONFIG).getAsNoteBytesMap());
+            
+            PolicyManifest policyManifest = PolicyManifest.fromNoteBytes(
+                message.get(NodeConstants.POLICY_MANIFEST).getAsNoteBytesMap());
+            
+            boolean loadImmediately = message.get(NodeConstants.LOAD_IMMEDIATELY).getAsBoolean();
+            
+            // Build InstallationRequest
+            // Note: Password already verified by caller - signature confirmed it
+            InstallationRequest request = new InstallationRequest(
+                packageInfo,
+                processConfig,
+                policyManifest,
+                null,  // password not needed - already verified
+                loadImmediately,
+                false, // userReviewedSource
+                null   // sourceRepo
+            );
+            
+            // Execute installation
+            return installPackage(request)
+                .thenAccept(installedPackage -> {
+                    reply(packet,
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(NodeConstants.INSTALLED_PACKAGE, installedPackage.toNoteBytes())
+                    );
+                })
+                .exceptionally(ex -> {
+                    handleCommandError(packet, "Installation failed", ex);
+                    return null;
+                });
+                
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Failed to parse install request: " + e.getMessage()));
+        }
+    }
+    
     private CompletableFuture<Void> handleLoadNode(
         NoteBytesMap message,
         RoutedPacket packet
     ) {
-        // Similar pattern
-        return CompletableFuture.completedFuture(null); // TODO
+        try {
+            // Parse package ID
+            NoteBytesReadOnly pkgIdBytes = message.getReadOnly(Keys.PACKAGE_ID);
+            if (pkgIdBytes == null) {
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("package_id required"));
+            }
+            
+            PackageId packageId = new PackageId(
+                pkgIdBytes,
+                "" // Version handled internally
+            );
+            
+            // Get installed package from registry
+            InstalledPackage pkg = installationRegistry.getPackage(packageId);
+            if (pkg == null) {
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("Package not found: " + packageId));
+            }
+            
+            // Create load request
+            NodeLoadRequest loadRequest = new NodeLoadRequest(pkg);
+            
+            // Load the node
+            return loadNode(loadRequest)
+                .thenAccept(instance -> {
+                    // Serialize instance info for response
+                    NoteBytesMap instanceData = serializeInstanceInfo(instance);
+                    
+                    reply(packet,
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(Keys.INSTANCE, instanceData)
+                    );
+                })
+                .exceptionally(ex -> {
+                    handleCommandError(packet, "Load failed", ex);
+                    return null;
+                });
+                
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Failed to parse load request: " + e.getMessage()));
+        }
     }
     
     private CompletableFuture<Void> handleUnloadInstance(
         NoteBytesMap message,
         RoutedPacket packet
     ) {
-        // Similar pattern
-        return CompletableFuture.completedFuture(null); // TODO
+        try {
+            // Parse instance ID
+            String instanceIdStr = message.get(Keys.INSTANCE_ID).getAsString();
+            if (instanceIdStr == null) {
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("instance_id required"));
+            }
+            
+            InstanceId instanceId = InstanceId.fromString(instanceIdStr);
+            
+            // Unload the instance
+            return unloadInstance(instanceId)
+                .thenRun(() -> {
+                    reply(packet,
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS)
+                    );
+                })
+                .exceptionally(ex -> {
+                    handleCommandError(packet, "Unload failed", ex);
+                    return null;
+                });
+                
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Failed to parse unload request: " + e.getMessage()));
+        }
     }
     
     private CompletableFuture<Void> handleUpdateConfig(
         NoteBytesMap message,
         RoutedPacket packet
     ) {
-        // Note: Password already verified by caller!
-        return CompletableFuture.completedFuture(null); // TODO
+        try {
+            // Parse package ID
+            NoteBytesReadOnly pkgIdBytes = message.getReadOnly(Keys.PACKAGE_ID);
+            if (pkgIdBytes == null) {
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("package_id required"));
+            }
+            
+            PackageId packageId = new PackageId(
+                pkgIdBytes,
+                "" // Version handled internally
+            );
+            
+            // Parse new process config
+            ProcessConfig newProcessConfig = ProcessConfig.fromNoteBytes(
+                message.get(NodeConstants.PROCESS_CONFIG).getAsNoteBytesMap());
+            
+            // Note: Password already verified by caller - signature confirmed it
+            return updatePackageConfiguration(packageId, newProcessConfig)
+                .thenRun(() -> {
+                    reply(packet,
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS)
+                    );
+                })
+                .exceptionally(ex -> {
+                    handleCommandError(packet, "Config update failed", ex);
+                    return null;
+                });
+                
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Failed to parse update request: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Serialize NodeInstance to NoteBytesMap for transmission
+     * 
+     * Creates a lightweight representation without the actual INode object
+     */
+    private NoteBytesMap serializeInstanceInfo(NodeInstance instance) {
+        NoteBytesMap data = new NoteBytesMap();
+        
+        // Instance identification
+        data.put(Keys.INSTANCE_ID, instance.getInstanceId().toString());
+        data.put(Keys.STATE, instance.getState().name());
+        
+        // Package information
+        data.put(NodeConstants.INSTALLED_PACKAGE, instance.getPackage().toNoteBytes());
+        
+        // Timing information
+        data.put(NodeConstants.LOAD_TIME, instance.getLoadTime());
+        data.put(NodeConstants.CRASH_COUNT, instance.getCrashCount());
+        
+        return data;
+    }
+
+    /**
+     * Handle command errors with consistent response format
+     */
+    private void handleCommandError(RoutedPacket packet, String message, Throwable ex) {
+        System.err.println("[NodeController] " + message + ": " + ex.getMessage());
+        
+        // Unwrap CompletionException if present
+        Throwable cause = ex instanceof CompletionException ? ex.getCause() : ex;
+        
+        // Try to serialize exception
+        NoteBytes serializableEx = null;
+        try {
+            serializableEx = new NoteSerializable(cause);
+        } catch (Exception e) {
+            // If serialization fails, just use message
+        }
+        
+        // Build error response
+        if (serializableEx != null) {
+            reply(packet,
+                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.ERROR),
+                new NoteBytesPair(Keys.ERROR_MESSAGE, message + ": " + cause.getMessage()),
+                new NoteBytesPair(Keys.EXCEPTION, serializableEx)
+            );
+        } else {
+            reply(packet,
+                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.ERROR),
+                new NoteBytesPair(Keys.ERROR_MESSAGE, message + ": " + cause.getMessage())
+            );
+        }
     }
 }
