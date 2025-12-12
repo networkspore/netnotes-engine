@@ -23,6 +23,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.TimeHelpers;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * FailedSettingsScreen - Handle settings file corruption or absence
@@ -244,7 +245,7 @@ class FailedSettingsScreen extends TerminalScreen {
                     RecoveredData data = extractValue(buffer, entry.getValue(), keyPositions);
                     recoveredData.put(entry.getKey(), data);
                 } catch (Exception e) {
-                    System.err.println("[Recovery] Failed to extract " + entry.getKey() + ": " + e.getMessage());
+                    Log.logError("[Recovery] Failed to extract " + entry.getKey() + ": " + e.getMessage());
                 }
             }
         }
@@ -321,7 +322,7 @@ class FailedSettingsScreen extends TerminalScreen {
         
         // Check for metadata mismatch
         if (declaredLength != actualLength) {
-            System.err.println("[Recovery] Length mismatch detected: declared=" + 
+            Log.logError("[Recovery] Length mismatch detected: declared=" + 
                 declaredLength + ", actual=" + actualLength);
         }
         

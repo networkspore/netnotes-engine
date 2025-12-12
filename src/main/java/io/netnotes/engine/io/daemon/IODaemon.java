@@ -24,7 +24,9 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
+import io.netnotes.engine.messaging.NoteMessaging.Modes;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -35,6 +37,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * IODaemon - Socket manager for daemon connection
@@ -89,18 +92,18 @@ public class IODaemon extends FlowProcess {
         return connect()
             .thenCompose(v -> startReadLoop())
             .thenRun(() -> {
-                System.out.println("IODaemon running at: " + contextPath);
+                Log.logMsg("IODaemon running at: " + contextPath);
             });
     }
     
     @Override
     public void onStart() {
-        System.out.println("IODaemon starting");
+        Log.logMsg("IODaemon starting");
     }
     
     @Override
     public void onStop() {
-        System.out.println("IODaemon stopping");
+        Log.logMsg("IODaemon stopping");
         handleDisconnect();
     }
     
@@ -113,7 +116,7 @@ public class IODaemon extends FlowProcess {
             
             NoteBytes cmd = command.get(Keys.CMD);
             if (cmd == null) {
-                System.err.println("No cmd field in routed message");
+                Log.logError("No cmd field in routed message");
                 return CompletableFuture.completedFuture(null);
             }
             
@@ -122,7 +125,7 @@ public class IODaemon extends FlowProcess {
             if (executor != null) {
                 return executor.execute(command, packet);
             } else {
-                System.err.println("Unknown command: " + cmd);
+                Log.logError("Unknown command: " + cmd);
                 return CompletableFuture.completedFuture(null);
             }
             
@@ -138,7 +141,7 @@ public class IODaemon extends FlowProcess {
      */
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        System.out.println("Received control stream from: " + fromPath);
+        Log.logMsg("Received control stream from: " + fromPath);
         
         channel.getReadyFuture().complete(null);
         
@@ -161,10 +164,10 @@ public class IODaemon extends FlowProcess {
                             } else {
                                 // Forward control message to daemon socket
                                 asyncWriter.writeRoutedMessageAsync(deviceId, payload.getAsNoteBytesObject())
-                                    .thenRun(() -> System.out.println(
+                                    .thenRun(() -> Log.logMsg(
                                         "Forwarded control message for device: " + deviceId))
                                     .exceptionally(ex -> {
-                                        System.err.println("Forward failed: " + ex.getMessage());
+                                        Log.logError("Forward failed: " + ex.getMessage());
                                         return null;
                                     });
                             }
@@ -174,7 +177,7 @@ public class IODaemon extends FlowProcess {
                     nextBytes = reader.nextNoteBytesReadOnly();
                 }
             } catch (IOException e) {
-                System.err.println("Control stream error: " + e.getMessage());
+                Log.logError("Control stream error: " + e.getMessage());
             }
         });
     }
@@ -183,7 +186,7 @@ public class IODaemon extends FlowProcess {
      * Handle device disconnection from ClaimedDevice
      */
     private void handleDeviceDisconnect(String deviceId) {
-        System.out.println("Device disconnecting: " + deviceId);
+        Log.logMsg("Device disconnecting: " + deviceId);
         cleanupDeviceStreams(deviceId);
     }
 
@@ -208,11 +211,11 @@ public class IODaemon extends FlowProcess {
             try {
                 channel.close();
             } catch (IOException e) {
-                System.err.println("Error closing event channel for " + deviceId + ": " + e.getMessage());
+                Log.logError("Error closing event channel for " + deviceId + ": " + e.getMessage());
             }
         }
         
-        System.out.println("Cleaned up streams for device: " + deviceId);
+        Log.logMsg("Cleaned up streams for device: " + deviceId);
     }
     
     // ===== CONNECTION LIFECYCLE =====
@@ -279,7 +282,7 @@ public class IODaemon extends FlowProcess {
                             throw new IOException("Handshake rejected");
                         }
                         
-                        System.out.println("Connected");
+                        Log.logMsg("Connected");
                         connected = true;
                    
                     }catch(IOException e){
@@ -287,7 +290,7 @@ public class IODaemon extends FlowProcess {
                         throw new CompletionException("Handshake failed", e);
                     }
                 }else{
-                    System.out.println("Already connected");
+                    Log.logMsg("Already connected");
                 }
 
             }, VirtualExecutors.getVirtualExecutor());
@@ -308,7 +311,7 @@ public class IODaemon extends FlowProcess {
                 while (running && connected) {
                     NoteBytesReadOnly first = reader.nextNoteBytesReadOnly();
                     if (first == null) {
-                        System.out.println("Connection closed by daemon");
+                        Log.logMsg("Connection closed by daemon");
                         break;
                     }
                     
@@ -321,11 +324,11 @@ public class IODaemon extends FlowProcess {
                         handleControlMessage(first);
                         
                     } else {
-                        System.err.println("Unexpected message type: " + first.getType());
+                        Log.logError("Unexpected message type: " + first.getType());
                     }
                 }
             } catch (Exception e) {
-                System.err.println("Read loop error: " + e.getMessage());
+                Log.logError("Read loop error: " + e.getMessage());
                 e.printStackTrace();
             } finally {
                 handleDisconnect();
@@ -341,13 +344,13 @@ public class IODaemon extends FlowProcess {
      private void handleRoutedMessage(String deviceId) throws IOException {
         NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
         if (payload == null) {
-            System.err.println("No payload for routed message");
+            Log.logError("No payload for routed message");
             return;
         }
         
         AsyncNoteBytesWriter writer = deviceEventWriters.get(deviceId);
         if (writer == null) {
-            System.err.println("No event writer for device: " + deviceId);
+            Log.logError("No event writer for device: " + deviceId);
             return;
         }
         
@@ -355,7 +358,7 @@ public class IODaemon extends FlowProcess {
         writer.writeAsync(new NoteBytes(deviceId))
             .thenCompose(v -> writer.writeAsync(payload))
             .exceptionally(ex -> {
-                System.err.println("Failed to forward to event stream: " + ex.getMessage());
+                Log.logError("Failed to forward to event stream: " + ex.getMessage());
                 return null;
             });
     }
@@ -369,7 +372,7 @@ public class IODaemon extends FlowProcess {
         
         NoteBytes typeBytes = map.get(Keys.TYPE);
         if (typeBytes == null) {
-            System.err.println("No type field in control message");
+            Log.logError("No type field in control message");
             return;
         }
         
@@ -378,7 +381,7 @@ public class IODaemon extends FlowProcess {
         if (executor != null) {
             executor.execute(map);
         } else {
-            System.err.println("Unknown message type: " + typeBytes);
+            Log.logError("Unknown message type: " + typeBytes);
         }
     }
     
@@ -470,10 +473,7 @@ public class IODaemon extends FlowProcess {
                 reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
-                NoteBytesMap error = new NoteBytesMap();
-                error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                error.put(Keys.MSG, ex.getMessage());
-                reply(request, error.toNoteBytes());
+                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
                 return null;
             });
     }
@@ -483,25 +483,30 @@ public class IODaemon extends FlowProcess {
      * IODaemon requests stream TO ClaimedDevice (for sending events)
      */
     private CompletableFuture<Void> handleClaimRequest(NoteBytesMap command, RoutedPacket request) {
-        String sessionId = command.get("session_id").getAsString();
-        String deviceId = command.get(Keys.DEVICE_ID).getAsString();
-        String mode = command.get(Keys.MODE).getAsString();
+        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
+        NoteBytes deviceIdBytes = command.get(Keys.DEVICE_ID);
+        NoteBytes modeBytes = command.getOrDefault(Keys.MODE, Modes.PARSED);
+
+        if(deviceIdBytes == null || sessionIdBytes == null){
+            reply(request, ProtocolObjects.getErrorObject("Invalid claim request"));
+            return CompletableFuture.completedFuture(null);
+        }
+
+        String sessionId = sessionIdBytes != null ? sessionIdBytes.getAsString() : null;
+        String deviceId = deviceIdBytes != null ? deviceIdBytes.getAsString() : null;
+        String mode = modeBytes.getAsString();
         
+       
+
         ClientSession session = getSession(sessionId);
         if (session == null) {
-            NoteBytesMap error = new NoteBytesMap();
-            error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            error.put(Keys.MSG, "Session not found: " + sessionId);
-            reply(request, error.toNoteBytes());
+            reply(request, ProtocolObjects.getErrorObject("Session not found: " + sessionId));
             return CompletableFuture.completedFuture(null);
         }
         
         ClaimedDevice claimedDevice = session.getClaimedDevice(deviceId);
         if (claimedDevice == null) {
-            NoteBytesMap error = new NoteBytesMap();
-            error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            error.put(Keys.MSG, "Device not found in session: " + deviceId);
-            reply(request, error.toNoteBytes());
+            reply(request, ProtocolObjects.getErrorObject("Device not found in session: " + deviceId));
             return CompletableFuture.completedFuture(null);
         }
         
@@ -533,17 +538,11 @@ public class IODaemon extends FlowProcess {
                 return asyncWriter.writeAsync(daemonRequest);
             })
             .thenRun(() -> {
-                NoteBytesMap response = new NoteBytesMap();
-                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                reply(request, response.toNoteBytes());
-                
-                System.out.println("Setup event stream for device: " + deviceId);
+                reply(request, ProtocolObjects.SUCCESS_OBJECT);
+                Log.logMsg("Setup event stream for device: " + deviceId);
             })
             .exceptionally(ex -> {
-                NoteBytesMap error = new NoteBytesMap();
-                error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                error.put(Keys.MSG, ex.getMessage());
-                reply(request, error.toNoteBytes());
+                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
                 return null;
             });
     }
@@ -579,7 +578,7 @@ public class IODaemon extends FlowProcess {
     private void handleCommand(NoteBytesMap map) {
         NoteBytes cmdBytes = map.get(Keys.CMD);
         if (cmdBytes == null) {
-            System.err.println("No cmd field in TYPE_CMD message");
+            Log.logError("No cmd field in TYPE_CMD message");
             return;
         }
         
@@ -588,7 +587,7 @@ public class IODaemon extends FlowProcess {
         if (executor != null) {
             executor.execute(map);
         } else {
-            System.err.println("Unknown command: " + cmdBytes);
+            Log.logError("Unknown command: " + cmdBytes);
         }
     }
     
@@ -604,15 +603,15 @@ public class IODaemon extends FlowProcess {
             }
         }
         
-        System.out.println("Broadcasted device list to " + sessions.size() + " sessions");
+        Log.logMsg("Broadcasted device list to " + sessions.size() + " sessions");
     }
     
     private void handleDeviceClaimed(NoteBytesMap map) {
-        System.out.println("Device claim confirmed by daemon");
+        Log.logMsg("Device claim confirmed by daemon");
     }
     
     private void handleDeviceReleased(NoteBytesMap map) {
-        System.out.println("Device release confirmed by daemon");
+        Log.logMsg("Device release confirmed by daemon");
     }
     
     private void handlePing(NoteBytesMap map) {
@@ -629,18 +628,18 @@ public class IODaemon extends FlowProcess {
     private void handleAccept(NoteBytesMap map) {
         NoteBytes statusBytes = map.get(Keys.STATUS);
         if (statusBytes != null) {
-            System.out.println("Daemon: " + statusBytes.getAsString());
+            Log.logMsg("Daemon: " + statusBytes.getAsString());
         }
     }
     
     private void handleError(NoteBytesMap map) {
         int errorCode = map.get(Keys.ERROR_CODE).getAsInt();
         String errorMsg = map.get(Keys.MSG).getAsString();
-        System.err.println("Daemon error " + errorCode + ": " + errorMsg);
+        Log.logError("Daemon error " + errorCode + ": " + errorMsg);
     }
     
     private void handleDisconnected(NoteBytesMap map) {
-        System.out.println("Daemon disconnected");
+        Log.logMsg("Daemon disconnected");
         handleDisconnect();
     }
     
@@ -650,7 +649,7 @@ public class IODaemon extends FlowProcess {
         connected = false;
         running = false;
         
-        System.out.println("Socket disconnected, cleaning up all device streams...");
+        Log.logMsg("Socket disconnected, cleaning up all device streams...");
         
         // Cleanup all device event streams
         for (String deviceId : deviceEventChannels.keySet()) {
@@ -668,7 +667,7 @@ public class IODaemon extends FlowProcess {
             registry.unregisterProcess(session.getContextPath());
         }
         
-        System.out.println("Disconnected from daemon, cleaned up " + 
+        Log.logMsg("Disconnected from daemon, cleaned up " + 
             sessions.size() + " sessions");
     }
 
@@ -677,7 +676,7 @@ public class IODaemon extends FlowProcess {
      */
     private void notifySessionDisconnect(ClientSession session) {
         if (!session.isAlive() || session.state.hasState(ClientStateFlags.DISCONNECTING)) {
-            System.out.println("Session " + session.sessionId + " already disconnecting, skipping notification");
+            Log.logMsg("Session " + session.sessionId + " already disconnecting, skipping notification");
             return;
         }
 
@@ -689,7 +688,7 @@ public class IODaemon extends FlowProcess {
         try {
             emitTo(session.getContextPath(), notification);
         } catch (Exception e) {
-            System.err.println("Failed to notify session: " + e.getMessage());
+            Log.logError("Failed to notify session: " + e.getMessage());
         }
     }
 
@@ -714,7 +713,7 @@ public class IODaemon extends FlowProcess {
                     socketChannel.close();
                 }
             } catch (IOException e) {
-                System.err.println("Error closing socket: " + e.getMessage());
+                Log.logError("Error closing socket: " + e.getMessage());
             }
             
             // Shutdown socket writer

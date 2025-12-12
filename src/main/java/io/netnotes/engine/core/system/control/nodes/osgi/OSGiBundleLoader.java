@@ -10,6 +10,7 @@ import io.netnotes.engine.core.system.control.nodes.INode;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.PackageId;
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.io.*;
 import java.util.*;
@@ -73,7 +74,7 @@ public class OSGiBundleLoader {
                 }
                 
                 try {
-                    System.out.println("[OSGiBundleLoader] Initializing OSGi framework");
+                    Log.logMsg("[OSGiBundleLoader] Initializing OSGi framework");
                     
                     // Get FrameworkFactory via ServiceLoader
                     ServiceLoader<FrameworkFactory> factoryLoader = 
@@ -104,7 +105,7 @@ public class OSGiBundleLoader {
                     
                     frameworkInitialized = true;
                     
-                    System.out.println("[OSGiBundleLoader] OSGi framework started");
+                    Log.logMsg("[OSGiBundleLoader] OSGi framework started");
                     
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to initialize OSGi framework", e);
@@ -128,7 +129,7 @@ public class OSGiBundleLoader {
             .thenCompose(bundle -> waitForNodeService(pkg.getPackageId(), bundle))
             .whenComplete((inode, ex) -> {
                 if (ex != null) {
-                    System.err.println("[OSGiBundleLoader] Failed to load bundle: " + 
+                    Log.logError("[OSGiBundleLoader] Failed to load bundle: " + 
                         pkg.getName() + " - " + ex.getMessage());
                 }
             });
@@ -145,7 +146,7 @@ public class OSGiBundleLoader {
             .getNoteFile(jarPath).thenCompose(jarFile->
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    System.out.println("[OSGiBundleLoader] Installing bundle: " + 
+                    Log.logMsg("[OSGiBundleLoader] Installing bundle: " + 
                         pkg.getName() + " from " + jarPath);
                     if(!jarFile.isFile()){
                         throw new CompletionException("Note file is not written", new FileNotFoundException("Bundle JAR not found: " + jarPath));
@@ -189,7 +190,7 @@ public class OSGiBundleLoader {
         
         return CompletableFuture.supplyAsync(() -> {
             try {
-                System.out.println("[OSGiBundleLoader] Waiting for INode service from: " + 
+                Log.logMsg("[OSGiBundleLoader] Waiting for INode service from: " + 
                     packageId);
                 
                 BundleContext context = framework.getBundleContext();
@@ -211,7 +212,7 @@ public class OSGiBundleLoader {
                     INode node = (INode) context.getService(refs[0]);
                     
                     if (node != null) {
-                        System.out.println("[OSGiBundleLoader] Found INode service: ");
+                        Log.logMsg("[OSGiBundleLoader] Found INode service: ");
                         return node;
                     }
                 }
@@ -251,7 +252,7 @@ public class OSGiBundleLoader {
                 );
             }
             
-            System.out.println("[OSGiBundleLoader] INode service registered: ");
+            Log.logMsg("[OSGiBundleLoader] INode service registered: ");
             
             return node;
             
@@ -269,7 +270,7 @@ public class OSGiBundleLoader {
                 Bundle bundle = installedBundles.remove(packageId);
                 
                 if (bundle != null) {
-                    System.out.println("[OSGiBundleLoader] Unloading bundle: " + 
+                    Log.logMsg("[OSGiBundleLoader] Unloading bundle: " + 
                         bundle.getSymbolicName());
                     
                     // Stop bundle (deactivates BundleActivator)
@@ -278,7 +279,7 @@ public class OSGiBundleLoader {
                     // Uninstall bundle
                     bundle.uninstall();
                     
-                    System.out.println("[OSGiBundleLoader] Bundle unloaded: " + packageId);
+                    Log.logMsg("[OSGiBundleLoader] Bundle unloaded: " + packageId);
                 }
                 
             } catch (BundleException e) {
@@ -295,7 +296,7 @@ public class OSGiBundleLoader {
             synchronized (frameworkLock) {
                 if (framework != null && frameworkInitialized) {
                     try {
-                        System.out.println("[OSGiBundleLoader] Shutting down OSGi framework");
+                        Log.logMsg("[OSGiBundleLoader] Shutting down OSGi framework");
                         
                         // Stop framework (stops all bundles)
                         framework.stop();
@@ -303,10 +304,10 @@ public class OSGiBundleLoader {
                         // Wait for framework to stop
                         framework.waitForStop(10000);
                         
-                        System.out.println("[OSGiBundleLoader] OSGi framework stopped");
+                        Log.logMsg("[OSGiBundleLoader] OSGi framework stopped");
                         
                     } catch (Exception e) {
-                        System.err.println("[OSGiBundleLoader] Error shutting down framework: " + 
+                        Log.logError("[OSGiBundleLoader] Error shutting down framework: " + 
                             e.getMessage());
                     } finally {
                         framework = null;

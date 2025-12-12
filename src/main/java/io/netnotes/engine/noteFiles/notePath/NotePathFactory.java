@@ -31,6 +31,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class NotePathFactory {
@@ -290,7 +291,7 @@ public class NotePathFactory {
         
         boolean isValid = availableSpace >= (requiredSpace + bufferSpace);
         
-        System.out.println(String.format(
+        Log.logMsg(String.format(
             "[NoteFileService] Disk space validation:\n" +
             "  Files found: %d\n" +
             "  Total size: %.2f MB\n" +

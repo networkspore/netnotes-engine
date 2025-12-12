@@ -7,6 +7,7 @@ import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * StreamChannel - Unidirectional pipe communication between processes
@@ -121,7 +122,7 @@ public class StreamChannel {
                 reader.read(receiverInput);
                 
             } catch (IOException e) {
-                System.err.println("Stream read error: " + e.getMessage());
+                Log.logError("Stream read error: " + e.getMessage());
             } finally {
                 try {
                     receiverInput.close();

@@ -13,6 +13,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteFiles.NoteFile;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * InstallationRegistry - Tracks INSTALLED packages (FlowProcess)
@@ -61,12 +62,12 @@ public class InstallationRegistry extends FlowProcess {
      * Initialize - load installation registry from NoteFile
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[InstallationRegistry] Initializing at: " + contextPath);
+        Log.logMsg("[InstallationRegistry] Initializing at: " + contextPath);
         
         return loadInstalledPackages()
             .exceptionally(ex -> {
                 // First run - create empty registry
-                System.out.println("[InstallationRegistry] First run - creating empty registry");
+                Log.logMsg("[InstallationRegistry] First run - creating empty registry");
                 return saveToFile().join(); // Create empty file
             });
     }
@@ -83,7 +84,7 @@ public class InstallationRegistry extends FlowProcess {
                 
                 NoteBytesMap packagesMap = noteBytesObj.getAsNoteBytesMap();
                 
-                System.out.println("[InstallationRegistry] Loading " + 
+                Log.logMsg("[InstallationRegistry] Loading " + 
                     packagesMap.size() + " installed packages");
                 
                 for (NoteBytes pkgIdBytes : packagesMap.keySet()) {
@@ -94,16 +95,16 @@ public class InstallationRegistry extends FlowProcess {
                         
                         installed.put(pkg.getPackageId(), pkg);
                         
-                        System.out.println("[InstallationRegistry]   Loaded: " + 
+                        Log.logMsg("[InstallationRegistry]   Loaded: " + 
                             pkg.getName() + " v" + pkg.getVersion());
                             
                     } catch (Exception e) {
-                        System.err.println("[InstallationRegistry]   Failed to load package " + 
+                        Log.logError("[InstallationRegistry]   Failed to load package " + 
                             pkgIdBytes.getAsString() + ": " + e.getMessage());
                     }
                 }
                 
-                System.out.println("[InstallationRegistry] Successfully loaded " + 
+                Log.logMsg("[InstallationRegistry] Successfully loaded " + 
                     installed.size() + " packages");
             });
     }
@@ -114,7 +115,7 @@ public class InstallationRegistry extends FlowProcess {
     public CompletableFuture<Void> registerPackage(InstalledPackage pkg) {
         installed.put(pkg.getPackageId(), pkg);
         
-        System.out.println("[InstallationRegistry] Registered: " + pkg.getName() + 
+        Log.logMsg("[InstallationRegistry] Registered: " + pkg.getName() + 
             " (processId: " + pkg.getProcessId() + ")");
         
         // Emit event
@@ -122,7 +123,7 @@ public class InstallationRegistry extends FlowProcess {
         
         return saveToFile()
             .thenRun(() -> {
-                System.out.println("[InstallationRegistry] Registry saved (" + 
+                Log.logMsg("[InstallationRegistry] Registry saved (" + 
                     installed.size() + " packages)");
             });
     }
@@ -134,18 +135,18 @@ public class InstallationRegistry extends FlowProcess {
         InstalledPackage removed = installed.remove(packageId);
         
         if (removed != null) {
-            System.out.println("[InstallationRegistry] Unregistered: " + removed.getName());
+            Log.logMsg("[InstallationRegistry] Unregistered: " + removed.getName());
             
             // Emit event
             emitPackageEvent("package_uninstalled", packageId.getId());
             
             return saveToFile()
                 .thenRun(() -> {
-                    System.out.println("[InstallationRegistry] Registry saved after removal");
+                    Log.logMsg("[InstallationRegistry] Registry saved after removal");
                 });
         }
         
-        System.out.println("[InstallationRegistry] Package not found: " + packageId);
+        Log.logMsg("[InstallationRegistry] Package not found: " + packageId);
         return CompletableFuture.completedFuture(null);
     }
     
@@ -191,11 +192,11 @@ public class InstallationRegistry extends FlowProcess {
         
         return registryFile.write(packagesMap.toNoteBytes())
             .thenRun(() -> {
-                System.out.println("[InstallationRegistry] Saved " + 
+                Log.logMsg("[InstallationRegistry] Saved " + 
                     installed.size() + " packages to file");
             })
             .exceptionally(ex -> {
-                System.err.println("[InstallationRegistry] Failed to save: " + 
+                Log.logError("[InstallationRegistry] Failed to save: " + 
                     ex.getMessage());
                 throw new RuntimeException("Failed to save installation registry", ex);
             });
@@ -233,23 +234,23 @@ public class InstallationRegistry extends FlowProcess {
      * Shutdown - ensure registry is saved and NoteFile closed
      */
     public CompletableFuture<Void> shutdown() {
-        System.out.println("[InstallationRegistry] Shutting down");
+        Log.logMsg("[InstallationRegistry] Shutting down");
         
         return saveToFile()
             .whenComplete((v, ex) -> {
                 if (ex != null) {
-                    System.err.println("[InstallationRegistry] Error during shutdown: " + 
+                    Log.logError("[InstallationRegistry] Error during shutdown: " + 
                         ex.getMessage());
                 }
                 
                 if (registryFile != null) {
                     registryFile.close();
-                    System.out.println("[InstallationRegistry] NoteFile closed");
+                    Log.logMsg("[InstallationRegistry] NoteFile closed");
                 }
             })
             .thenRun(() -> {
                 complete();
-                System.out.println("[InstallationRegistry] Shutdown complete");
+                Log.logMsg("[InstallationRegistry] Shutdown complete");
             });
     }
     

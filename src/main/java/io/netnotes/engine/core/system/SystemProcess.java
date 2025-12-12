@@ -28,6 +28,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -140,22 +141,22 @@ public class SystemProcess extends FlowProcess {
     
     private void setupStateTransitions() {
         state.onStateAdded(INITIALIZING, (old, now, bit) -> 
-            System.out.println("[SystemProcess] INITIALIZING"));
+            Log.logMsg("[SystemProcess] INITIALIZING"));
         
         state.onStateAdded(BOOTSTRAP_NEEDED, (old, now, bit) -> 
-            System.out.println("[SystemProcess] BOOTSTRAP_NEEDED"));
+            Log.logMsg("[SystemProcess] BOOTSTRAP_NEEDED"));
         
         state.onStateAdded(BOOTSTRAP_RUNNING, (old, now, bit) -> 
-            System.out.println("[SystemProcess] BOOTSTRAP_RUNNING"));
+            Log.logMsg("[SystemProcess] BOOTSTRAP_RUNNING"));
         
         state.onStateAdded(SERVICES_STARTING, (old, now, bit) -> 
-            System.out.println("[SystemProcess] SERVICES_STARTING"));
+            Log.logMsg("[SystemProcess] SERVICES_STARTING"));
         
         state.onStateAdded(TERMINAL_CREATING, (old, now, bit) -> 
-            System.out.println("[SystemProcess] TERMINAL_CREATING"));
+            Log.logMsg("[SystemProcess] TERMINAL_CREATING"));
         
         state.onStateAdded(READY, (old, now, bit) -> 
-            System.out.println("[SystemProcess] READY - System operational"));
+            Log.logMsg("[SystemProcess] READY - System operational"));
     }
     
     private CompletableFuture<Void> initialize() {
@@ -193,7 +194,7 @@ public class SystemProcess extends FlowProcess {
                 state.addState(READY);
             })
             .exceptionally(ex -> {
-                System.err.println("[SystemProcess] Init failed: " + ex.getMessage());
+                Log.logError("[SystemProcess] Init failed: " + ex.getMessage());
                 state.addState(ERROR);
                 return null;
             });
@@ -202,13 +203,13 @@ public class SystemProcess extends FlowProcess {
     private CompletableFuture<Void> startGUIKeyboard() {
         return spawnChild(guiKeyboard)
             .thenCompose(path -> registry.startProcess(path))
-            .thenRun(() -> System.out.println(
+            .thenRun(() -> Log.logMsg(
                 "[SystemProcess] GUI keyboard: " + guiKeyboard.getContextPath()));
     }
     
     private CompletableFuture<Void> initializeUIRenderer() {
         return uiRenderer.initialize()
-            .thenRun(() -> System.out.println(
+            .thenRun(() -> Log.logMsg(
                 "[SystemProcess] UIRenderer: " + uiRenderer.getClass().getSimpleName()));
     }
     
@@ -220,7 +221,7 @@ public class SystemProcess extends FlowProcess {
         
         return spawnChild(containerService)
             .thenCompose(path -> registry.startProcess(path))
-            .thenRun(() -> System.out.println(
+            .thenRun(() -> Log.logMsg(
                 "[SystemProcess] ContainerService: " + containerService.getContextPath()));
     }
     
@@ -229,7 +230,7 @@ public class SystemProcess extends FlowProcess {
             try {
                 return !SettingsData.isBootstrapData();
             } catch (IOException e) {
-                System.err.println("[SystemProcess] Bootstrap check error: " + 
+                Log.logError("[SystemProcess] Bootstrap check error: " + 
                     e.getMessage());
                 return true;
             }
@@ -237,7 +238,7 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<Void> launchBootstrapWizard() {
-        System.out.println("[SystemProcess] Launching bootstrap wizard");
+        Log.logMsg("[SystemProcess] Launching bootstrap wizard");
         
         return createWizardContainer()
             .thenCompose(containerHandle -> {
@@ -255,13 +256,13 @@ public class SystemProcess extends FlowProcess {
                         bootstrapWizard = null;
                         state.removeState(BOOTSTRAP_RUNNING);
                         state.removeState(BOOTSTRAP_NEEDED);
-                        System.out.println("[SystemProcess] Bootstrap wizard complete");
+                        Log.logMsg("[SystemProcess] Bootstrap wizard complete");
                     });
             });
     }
     
     private CompletableFuture<TerminalContainerHandle> createWizardContainer() {
-        NoteBytesMap createMsg = ContainerProtocol.createContainer(
+        NoteBytesMap createMsg = ContainerCommands.createContainer(
             "Bootstrap Wizard",
             ContainerType.TERMINAL,
             contextPath,
@@ -288,25 +289,25 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<Void> initializeBootstrapConfig() {
-        System.out.println("[SystemProcess] Initializing BootstrapConfig");
+        Log.logMsg("[SystemProcess] Initializing BootstrapConfig");
         
         return BootstrapConfig.initialize()
             .thenCompose(config -> spawnChild(config)
                 .thenCompose(path -> registry.startProcess(path))
-                .thenRun(() -> System.out.println(
+                .thenRun(() -> Log.logMsg(
                     "[SystemProcess] BootstrapConfig: " + 
                     BootstrapConfig.BOOTSTRAP_CONFIG_PATH)));
     }
     
     private CompletableFuture<Void> startServicesProcess() {
-        System.out.println("[SystemProcess] Starting ServicesProcess");
+        Log.logMsg("[SystemProcess] Starting ServicesProcess");
         
         servicesProcess = new ServicesProcess(containerService);
         
         return spawnChild(servicesProcess)
             .thenCompose(path -> registry.startProcess(path))
             .thenCompose(v -> {
-                System.out.println("[SystemProcess] ServicesProcess: " + 
+                Log.logMsg("[SystemProcess] ServicesProcess: " + 
                     CoreConstants.SERVICES_PATH);
                 
                 if (servicesProcess.getIODaemon() != null) {
@@ -330,11 +331,11 @@ public class SystemProcess extends FlowProcess {
         return ioDaemon.createSession(sessionId, pid)
             .thenCompose(sessionPath -> {
                 systemClientSession = (ClientSession) processService.getProcess(sessionPath);
-                System.out.println("[SystemProcess] IODaemon session: " + sessionPath);
+                Log.logMsg("[SystemProcess] IODaemon session: " + sessionPath);
                 
                 return systemClientSession.discoverDevices()
                     .thenRun(() -> {
-                        System.out.println("[SystemProcess] Initial device discovery complete");
+                        Log.logMsg("[SystemProcess] Initial device discovery complete");
                     });
             });
     }
@@ -350,9 +351,9 @@ public class SystemProcess extends FlowProcess {
      * - All screens and menus
      */
     private CompletableFuture<Void> createSystemTerminal() {
-        System.out.println("[SystemProcess] Creating system terminal");
+        Log.logMsg("[SystemProcess] Creating system terminal");
         
-        NoteBytesMap createMsg = ContainerProtocol.createContainer(
+        NoteBytesMap createMsg = ContainerCommands.createContainer(
             CoreConstants.SYSTEM_CONTAINER_NAME,
             ContainerType.TERMINAL,
             contextPath,
@@ -388,7 +389,7 @@ public class SystemProcess extends FlowProcess {
             })
             .thenCompose(terminal -> spawnChild(terminal)
                 .thenCompose(path -> registry.startProcess(path))
-                .thenRun(() -> System.out.println(
+                .thenRun(() -> Log.logMsg(
                     "[SystemProcess] System terminal: " + 
                     systemTerminal.getContextPath())));
     }
@@ -404,7 +405,7 @@ public class SystemProcess extends FlowProcess {
                     String deviceId = device.usbDevice().get_device_id();
                     var claimedDevice = systemClientSession.getClaimedDevice(deviceId);
                     if (claimedDevice != null && claimedDevice.isActive()) {
-                        System.out.println("[SystemProcess] Using secure keyboard");
+                        Log.logMsg("[SystemProcess] Using secure keyboard");
                         return claimedDevice;
                     }
                 }
@@ -412,7 +413,7 @@ public class SystemProcess extends FlowProcess {
         }
         
         // Fallback to GUI keyboard
-        System.out.println("[SystemProcess] Using GUI keyboard");
+        Log.logMsg("[SystemProcess] Using GUI keyboard");
         return guiKeyboard;
     }
     
@@ -439,7 +440,7 @@ public class SystemProcess extends FlowProcess {
                 return msgExec.execute(msg, packet);
             }
             
-            System.err.println("[SystemProcess] Unknown command: " + cmdBytes);
+            Log.logError("[SystemProcess] Unknown command: " + cmdBytes);
             return CompletableFuture.completedFuture(null);
             
         } catch (Exception e) {
@@ -456,7 +457,7 @@ public class SystemProcess extends FlowProcess {
         if (systemTerminal == null) {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            error.put(Keys.MSG, new NoteBytes("Terminal not initialized"));
+            error.put(Keys.ERROR_MESSAGE, new NoteBytes("Terminal not initialized"));
             reply(packet, error.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }
@@ -498,7 +499,7 @@ public class SystemProcess extends FlowProcess {
     
     
     private CompletableFuture<Void> handleReconfigureBootstrap(RoutedPacket packet) {
-        System.out.println("[SystemProcess] Reconfiguration requested");
+        Log.logMsg("[SystemProcess] Reconfiguration requested");
         
         state.addState(BOOTSTRAP_RUNNING);
         
@@ -514,7 +515,7 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<Void> handleInstallSecureInput(RoutedPacket packet) {
-        System.out.println("[SystemProcess] Secure input installation requested");
+        Log.logMsg("[SystemProcess] Secure input installation requested");
         
         String os = System.getProperty("os.name");
         

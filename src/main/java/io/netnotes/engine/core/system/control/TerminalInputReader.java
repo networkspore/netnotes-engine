@@ -31,7 +31,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
  * <pre>
  * InputReader reader = new InputReader(terminal, 10, 20, 40);
  * reader.setOnComplete(text -> {
- *     System.out.println("User entered: " + text);
+ *     Log.logMsg("User entered: " + text);
  * });
  * keyboard.setEventConsumer(reader.getEventConsumer());
  * </pre>

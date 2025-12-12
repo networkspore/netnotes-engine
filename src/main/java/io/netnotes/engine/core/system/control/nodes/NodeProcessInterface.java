@@ -8,6 +8,7 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.time.Duration;
 import java.util.List;
@@ -66,7 +67,7 @@ public class NodeProcessInterface implements ProcessRegistryInterface {
      */
     private void logViolation(ContextPath caller, ContextPath target, 
                               PathCapability.Operation operation, String reason) {
-        System.err.println(String.format(
+        Log.logError(String.format(
             "[Security] VIOLATION: Node '%s' (caller: %s) attempted %s on '%s': %s",
             nodePath.getLastSegment(),
             caller,

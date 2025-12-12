@@ -24,6 +24,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteShort;
 
 import io.netnotes.engine.utils.CollectionHelpers;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class ByteDecoding{
 
@@ -842,7 +843,7 @@ public class ByteDecoding{
                     return new BigDecimal(bytesToString(value.getBytes(), value.getType()));
             }
         }catch(Exception e){
-            System.err.println(e.toString());
+            Log.logError("[ByteDecoding.readAsBigDeciaml]" + e.toString());
             e.printStackTrace();
         }
 
@@ -1387,7 +1388,7 @@ public class ByteDecoding{
                 out2.writeObject( e);
                 return baos2.toByteArray();
             }catch(IOException e2){
-                System.err.println("Unexpected seriliazation double error: " + e.toString() + "\n" + e2.toString());
+                Log.logError("Unexpected seriliazation double error: " + e.toString() + "\n" + e2.toString());
                 e2.printStackTrace();
                 return new byte[0];
             }

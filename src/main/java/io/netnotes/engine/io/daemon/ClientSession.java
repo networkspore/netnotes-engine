@@ -7,6 +7,7 @@ import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.daemon.IODaemonProtocol.DeviceMode;
 import io.netnotes.engine.io.input.events.EventBytes;
@@ -15,6 +16,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 
 import java.time.Duration;
@@ -72,12 +74,12 @@ public class ClientSession extends FlowProcess {
         
         state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
             state.addState(ClientStateFlags.FLOW_CONTROL_PAUSED);
-            System.out.println("Backpressure activated for client " + sessionId);
+            Log.logMsg("Backpressure activated for client " + sessionId);
         });
         
         state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
             state.addState(ClientStateFlags.ERROR_STATE);
-            System.err.println("Heartbeat timeout for client " + sessionId);
+            Log.logError("Heartbeat timeout for client " + sessionId);
         });
         
         state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
@@ -125,7 +127,7 @@ public class ClientSession extends FlowProcess {
      * Handle daemon socket disconnect
      */
     private void handleDaemonDisconnect(NoteBytesMap notification) {
-        System.err.println("Daemon disconnected: " + notification.get(Keys.MSG));
+        Log.logError("Daemon disconnected: " + notification.get(Keys.MSG));
         
         state.addState(ClientStateFlags.DISCONNECTING);
         state.addState(ClientStateFlags.ERROR_STATE);
@@ -159,10 +161,8 @@ public class ClientSession extends FlowProcess {
                 reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, ex.getMessage());
-                reply(request, errorResponse.toNoteBytes());
+               
+                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
                 return null;
             });
     }
@@ -188,7 +188,7 @@ public class ClientSession extends FlowProcess {
     public void handleDeviceList(NoteBytesMap map) {
         discoveredDevices.parseDeviceList(map);
         state.removeState(ClientStateFlags.DISCOVERING);
-        System.out.println("Device discovery complete: " + 
+        Log.logMsg("Device discovery complete: " + 
             discoveredDevices.getAllDevices().size() + " devices found");
     }
     
@@ -239,10 +239,7 @@ public class ClientSession extends FlowProcess {
                 reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
-                reply(request, errorResponse.toNoteBytes());
+                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
                 return null;
             });
     }
@@ -304,7 +301,7 @@ public class ClientSession extends FlowProcess {
             discoveredDevices.markClaimed(deviceId);
             state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
             
-            System.out.println("Claimed device: " + deviceId);
+            Log.logMsg("Claimed device: " + deviceId);
             return claimedDevicePath;
         });
     }
@@ -345,7 +342,7 @@ public class ClientSession extends FlowProcess {
             if (claimedDevice != null) {
                 registry.unregisterProcess(claimedDevice.getContextPath());
             }
-            System.out.println("Released device: " + deviceId);
+            Log.logMsg("Released device: " + deviceId);
         });
     }
     
@@ -353,14 +350,14 @@ public class ClientSession extends FlowProcess {
     private void releaseAllDevices() {
         List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
         
-        System.out.println("Releasing " + devices.size() + " devices...");
+        Log.logMsg("Releasing " + devices.size() + " devices...");
         
         for (ClaimedDevice device : devices) {
             try {
                 device.release();
                 registry.unregisterProcess(device.getContextPath());
             } catch (Exception e) {
-                System.err.println("Error releasing device " + 
+                Log.logError("Error releasing device " + 
                     device.getDeviceId() + ": " + e.getMessage());
             }
         }

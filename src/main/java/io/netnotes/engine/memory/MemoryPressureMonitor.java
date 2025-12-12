@@ -6,6 +6,9 @@ import java.lang.management.MemoryUsage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.List;
 
@@ -168,7 +171,7 @@ public class MemoryPressureMonitor {
             }
             
         } catch (Exception e) {
-            System.err.println("Error sampling memory: " + e.getMessage());
+            Log.logError("Error sampling memory: " + e.getMessage());
         }
     }
     
@@ -180,7 +183,7 @@ public class MemoryPressureMonitor {
             try {
                 listener.onPressureChanged(oldLevel, newLevel, usage);
             } catch (Exception e) {
-                System.err.println("Error notifying pressure listener: " + e.getMessage());
+                Log.logError("Error notifying pressure listener: " + e.getMessage());
             }
         }
     }

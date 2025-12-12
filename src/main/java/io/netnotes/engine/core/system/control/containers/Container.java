@@ -2,34 +2,41 @@ package io.netnotes.engine.core.system.control.containers;
 
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
+import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Container - Represents a single container instance
  * 
- * Wraps UIRenderer calls and tracks state.
- * Abstract enough to work with any UI (desktop, mobile, web, terminal).
+ * Architecture (similar to ClaimedDevice):
+ * - Has assigned UIRenderer (injected)
+ * - Receives render commands via incoming stream
+ * - Writes commands directly to UIRenderer
+ * - Tracks abstract state (visible, focused, maximized)
  * 
- * State tracking (abstract concepts):
- * - isCurrent: Container has focus
- * - isHidden: Container is minimized/hidden
- * - isMaximized: Container fills screen/parent
- * - isVisible: Container is shown (not hidden)
- * 
- * UI interprets these as appropriate:
- * - Desktop: GLFW window with title bar
- * - Mobile: Full screen or split view
- * - Web: Browser window/tab or iframe
- * - Terminal: Terminal pane in tmux/screen
+ * Stream-based rendering:
+ * - ContainerHandle writes commands to stream
+ * - Container reads from stream
+ * - Container writes to UIRenderer
+ * - No message wrapping/unwrapping needed!
  */
 public class Container {
     
     private final ContainerId id;
     private final ContextPath path;
     private final ContextPath ownerPath;
+    private final ContextPath servicePath;
+
     private final UIRenderer uiRenderer;
     
     // Mutable state
@@ -46,17 +53,24 @@ public class Container {
     private volatile boolean isMaximized = false;   // Fills screen
     private volatile boolean isVisible = false;     // Shown (not hidden)
     
+    // Render stream
+    private StreamChannel renderStream;
+    private volatile boolean active = false;
+    
+    
     public Container(
         ContainerId id,
         String title,
         ContainerType type,
         ContextPath ownerPath,
         ContainerConfig config,
-        UIRenderer uiRenderer
+        UIRenderer uiRenderer,
+        ContextPath servicePath
     ) {
         this.id = id;
         this.path = ownerPath.append("container", id.toString());
         this.ownerPath = ownerPath;
+        this.servicePath = servicePath;
         this.uiRenderer = uiRenderer;
         
         this.title = new AtomicReference<>(title);
@@ -70,24 +84,92 @@ public class Container {
     // ===== LIFECYCLE =====
     
     /**
-     * Initialize container (render to UI)
+     * Initialize container:
+     * 1. Render initial UI
+     * 2. Request stream channel from ContainerHandle (via service path)
+     * 3. Start reading render commands from stream
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[Container] Initializing: " + id + " (" + title.get() + ")");
+        Log.logMsg("[Container] Initializing: " + id + " (" + title.get() + ")");
         
-        // Build UI command based on type
-        NoteBytesMap uiCommand = buildCreateCommand();
+        // Build initial UI command
+        NoteBytesMap createCommand = new NoteBytesMap();
+        createCommand.put(Keys.CMD, ContainerCommands.CREATE_CONTAINER);
+        createCommand.put(Keys.CONTAINER_ID, id.toNoteBytes());
+        createCommand.put(Keys.TITLE, title.get());
+        createCommand.put(Keys.TYPE, type.get().name());
+        createCommand.put(Keys.CONFIG, config.get().toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        // Render to UI
+        return uiRenderer.render(createCommand)
             .thenRun(() -> {
                 state.set(ContainerState.VISIBLE);
                 isVisible = true;
+                active = true;
                 
-                System.out.println("[Container] Initialized: " + id);
+                Log.logMsg("[Container] Initialized: " + id);
             })
             .exceptionally(ex -> {
-                System.err.println("[Container] Failed to initialize: " + ex.getMessage());
+                Log.logError("[Container] Failed to initialize: " + ex.getMessage());
                 state.set(ContainerState.DESTROYED);
+                return null;
+            });
+    }
+    
+    /**
+     * Handle incoming render stream FROM ContainerHandle
+     * Similar to ClaimedDevice.handleStreamChannel()
+     */
+    public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
+        Log.logMsg("[Container] Render stream received from: " + fromPath);
+        
+        this.renderStream = channel;
+        channel.getReadyFuture().complete(null);
+        
+        // Start reading render commands
+        channel.startReceiving(input -> {
+            try (NoteBytesReader reader = new NoteBytesReader(input)) {
+                NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
+                
+                while (nextBytes != null && active) {
+                    if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                        NoteBytesMap command = nextBytes.getAsNoteBytesMap();
+                        handleRenderCommand(command);
+                    } else {
+                        Log.logError("[Container] Unexpected message type: " + 
+                            nextBytes.getType());
+                    }
+                    
+                    nextBytes = reader.nextNoteBytesReadOnly();
+                }
+                
+            } catch (IOException e) {
+                Log.logError("[Container] Render stream error: " + e.getMessage());
+                active = false;
+            }
+        });
+    }
+    
+    /**
+     * Handle render command from stream
+     * Write directly to UIRenderer
+     */
+    private void handleRenderCommand(NoteBytesMap cmdMap) {
+        NoteBytes cmd = cmdMap.get(Keys.CMD);
+        
+        // Update local state if needed
+        if (cmd.equals(ContainerCommands.UPDATE_CONTAINER)) {
+            NoteBytesMap updates = cmdMap.get(Keys.UPDATES).getAsNoteBytesMap();
+            NoteBytes titleBytes = updates.get(Keys.TITLE);
+            if (titleBytes != null) {
+                title.set(titleBytes.getAsString());
+            }
+        }
+        
+        // Write directly to renderer
+        uiRenderer.render(cmdMap)
+            .exceptionally(ex -> {
+                Log.logError("[Container] Render failed: " + ex.getMessage());
                 return null;
             });
     }
@@ -96,28 +178,42 @@ public class Container {
      * Destroy container (remove from UI)
      */
     public CompletableFuture<Void> destroy() {
-        System.out.println("[Container] Destroying: " + id);
+        Log.logMsg("[Container] Destroying: " + id);
         
         state.set(ContainerState.DESTROYING);
+        active = false;
         
         // Build destroy command
-        NoteBytesMap uiCommand = buildDestroyCommand();
+        NoteBytesMap destroyCommand = new NoteBytesMap();
+        destroyCommand.put(Keys.CMD, ContainerCommands.DESTROY_CONTAINER);
+        destroyCommand.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(destroyCommand)
             .thenRun(() -> {
                 state.set(ContainerState.DESTROYED);
                 isVisible = false;
                 isCurrent = false;
                 
-                System.out.println("[Container] Destroyed: " + id);
+                // Close render stream
+                if (renderStream != null) {
+                    try {
+                        renderStream.close();
+                    } catch (IOException e) {
+                        Log.logError("[Container] Error closing render stream: " + 
+                            e.getMessage());
+                    }
+                }
+                
+                Log.logMsg("[Container] Destroyed: " + id);
             })
             .exceptionally(ex -> {
-                System.err.println("[Container] Failed to destroy: " + ex.getMessage());
+                Log.logError("[Container] Failed to destroy: " + ex.getMessage());
                 return null;
             });
     }
     
     // ===== STATE OPERATIONS =====
+    // These are called by ContainerService, NOT from stream
     
     /**
      * Show container (unhide/restore)
@@ -127,11 +223,13 @@ public class Container {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[Container] Showing: " + id);
+        Log.logMsg("[Container] Showing: " + id);
         
-        NoteBytesMap uiCommand = buildShowCommand();
+        NoteBytesMap command = new NoteBytesMap();
+        command.put(Keys.CMD, ContainerCommands.SHOW_CONTAINER);
+        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(command)
             .thenRun(() -> {
                 isVisible = true;
                 isHidden = false;
@@ -147,11 +245,13 @@ public class Container {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[Container] Hiding: " + id);
+        Log.logMsg("[Container] Hiding: " + id);
         
-        NoteBytesMap uiCommand = buildHideCommand();
+        NoteBytesMap command = new NoteBytesMap();
+        command.put(Keys.CMD, ContainerCommands.HIDE_CONTAINER);
+        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(command)
             .thenRun(() -> {
                 isHidden = true;
                 isCurrent = false;
@@ -167,11 +267,13 @@ public class Container {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[Container] Focusing: " + id);
+        Log.logMsg("[Container] Focusing: " + id);
         
-        NoteBytesMap uiCommand = buildFocusCommand();
+        NoteBytesMap command = new NoteBytesMap();
+        command.put(Keys.CMD, ContainerCommands.FOCUS_CONTAINER);
+        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(command)
             .thenRun(() -> {
                 isCurrent = true;
                 state.set(ContainerState.FOCUSED);
@@ -202,11 +304,13 @@ public class Container {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[Container] Maximizing: " + id);
+        Log.logMsg("[Container] Maximizing: " + id);
         
-        NoteBytesMap uiCommand = buildMaximizeCommand();
+        NoteBytesMap command = new NoteBytesMap();
+        command.put(Keys.CMD, ContainerCommands.MAXIMIZE_CONTAINER);
+        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(command)
             .thenRun(() -> {
                 isMaximized = true;
                 state.set(ContainerState.MAXIMIZED);
@@ -221,102 +325,17 @@ public class Container {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[Container] Restoring: " + id);
+        Log.logMsg("[Container] Restoring: " + id);
         
-        NoteBytesMap uiCommand = buildRestoreCommand();
+        NoteBytesMap command = new NoteBytesMap();
+        command.put(Keys.CMD, ContainerCommands.RESTORE_CONTAINER);
+        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
         
-        return uiRenderer.render(uiCommand)
+        return uiRenderer.render(command)
             .thenRun(() -> {
                 isMaximized = false;
                 state.set(isCurrent ? ContainerState.FOCUSED : ContainerState.VISIBLE);
             });
-    }
-    
-    /**
-     * Update container properties
-     */
-    public CompletableFuture<NoteBytesMap> update(NoteBytesMap updates) {
-        System.out.println("[Container] Updating: " + id);
-        
-        // Update local state
-        if (updates.has("title")) {
-            title.set(updates.get("title").getAsString());
-        }
-        
-        if (updates.has("config")) {
-            ContainerConfig newConfig = ContainerConfig.fromNoteBytes(
-                updates.get("config").getAsNoteBytesMap()
-            );
-            config.set(newConfig);
-        }
-        
-        // Send update command to UI
-        NoteBytesMap uiCommand = buildUpdateCommand(updates);
-        
-        return uiRenderer.render(uiCommand);
-    }
-    
-    // ===== UI COMMAND BUILDERS =====
-    // These build abstract commands that UIRenderer interprets
-    
-    private NoteBytesMap buildCreateCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "create_container");
-        cmd.put("container_id", id.toNoteBytes());
-        cmd.put("title", title.get());
-        cmd.put("type", type.get().name());
-        cmd.put("config", config.get().toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildDestroyCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "destroy_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildShowCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "show_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildHideCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "hide_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildFocusCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "focus_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildMaximizeCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "maximize_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildRestoreCommand() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "restore_container");
-        cmd.put("container_id", id.toNoteBytes());
-        return cmd;
-    }
-    
-    private NoteBytesMap buildUpdateCommand(NoteBytesMap updates) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put("cmd", "update_container");
-        cmd.put("container_id", id.toNoteBytes());
-        cmd.put("updates", updates);
-        return cmd;
     }
     
     // ===== GETTERS =====
@@ -324,6 +343,7 @@ public class Container {
     public ContainerId getId() { return id; }
     public ContextPath getPath() { return path; }
     public ContextPath getOwnerPath() { return ownerPath; }
+    public ContextPath getServicePath() { return servicePath; }
     public String getTitle() { return title.get(); }
     public ContainerType getType() { return type.get(); }
     public ContainerState getState() { return state.get(); }
@@ -335,6 +355,7 @@ public class Container {
     public boolean isHidden() { return isHidden; }
     public boolean isMaximized() { return isMaximized; }
     public boolean isVisible() { return isVisible; }
+    public boolean isActive() { return active; }
     
     /**
      * Get current container info

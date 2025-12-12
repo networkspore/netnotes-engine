@@ -1,6 +1,5 @@
 package io.netnotes.engine.core.system.control.containers;
 
-
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -8,79 +7,112 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ContainerService - Manages system-level containers
+ * ContainerService - Manages system-level containers with multiple renderers
  * 
  * Lives at: /system/services/container-service
+ * 
+ * Architecture (similar to IODaemon):
+ * - Maintains map of UIRenderers (by renderer ID)
+ * - Creates containers with assigned renderer
+ * - Container reads from stream and writes to its UIRenderer
  * 
  * Provides:
  * - Container creation/destruction
  * - Container state management (show/hide/focus)
  * - Event propagation to owners
- * - UIRenderer coordination
- * 
- * INodes request containers via standard messages:
- * processInterface.sendMessage(CONTAINER_SERVICE_PATH, createContainer(...))
+ * - Multiple UIRenderer support
  */
 public class ContainerService extends FlowProcess {
     
-    private final UIRenderer uiRenderer;
     private final BitFlagStateMachine state;
+    
+    // Renderer management
+    private final Map<String, UIRenderer> renderers = new ConcurrentHashMap<>();
+    private final String defaultRendererId;
+    
+    // Container management
     private final Map<ContainerId, Container> containers = new ConcurrentHashMap<>();
     private final Map<ContextPath, List<ContainerId>> ownerContainers = new ConcurrentHashMap<>();
-    
+    private final HashMap<NoteBytes, RoutedMessageExecutor> m_msgExecMap = new HashMap<>();
+
     // Track focus
     private ContainerId focusedContainer = null;
     
-    public ContainerService(String name, UIRenderer uiRenderer) {
+    /**
+     * Constructor with default renderer
+     * 
+     * @param name Service name
+     * @param defaultRenderer Default UI renderer (e.g., ConsoleUIRenderer)
+     */
+    public ContainerService(String name, UIRenderer defaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
-        this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine("container-service");
         
+        // Register default renderer
+        this.defaultRendererId = "default";
+        this.renderers.put(defaultRendererId, defaultRenderer);
+        setupMsgExcMap();
         setupStateTransitions();
+    }
+    
+    /**
+     * Register additional renderer (for multi-renderer scenarios)
+     * 
+     * Example: Desktop app might have:
+     * - "gui" renderer (NanoVG)
+     * - "terminal" renderer (for embedded terminal widgets)
+     */
+    public void registerRenderer(String rendererId, UIRenderer renderer) {
+        renderers.put(rendererId, renderer);
+        Log.logMsg("[ContainerService] Registered renderer: " + rendererId);
     }
     
     private void setupStateTransitions() {
         state.onStateAdded(ContainerServiceStates.INITIALIZING, (old, now, bit) -> {
-            System.out.println("[ContainerService] Initializing...");
+            Log.logMsg("[ContainerService] Initializing...");
         });
         
         state.onStateAdded(ContainerServiceStates.READY, (old, now, bit) -> {
-            System.out.println("[ContainerService] Ready - accepting requests");
+            Log.logMsg("[ContainerService] Ready - accepting requests");
         });
         
         state.onStateAdded(ContainerServiceStates.HAS_CONTAINERS, (old, now, bit) -> {
-            System.out.println("[ContainerService] First container created");
+            Log.logMsg("[ContainerService] First container created");
         });
         
         state.onStateRemoved(ContainerServiceStates.HAS_CONTAINERS, (old, now, bit) -> {
-            System.out.println("[ContainerService] All containers destroyed");
+            Log.logMsg("[ContainerService] All containers destroyed");
         });
         
         state.onStateAdded(ContainerServiceStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> {
-            System.out.println("[ContainerService] Container focused");
+            Log.logMsg("[ContainerService] Container focused");
         });
         
         state.onStateAdded(ContainerServiceStates.SHUTTING_DOWN, (old, now, bit) -> {
-            System.out.println("[ContainerService] Shutting down...");
+            Log.logMsg("[ContainerService] Shutting down...");
         });
         
         state.onStateAdded(ContainerServiceStates.STOPPED, (old, now, bit) -> {
-            System.out.println("[ContainerService] Stopped");
+            Log.logMsg("[ContainerService] Stopped");
         });
         
         state.onStateAdded(ContainerServiceStates.ERROR, (old, now, bit) -> {
-            System.err.println("[ContainerService] ERROR");
+            Log.logError("[ContainerService] ERROR");
         });
     }
     
@@ -88,10 +120,11 @@ public class ContainerService extends FlowProcess {
     public CompletableFuture<Void> run() {
         state.addState(ContainerServiceStates.INITIALIZING);
         
-        System.out.println("[ContainerService] Started at: " + contextPath);
+        Log.logMsg("[ContainerService] Started at: " + contextPath);
         
-        // Check if UI renderer is active
-        if (uiRenderer != null && uiRenderer.isActive()) {
+        // Check if default renderer is active
+        UIRenderer defaultRenderer = renderers.get(defaultRendererId);
+        if (defaultRenderer != null && defaultRenderer.isActive()) {
             state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
         }
         
@@ -100,6 +133,18 @@ public class ContainerService extends FlowProcess {
         state.addState(ContainerServiceStates.ACCEPTING_REQUESTS);
         
         return getCompletionFuture();
+    }
+
+    
+
+    private void setupMsgExcMap(){
+        m_msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::handleCreateContainer);
+        m_msgExecMap.put(ContainerCommands.DESTROY_CONTAINER, this::handleDestroyContainer);
+        m_msgExecMap.put(ContainerCommands.SHOW_CONTAINER, this::handleShowContainer);
+        m_msgExecMap.put(ContainerCommands.HIDE_CONTAINER, this::handleHideContainer);
+        m_msgExecMap.put(ContainerCommands.FOCUS_CONTAINER, this::handleFocusContainer);
+        m_msgExecMap.put(ContainerCommands.QUERY_CONTAINER, this::handleQueryContainer);
+        m_msgExecMap.put(ContainerCommands.LIST_CONTAINERS, this::handleListContainers);
     }
     
     @Override
@@ -117,25 +162,13 @@ public class ContainerService extends FlowProcess {
                     new IllegalArgumentException("'cmd' required"));
             }
             
+            RoutedMessageExecutor msgExec = m_msgExecMap.get(cmdBytes);
             // Dispatch commands
-            if (cmdBytes.equals(ContainerProtocol.CREATE_CONTAINER)) {
-                return handleCreateContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.DESTROY_CONTAINER)) {
-                return handleDestroyContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.UPDATE_CONTAINER)) {
-                return handleUpdateContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.SHOW_CONTAINER)) {
-                return handleShowContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.HIDE_CONTAINER)) {
-                return handleHideContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.FOCUS_CONTAINER)) {
-                return handleFocusContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.QUERY_CONTAINER)) {
-                return handleQueryContainer(packet);
-            } else if (cmdBytes.equals(ContainerProtocol.LIST_CONTAINERS)) {
-                return handleListContainers(packet);
+            if(msgExec != null){
+                return msgExec.execute(msg, packet);
+    
             } else {
-                System.err.println("[ContainerService] Unknown command: " + cmdBytes);
+                Log.logError("[ContainerService] Unknown command: " + cmdBytes);
                 return CompletableFuture.failedFuture(
                     new IllegalArgumentException("Unknown command: " + cmdBytes));
             }
@@ -147,15 +180,13 @@ public class ContainerService extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        System.err.println("[ContainerService] Unexpected stream channel from: " + fromPath);
+        Log.logError("[ContainerService] Unexpected stream channel from: " + fromPath);
     }
     
     // ===== COMMAND HANDLERS =====
     
-    private CompletableFuture<Void> handleCreateContainer(RoutedPacket packet) {
+    private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(ContainerServiceStates.CREATING_CONTAINER);
-        
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
         
         String title = msg.get(Keys.TITLE).getAsString();
         ContainerType type = ContainerType.valueOf(
@@ -171,33 +202,39 @@ public class ContainerService extends FlowProcess {
                 msg.get(Keys.CONFIG).getAsNoteBytesMap()
             );
         }
-
-        UIRenderer containerRenderer = uiRenderer;
-        //TODO: createRenderer does not exist
-        if (msg.has("renderer_type")) {
-            String rendererType = msg.get("renderer_type").getAsString();
-            containerRenderer = createRenderer(rendererType); // Factory method
+        
+        // Determine which renderer to use
+        String rendererId = defaultRendererId;
+        if (msg.has("renderer_id")) {
+            rendererId = msg.get("renderer_id").getAsString();
         }
         
-        System.out.println(String.format(
-            "[ContainerService] Creating %s container: %s (owner: %s)",
-            type, title, ownerPath
+        UIRenderer containerRenderer = renderers.get(rendererId);
+        if (containerRenderer == null) {
+            state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+            return replyError(packet, "Renderer not found: " + rendererId);
+        }
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Creating %s container: %s (owner: %s, renderer: %s)",
+            type, title, ownerPath, rendererId
         ));
         
         // Generate container ID
         ContainerId containerId = ContainerId.generate();
         
-        // Create container
+        // Create container with assigned renderer
         Container container = new Container(
             containerId,
             title,
             type,
             ownerPath,
             config != null ? config : new ContainerConfig(),
-            containerRenderer
+            containerRenderer,  // Pass renderer directly
+            contextPath         // Service path for requesting streams
         );
         
-        // Initialize container
+        // Initialize container (creates stream channel for render commands)
         return container.initialize()
             .thenRun(() -> {
                 // Register container
@@ -218,7 +255,7 @@ public class ContainerService extends FlowProcess {
                 
                 state.removeState(ContainerServiceStates.CREATING_CONTAINER);
                 
-                System.out.println("[ContainerService] Container created: " + containerId);
+                Log.logMsg("[ContainerService] Container created: " + containerId);
                 
                 // Reply with container ID
                 NoteBytesMap response = new NoteBytesMap();
@@ -229,34 +266,24 @@ public class ContainerService extends FlowProcess {
                 reply(packet, response.toNoteBytes());
                 
                 // Send event to owner
-                sendEvent(ownerPath, ContainerProtocol.containerCreated(
+                sendEvent(ownerPath, ContainerCommands.containerCreated(
                     containerId, container.getPath()
                 ));
             })
             .exceptionally(ex -> {
                 state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+                String errorMsg = ex.getMessage();
+                Log.logError("[ContainerService] Failed to create container: " + 
+                    errorMsg);
                 
-                System.err.println("[ContainerService] Failed to create container: " + 
-                    ex.getMessage());
-                
-                NoteBytesMap errorResponse = new NoteBytesMap();
-                errorResponse.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                errorResponse.put(Keys.MSG, new NoteBytes(ex.getMessage()));
-                
-                reply(packet, errorResponse.toNoteBytes());
+                reply(packet, ProtocolObjects.getErrorObject(errorMsg));
                 return null;
             });
     }
     
-    //TODO: verify
-    private UIRenderer createRenderer(String type){
-        return uiRenderer;
-    }
-    
-    private CompletableFuture<Void> handleDestroyContainer(RoutedPacket packet) {
+    private CompletableFuture<Void> handleDestroyContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(ContainerServiceStates.DESTROYING_CONTAINER);
         
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
         ContainerId containerId = ContainerId.fromNoteBytes(
             msg.get(Keys.CONTAINER_ID)
         );
@@ -267,7 +294,7 @@ public class ContainerService extends FlowProcess {
             return replyError(packet, "Container not found");
         }
         
-        System.out.println("[ContainerService] Destroying container: " + containerId);
+        Log.logMsg("[ContainerService] Destroying container: " + containerId);
         
         return container.destroy()
             .thenRun(() -> {
@@ -299,7 +326,7 @@ public class ContainerService extends FlowProcess {
                 
                 state.removeState(ContainerServiceStates.DESTROYING_CONTAINER);
                 
-                System.out.println("[ContainerService] Container destroyed: " + containerId);
+                Log.logMsg("[ContainerService] Container destroyed: " + containerId);
                 
                 // Reply success
                 NoteBytesMap response = new NoteBytesMap();
@@ -308,38 +335,12 @@ public class ContainerService extends FlowProcess {
                 
                 // Send event to owner
                 sendEvent(container.getOwnerPath(), 
-                    ContainerProtocol.containerClosed(containerId));
+                    ContainerCommands.containerClosed(containerId));
             });
     }
     
-    private CompletableFuture<Void> handleUpdateContainer(RoutedPacket packet) {
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
-        ContainerId containerId = ContainerId.fromNoteBytes(
-            msg.get(Keys.CONTAINER_ID)
-        );
-        NoteBytesMap updates = msg.get(Keys.UPDATES).getAsNoteBytesMap();
-        
-        Container container = containers.get(containerId);
-        if (container == null) {
-            return replyError(packet, "Container not found");
-        }
-        
-        state.addState(ContainerServiceStates.RENDERING);
-        
-        return container.update(updates)
-            .thenRun(() -> {
-                state.removeState(ContainerServiceStates.RENDERING);
-                replySuccess(packet);
-            })
-            .exceptionally(ex -> {
-                state.removeState(ContainerServiceStates.RENDERING);
-                replyError(packet, ex.getMessage());
-                return null;
-            });
-    }
-    
-    private CompletableFuture<Void> handleShowContainer(RoutedPacket packet) {
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+    private CompletableFuture<Void> handleShowContainer(NoteBytesMap msg, RoutedPacket packet) {
+
         ContainerId containerId = ContainerId.fromNoteBytes(
             msg.get(Keys.CONTAINER_ID)
         );
@@ -359,8 +360,8 @@ public class ContainerService extends FlowProcess {
             });
     }
     
-    private CompletableFuture<Void> handleHideContainer(RoutedPacket packet) {
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+    private CompletableFuture<Void> handleHideContainer(NoteBytesMap msg, RoutedPacket packet) {
+
         ContainerId containerId = ContainerId.fromNoteBytes(
             msg.get(Keys.CONTAINER_ID)
         );
@@ -380,8 +381,8 @@ public class ContainerService extends FlowProcess {
             });
     }
     
-    private CompletableFuture<Void> handleFocusContainer(RoutedPacket packet) {
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+    private CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) {
+  
         ContainerId containerId = ContainerId.fromNoteBytes(
             msg.get(Keys.CONTAINER_ID)
         );
@@ -414,12 +415,12 @@ public class ContainerService extends FlowProcess {
                 
                 // Send focus event to owner
                 sendEvent(container.getOwnerPath(),
-                    ContainerProtocol.containerFocused(containerId));
+                    ContainerCommands.containerFocused(containerId));
             });
     }
     
-    private CompletableFuture<Void> handleQueryContainer(RoutedPacket packet) {
-        NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+    private CompletableFuture<Void> handleQueryContainer(NoteBytesMap msg, RoutedPacket packet) {
+
         ContainerId containerId = ContainerId.fromNoteBytes(
             msg.get(Keys.CONTAINER_ID)
         );
@@ -440,7 +441,7 @@ public class ContainerService extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
     
-    private CompletableFuture<Void> handleListContainers(RoutedPacket packet) {
+    private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) {
         List<ContainerInfo> infoList = containers.values().stream()
             .map(Container::getInfo)
             .toList();
@@ -473,23 +474,18 @@ public class ContainerService extends FlowProcess {
     // ===== HELPERS =====
     
     private void sendEvent(ContextPath target, NoteBytesMap event) {
-    
         if (registry.exists(target)) {
             emitTo(target, event.toNoteBytes());
         }
     }
     
     private void replySuccess(RoutedPacket packet) {
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        reply(packet, response.toNoteBytes());
+        reply(packet, ProtocolObjects.SUCCESS_OBJECT);
     }
     
     private CompletableFuture<Void> replyError(RoutedPacket packet, String message) {
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.ERROR);
-        response.put(Keys.MSG, new NoteBytes(message));
-        reply(packet, response.toNoteBytes());
+        
+        reply(packet, ProtocolObjects.getErrorObject(message));
         return CompletableFuture.completedFuture(null);
     }
     
@@ -541,7 +537,7 @@ public class ContainerService extends FlowProcess {
         state.addState(ContainerServiceStates.SHUTTING_DOWN);
         state.removeState(ContainerServiceStates.ACCEPTING_REQUESTS);
         
-        System.out.println("[ContainerService] Shutting down, destroying " + 
+        Log.logMsg("[ContainerService] Shutting down, destroying " + 
             containers.size() + " containers");
         
         List<CompletableFuture<Void>> futures = containers.values().stream()
@@ -561,7 +557,7 @@ public class ContainerService extends FlowProcess {
                 state.removeState(ContainerServiceStates.HAS_FOCUSED_CONTAINER);
                 state.addState(ContainerServiceStates.STOPPED);
                 
-                System.out.println("[ContainerService] Shutdown complete");
+                Log.logMsg("[ContainerService] Shutdown complete");
             });
     }
 }

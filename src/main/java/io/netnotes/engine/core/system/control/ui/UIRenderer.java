@@ -21,7 +21,7 @@ public interface UIRenderer {
      * @param command Command to render
      * @return CompletableFuture that completes with user response (if applicable)
      */
-    CompletableFuture<NoteBytesMap> render(NoteBytesMap command);
+    CompletableFuture<Void> render(NoteBytesMap command);
     
     /**
      * Check if this renderer is active/available

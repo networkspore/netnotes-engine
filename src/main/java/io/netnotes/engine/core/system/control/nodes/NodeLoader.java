@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.nodes.osgi.OSGiBundleLoader;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * NodeLoader - Loads nodes from packages (OSGi integration)
@@ -43,7 +44,7 @@ class NodeLoader {
         
         PackageManifest manifest = installedPackage.getManifest();
         
-        System.out.println("[NodeLoader] Loading node: " + 
+        Log.logMsg("[NodeLoader] Loading node: " + 
             installedPackage.getName() + " (type: " + manifest.getType() + ")");
         
         switch (manifest.getType()) {

@@ -4,6 +4,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.*;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.time.Duration;
 import java.util.*;
@@ -104,7 +105,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         this.registry = registryInterface;
         this.startTime = System.currentTimeMillis();
         
-        System.out.println("[FlowProcess] Initialized: " + contextPath + 
+        Log.logMsg("[FlowProcess] Initialized: " + contextPath + 
             " (name: " + name + ", parent: " + parentPath + 
             ", interface: " + registryInterface.getClass().getSimpleName() + ")");
     }
@@ -172,7 +173,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     public void onStart() {}
     public void onStop() {}
     public void onStreamError(Throwable error) {
-        System.err.println("Process " + contextPath + " error: " + error.getMessage());
+        Log.logError("Process " + contextPath + " error: " + error.getMessage());
         error.printStackTrace();
     }
     public void onStreamComplete() {}
@@ -185,11 +186,11 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         try {
             int lag = outgoingPublisher.submit(packet);
             if (lag > 100) {
-                System.out.println("WARNING: " + contextPath + 
+                Log.logMsg("WARNING: " + contextPath + 
                     " downstream lagging (buffer: " + lag + ")");
             }
         } catch (Exception e) {
-            System.err.println("Error emitting packet: " + e.getMessage());
+            Log.logError("Error emitting packet: " + e.getMessage());
         }
     }
     
@@ -422,7 +423,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         String replyTo = originalRequest.getMetadataString("replyTo");
         
         if (correlationId == null || replyTo == null) {
-            System.err.println("Cannot reply: missing correlation metadata");
+            Log.logError("Cannot reply: missing correlation metadata");
             return;
         }
         

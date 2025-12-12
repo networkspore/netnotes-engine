@@ -5,6 +5,7 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * FlowProcessService - Instance-based process registry
@@ -54,7 +55,7 @@ public class FlowProcessService {
      * Security is handled by who controls interface creation
      */
     public FlowProcessService() {
-        System.out.println("[FlowProcessService] New registry instance created");
+        Log.logMsg("[FlowProcessService] New registry instance created");
     }
     
     public ProcessRegistryInterface getRegistryInterface(){
@@ -95,7 +96,7 @@ public class FlowProcessService {
         // Detect stream capability
         detectStreamCapability(process, path);
         
-        System.out.println("[ProcessService] Registered: " + path +
+        Log.logMsg("[ProcessService] Registered: " + path +
             " (parent: " + parentPath + ", stream: " + 
             streamCapable.getOrDefault(path, false) + ")");
         
@@ -145,7 +146,7 @@ public class FlowProcessService {
             childPaths.forEach(this::unregisterProcess);
         }
         
-        System.out.println("[ProcessService] Unregistered: " + path);
+        Log.logMsg("[ProcessService] Unregistered: " + path);
     }
     
     /**
@@ -169,7 +170,7 @@ public class FlowProcessService {
         connections.computeIfAbsent(downstreamPath, k -> ConcurrentHashMap.newKeySet())
             .add(upstreamPath);
         
-        System.out.println("[ProcessService] Connected: " + upstreamPath + " → " + downstreamPath);
+        Log.logMsg("[ProcessService] Connected: " + upstreamPath + " → " + downstreamPath);
     }
     
     /**
@@ -181,7 +182,7 @@ public class FlowProcessService {
             upstreams.remove(upstreamPath);
         }
         
-        System.out.println("[ProcessService] Disconnected: " + upstreamPath + " ⊣ " + downstreamPath);
+        Log.logMsg("[ProcessService] Disconnected: " + upstreamPath + " ⊣ " + downstreamPath);
     }
     
     /**
@@ -199,7 +200,7 @@ public class FlowProcessService {
             .thenCompose(v -> process.run())
             .whenComplete((v, ex) -> {
                 if (ex != null) {
-                    System.err.println("Process " + path + " error: " + ex);
+                    Log.logError("Process " + path + " error: " + ex);
                     ex.printStackTrace();
                 }
                 try {
@@ -350,7 +351,7 @@ public class FlowProcessService {
         parents.clear();
         connections.clear();
         streamCapable.clear();
-        System.out.println("[ProcessService] Shutdown complete");
+        Log.logMsg("[ProcessService] Shutdown complete");
     }
 
     /**

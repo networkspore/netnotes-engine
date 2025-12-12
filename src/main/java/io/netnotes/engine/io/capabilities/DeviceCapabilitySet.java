@@ -4,6 +4,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -71,7 +72,7 @@ public class DeviceCapabilitySet {
                     String capName = REGISTRY.getNameForBit(bitValue);
                     
                     if (capName != null && !availableCapabilities.hasFlag(bitValue)) {
-                        System.err.println("Warning: Enabled unavailable capability: " + capName);
+                        Log.logError("Warning: Enabled unavailable capability: " + capName);
                     }
                 }
             }
@@ -80,7 +81,7 @@ public class DeviceCapabilitySet {
         // Log all state changes for debugging
         availableCapabilities.onStateChanged((oldState, newState) -> {
             if (!oldState.equals(newState)) {
-                System.out.println("[" + name + "] Available capabilities updated");
+                Log.logMsg("[" + name + "] Available capabilities updated");
             }
         });
     }
@@ -159,7 +160,7 @@ public class DeviceCapabilitySet {
         
         // Check constraints
         if (!constraints.canEnable(capability, this)) {
-            System.err.println("Cannot enable " + capability + ": " + 
+            Log.logError("Cannot enable " + capability + ": " + 
                              constraints.getFailureReason(capability, this));
             return false;
         }

@@ -10,6 +10,7 @@ import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * ProgressTrackingProcess - Consumes progress stream and updates UI
@@ -78,11 +79,11 @@ public class StreamReader {
                 }
                 
 
-                System.out.println("[ProgressTracking] Progress stream complete");
+                Log.logMsg("[ProgressTracking] Progress stream complete");
 
                 
             } catch (IOException e) {
-                System.err.println("[ProgressTracking] Progress stream error: " + 
+                Log.logError("[ProgressTracking] Progress stream error: " + 
                     e.getMessage());
             }
         });
@@ -112,7 +113,7 @@ public class StreamReader {
 
             
         } catch (Exception e) {
-            System.err.println("[ProgressTracking] Error updating UI: " + e.getMessage());
+            Log.logError("[ProgressTracking] Error updating UI: " + e.getMessage());
         }
     } 
     
@@ -130,7 +131,7 @@ public class StreamReader {
             containerHandle.println(message);
         }
         
-        System.out.println(String.format(
+        Log.logMsg(String.format(
             "[ProgressTracking] Progress: %d/%d (%.1f%%) - %s",
             completed, total, percentage, message
         ));

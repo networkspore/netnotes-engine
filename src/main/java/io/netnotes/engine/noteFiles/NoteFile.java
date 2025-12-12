@@ -25,6 +25,7 @@ import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 
 import io.netnotes.engine.utils.CollectionHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 
@@ -35,8 +36,8 @@ import io.netnotes.engine.utils.streams.StreamUtils;
 OperationBuilder builder = noteFile.newOperation();
 
 // Use multiple times
-builder.readWrite(stream1, stream2).thenRun(() -> System.out.println("Op 1 done"));
-builder.readWrite(stream3, stream4).thenRun(() -> System.out.println("Op 2 done"));
+builder.readWrite(stream1, stream2).thenRun(() -> Log.logMsg("Op 1 done"));
+builder.readWrite(stream3, stream4).thenRun(() -> Log.logMsg("Op 2 done"));
 
 // Custom operations
 builder.execute(fileInterface -> {
@@ -330,7 +331,7 @@ public class NoteFile implements AutoCloseable  {
                 // On decryption error, close streams to signal failure
                 StreamUtils.safeClose(decryptInput);
                 StreamUtils.safeClose(decryptOutput);
-                System.err.println("[NoteFile] Decryption error for " + 
+                Log.logError("[NoteFile] Decryption error for " + 
                     pathString + ": " + ex.getMessage());
                 return null;
             });
@@ -447,7 +448,7 @@ public class NoteFile implements AutoCloseable  {
         CompletableFuture<NoteBytesObject> writeFuture = writeOnly(pipeOut)
             .exceptionally(ex -> {
                 StreamUtils.safeClose(pipeOut);
-                System.err.println("[NoteFile] Write/encrypt error for " +
+                Log.logError("[NoteFile] Write/encrypt error for " +
                     pathString + ": " + ex.getMessage());
                 return null;
             });

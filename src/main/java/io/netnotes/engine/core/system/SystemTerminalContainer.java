@@ -15,6 +15,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 /**
  * SystemTerminalContainer - THE system terminal
  * 
@@ -86,17 +87,17 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     
     private void setupStateTransitions() {
         state.onStateAdded(CLOSED, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Terminal closed");
+            Log.logMsg("[SystemTerminal] Terminal closed");
             isVisible = false;
         });
         
         state.onStateAdded(OPENING, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Opening terminal...");
+            Log.logMsg("[SystemTerminal] Opening terminal...");
             isVisible = true;
         });
         
         state.onStateAdded(CHECKING_SETTINGS, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Checking if settings exist...");
+            Log.logMsg("[SystemTerminal] Checking if settings exist...");
             checkSettingsExist()
                 .thenAccept(exists -> {
                     state.removeState(CHECKING_SETTINGS);
@@ -118,30 +119,30 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         });
         
         state.onStateAdded(FIRST_RUN, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] First run - creating password");
+            Log.logMsg("[SystemTerminal] First run - creating password");
             showScreen("first-run-password");
         });
         
         state.onStateAdded(AUTHENTICATING, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Authenticating user...");
+            Log.logMsg("[SystemTerminal] Authenticating user...");
             showScreen("login");
         });
         
         state.onStateAdded(AUTHENTICATED, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] User authenticated");
+            Log.logMsg("[SystemTerminal] User authenticated");
             isAuthenticated = true;
             // Check for recovery needs, then show main menu
             checkRecovery().thenRun(() -> showScreen("main-menu"));
         });
         
         state.onStateAdded(LOCKED, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Terminal locked");
+            Log.logMsg("[SystemTerminal] Terminal locked");
             isAuthenticated = false;
             showScreen("locked");
         });
 
         state.onStateAdded(FAILED_SETTINGS, (old, now, bit) -> {
-            System.out.println("[SystemTerminal] Settings error - troubleshooting settings");
+            Log.logMsg("[SystemTerminal] Settings error - troubleshooting settings");
             showScreen("settings-recovery");
         });
     }
@@ -317,23 +318,23 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
      * Called by LoginScreen after password entry
      */
     public CompletableFuture<Boolean> verifyAndLoadSystem(NoteBytesEphemeral password) {
-        System.out.println("[SystemTerminal] Verifying password and loading system");
+        Log.logMsg("[SystemTerminal] Verifying password and loading system");
         
         // Load settingsMap (ephemeral)
         return SettingsData.loadSettingsMap()
             .thenCompose(settingsMap -> {
-                System.out.println("[SystemTerminal] Settings map loaded, verifying");
+                Log.logMsg("[SystemTerminal] Settings map loaded, verifying");
                 
                 // Verify password
                 return SettingsData.verifyPassword(password, settingsMap)
                     .thenCompose(valid -> {
                         if (valid) {
-                            System.out.println("[SystemTerminal] Password valid, loading");
+                            Log.logMsg("[SystemTerminal] Password valid, loading");
                             
                             // Load SettingsData
                             return SettingsData.loadSettingsData(password, settingsMap)
                                 .thenApply(settingsData -> {
-                                    System.out.println("[SystemTerminal] Creating SystemRuntime");
+                                    Log.logMsg("[SystemTerminal] Creating SystemRuntime");
                                     
                                     RuntimeAccess access = new RuntimeAccess();
                                     
@@ -356,7 +357,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                                     return true;
                                 });
                         } else {
-                            System.out.println("[SystemTerminal] Password invalid");
+                            Log.logMsg("[SystemTerminal] Password invalid");
                             return CompletableFuture.completedFuture(false);
                         }
                     });
@@ -426,7 +427,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     public CompletableFuture<Void> showScreen(String screenName) {
         ScreenFactory screenFactory = screenFactories.get(screenName);
         if (screenFactory == null) {
-            System.err.println("[SystemTerminal] Screen not found: " + screenName);
+            Log.logError("[SystemTerminal] Screen not found: " + screenName);
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Screen not found: " + screenName)
             );

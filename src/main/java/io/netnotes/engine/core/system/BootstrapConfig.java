@@ -15,6 +15,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -202,7 +203,7 @@ public class BootstrapConfig extends FlowProcess {
     public static CompletableFuture<BootstrapConfig> initialize() {
         synchronized (INSTANCE_LOCK) {
             if (instance != null) {
-                System.out.println("[BootstrapConfig] Already initialized");
+                Log.logMsg("[BootstrapConfig] Already initialized");
                 return CompletableFuture.completedFuture(instance);
             }
             
@@ -210,12 +211,12 @@ public class BootstrapConfig extends FlowProcess {
             
             return instance.loadConfig()
                 .thenApply(v -> {
-                    System.out.println("[BootstrapConfig] Singleton initialized at: " + 
+                    Log.logMsg("[BootstrapConfig] Singleton initialized at: " + 
                         BOOTSTRAP_CONFIG_PATH);
                     return instance;
                 })
                 .exceptionally(ex -> {
-                    System.err.println("[BootstrapConfig] Initialization failed: " + ex.getMessage());
+                    Log.logError("[BootstrapConfig] Initialization failed: " + ex.getMessage());
                     instance = null;
                     throw new RuntimeException("Failed to initialize BootstrapConfig", ex);
                 });
@@ -237,7 +238,7 @@ public class BootstrapConfig extends FlowProcess {
             return toShutdown.saveConfig()
                 .thenRun(() -> {
                     toShutdown.kill();
-                    System.out.println("[BootstrapConfig] Singleton shutdown");
+                    Log.logMsg("[BootstrapConfig] Singleton shutdown");
                 });
         }
     }
@@ -256,23 +257,23 @@ public class BootstrapConfig extends FlowProcess {
     
     private void setupStateTransitions() {
         state.onStateAdded(INITIALIZING, (old, now, bit) -> {
-            System.out.println("[BootstrapConfig] Initializing...");
+            Log.logMsg("[BootstrapConfig] Initializing...");
         });
         
         state.onStateAdded(LOADING, (old, now, bit) -> {
-            System.out.println("[BootstrapConfig] Loading from disk...");
+            Log.logMsg("[BootstrapConfig] Loading from disk...");
         });
         
         state.onStateAdded(READY, (old, now, bit) -> {
-            System.out.println("[BootstrapConfig] Ready - accepting requests");
+            Log.logMsg("[BootstrapConfig] Ready - accepting requests");
         });
         
         state.onStateAdded(SAVING, (old, now, bit) -> {
-            System.out.println("[BootstrapConfig] Saving to disk...");
+            Log.logMsg("[BootstrapConfig] Saving to disk...");
         });
         
         state.onStateAdded(ERROR, (old, now, bit) -> {
-            System.err.println("[BootstrapConfig] ERROR state");
+            Log.logError("[BootstrapConfig] ERROR state");
         });
     }
     
@@ -296,15 +297,15 @@ public class BootstrapConfig extends FlowProcess {
                 boolean exists = SettingsData.isBootstrapData();
                 
                 if (exists) {
-                    System.out.println("[BootstrapConfig] Loading existing config");
+                    Log.logMsg("[BootstrapConfig] Loading existing config");
                     return SettingsData.loadBootStrapConfig().join();
                 } else {
-                    System.out.println("[BootstrapConfig] Creating default config");
+                    Log.logMsg("[BootstrapConfig] Creating default config");
                     return createDefault();
                 }
                 
             } catch (Exception e) {
-                System.err.println("[BootstrapConfig] Load error: " + e.getMessage());
+                Log.logError("[BootstrapConfig] Load error: " + e.getMessage());
                 return createDefault();
             }
         }, VirtualExecutors.getVirtualExecutor())
@@ -317,7 +318,7 @@ public class BootstrapConfig extends FlowProcess {
             }
             
             state.removeState(LOADING);
-            System.out.println("[BootstrapConfig] Config loaded");
+            Log.logMsg("[BootstrapConfig] Config loaded");
         });
     }
     
@@ -342,11 +343,11 @@ public class BootstrapConfig extends FlowProcess {
         return SettingsData.saveBootstrapConfig(toSave)
             .thenRun(() -> {
                 state.removeState(SAVING);
-                System.out.println("[BootstrapConfig] Config saved to disk");
+                Log.logMsg("[BootstrapConfig] Config saved to disk");
             })
             .exceptionally(ex -> {
                 state.removeState(SAVING);
-                System.err.println("[BootstrapConfig] Save failed: " + ex.getMessage());
+                Log.logError("[BootstrapConfig] Save failed: " + ex.getMessage());
                 return null;
             });
     }
@@ -397,7 +398,7 @@ public class BootstrapConfig extends FlowProcess {
             response.put(Keys.DATA, value);
         } else {
             response.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            response.put(Keys.MSG, new NoteBytes("Path not found: " + path));
+            response.put(Keys.ERROR_MESSAGE, new NoteBytes("Path not found: " + path));
         }
         
         reply(packet, response.toNoteBytes());
@@ -493,7 +494,7 @@ public class BootstrapConfig extends FlowProcess {
         ConfigChangeListener listener = new ConfigChangeListener(subscriber);
         subscribers.put(subscriber, listener);
         
-        System.out.println("[BootstrapConfig] Subscriber added: " + subscriber);
+        Log.logMsg("[BootstrapConfig] Subscriber added: " + subscriber);
         
         replySuccess(packet);
         return CompletableFuture.completedFuture(null);
@@ -504,7 +505,7 @@ public class BootstrapConfig extends FlowProcess {
         
         subscribers.remove(subscriber);
         
-        System.out.println("[BootstrapConfig] Subscriber removed: " + subscriber);
+        Log.logMsg("[BootstrapConfig] Subscriber removed: " + subscriber);
         
         replySuccess(packet);
         return CompletableFuture.completedFuture(null);
@@ -512,7 +513,7 @@ public class BootstrapConfig extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        System.err.println("[BootstrapConfig] Unexpected stream from: " + fromPath);
+        Log.logError("[BootstrapConfig] Unexpected stream from: " + fromPath);
     }
     
     // ===== NOTIFICATION =====
@@ -527,7 +528,7 @@ public class BootstrapConfig extends FlowProcess {
             try {
                 emitTo(listener.path, event.toNoteBytes());
             } catch (Exception e) {
-                System.err.println("[BootstrapConfig] Failed to notify " + 
+                Log.logError("[BootstrapConfig] Failed to notify " + 
                     listener.path + ": " + e.getMessage());
             }
         });
@@ -840,7 +841,7 @@ public class BootstrapConfig extends FlowProcess {
     private CompletableFuture<Void> replyError(RoutedPacket packet, String message) {
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.ERROR);
-        response.put(Keys.MSG, new NoteBytes(message));
+        response.put(Keys.ERROR_MESSAGE, new NoteBytes(message));
         reply(packet, response.toNoteBytes());
         return CompletableFuture.completedFuture(null);
     }

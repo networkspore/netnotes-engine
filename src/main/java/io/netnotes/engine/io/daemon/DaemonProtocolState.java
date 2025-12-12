@@ -6,6 +6,7 @@ import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;
 import io.netnotes.engine.state.StateEventRegistry.DeviceStates;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -131,12 +132,12 @@ public class DaemonProtocolState {
             
             state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
                 state.addState(ClientStateFlags.FLOW_CONTROL_PAUSED);
-                System.out.println("Backpressure activated for client " + sessionId);
+                Log.logMsg("Backpressure activated for client " + sessionId);
             });
             
             state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
                 state.addState(ClientStateFlags.ERROR_STATE);
-                System.err.println("Heartbeat timeout for client " + sessionId);
+                Log.logError("Heartbeat timeout for client " + sessionId);
             });
             
             state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
@@ -253,7 +254,7 @@ public class DaemonProtocolState {
             
             state.onStateAdded(DeviceStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
                 state.addState(DeviceStateFlags.EVENT_BUFFERING);
-                System.out.println("Backpressure on device " + deviceId);
+                Log.logMsg("Backpressure on device " + deviceId);
             });
             
             state.onStateAdded(DeviceStateFlags.PAUSED, (old, now, bit) -> {
@@ -271,7 +272,7 @@ public class DaemonProtocolState {
             
             state.onStateAdded(DeviceStateFlags.ENCRYPTION_ENABLED, (old, now, bit) -> {
                 if (!capabilities.hasCapability("encryption_supported")) {
-                    System.err.println("Device does not support encryption");
+                    Log.logError("Device does not support encryption");
                     state.removeState(DeviceStateFlags.ENCRYPTION_ENABLED);
                 } else {
                     capabilities.enableCapability("encryption_enabled");
@@ -280,7 +281,7 @@ public class DaemonProtocolState {
             
             state.onStateAdded(DeviceStateFlags.FILTER_ENABLED, (old, now, bit) -> {
                 if (!capabilities.hasCapability("filtered_mode")) {
-                    System.err.println("Device does not support filtering");
+                    Log.logError("Device does not support filtering");
                     state.removeState(DeviceStateFlags.FILTER_ENABLED);
                 } else {
                     capabilities.enableCapability("filtered_mode");
@@ -294,16 +295,16 @@ public class DaemonProtocolState {
         
         public boolean enableMode(String mode) {
             if (!capabilities.hasCapability(mode)) {
-                System.err.println("Mode not available: " + mode);
+                Log.logError("Mode not available: " + mode);
                 return false;
             }
             
             boolean enabled = capabilities.enableCapability(mode);
             
             if (enabled) {
-                System.out.println("Enabled mode '" + mode + "' for device " + deviceId);
+                Log.logMsg("Enabled mode '" + mode + "' for device " + deviceId);
             } else {
-                System.err.println("Failed to enable mode '" + mode + "': " + 
+                Log.logError("Failed to enable mode '" + mode + "': " + 
                                  capabilities.getEnableFailureReason(mode));
             }
             
@@ -452,7 +453,7 @@ public class DaemonProtocolState {
         }
         
         private void handleHeartbeatTimeout(ClientSession session) {
-            System.err.println("Heartbeat timeout for session: " + session.sessionId);
+            Log.logError("Heartbeat timeout for session: " + session.sessionId);
             session.state.addState(ClientStateFlags.DISCONNECTING);
         }
         

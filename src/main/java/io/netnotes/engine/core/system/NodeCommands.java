@@ -7,12 +7,13 @@ import io.netnotes.engine.core.system.control.nodes.*;
 import io.netnotes.engine.crypto.AsymmetricPairs;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.messaging.NoteMessaging.ErrorCodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.time.Duration;
 import java.util.*;
@@ -96,14 +97,7 @@ class NodeCommands {
             return command;
         }
 
-        public static String getErrMsg(NoteBytesMap result){
-            NoteBytes errMsg = result.get(Keys.ERROR_MESSAGE);
-            if(errMsg != null){
-                return errMsg.getAsString();
-            }else{
-                return ErrorCodes.getMessage(result.get(Keys.ERROR_CODE));
-            }
-        }
+        
 
         // ═══════════════════════════════════════════════════════════════════════
         // QUERY OPERATIONS 
@@ -126,13 +120,13 @@ class NodeCommands {
                             packages.add(InstalledPackage.fromNoteBytes(
                                 pkgBytes.getAsNoteBytesMap()));
                         } catch (Exception e) {
-                            System.err.println("[NodeCommands] Failed to parse package: " + e.getMessage());
+                            Log.logError("[NodeCommands] Failed to parse package: " + e.getMessage());
                         }
                     }
                     return packages;
                 })
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to get installed packages: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to get installed packages: " + ex.getMessage());
                     return new ArrayList<>();
                 });
         }
@@ -147,7 +141,7 @@ class NodeCommands {
             return sendMessageToProcess(CoreConstants.NODE_CONTROLLER_PATH, command)
                 .thenApply(response -> parseInstanceList(response.getPayload().getAsMap()))
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to get running instances: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to get running instances: " + ex.getMessage());
                     return new ArrayList<>();
                 });
         }
@@ -163,7 +157,7 @@ class NodeCommands {
             return sendMessageToProcess(CoreConstants.NODE_CONTROLLER_PATH, command)
                 .thenApply(response -> parseInstanceList(response.getPayload().getAsMap()))
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to get instances by package: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to get instances by package: " + ex.getMessage());
                     return new ArrayList<>();
                 });
         }
@@ -179,7 +173,7 @@ class NodeCommands {
             return sendMessageToProcess(CoreConstants.NODE_CONTROLLER_PATH, command)
                 .thenApply(response -> parseInstanceList(response.getPayload().getAsMap()))
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to get instances by process: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to get instances by process: " + ex.getMessage());
                     return new ArrayList<>();
                 });
         }
@@ -226,13 +220,13 @@ class NodeCommands {
                             packages.add(PackageInfo.fromNoteBytes(
                                 pkgBytes.getAsNoteBytesMap()));
                         } catch (Exception e) {
-                            System.err.println("[NodeCommands] Failed to parse package info: " + e.getMessage());
+                            Log.logError("[NodeCommands] Failed to parse package info: " + e.getMessage());
                         }
                     }
                     return packages;
                 })
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to browse packages: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to browse packages: " + ex.getMessage());
                     return new ArrayList<>();
                 });
         }
@@ -250,7 +244,7 @@ class NodeCommands {
                     return countBytes != null ? countBytes.getAsInt() : 0;
                 })
                 .exceptionally(ex -> {
-                    System.err.println("[NodeCommands] Failed to update cache: " + ex.getMessage());
+                    Log.logError("[NodeCommands] Failed to update cache: " + ex.getMessage());
                     return 0;
                 });
         }
@@ -295,7 +289,8 @@ class NodeCommands {
                     NoteBytes status = result.get(Keys.STATUS);
                     
                     if (!ProtocolMesssages.SUCCESS.equals(status)) {
-                        throw new RuntimeException("Installation failed: " + getErrMsg(result));
+                   
+                        throw new RuntimeException("Installation failed: " + ProtocolObjects.getErrMsg(result));
                     }
                     
                     return InstalledPackage.fromNoteBytes(
@@ -320,7 +315,7 @@ class NodeCommands {
                     NoteBytes status = result.get(Keys.STATUS);
                     
                     if (!ProtocolMesssages.SUCCESS.equals(status)) {
-                        throw new RuntimeException("Uninstall failed: " + getErrMsg(result));
+                        throw new RuntimeException("Uninstall failed: " + ProtocolObjects.getErrMsg(result));
                     }
                 });
         }
@@ -342,7 +337,7 @@ class NodeCommands {
                     NoteBytes status = result.get(Keys.STATUS);
                     
                     if (!ProtocolMesssages.SUCCESS.equals(status)) {
-                        throw new RuntimeException("Config update failed: " + getErrMsg(result));
+                        throw new RuntimeException("Config update failed: " + ProtocolObjects.getErrMsg(result));
                     }
                 });
         }
@@ -364,7 +359,7 @@ class NodeCommands {
                     NoteBytes status = result.get(Keys.STATUS);
                     
                     if (!ProtocolMesssages.SUCCESS.equals(status)) {
-                        throw new RuntimeException("Load failed: " + getErrMsg(result));
+                        throw new RuntimeException("Load failed: " + ProtocolObjects.getErrMsg(result));
                     }
                     
                     return parseNodeInstance(result.get(Keys.INSTANCE).getAsNoteBytesMap());
@@ -386,7 +381,7 @@ class NodeCommands {
                     NoteBytes status = result.get(Keys.STATUS);
                     
                     if (!ProtocolMesssages.SUCCESS.equals(status)) {
-                        throw new RuntimeException("Unload failed: " + getErrMsg(result));
+                        throw new RuntimeException("Unload failed: " + ProtocolObjects.getErrMsg(result));
                     }
                 });
         }
@@ -457,12 +452,12 @@ class NodeCommands {
                             instances.add(instance);
                         }
                     } catch (Exception e) {
-                        System.err.println("[NodeCommands] Failed to parse instance: " + 
+                        Log.logError("[NodeCommands] Failed to parse instance: " + 
                             e.getMessage());
                     }
                 }
             } catch (Exception e) {
-                System.err.println("[NodeCommands] Failed to parse instance list: " + 
+                Log.logError("[NodeCommands] Failed to parse instance list: " + 
                     e.getMessage());
             }
             
@@ -504,7 +499,7 @@ class NodeCommands {
                 return instance;
                 
             } catch (Exception e) {
-                System.err.println("[NodeCommands] Failed to parse node instance: " + 
+                Log.logError("[NodeCommands] Failed to parse node instance: " + 
                     e.getMessage());
                 return null;
             }

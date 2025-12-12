@@ -12,6 +12,7 @@ import io.netnotes.engine.utils.github.GitHubAsset;
 import io.netnotes.engine.utils.github.GitHubInfo;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -85,31 +86,31 @@ public class SecureInputInstaller extends FlowProcess {
     
     private void setupStateTransitions() {
         state.onStateAdded(FETCHING_RELEASES, (old, now, bit) -> {
-            System.out.println("[Installer] Fetching releases from GitHub...");
+            Log.logMsg("[Installer] Fetching releases from GitHub...");
         });
         
         state.onStateAdded(SHOWING_MENU, (old, now, bit) -> {
-            System.out.println("[Installer] Displaying release selection menu");
+            Log.logMsg("[Installer] Displaying release selection menu");
         });
         
         state.onStateAdded(CONFIRMING, (old, now, bit) -> {
-            System.out.println("[Installer] Awaiting installation confirmation");
+            Log.logMsg("[Installer] Awaiting installation confirmation");
         });
         
         state.onStateAdded(INSTALLING, (old, now, bit) -> {
-            System.out.println("[Installer] Installation in progress...");
+            Log.logMsg("[Installer] Installation in progress...");
         });
         
         state.onStateAdded(VERIFYING, (old, now, bit) -> {
-            System.out.println("[Installer] Verifying installation...");
+            Log.logMsg("[Installer] Verifying installation...");
         });
         
         state.onStateAdded(COMPLETE, (old, now, bit) -> {
-            System.out.println("[Installer] Installation complete!");
+            Log.logMsg("[Installer] Installation complete!");
         });
         
         state.onStateAdded(FAILED, (old, now, bit) -> {
-            System.out.println("[Installer] Installation failed");
+            Log.logMsg("[Installer] Installation failed");
         });
     }
     
@@ -622,7 +623,7 @@ public class SecureInputInstaller extends FlowProcess {
             try {
                 executeCommand("usermod", "-a", "-G", "netnotes", user);
             } catch (Exception e) {
-                System.err.println("Could not add user to group: " + e.getMessage());
+                Log.logError("Could not add user to group: " + e.getMessage());
             }
         }
     }
@@ -669,7 +670,7 @@ public class SecureInputInstaller extends FlowProcess {
         
         int percent = totalSteps > 0 ? (step * 100) / totalSteps : 0;
         
-        System.out.println("[" + step + "/" + totalSteps + "] " + message);
+        Log.logMsg("[" + step + "/" + totalSteps + "] " + message);
         
         // Update terminal with progress
         terminal.println(String.format("[%d/%d] %s (%d%%)", 
@@ -686,7 +687,7 @@ public class SecureInputInstaller extends FlowProcess {
                 new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                System.out.println("  " + line);
+                Log.logMsg("  " + line);
                 terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
             }
         }
@@ -708,7 +709,7 @@ public class SecureInputInstaller extends FlowProcess {
                 new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                System.out.println("  " + line);
+                Log.logMsg("  " + line);
                 terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
             }
         }
@@ -749,7 +750,7 @@ public class SecureInputInstaller extends FlowProcess {
                     try {
                         deleteRecursively(child);
                     } catch (IOException e) {
-                        System.err.println("Could not delete: " + child);
+                        Log.logError("Could not delete: " + child);
                     }
                 });
             }

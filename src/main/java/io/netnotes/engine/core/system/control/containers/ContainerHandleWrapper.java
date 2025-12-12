@@ -13,6 +13,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * ContainerHandle - Lightweight wrapper using owner's FlowProcess
@@ -29,7 +30,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  *     this  // Pass the INode itself
  * );
  * 
- * handle.show().thenRun(() -> System.out.println("Container shown"));
+ * handle.show().thenRun(() -> Log.logMsg("Container shown"));
  * </pre>
  */
 public class ContainerHandleWrapper {
@@ -62,7 +63,7 @@ public class ContainerHandleWrapper {
      * Update container properties
      */
     public CompletableFuture<Void> updateContainer(NoteBytesMap updates) {
-        NoteBytesMap msg = ContainerProtocol.updateContainer(containerId, updates);
+        NoteBytesMap msg = ContainerCommands.updateContainer(containerId, updates);
         return sendCommand(msg);
     }
     
@@ -70,7 +71,7 @@ public class ContainerHandleWrapper {
      * Show container (unhide/restore)
      */
     public CompletableFuture<Void> show() {
-        NoteBytesMap msg = ContainerProtocol.showContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.showContainer(containerId);
         return sendCommand(msg);
     }
     
@@ -78,7 +79,7 @@ public class ContainerHandleWrapper {
      * Hide container (minimize)
      */
     public CompletableFuture<Void> hide() {
-        NoteBytesMap msg = ContainerProtocol.hideContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.hideContainer(containerId);
         return sendCommand(msg);
     }
     
@@ -86,7 +87,7 @@ public class ContainerHandleWrapper {
      * Focus container (bring to front)
      */
     public CompletableFuture<Void> focus() {
-        NoteBytesMap msg = ContainerProtocol.focusContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.focusContainer(containerId);
         return sendCommand(msg);
     }
     
@@ -94,7 +95,7 @@ public class ContainerHandleWrapper {
      * Maximize container
      */
     public CompletableFuture<Void> maximize() {
-        NoteBytesMap msg = ContainerProtocol.maximizeContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.maximizeContainer(containerId);
         return sendCommand(msg);
     }
     
@@ -102,7 +103,7 @@ public class ContainerHandleWrapper {
      * Restore container (un-maximize)
      */
     public CompletableFuture<Void> restore() {
-        NoteBytesMap msg = ContainerProtocol.restoreContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.restoreContainer(containerId);
         return sendCommand(msg);
     }
     
@@ -114,7 +115,7 @@ public class ContainerHandleWrapper {
             return CompletableFuture.completedFuture(null);
         }
         
-        NoteBytesMap msg = ContainerProtocol.destroyContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.destroyContainer(containerId);
         return sendCommand(msg)
             .thenRun(() -> isDestroyed = true);
     }
@@ -123,7 +124,7 @@ public class ContainerHandleWrapper {
      * Query container info
      */
     public CompletableFuture<NoteBytesMap> getInfo() {
-        NoteBytesMap msg = ContainerProtocol.queryContainer(containerId);
+        NoteBytesMap msg = ContainerCommands.queryContainer(containerId);
         
         return sendRequest(msg)
             .thenApply(reply -> reply.getPayload().getAsNoteBytesMap());
@@ -152,9 +153,8 @@ public class ContainerHandleWrapper {
         .thenAccept(reply -> {
             // Validate acknowledgment and propagate errors
             NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
-            if (response.has("status")) {
-                NoteBytes statusBytes = response.get(ProtocolMesssages.STATUS);
-                
+            NoteBytes statusBytes = response.get(ProtocolMesssages.STATUS);
+            if (statusBytes != null) {
                 if (!statusBytes.equals(ProtocolMesssages.SUCCESS)) {
                     NoteBytes errorBytes = response.get(Keys.ERROR_CODE);
                     int errorCode = errorBytes != null
@@ -163,7 +163,7 @@ public class ContainerHandleWrapper {
                     String errorMsg = NoteMessaging.ErrorCodes.getMessage(errorCode);
 
                     String msg = "[ContainerHandle] Command failed: " + errorMsg;
-                    System.err.println(msg);
+                    Log.logError(msg);
                     throw new CompletionException(msg, new IOException(errorMsg));
                 }
             }

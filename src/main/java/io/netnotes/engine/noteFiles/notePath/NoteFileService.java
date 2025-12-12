@@ -18,6 +18,7 @@ import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.noteFiles.ManagedNoteFileInterface;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.File;
@@ -660,7 +661,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                         Files.delete(tmpFile.toPath());
                     }
                 } catch (IOException e) {
-                    System.err.println("Failed to delete tmp: " + tmpFile + " - " + 
+                    Log.logError("Failed to delete tmp: " + tmpFile + " - " + 
                         e.getMessage());
                     succeeded = false;
                 }
@@ -721,7 +722,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 } catch (IOException e) {
                    // failed.add(pathStr);
                     isSuccess = false;
-                    System.err.println("Perform finish swaps failed: " + e.toString());
+                    Log.logError("Perform finish swaps failed: " + e.toString());
                 }
                 
             }
@@ -784,7 +785,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 decryptFuture.join();
                 
             } catch (IOException e) {
-                System.err.println("[NoteFileService] Error reading ledger: " + e.getMessage());
+                Log.logError("[NoteFileService] Error reading ledger: " + e.getMessage());
             } finally {
                 StreamUtils.safeClose(decryptedOutput);
             }
@@ -964,11 +965,11 @@ private boolean canDecryptFile(File file, SecretKey key) {
             FileEncryptionAnalysis analysis) {
         
         if (filePaths == null || filePaths.isEmpty()) {
-            System.out.println("[NoteFileService] No files to re-encrypt");
+            Log.logMsg("[NoteFileService] No files to re-encrypt");
             return CompletableFuture.completedFuture(true);
         }
         
-        System.out.println(String.format(
+        Log.logMsg(String.format(
             "[NoteFileService] %s: Adaptive processing of %d files (initial batch: %d)",
             operation, filePaths.size(), initialBatchSize));
         
@@ -989,7 +990,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                         dataDir, remainingFiles, currentBatchSize.get());
                     
                     if (!resourceCheck.canProceed) {
-                        System.err.println("[NoteFileService] Insufficient resources: " + 
+                        Log.logError("[NoteFileService] Insufficient resources: " + 
                             resourceCheck.reason);
                         
                         if (progressWriter != null) {
@@ -1005,7 +1006,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                     
                     // Adjust batch size if recommended
                     if (resourceCheck.recommendedBatchSize < currentBatchSize.get()) {
-                        System.out.println(String.format(
+                        Log.logMsg(String.format(
                             "[NoteFileService] Adjusting batch size: %d -> %d",
                             currentBatchSize.get(), resourceCheck.recommendedBatchSize));
                         currentBatchSize.set(resourceCheck.recommendedBatchSize);
@@ -1025,7 +1026,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                         File file = new File(filePath);
                         
                         if (!file.exists() || !file.isFile()) {
-                            System.err.println("[NoteFileService] File not found: " + filePath);
+                            Log.logError("[NoteFileService] File not found: " + filePath);
                             failed.incrementAndGet();
                             continue;
                         }
@@ -1068,7 +1069,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                                 }
                             } catch (Exception e) {
                                 failed.incrementAndGet();
-                                System.err.println("[NoteFileService] " + operation +
+                                Log.logError("[NoteFileService] " + operation +
                                     " failed: " + filePath + " - " + e.getMessage());
                                 
                                 if (progressWriter != null) {
@@ -1087,21 +1088,21 @@ private boolean canDecryptFile(File file, SecretKey key) {
                     CompletableFuture.allOf(batchFutures.toArray(new CompletableFuture[0])).join();
                     
                     // Log batch completion
-                    System.out.println(String.format(
+                    Log.logMsg(String.format(
                         "[NoteFileService] Batch complete: %d/%d files remaining",
                         remainingFiles.size(), filePaths.size()));
                 }
                 
                 boolean success = failed.get() == 0;
                 
-                System.out.println(String.format(
+                Log.logMsg(String.format(
                     "[NoteFileService] %s complete: %d succeeded, %d failed",
                     operation, completed.get(), failed.get()));
                 
                 return success;
                 
             } catch (Exception e) {
-                System.err.println("[NoteFileService] " + operation +
+                Log.logError("[NoteFileService] " + operation +
                     " operation failed: " + e.getMessage());
                 return false;
             }
@@ -1176,7 +1177,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 "Disk space constrained. Reducing batch from %d to %d files",
                 proposedBatchSize, maxFiles);
             
-            System.out.println("[NoteFileService] " + check.reason);
+            Log.logMsg("[NoteFileService] " + check.reason);
             return check;
         }
         
@@ -1218,7 +1219,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 "Memory constrained. Reducing batch from %d to %d files",
                 proposedBatchSize, memoryBasedBatch);
             
-            System.out.println("[NoteFileService] " + check.reason);
+            Log.logMsg("[NoteFileService] " + check.reason);
             return check;
         }
         
@@ -1256,16 +1257,16 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 try {
                     if (file.exists()) {
                         Files.delete(file.toPath());
-                        System.out.println("[NoteFileService] Deleted corrupted file: " + filePath);
+                        Log.logMsg("[NoteFileService] Deleted corrupted file: " + filePath);
                     }
                     
                     if (tmpFile.exists()) {
                         Files.delete(tmpFile.toPath());
-                        System.out.println("[NoteFileService] Deleted corrupted tmp: " + 
+                        Log.logMsg("[NoteFileService] Deleted corrupted tmp: " + 
                             tmpFile.getName());
                     }
                 } catch (IOException e) {
-                    System.err.println("[NoteFileService] Failed to delete: " + filePath + 
+                    Log.logError("[NoteFileService] Failed to delete: " + filePath + 
                         " - " + e.getMessage());
                     allSucceeded = false;
                 }
@@ -1282,7 +1283,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                     Throwable cause = ex.getCause();
                     String msg = "Error shutting down note file service: " + 
                         (cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString());
-                    System.err.println(msg);
+                    Log.logError(msg);
                     ex.printStackTrace();
                     if(progressWriter != null){
                         TaskMessages.writeErrorAsync("AppData", msg, ex, progressWriter);

@@ -20,6 +20,7 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.TimeHelpers;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * PasswordChangeScreen - Change master password
@@ -300,7 +301,7 @@ class PasswordChangeScreen extends TerminalScreen {
                     try {
                         // Wait for all queued UI updates to complete
                         if (!msgExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                            System.err.println("[PasswordChange] Warning: Executor did not terminate in time");
+                            Log.logError("[PasswordChange] Warning: Executor did not terminate in time");
                             msgExecutor.shutdownNow();
                         }
                     } catch (InterruptedException e) {
@@ -315,7 +316,7 @@ class PasswordChangeScreen extends TerminalScreen {
             if(!msgExecutor.isShutdown()){
                 msgExecutor.shutdownNow();
             }
-            System.err.println("[PasswordChange] Error during stream completion: " + ex.getMessage());
+            Log.logError("[PasswordChange] Error during stream completion: " + ex.getMessage());
             return null;
         });
     }

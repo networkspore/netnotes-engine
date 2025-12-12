@@ -17,6 +17,7 @@ import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 
 public class SystemRuntime {
@@ -227,12 +228,12 @@ public class SystemRuntime {
      * - NodeController
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[SystemRuntime] Initializing services...");
+        Log.logMsg("[SystemRuntime] Initializing services...");
         
         return initializeRepositoryManager()
             .thenCompose(v -> initializeNodeController())
             .thenRun(() -> {
-                System.out.println("[SystemRuntime] All services initialized");
+                Log.logMsg("[SystemRuntime] All services initialized");
             });
     }
 
@@ -253,7 +254,7 @@ public class SystemRuntime {
                     CoreConstants.SYSTEM_PATH,
                     registryInterface
                 );
-                System.out.println("[SystemRuntime] Registered RepositoryManager at: " + path);
+                Log.logMsg("[SystemRuntime] Registered RepositoryManager at: " + path);
                 return registryInterface.startProcess(path)
                     .thenCompose(v -> repositoryManager.initialize());
             });
@@ -305,7 +306,7 @@ public class SystemRuntime {
                     registryInterface
                 );
 
-        System.out.println("[SystemRuntime] Registered NodeController at: " + path);
+        Log.logMsg("[SystemRuntime] Registered NodeController at: " + path);
 
 
         return registryInterface.startProcess(path);
@@ -316,13 +317,13 @@ public class SystemRuntime {
      * Shutdown - stop all services
      */
     public CompletableFuture<Void> shutdown() {
-        System.out.println("[SystemRuntime] Shutting down services");
+        Log.logMsg("[SystemRuntime] Shutting down services");
         
         return nodeController.shutdown()
             .thenCompose(v -> repositoryManager.shutdown())
             .thenCompose(v -> noteFileService.shutdown(null))
             .thenRun(() -> {
-                System.out.println("[SystemRuntime] Shutdown complete");
+                Log.logMsg("[SystemRuntime] Shutdown complete");
             });
     }
 

@@ -6,6 +6,7 @@ import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -259,7 +260,7 @@ class PasswordSessionProcess extends FlowProcess {
                     password.close();
                     
                     if (ex != null) {
-                        System.err.println("Verification error: " + ex.getMessage());
+                        Log.logError("Verification error: " + ex.getMessage());
                         active = false;
                         result.completeExceptionally(ex);
                         complete();

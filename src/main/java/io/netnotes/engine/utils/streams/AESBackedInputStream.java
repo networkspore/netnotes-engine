@@ -13,6 +13,7 @@ import org.apache.commons.io.input.UnsynchronizedByteArrayInputStream;
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.crypto.CryptoService;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public final class AESBackedInputStream extends InputStream {
     private final File m_file;
@@ -103,7 +104,7 @@ public final class AESBackedInputStream extends InputStream {
             try{
                 Files.deleteIfExists(m_file.toPath());
             }catch(IOException e){
-                System.err.println("Failed to delete temp file: " + m_file.getAbsolutePath());
+                Log.logError("Failed to delete temp file: " + m_file.getAbsolutePath());
             }
         }
     }

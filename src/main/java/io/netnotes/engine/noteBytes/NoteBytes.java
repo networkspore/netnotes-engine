@@ -27,6 +27,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -558,7 +559,7 @@ public class NoteBytes {
             for (int i = 0; i < m_value.length; i++) {
                 clearanceVerifier ^= m_value[i]; 
                 if (m_value[i] != 0) {
-                    System.err.println("Warning: Memory clear verification failed at index " + i);
+                    Log.logError("Warning: Memory clear verification failed at index " + i);
                 }
             }
             Thread.yield();

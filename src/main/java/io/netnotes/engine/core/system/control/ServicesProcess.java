@@ -10,6 +10,7 @@ import io.netnotes.engine.io.daemon.IODaemon;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -58,39 +59,39 @@ public class ServicesProcess extends FlowProcess {
     
     private void setupStateTransitions() {
         state.onStateAdded(ServicesStates.INITIALIZING, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] Initializing...");
+            Log.logMsg("[ServicesProcess] Initializing...");
         });
         
         state.onStateAdded(ServicesStates.STARTING_CORE, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] Starting core services...");
+            Log.logMsg("[ServicesProcess] Starting core services...");
         });
         
         state.onStateAdded(ServicesStates.STARTING_OPTIONAL, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] Starting optional services...");
+            Log.logMsg("[ServicesProcess] Starting optional services...");
         });
         
         state.onStateAdded(ServicesStates.READY, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] " + ServicesStates.describe(state));
+            Log.logMsg("[ServicesProcess] " + ServicesStates.describe(state));
         });
         
         state.onStateAdded(ServicesStates.CONTAINER_SERVICE_ACTIVE, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] ContainerService is active");
+            Log.logMsg("[ServicesProcess] ContainerService is active");
         });
         
         state.onStateAdded(ServicesStates.IO_DAEMON_ACTIVE, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] IODaemon is active");
+            Log.logMsg("[ServicesProcess] IODaemon is active");
         });
         
         state.onStateAdded(ServicesStates.SHUTTING_DOWN, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] Shutting down services...");
+            Log.logMsg("[ServicesProcess] Shutting down services...");
         });
         
         state.onStateAdded(ServicesStates.STOPPED, (old, now, bit) -> {
-            System.out.println("[ServicesProcess] All services stopped");
+            Log.logMsg("[ServicesProcess] All services stopped");
         });
         
         state.onStateAdded(ServicesStates.ERROR, (old, now, bit) -> {
-            System.err.println("[ServicesProcess] ERROR: " + ServicesStates.describe(state));
+            Log.logError("[ServicesProcess] ERROR: " + ServicesStates.describe(state));
         });
     }
     
@@ -110,11 +111,11 @@ public class ServicesProcess extends FlowProcess {
                 state.removeState(ServicesStates.STARTING_OPTIONAL);
                 state.addState(ServicesStates.READY);
                 
-                System.out.println("[ServicesProcess] All services operational");
+                Log.logMsg("[ServicesProcess] All services operational");
             })
             .thenCompose(v -> getCompletionFuture())
             .exceptionally(ex -> {
-                System.err.println("[ServicesProcess] Fatal error: " + ex.getMessage());
+                Log.logError("[ServicesProcess] Fatal error: " + ex.getMessage());
                 state.addState(ServicesStates.ERROR);
                 return null;
             });
@@ -144,7 +145,7 @@ public class ServicesProcess extends FlowProcess {
         
         // Check if BootstrapConfig singleton is initialized
         if (!BootstrapConfig.isInitialized()) {
-            System.err.println("[ServicesProcess] BootstrapConfig not initialized!");
+            Log.logError("[ServicesProcess] BootstrapConfig not initialized!");
             return CompletableFuture.completedFuture(null);
         }
         
@@ -153,10 +154,10 @@ public class ServicesProcess extends FlowProcess {
         BootstrapConfig config = BootstrapConfig.getInstance();
         
         if (config.isSecureInputInstalled()) {
-            System.out.println("[ServicesProcess] Secure input configured, starting IODaemon");
+            Log.logMsg("[ServicesProcess] Secure input configured, starting IODaemon");
             optionalFutures.add(startIODaemon());
         } else {
-            System.out.println("[ServicesProcess] Secure input not configured, skipping IODaemon");
+            Log.logMsg("[ServicesProcess] Secure input not configured, skipping IODaemon");
         }
         
         // Future services can be added here
@@ -178,18 +179,18 @@ public class ServicesProcess extends FlowProcess {
      * Start ContainerService
      */
     private CompletableFuture<Void> startContainerService() {
-        System.out.println("[ServicesProcess] Starting ContainerService...");
+        Log.logMsg("[ServicesProcess] Starting ContainerService...");
         
         
         return spawnChild(containerService)
             .thenCompose(path -> registry.startProcess(path))
             .thenRun(() -> {
                 state.addState(ServicesStates.CONTAINER_SERVICE_ACTIVE);
-                System.out.println("[ServicesProcess] ContainerService started at: " + 
+                Log.logMsg("[ServicesProcess] ContainerService started at: " + 
                     CONTAINER_SERVICE_PATH);
             })
             .exceptionally(ex -> {
-                System.err.println("[ServicesProcess] FATAL: ContainerService failed to start: " + 
+                Log.logError("[ServicesProcess] FATAL: ContainerService failed to start: " + 
                     ex.getMessage());
                 state.addState(ServicesStates.CONTAINER_SERVICE_FAILED);
                 state.addState(ServicesStates.ERROR);
@@ -201,13 +202,13 @@ public class ServicesProcess extends FlowProcess {
      * Start IODaemon (accesses config through singleton)
      */
     private CompletableFuture<Void> startIODaemon() {
-        System.out.println("[ServicesProcess] Starting IODaemon...");
+        Log.logMsg("[ServicesProcess] Starting IODaemon...");
         
         // Get socket path from singleton - always fresh!
         BootstrapConfig config = BootstrapConfig.getInstance();
         String socketPath = config.getSecureInputSocketPath();
         
-        System.out.println("[ServicesProcess] Using socket path: " + socketPath);
+        Log.logMsg("[ServicesProcess] Using socket path: " + socketPath);
         
         ioDaemon = new IODaemon(IO_DAEMON, socketPath);
         
@@ -215,11 +216,11 @@ public class ServicesProcess extends FlowProcess {
             .thenCompose(path -> registry.startProcess(path))
             .thenRun(() -> {
                 state.addState(ServicesStates.IO_DAEMON_ACTIVE);
-                System.out.println("[ServicesProcess] IODaemon started at: " + 
+                Log.logMsg("[ServicesProcess] IODaemon started at: " + 
                     IO_DAEMON_PATH);
             })
             .exceptionally(ex -> {
-                System.err.println("[ServicesProcess] IODaemon failed to start: " + 
+                Log.logError("[ServicesProcess] IODaemon failed to start: " + 
                     ex.getMessage());
                 state.addState(ServicesStates.IO_DAEMON_FAILED);
                 // Don't fail entire startup if IODaemon fails
@@ -274,7 +275,7 @@ public class ServicesProcess extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        System.err.println("[ServicesProcess] Unexpected stream channel from: " + fromPath);
+        Log.logError("[ServicesProcess] Unexpected stream channel from: " + fromPath);
     }
     
     /**
@@ -287,7 +288,7 @@ public class ServicesProcess extends FlowProcess {
         
         state.addState(ServicesStates.SHUTTING_DOWN);
         
-        System.out.println("[ServicesProcess] Shutting down services...");
+        Log.logMsg("[ServicesProcess] Shutting down services...");
         
         List<CompletableFuture<Void>> shutdownFutures = new ArrayList<>();
         
@@ -296,7 +297,7 @@ public class ServicesProcess extends FlowProcess {
             shutdownFutures.add(CompletableFuture.runAsync(() -> {
                 ioDaemon.kill();
                 state.removeState(ServicesStates.IO_DAEMON_ACTIVE);
-                System.out.println("[ServicesProcess] IODaemon stopped");
+                Log.logMsg("[ServicesProcess] IODaemon stopped");
             }));
         }
         
@@ -304,7 +305,7 @@ public class ServicesProcess extends FlowProcess {
             shutdownFutures.add(containerService.shutdown()
                 .thenRun(() -> {
                     state.removeState(ServicesStates.CONTAINER_SERVICE_ACTIVE);
-                    System.out.println("[ServicesProcess] ContainerService stopped");
+                    Log.logMsg("[ServicesProcess] ContainerService stopped");
                 }));
         }
         
@@ -315,7 +316,7 @@ public class ServicesProcess extends FlowProcess {
             state.removeState(ServicesStates.READY);
             state.addState(ServicesStates.STOPPED);
             
-            System.out.println("[ServicesProcess] All services stopped");
+            Log.logMsg("[ServicesProcess] All services stopped");
         });
     }
 }

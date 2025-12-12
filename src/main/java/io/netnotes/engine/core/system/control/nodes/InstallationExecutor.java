@@ -7,6 +7,7 @@ import io.netnotes.engine.core.NoteFileServiceInterface;
 import io.netnotes.engine.core.system.control.nodes.security.NodeSecurityPolicy;
 import io.netnotes.engine.core.system.control.nodes.security.PathCapability;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * InstallationExecutor - Actually performs the installation
@@ -54,13 +55,13 @@ class InstallationExecutor {
         ProcessConfig processConfig = request.getProcessConfig();
         PolicyManifest policyManifest = request.getPolicyManifest();
         
-        System.out.println("[InstallationExecutor] Installing: " + pkgInfo.getName());
-        System.out.println("  ProcessId: " + processConfig.getProcessId());
+        Log.logMsg("[InstallationExecutor] Installing: " + pkgInfo.getName());
+        Log.logMsg("  ProcessId: " + processConfig.getProcessId());
         
         // Step 1: Download and store package files
         return packageInstaller.installPackage(pkgInfo)
             .thenApply(installPath -> {
-                System.out.println("[InstallationExecutor] Files downloaded and stored");
+                Log.logMsg("[InstallationExecutor] Files downloaded and stored");
                 
                 // Step 2: Create security policy from manifest
                 NodeSecurityPolicy policy = createSecurityPolicy(
@@ -69,7 +70,7 @@ class InstallationExecutor {
                     processConfig
                 );
                 
-                System.out.println("[InstallationExecutor] Security policy created with " + 
+                Log.logMsg("[InstallationExecutor] Security policy created with " + 
                     policy.getGrantedCapabilities().size() + " capabilities");
                 
                 // Step 3: Create RefactoredInstalledPackage with all metadata
@@ -85,13 +86,13 @@ class InstallationExecutor {
                     installPath
                 );
 
-                System.out.println("[InstallationExecutor] Installation complete: " + 
+                Log.logMsg("[InstallationExecutor] Installation complete: " + 
                     pkgInfo.getName());
                 
                 return pkg;
             })
             .exceptionally(ex -> {
-                System.err.println("[InstallationExecutor] Installation failed: " + 
+                Log.logError("[InstallationExecutor] Installation failed: " + 
                     ex.getMessage());
                 throw new RuntimeException("Installation failed", ex);
             });
@@ -117,7 +118,7 @@ class InstallationExecutor {
         for (PathCapability cap : policyManifest.getRequestedCapabilities()) {
             policy.grantCapability(cap);
             
-            System.out.println("[InstallationExecutor]   Granted: " + 
+            Log.logMsg("[InstallationExecutor]   Granted: " + 
                 cap.getPathPattern() + " (" + cap.getReason() + ")");
         }
         

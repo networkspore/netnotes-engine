@@ -20,6 +20,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.core.system.control.nodes.security.NodeSecurityPolicy;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
 
@@ -100,12 +101,12 @@ public class NodeController extends FlowProcess {
     }
     
     private CompletableFuture<Void> initialize() {
-        System.out.println("[NodeController] Initializing at: " + contextPath);
+        Log.logMsg("[NodeController] Initializing at: " + contextPath);
         
         // Initialize installation registry
         return initializeInstallationRegistry()
             .thenRun(() -> {
-                System.out.println("[NodeController] Initialization complete");
+                Log.logMsg("[NodeController] Initialization complete");
             });
     }
 
@@ -129,7 +130,7 @@ public class NodeController extends FlowProcess {
                     registry
                 );
                 
-                System.out.println("[NodeController] Registered InstallationRegistry at: " + regPath);
+                Log.logMsg("[NodeController] Registered InstallationRegistry at: " + regPath);
                 
                 // Start and initialize
                 return registry.startProcess(regPath)
@@ -169,11 +170,11 @@ public class NodeController extends FlowProcess {
                     "Package already loaded with processId: " + processConfig.getProcessId()));
         }
         
-        System.out.println("[NodeController] Loading node:");
-        System.out.println("  Package: " + pkg.getName() + " v" + pkg.getPackageId().getVersion());
-        System.out.println("  ProcessId: " + processConfig.getProcessId());
-        System.out.println("  Data root: " + processConfig.getDataRootPath());
-        System.out.println("  Flow base: " + processConfig.getFlowBasePath());
+        Log.logMsg("[NodeController] Loading node:");
+        Log.logMsg("  Package: " + pkg.getName() + " v" + pkg.getPackageId().getVersion());
+        Log.logMsg("  ProcessId: " + processConfig.getProcessId());
+        Log.logMsg("  Data root: " + processConfig.getDataRootPath());
+        Log.logMsg("  Flow base: " + processConfig.getFlowBasePath());
         
         // Load INode from package
         return nodeLoader.loadNodeFromPackage(pkg)
@@ -219,15 +220,15 @@ public class NodeController extends FlowProcess {
                 // Register in instance registry
                 instanceRegistry.register(instance);
                 
-                System.out.println("[NodeController] Node loaded successfully:");
-                System.out.println("  Instance: " + instance.getInstanceId());
-                System.out.println("  Package: " + pkg.getName());
-                System.out.println("  ProcessId: " + processConfig.getProcessId());
+                Log.logMsg("[NodeController] Node loaded successfully:");
+                Log.logMsg("  Instance: " + instance.getInstanceId());
+                Log.logMsg("  Package: " + pkg.getName());
+                Log.logMsg("  ProcessId: " + processConfig.getProcessId());
                 
                 return instance;
             })
             .exceptionally(ex -> {
-                System.err.println("[NodeController] Failed to initialize node: " + 
+                Log.logError("[NodeController] Failed to initialize node: " + 
                     ex.getMessage());
                 instance.setState(NodeState.CRASHED);
                 throw new RuntimeException("Node initialization failed", ex);
@@ -249,7 +250,7 @@ public class NodeController extends FlowProcess {
                 new IllegalArgumentException("Instance not found: " + instanceId));
         }
         
-        System.out.println("[NodeController] Unloading instance: " + instanceId);
+        Log.logMsg("[NodeController] Unloading instance: " + instanceId);
         
         instance.setState(NodeState.STOPPING);
         
@@ -260,10 +261,10 @@ public class NodeController extends FlowProcess {
                 
                 instance.setState(NodeState.STOPPED);
                 
-                System.out.println("[NodeController] Instance unloaded: " + instanceId);
+                Log.logMsg("[NodeController] Instance unloaded: " + instanceId);
             })
             .exceptionally(ex -> {
-                System.err.println("[NodeController] Error unloading instance: " + 
+                Log.logError("[NodeController] Error unloading instance: " + 
                     instanceId + " - " + ex.getMessage());
                 return null;
             });
@@ -280,7 +281,7 @@ public class NodeController extends FlowProcess {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[NodeController] Unloading " + instances.size() + 
+        Log.logMsg("[NodeController] Unloading " + instances.size() + 
             " instances of package: " + packageId);
         
         List<CompletableFuture<Void>> futures = instances.stream()
@@ -301,7 +302,7 @@ public class NodeController extends FlowProcess {
             return CompletableFuture.completedFuture(null);
         }
         
-        System.out.println("[NodeController] Unloading " + instances.size() + 
+        Log.logMsg("[NodeController] Unloading " + instances.size() + 
             " instances in process: " + processId);
         
         List<CompletableFuture<Void>> futures = instances.stream()
@@ -371,7 +372,7 @@ public class NodeController extends FlowProcess {
      * Install a package
      */
     public CompletableFuture<InstalledPackage> installPackage(InstallationRequest request) {
-        System.out.println("[NodeController] Installing package: " + 
+        Log.logMsg("[NodeController] Installing package: " + 
             request.getPackageInfo().getName());
         
         // Execute installation
@@ -396,7 +397,7 @@ public class NodeController extends FlowProcess {
      * Uninstall a package
      */
     public CompletableFuture<Void> uninstallPackage(PackageId packageId, AsyncNoteBytesWriter progress) {
-        System.out.println("[NodeController] Uninstalling package: " + packageId);
+        Log.logMsg("[NodeController] Uninstalling package: " + packageId);
         
         // Check if package has running instances
         List<NodeInstance> instances = getInstancesByPackage(packageId);
@@ -421,7 +422,7 @@ public class NodeController extends FlowProcess {
                 return deletePackageFiles(pkg, progress);
             })
             .thenRun(() -> {
-                System.out.println("[NodeController] Package uninstalled: " + packageId);
+                Log.logMsg("[NodeController] Package uninstalled: " + packageId);
             });
     }
 
@@ -434,10 +435,10 @@ public class NodeController extends FlowProcess {
         // Get the NoteFile for the install path
         return fileService.deleteNoteFile(installPath, false, progress)
             .thenAccept((notePath) -> {
-                System.out.println("[NodeController] Deleted package files at: " + installPath);
+                Log.logMsg("[NodeController] Deleted package files at: " + installPath);
             })
             .exceptionally(ex -> {
-                System.err.println("[NodeController] Failed to delete package files: " + 
+                Log.logError("[NodeController] Failed to delete package files: " + 
                     ex.getMessage());
                 // Don't fail the uninstall if file deletion fails
                 return null;
@@ -457,14 +458,14 @@ public class NodeController extends FlowProcess {
         
         ContextPath dataPath = pkg.getProcessConfig().getDataRootPath();
         
-        System.out.println("[NodeController] Deleting package data at: " + dataPath);
+        Log.logMsg("[NodeController] Deleting package data at: " + dataPath);
         
         return fileService.deleteNoteFile(dataPath, false, progress)
             .thenRun(() -> {
-                System.out.println("[NodeController] Package data deleted");
+                Log.logMsg("[NodeController] Package data deleted");
             })
             .exceptionally(ex -> {
-                System.err.println("[NodeController] Failed to delete package data: " + 
+                Log.logError("[NodeController] Failed to delete package data: " + 
                     ex.getMessage());
                 // Log but don't fail
                 return null;
@@ -478,7 +479,7 @@ public class NodeController extends FlowProcess {
         PackageId packageId,
         io.netnotes.engine.core.system.control.nodes.ProcessConfig newProcessConfig
     ) {
-        System.out.println("[NodeController] Updating package configuration: " + packageId);
+        Log.logMsg("[NodeController] Updating package configuration: " + packageId);
         
         // Check if package has running instances
         List<NodeInstance> instances = getInstancesByPackage(packageId);
@@ -512,8 +513,8 @@ public class NodeController extends FlowProcess {
         // Update in registry (this will trigger save)
         return installationRegistry.registerPackage(updatedPkg)
             .thenRun(() -> {
-                System.out.println("[NodeController] Configuration updated for: " + packageId);
-                System.out.println("  New ProcessId: " + newProcessConfig.getProcessId());
+                Log.logMsg("[NodeController] Configuration updated for: " + packageId);
+                Log.logMsg("  New ProcessId: " + newProcessConfig.getProcessId());
             });
     }
 
@@ -657,7 +658,7 @@ public class NodeController extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        System.err.println("[NodeController] Unexpected stream channel from: " + fromPath);
+        Log.logError("[NodeController] Unexpected stream channel from: " + fromPath);
     }
     
     // ═══════════════════════════════════════════════════════════════════════
@@ -666,7 +667,7 @@ public class NodeController extends FlowProcess {
     
 
     public CompletableFuture<Void> shutdown() {
-        System.out.println("[NodeController] Shutting down - unloading " + 
+        Log.logMsg("[NodeController] Shutting down - unloading " + 
             instanceRegistry.getAllInstances().size() + " instances");
         
         List<CompletableFuture<Void>> shutdownFutures = new ArrayList<>();
@@ -684,7 +685,7 @@ public class NodeController extends FlowProcess {
         return CompletableFuture.allOf(
             shutdownFutures.toArray(new CompletableFuture[0]))
             .thenRun(() -> {
-                System.out.println("[NodeController] Shutdown complete");
+                Log.logMsg("[NodeController] Shutdown complete");
             });
     }
 
@@ -980,7 +981,7 @@ public class NodeController extends FlowProcess {
      * Handle command errors with consistent response format
      */
     private void handleCommandError(RoutedPacket packet, String message, Throwable ex) {
-        System.err.println("[NodeController] " + message + ": " + ex.getMessage());
+        Log.logError("[NodeController] " + message + ": " + ex.getMessage());
         
         // Unwrap CompletionException if present
         Throwable cause = ex instanceof CompletionException ? ex.getCause() : ex;

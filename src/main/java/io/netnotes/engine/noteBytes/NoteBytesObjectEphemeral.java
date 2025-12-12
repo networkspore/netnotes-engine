@@ -11,6 +11,7 @@ import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 
 
@@ -38,7 +39,7 @@ public class NoteBytesObjectEphemeral extends NoteBytes implements AutoCloseable
                 for (int i = 0; i < dataToClean.length; i++) {
                     clearanceVerifier ^= dataToClean[i]; 
                     if (dataToClean[i] != 0) {
-                        System.err.println("Warning: Memory clear verification failed at index " + i);
+                        Log.logError("Warning: Memory clear verification failed at index " + i);
                     }
                 }
                 Thread.yield();

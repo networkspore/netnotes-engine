@@ -15,6 +15,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteFiles.NoteFile;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.github.GitHubInfo;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 
@@ -92,12 +93,12 @@ public class RepositoryManager extends FlowProcess {
      * Gets NoteFile ONCE and stores for entire lifecycle.
      */
     public CompletableFuture<Void> initialize() {
-        System.out.println("[RepositoryManager] Initializing at: " + contextPath);
+        Log.logMsg("[RepositoryManager] Initializing at: " + contextPath);
   
         return loadRepositories()
             .exceptionallyCompose(ex -> {
                 // First run - add default repository
-                System.out.println("[RepositoryManager] No existing sources found, adding defaults");
+                Log.logMsg("[RepositoryManager] No existing sources found, adding defaults");
                 addDefaultRepository();
                 return saveRepositories();
             });
@@ -112,7 +113,7 @@ public class RepositoryManager extends FlowProcess {
                 // Deserialize from NoteBytes format
                 NoteBytesMap reposMap = noteBytesObj.getAsNoteBytesMap();
                 
-                System.out.println("[RepositoryManager] Found " + reposMap.size() + " repositories");
+                Log.logMsg("[RepositoryManager] Found " + reposMap.size() + " repositories");
                 
                 for (Map.Entry<NoteBytes, NoteBytes> entry : reposMap.entrySet()) {
                     NoteBytes repoId = entry.getKey();
@@ -120,11 +121,11 @@ public class RepositoryManager extends FlowProcess {
                         Repository repo = Repository.fromNoteBytes(entry.getValue().getAsNoteBytesMap());
                         repositories.put(repoId.readOnly(), repo);
                         
-                        System.out.println("[RepositoryManager] Loaded: " + 
+                        Log.logMsg("[RepositoryManager] Loaded: " + 
                             repo.getName() + (repo.isEnabled() ? "" : " (disabled)"));
                             
                     } catch (Exception e) {
-                        System.err.println("[RepositoryManager] Failed to load repository " + 
+                        Log.logError("[RepositoryManager] Failed to load repository " + 
                             repoId + ": " + e.getMessage());
                     }
                 }
@@ -145,7 +146,7 @@ public class RepositoryManager extends FlowProcess {
     private void addDefaultRepository() {
         
         repositories.put(OFFICIAL_REPO.getId(), OFFICIAL_REPO);
-        System.out.println("[RepositoryManager] Added default repository: " + 
+        Log.logMsg("[RepositoryManager] Added default repository: " + 
             OFFICIAL_REPO.getName());
     }
     
@@ -161,7 +162,7 @@ public class RepositoryManager extends FlowProcess {
      */
     public CompletableFuture<Void> addRepository(Repository repo) {
         repositories.put(repo.getId(), repo);
-        System.out.println("[RepositoryManager] Added repository: " + repo.getName());
+        Log.logMsg("[RepositoryManager] Added repository: " + repo.getName());
         emitRepositoryEvent("repository_added", repo.getId());
         return saveRepositories();
     }
@@ -172,7 +173,7 @@ public class RepositoryManager extends FlowProcess {
     public CompletableFuture<Void> removeRepository(String repoId) {
         Repository removed = repositories.remove(repoId);
         if (removed != null) {
-            System.out.println("[RepositoryManager] Removed repository: " + 
+            Log.logMsg("[RepositoryManager] Removed repository: " + 
                 removed.getName());
             emitRepositoryEvent("repository_removed", removed.getId());
             
@@ -188,7 +189,7 @@ public class RepositoryManager extends FlowProcess {
         Repository repo = repositories.get(repoId);
         if (repo != null) {
             repo.setEnabled(enabled);
-            System.out.println("[RepositoryManager] Repository " + repo.getName() + 
+            Log.logMsg("[RepositoryManager] Repository " + repo.getName() + 
                 " " + (enabled ? "enabled" : "disabled"));
             emitRepositoryEvent(
                 enabled ? "repository_enabled" : "repository_disabled",
@@ -206,7 +207,7 @@ public class RepositoryManager extends FlowProcess {
     public CompletableFuture<List<PackageInfo>> updateAllRepositories() {
         List<CompletableFuture<List<PackageInfo>>> futures = new ArrayList<>();
         
-        System.out.println("[RepositoryManager] Updating package lists from " + 
+        Log.logMsg("[RepositoryManager] Updating package lists from " + 
             repositories.values().stream().filter(Repository::isEnabled).count() + 
             " enabled repositories");
         
@@ -223,12 +224,12 @@ public class RepositoryManager extends FlowProcess {
                     try {
                         allPackages.addAll(future.join());
                     } catch (Exception e) {
-                        System.err.println("[RepositoryManager] Failed to get packages: " + 
+                        Log.logError("[RepositoryManager] Failed to get packages: " + 
                             e.getMessage());
                     }
                 }
                 
-                System.out.println("[RepositoryManager] Found " + allPackages.size() + 
+                Log.logMsg("[RepositoryManager] Found " + allPackages.size() + 
                     " packages total");
                 return allPackages;
             });
@@ -245,7 +246,7 @@ public class RepositoryManager extends FlowProcess {
             .thenCompose(jsonString ->
                 CompletableFuture.supplyAsync(() -> {
                     try {
-                        System.out.println("[RepositoryManager] Fetching from: " + repo.getName());
+                        Log.logMsg("[RepositoryManager] Fetching from: " + repo.getName());
                         
                         // Fetch JSON from URL (EXTERNAL format)
                         JsonObject repoData = JsonParser.parseString(jsonString).getAsJsonObject();
@@ -291,18 +292,18 @@ public class RepositoryManager extends FlowProcess {
                                 packages.add(pkg);
                                 
                             } catch (Exception e) {
-                                System.err.println("[RepositoryManager] Failed to parse package in " + 
+                                Log.logError("[RepositoryManager] Failed to parse package in " + 
                                     repo.getName() + ": " + e.getMessage());
                             }
                         }
                         
-                        System.out.println("[RepositoryManager] " + repo.getName() + 
+                        Log.logMsg("[RepositoryManager] " + repo.getName() + 
                             " provided " + packages.size() + " packages");
                         
                         return packages;
                         
                     } catch (Exception e) {
-                        System.err.println("[RepositoryManager] Failed to fetch from " + 
+                        Log.logError("[RepositoryManager] Failed to fetch from " + 
                             repo.getName() + ": " + e.getMessage());
                         return new ArrayList<>();
                     }
@@ -337,7 +338,7 @@ public class RepositoryManager extends FlowProcess {
         // Write to cached NoteFile (no ledger access!)
         return sourcesFile.write(reposMap.toNoteBytes())
             .exceptionally(ex -> {
-                System.err.println("[RepositoryManager] Failed to save: " + 
+                Log.logError("[RepositoryManager] Failed to save: " + 
                     ex.getMessage());
                 throw new RuntimeException("Failed to save repository sources", ex);
             });
@@ -347,22 +348,22 @@ public class RepositoryManager extends FlowProcess {
      * Shutdown - ensure sources are saved and NoteFile closed
      */
     public CompletableFuture<Void> shutdown() {
-        System.out.println("[RepositoryManager] Shutting down, saving sources");
+        Log.logMsg("[RepositoryManager] Shutting down, saving sources");
         
         return saveRepositories()
             .whenComplete((v, ex) -> {
                 if (ex != null) {
-                    System.err.println("[RepositoryManager] Error during shutdown save: " + 
+                    Log.logError("[RepositoryManager] Error during shutdown save: " + 
                         ex.getMessage());
                 }
                 
                 if (sourcesFile != null) {
                     sourcesFile.close(); // disables further access
-                    System.out.println("[RepositoryManager] NoteFile closed");
+                    Log.logMsg("[RepositoryManager] NoteFile closed");
                 }
             })
             .thenRun(() -> {
-                System.out.println("[RepositoryManager] Shutdown complete");
+                Log.logMsg("[RepositoryManager] Shutdown complete");
             });
     }
     

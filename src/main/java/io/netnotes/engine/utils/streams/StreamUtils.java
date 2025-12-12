@@ -25,6 +25,7 @@ import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class StreamUtils {
 
@@ -128,7 +129,7 @@ public class StreamUtils {
                 return true;
             } catch (Exception e) {
                 // Log but don't throw - we're cleaning up
-                System.err.println("Warning: Error closing resource: " + e.getMessage());
+                Log.logError("Warning: Error closing resource: " + e.getMessage());
                 return false;
             }
         }
@@ -142,7 +143,7 @@ public class StreamUtils {
                 return true;
             } catch (Exception e) {
                 // Log but don't throw - we're cleaning up
-                System.err.println("Warning: Error closing streamChannel: " + e.getMessage());
+                Log.logError("Warning: Error closing streamChannel: " + e.getMessage());
                 return false;
             }
         }

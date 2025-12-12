@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 
 import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class RecoveryFlags {
     private static final String RECOVERY_FLAG_FILENAME = "needs_recovery.flag";
@@ -18,9 +19,9 @@ public class RecoveryFlags {
             File flagFile = getRecoveryFlagFile();
             Files.writeString(flagFile.toPath(), 
                 reason + "\n" + System.currentTimeMillis());
-            System.out.println("[Recovery] Flag set: " + reason);
+            Log.logMsg("[Recovery] Flag set: " + reason);
         } catch (IOException e) {
-            System.err.println("[Recovery] Failed to set flag: " + e.getMessage());
+            Log.logError("[Recovery] Failed to set flag: " + e.getMessage());
         }
     }
     
@@ -31,9 +32,9 @@ public class RecoveryFlags {
     public static void clearRecoveryFlag() {
         try {
             Files.deleteIfExists(getRecoveryFlagFile().toPath());
-            System.out.println("[Recovery] Flag cleared");
+            Log.logMsg("[Recovery] Flag cleared");
         } catch (IOException e) {
-            System.err.println("[Recovery] Failed to clear flag: " + e.getMessage());
+            Log.logError("[Recovery] Failed to clear flag: " + e.getMessage());
         }
     }
     
@@ -45,7 +46,7 @@ public class RecoveryFlags {
                 return content.split("\n")[0];
             }
         } catch (IOException e) {
-            System.err.println("[Recovery] Failed to read flag: " + e.getMessage());
+            Log.logError("[Recovery] Failed to read flag: " + e.getMessage());
         }
         return "Unknown reason";
     }

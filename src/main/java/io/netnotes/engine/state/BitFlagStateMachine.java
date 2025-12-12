@@ -3,6 +3,7 @@ package io.netnotes.engine.state;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -437,7 +438,7 @@ public class BitFlagStateMachine {
         if (m_errorHandler != null) {
             m_errorHandler.accept(e, listener);
         } else {
-            System.err.println("Error in state machine listener: " + e.getMessage());
+            Log.logError("Error in state machine listener: " + e.getMessage());
         }
     }
 

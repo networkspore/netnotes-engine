@@ -173,14 +173,23 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly CONFIG        = new NoteBytesReadOnly("config");
         public static final NoteBytesReadOnly CATEGORY      = new NoteBytesReadOnly("category");
         public static final NoteBytesReadOnly SIZE          = new NoteBytesReadOnly("size");
-        
+        public static final NoteBytesReadOnly TEXT          = new NoteBytesReadOnly("text");
+        public static final NoteBytesReadOnly STYLE         = new NoteBytesReadOnly("style");
+        public static final NoteBytesReadOnly ROW           = new NoteBytesReadOnly("row");
+        public static final NoteBytesReadOnly COL           = new NoteBytesReadOnly("col");
+        public static final NoteBytesReadOnly WIDTH         = new NoteBytesReadOnly("width");
+        public static final NoteBytesReadOnly HEIGHT        = new NoteBytesReadOnly("height");
+        public static final NoteBytesReadOnly LENGTH        = new NoteBytesReadOnly("length");
+        public static final NoteBytesReadOnly BOLD          = new NoteBytesReadOnly("bold");
+        public static final NoteBytesReadOnly INVERSE       = new NoteBytesReadOnly("inverse");
+        public static final NoteBytesReadOnly UNDERLINE     = new NoteBytesReadOnly("underline");
+        public static final NoteBytesReadOnly FOREGROUND    = new NoteBytesReadOnly("foreground");
+        public static final NoteBytesReadOnly BACKGROUND    = new NoteBytesReadOnly("background");
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");
         public static final NoteBytesReadOnly CMD           = new NoteBytesReadOnly("cmd");
         public static final NoteBytesReadOnly STRING_LIST   = new NoteBytesReadOnly("string_list");
-        public static final NoteBytesReadOnly SIGN_PRIV_KEY = new NoteBytesReadOnly("sign_priv");
-        public static final NoteBytesReadOnly SIGN_PUB_KEY  = new NoteBytesReadOnly("sign_pub");
         public static final NoteBytesReadOnly SIGNATURE     = new NoteBytesReadOnly("signature");
         // Status & Results
         public static final NoteBytesReadOnly INFO          = new NoteBytesReadOnly("info");
@@ -435,6 +444,34 @@ public class NoteMessaging {
         public static final String SORT_DSC = "dsc";
     }
 
+    public static class ProtocolObjects{
+        public static final NoteBytesReadOnly SUCCESS_OBJECT 
+            = new NoteBytesObject(new NoteBytesPair( Keys.STATUS, ProtocolMesssages.SUCCESS)).readOnly();
+
+
+        public static NoteBytesObject getErrorObject(String msg){
+            return new NoteBytesObject(
+                new NoteBytesPair( Keys.STATUS, ProtocolMesssages.ERROR),
+                new NoteBytesPair( Keys.ERROR_MESSAGE, msg)
+            );
+        }
+
+        public static NoteBytesObject getErrorObject(int errorCode){
+            return new NoteBytesObject(
+                new NoteBytesPair( Keys.STATUS, ProtocolMesssages.ERROR),
+                new NoteBytesPair( Keys.ERROR_CODE, errorCode)
+            );
+        }
+
+        public static String getErrMsg(NoteBytesMap result){
+            NoteBytes errMsg = result.get(Keys.ERROR_MESSAGE);
+            if(errMsg != null){
+                return errMsg.getAsString();
+            }else{
+                return ErrorCodes.getMessage(result.get(Keys.ERROR_CODE));
+            }
+        }
+    }
 
     public static String checkAsc(String value){
        return (value != null && value.toLowerCase().equals(Search.SORT_ASC.toLowerCase())) ? Search.SORT_ASC : Search.SORT_DSC;

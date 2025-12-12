@@ -9,6 +9,7 @@ import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
@@ -52,7 +53,7 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
         channel.getReadyFuture().complete(null);
         
         channel.startReceiving(input -> {
-            System.out.println("GUI keyboard stream ready: " + contextPath);
+            Log.logMsg("GUI keyboard stream ready: " + contextPath);
             
             try (NoteBytesReader reader = new NoteBytesReader(input)) {
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
@@ -62,7 +63,7 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
                         
                         if (!nextBytes.equalsString(getName())) {
-                            System.err.println("SourceId mismatch: expected " + 
+                            Log.logError("SourceId mismatch: expected " + 
                                 getName() + ", got " + nextBytes);
                             break;
                         }
@@ -79,7 +80,7 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
                 }
                 
             } catch (IOException e) {
-                System.err.println("GUI keyboard stream error: " + e.getMessage());
+                Log.logError("GUI keyboard stream error: " + e.getMessage());
                 active = false;
             }
         });
@@ -116,7 +117,7 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
             try {
                 streamChannel.close();
             } catch (IOException e) {
-                System.err.println("Error closing stream: " + e.getMessage());
+                Log.logError("Error closing stream: " + e.getMessage());
             }
         }
     }

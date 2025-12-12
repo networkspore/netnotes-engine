@@ -28,6 +28,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class SettingsData {
     public static final NoteBytes BCRYPT_KEY = new NoteBytes("bcrypt_key");
@@ -144,11 +145,13 @@ public class SettingsData {
         m_oldBcrypt = null;
         try{
             save();
+            Log.logMsg("[SettingsData] Old key/salt cleared");
         }catch(IOException e){
-            System.err.println("[SettingsData] Old key/salt cleared, but not saved:\n" + e.toString());
+          
+            Log.logError("[SettingsData] Old key/salt cleared, but not saved:\n" + e.toString());
             e.printStackTrace();
         }
-        System.out.println("[SettingsData] Old key/salt cleared");
+       
     }
 
     public CompletableFuture<Boolean> verifyPassword(NoteBytesEphemeral password){
@@ -240,7 +243,7 @@ public class SettingsData {
                 "Rollback is only possible if system hasn't restarted since password change.");
         }
         
-        System.out.println("[SettingsData] Rolling back to old password");
+        Log.logMsg("[SettingsData] Rolling back to old password");
         
         // Save current as temporary
         SecretKey tempKey = m_secretKey;

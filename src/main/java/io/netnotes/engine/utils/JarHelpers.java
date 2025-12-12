@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipFile;
 
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
 public class JarHelpers {
     
     public static Map<String, List<String>> parseArgs(String args[]) {
@@ -27,7 +29,7 @@ public class JarHelpers {
 
             if (a.charAt(0) == '-') {
                 if (a.length() < 2) {
-                    System.err.println("Error at argument " + a);
+                    Log.logError("Error at argument " + a);
                     return null;
                 }
 
@@ -36,7 +38,7 @@ public class JarHelpers {
             } else if (options != null) {
                 options.add(a);
             } else {
-                System.err.println("Illegal parameter usage");
+                Log.logError("Illegal parameter usage");
                 return null;
             }
         }

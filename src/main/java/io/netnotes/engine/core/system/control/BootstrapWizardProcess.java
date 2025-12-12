@@ -11,6 +11,7 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
@@ -633,7 +634,7 @@ public class BootstrapWizardProcess extends FlowProcess {
                 .getSystemClipboard()
                 .setContents(new java.awt.datatransfer.StringSelection(text), null);
         } catch (Exception e) {
-            System.err.println("Could not copy to clipboard: " + e.getMessage());
+            Log.logError("Could not copy to clipboard: " + e.getMessage());
         }
     }
     

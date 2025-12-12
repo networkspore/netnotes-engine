@@ -18,6 +18,7 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support
@@ -134,19 +135,19 @@ public class PasswordReader {
     
         
         if(keyUTF8 == null){
-            System.err.println("Key is not in lookup table");
+            Log.logError("Key is not in lookup table");
         }
 
         // Check buffer space
         if (m_keystrokeCount >= MAX_KEYSTROKE_COUNT) {
-            System.err.println("Password too long (max keystrokes exceeded)");
+            Log.logError("Password too long (max keystrokes exceeded)");
             return;
         }
 
         int keyUTF8ByteLength = keyUTF8.byteLength();
         
         if (m_currentLength + keyUTF8ByteLength > MAX_PASSWORD_BYTE_LENGTH) {
-            System.err.println("Password too long (max bytes exceeded)");
+            Log.logError("Password too long (max bytes exceeded)");
             return;
         }
         
@@ -175,19 +176,19 @@ public class PasswordReader {
         NoteBytes utf8 = event.getUTF8();
 
         if(utf8 == null){
-            System.err.println("Key is not in lookup table");
+            Log.logError("Key is not in lookup table");
             return;
         }
         // Check buffer space
         if (m_keystrokeCount >= MAX_KEYSTROKE_COUNT) {
-            System.err.println("Password too long (max keystrokes exceeded)");
+            Log.logError("Password too long (max keystrokes exceeded)");
             return;
         }
 
         int utf8ByteLength = utf8.byteLength();
         
         if (m_currentLength + utf8ByteLength > MAX_PASSWORD_BYTE_LENGTH) {
-            System.err.println("Password too long (max bytes exceeded)");
+            Log.logError("Password too long (max bytes exceeded)");
             return;
         }
         

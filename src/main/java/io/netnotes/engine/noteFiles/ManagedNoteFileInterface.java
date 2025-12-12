@@ -21,6 +21,7 @@ import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File m_file;
@@ -210,7 +211,7 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
                 if(writer != null){
                     TaskMessages.writeErrorAsync(path, msg, ex, writer);
                 }
-                System.err.println(msg + " for " + path);
+                Log.logError(msg + " for " + path);
                 ex.printStackTrace();
                 return null;
             }).thenApply((v)->{

@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -19,6 +20,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
@@ -104,7 +106,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     @Override
     public void onStart() {
-        System.out.println("ClaimedDevice starting: " + devicePath);
+        Log.logMsg("ClaimedDevice starting: " + devicePath);
         
         // Request control stream TO IODaemon (for sending control messages)
         requestStreamChannel(ioDaemonPath)
@@ -114,10 +116,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                     channel.getOutputStream()
                 );
                 
-                System.out.println("Control stream ready: " + devicePath + " → " + ioDaemonPath);
+                Log.logMsg("Control stream ready: " + devicePath + " → " + ioDaemonPath);
             })
             .exceptionally(ex -> {
-                System.err.println("Failed to setup control stream: " + ex.getMessage());
+                Log.logError("Failed to setup control stream: " + ex.getMessage());
                 return null;
             });
     }
@@ -147,7 +149,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         if (!fromPath.equals(ioDaemonPath)) {
-            System.err.println("Unexpected stream from: " + fromPath + 
+            Log.logError("Unexpected stream from: " + fromPath + 
                             " (expected: " + ioDaemonPath + ")");
             return;
         }
@@ -159,7 +161,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         channel.getReadyFuture().complete(null);
         
         channel.startReceiving(input -> {
-            System.out.println("Event stream ready: " + devicePath);
+            Log.logMsg("Event stream ready: " + devicePath);
             
             try (NoteBytesReader reader = new NoteBytesReader(input)) {
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
@@ -168,7 +170,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                     // Read routed events: [STRING:deviceId][OBJECT/ENCRYPTED:event]
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
                         if (!nextBytes.equalsString(deviceId)) {
-                            System.err.println("DeviceId mismatch: expected " + 
+                            Log.logError("DeviceId mismatch: expected " + 
                                 deviceId + ", got " + nextBytes);
                             break;
                         }
@@ -183,7 +185,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                 }
                 
             } catch (IOException e) {
-                System.err.println("Event stream error: " + e.getMessage());
+                Log.logError("Event stream error: " + e.getMessage());
                 active = false;
             }
         });
@@ -223,10 +225,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                     NoteBytesReadOnly decryptedPayload = new NoteBytesReadOnly(decrypted);
                     emitEvent(InputEventFactory.from(contextPath, decryptedPayload));
                 } catch (Exception e) {
-                    System.err.println("Decryption failed: " + e.getMessage());
+                    Log.logError("Decryption failed: " + e.getMessage());
                 }
             } else {
-                System.err.println("Received encrypted data but no active encryption session");
+                Log.logError("Received encrypted data but no active encryption session");
             }
         } else {
             // Plaintext event
@@ -263,14 +265,14 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     // ===== ENCRYPTION NEGOTIATION =====
     
     private void handleEncryptionOffer(NoteBytesMap offer) {
-        System.out.println("Encryption offered for device: " + deviceId);
+        Log.logMsg("Encryption offered for device: " + deviceId);
         
         try {
             byte[] serverPublicKey = offer.get(Keys.PUBLIC_KEY).getBytes();
             String cipher = offer.get(Keys.CIPHER).getAsString();
             
             if (!cipher.equals("aes-256-gcm")) {
-                System.err.println("Unsupported cipher: " + cipher);
+                Log.logError("Unsupported cipher: " + cipher);
                 declineEncryption("Unsupported cipher algorithm");
                 return;
             }
@@ -285,36 +287,37 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             accept.add(Keys.PUBLIC_KEY, clientPublicKey);
             
             sendDeviceControlMessage(accept)
-                .thenRun(() -> System.out.println("Encryption accept sent"))
+                .thenRun(() -> Log.logMsg("Encryption accept sent"))
                 .exceptionally(ex -> {
-                    System.err.println("Failed to send accept: " + ex.getMessage());
+                    Log.logError("Failed to send accept: " + ex.getMessage());
                     return null;
                 });
             
         } catch (Exception e) {
-            System.err.println("Encryption offer failed: " + e.getMessage());
+            Log.logError("Encryption offer failed: " + e.getMessage());
             declineEncryption("Key exchange failed: " + e.getMessage());
         }
     }
     
     private void handleEncryptionReady(NoteBytesMap ready) {
-        System.out.println("Encryption ready for device: " + deviceId);
+        Log.logMsg("Encryption ready for device: " + deviceId);
         
         try {
             byte[] serverIV = ready.get(Keys.AES_IV).getBytes();
             encryptionSession.finalizeEncryption(serverIV);
             
-            System.out.println("Device encryption active: " + deviceId);
+            Log.logMsg("Device encryption active: " + deviceId);
             
         } catch (Exception e) {
-            System.err.println("Encryption finalization failed: " + e.getMessage());
+            Log.logError("Encryption finalization failed: " + e.getMessage());
             encryptionSession = null;
         }
     }
     
     private void handleEncryptionError(NoteBytesMap error) {
-        String reason = error.get(Keys.MSG).getAsString();
-        System.err.println("Encryption error for device " + deviceId + ": " + reason);
+        String reason = ProtocolObjects.getErrMsg(error);
+       
+        Log.logError("Encryption error for device " + deviceId + ": " + reason);
         encryptionSession = null;
     }
     
@@ -342,7 +345,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         return controlStreamWriter.writeAsync(new NoteBytes(deviceId))
             .thenCompose(v -> controlStreamWriter.writeAsync(message))
             .exceptionally(ex -> {
-                System.err.println("Failed to send control message: " + ex.getMessage());
+                Log.logError("Failed to send control message: " + ex.getMessage());
                 return null;
             });
     }
@@ -391,7 +394,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             })
             .thenRun(this::cleanup)
             .exceptionally(ex -> {
-                System.err.println("Release notification failed, cleaning up anyway");
+                Log.logError("Release notification failed, cleaning up anyway");
                 cleanup();
                 return null;
             });
@@ -429,7 +432,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             try {
                 incomingEventStream.close();
             } catch (IOException e) {
-                System.err.println("Error closing event stream: " + e.getMessage());
+                Log.logError("Error closing event stream: " + e.getMessage());
             }
         }
         
@@ -437,7 +440,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             try {
                 outgoingControlStream.close();
             } catch (IOException e) {
-                System.err.println("Error closing control stream: " + e.getMessage());
+                Log.logError("Error closing control stream: " + e.getMessage());
             }
         }
     }

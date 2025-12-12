@@ -6,6 +6,7 @@ import io.netnotes.engine.io.capabilities.CapabilityRegistry;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -76,7 +77,7 @@ public class DiscoveredDeviceRegistry {
     public void parseDeviceList(NoteBytesMap messageMap) {
         NoteBytes itemsBytes = messageMap.get(Keys.ITEMS);
         if (itemsBytes == null || itemsBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
-            System.err.println("No items array in device list");
+            Log.logError("No items array in device list");
             return;
         }
         
@@ -93,7 +94,7 @@ public class DiscoveredDeviceRegistry {
             }
         }
         
-        System.out.println("Discovered " + discoveredDevices.size() + " devices");
+        Log.logMsg("Discovered " + discoveredDevices.size() + " devices");
     }
     
     /**
@@ -116,7 +117,7 @@ public class DiscoveredDeviceRegistry {
             );
             
         } catch (Exception e) {
-            System.err.println("Failed to parse device: " + e.getMessage());
+            Log.logError("Failed to parse device: " + e.getMessage());
             e.printStackTrace();
             return null;
         }
@@ -181,7 +182,7 @@ public class DiscoveredDeviceRegistry {
         // Get capability bits from daemon
         NoteBytes capsBytes = deviceMap.getOrDefault(AVAILABLE_CAPABILITIES, null);
         if (capsBytes == null) {
-            System.err.println("No capabilities in device descriptor");
+            Log.logError("No capabilities in device descriptor");
             return caps;
         }
         
@@ -195,7 +196,7 @@ public class DiscoveredDeviceRegistry {
                 if (capName != null && CAPABILITY_REGISTRY.isRegistered(capName)) {
                     caps.addAvailableCapability(capName);
                 } else {
-                    System.out.println("Unknown capability bit: " + i);
+                    Log.logMsg("Unknown capability bit: " + i);
                 }
             }
         }
@@ -204,7 +205,7 @@ public class DiscoveredDeviceRegistry {
         NoteBytes namesBytes = deviceMap.get("capability_names");
         if (namesBytes != null && namesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
             NoteBytesReadOnly[] names = namesBytes.getAsNoteBytesArrayReadOnly().getAsArray();
-            System.out.println("Device capabilities: " + 
+            Log.logMsg("Device capabilities: " + 
                 Arrays.stream(names)
                     .map(NoteBytes::getAsString)
                     .toList());
@@ -329,7 +330,7 @@ public class DiscoveredDeviceRegistry {
         if (device != null) {
             discoveredDevices.put(deviceId, device.claim());
             claimedDevices.add(deviceId);
-            System.out.println("Marked device " + deviceId + " as claimed");
+            Log.logMsg("Marked device " + deviceId + " as claimed");
         }
     }
     
@@ -343,7 +344,7 @@ public class DiscoveredDeviceRegistry {
                 device.usbDevice, device.capabilities, false
             ));
             claimedDevices.remove(deviceId);
-            System.out.println("Marked device " + deviceId + " as released");
+            Log.logMsg("Marked device " + deviceId + " as released");
         }
     }
     
@@ -370,13 +371,13 @@ public class DiscoveredDeviceRegistry {
         
         // Check if mode capability exists
         if (!caps.hasCapability(requestedMode)) {
-            System.err.println("Device does not have capability: " + requestedMode);
+            Log.logError("Device does not have capability: " + requestedMode);
             return false;
         }
         
         // Check if mode can be enabled (constraint validation)
         if (!caps.canEnable(requestedMode)) {
-            System.err.println("Cannot enable mode " + requestedMode + ": " + 
+            Log.logError("Cannot enable mode " + requestedMode + ": " + 
                              caps.getEnableFailureReason(requestedMode));
             return false;
         }
@@ -399,7 +400,7 @@ public class DiscoveredDeviceRegistry {
     // ===== DEBUG =====
     
     public void printDevices() {
-        System.out.println("=== Discovered Devices ===");
+        Log.logMsg("=== Discovered Devices ===");
         for (DeviceDescriptorWithCapabilities device : discoveredDevices.values()) {
             IODaemonProtocol.USBDeviceDescriptor usb = device.usbDevice;
             System.out.printf("  %s: %s (type=%s, claimed=%s)%n",
@@ -407,9 +408,9 @@ public class DiscoveredDeviceRegistry {
                 usb.product != null ? usb.product : "Unknown",
                 usb.get_device_type(),
                 device.claimed);
-            System.out.println("    Available modes: " + device.capabilities.getAvailableModes());
-            System.out.println("    Capabilities: " + device.capabilities.getAvailableCapabilities());
+            Log.logMsg("    Available modes: " + device.capabilities.getAvailableModes());
+            Log.logMsg("    Capabilities: " + device.capabilities.getAvailableCapabilities());
         }
-        System.out.println("==========================");
+        Log.logMsg("==========================");
     }
 }
