@@ -4,7 +4,7 @@ import io.netnotes.engine.io.ContextPath;
 
 public class CoreConstants {
 
-    public static final String NAME = "system";
+    public static final String SYSTEM = "system";
     
 
     public static final String SERVICES = "services";
@@ -18,14 +18,16 @@ public class CoreConstants {
     public static final String NODES = "nodes";
     public static final String CONTROLLERS = "controllers";
 
-   
+    public static final String DEFAULT_KEYBOARD_ID = "default-keyboard";
 
     public static final String SYSTEM_CONTAINER_NAME = "sys-term";
 
+ 
 
-    public static final ContextPath SYSTEM_PATH = ContextPath.of(CoreConstants.NAME);
+    public static final ContextPath SYSTEM_PATH = ContextPath.of(CoreConstants.SYSTEM);
     public static final ContextPath REPOSITORIES_PATH = SYSTEM_PATH.append(REPOSITORIES);
     public static final ContextPath SYSTEM_CONTAINER_PATH = SYSTEM_PATH.append(SYSTEM_CONTAINER_NAME);
+    public static final ContextPath SYSTEM_DEFAULT_KEYBOARD_PATH = SYSTEM_PATH.append(DEFAULT_KEYBOARD_ID);
 
     public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append(SERVICES);
     public static final ContextPath CONTAINER_SERVICE_PATH = SERVICES_PATH.append(CONTAINER_SERVICE);

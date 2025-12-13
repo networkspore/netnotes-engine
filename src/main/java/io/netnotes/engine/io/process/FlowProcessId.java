@@ -23,10 +23,8 @@ public final class FlowProcessId {
         this(path, null);
     }
 
-    public String getNextCorrelationId() {
-        long uuid64 =  NoteUUID.getNextUUID64();
-  
-        return asString() + "-" + uuid64;
+    public String getNextCorrelationId() { 
+        return asString() + NoteUUID.createSafeUUID64();
        
     }
     

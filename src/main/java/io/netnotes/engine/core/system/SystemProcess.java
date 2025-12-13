@@ -68,7 +68,7 @@ public class SystemProcess extends FlowProcess {
         new ConcurrentHashMap<>();
 
     // Core components
-    private final KeyboardInput guiKeyboard;
+    private final KeyboardInput defaultKeyboard;
     private final UIRenderer uiRenderer;
     private ContainerService containerService;
     private ServicesProcess servicesProcess;
@@ -92,14 +92,14 @@ public class SystemProcess extends FlowProcess {
     
     private SystemProcess(
         FlowProcessService processService,
-        KeyboardInput guiKeyboard,
+        KeyboardInput defaultKeyboard,
         UIRenderer uiRenderer
     ) {
-        super(CoreConstants.NAME, ProcessType.BIDIRECTIONAL);
+        super(CoreConstants.SYSTEM, ProcessType.BIDIRECTIONAL);
         this.processService = processService;
-        this.guiKeyboard = guiKeyboard;
+        this.defaultKeyboard = defaultKeyboard;
         this.uiRenderer = uiRenderer;
-        this.state = new BitFlagStateMachine(contextPath.toString());
+        this.state = new BitFlagStateMachine(CoreConstants.SYSTEM + "-state");
         
         setupStateTransitions();
         setupMsgExecutorMap();
@@ -117,26 +117,26 @@ public class SystemProcess extends FlowProcess {
     }
     
     public static CompletableFuture<SystemProcess> bootstrap(
-        KeyboardInput guiKeyboard,
+        KeyboardInput defaultKeyboard,
         UIRenderer uiRenderer
     ) {
-        return CompletableFuture.supplyAsync(() -> {
-            FlowProcessService flowProcessService = new FlowProcessService();
-            ProcessRegistryInterface bootstrapInterface = 
-                flowProcessService.getRegistryInterface();
-            
-            SystemProcess process = new SystemProcess(
-                flowProcessService,
-                guiKeyboard,
-                uiRenderer
-            );
-            
-            bootstrapInterface.registerChild(CoreConstants.SYSTEM_PATH, process);
-            return process;
-            
-        }, VirtualExecutors.getVirtualExecutor())
-            .thenCompose(process -> process.initialize()
-                .thenApply(v -> process));
+        FlowProcessService flowProcessService = new FlowProcessService();
+
+        ProcessRegistryInterface bootstrapInterface = 
+            flowProcessService.getRegistryInterface();
+        
+        SystemProcess process = new SystemProcess(
+            flowProcessService,
+            defaultKeyboard,
+            uiRenderer
+        );
+
+        bootstrapInterface.registerProcess(process, CoreConstants.SYSTEM_PATH, null, bootstrapInterface);
+     
+        return process.initialize().
+            thenApply(v->{
+                return process;
+            });
     }
     
     private void setupStateTransitions() {
@@ -159,10 +159,10 @@ public class SystemProcess extends FlowProcess {
             Log.logMsg("[SystemProcess] READY - System operational"));
     }
     
-    private CompletableFuture<Void> initialize() {
+    CompletableFuture<Void> initialize() {
         state.addState(INITIALIZING);
-        
-        return startGUIKeyboard()
+
+        return startDefaultKeyboard()
             .thenCompose(v -> initializeUIRenderer())
             .thenCompose(v -> startContainerService())
             .thenCompose(v -> checkBootstrapNeeded())
@@ -184,15 +184,14 @@ public class SystemProcess extends FlowProcess {
                 state.addState(SERVICES_STARTING);
                 return startServicesProcess();
             })
-            .thenCompose(v -> {
-                state.removeState(SERVICES_STARTING);
-                state.addState(TERMINAL_CREATING);
-                return createSystemTerminal();
-            })
             .thenRun(() -> {
-                state.removeState(TERMINAL_CREATING);
+                // FIXED: Set READY here - system can now accept commands
+                state.removeState(SERVICES_STARTING);
                 state.addState(READY);
+                
             })
+            // Terminal creation is no longer part of initialization
+            // It happens via OPEN_TERMINAL command after system is ready
             .exceptionally(ex -> {
                 Log.logError("[SystemProcess] Init failed: " + ex.getMessage());
                 state.addState(ERROR);
@@ -200,14 +199,22 @@ public class SystemProcess extends FlowProcess {
             });
     }
     
-    private CompletableFuture<Void> startGUIKeyboard() {
-        return spawnChild(guiKeyboard)
-            .thenCompose(path -> registry.startProcess(path))
+    private CompletableFuture<Void> startDefaultKeyboard() {
+        return spawnChild(defaultKeyboard)
+            .thenCompose(path -> {
+                // Connect keyboard → system (keyboard emits input events)
+                registry.connect(path, contextPath);
+                
+                Log.logMsg("[SystemProcess] Connected reactive streams with keyboard");
+                
+                return registry.startProcess(path);
+            })
             .thenRun(() -> Log.logMsg(
-                "[SystemProcess] GUI keyboard: " + guiKeyboard.getContextPath()));
+                "[SystemProcess] native keyboard: " + defaultKeyboard.getContextPath()));
     }
     
     private CompletableFuture<Void> initializeUIRenderer() {
+        Log.logMsg( "[SystemProcess] initializing UIRenderer");
         return uiRenderer.initialize()
             .thenRun(() -> Log.logMsg(
                 "[SystemProcess] UIRenderer: " + uiRenderer.getClass().getSimpleName()));
@@ -220,7 +227,15 @@ public class SystemProcess extends FlowProcess {
         );
         
         return spawnChild(containerService)
-            .thenCompose(path -> registry.startProcess(path))
+            .thenCompose(path -> {
+                // CRITICAL: Connect via reactive streams for bidirectional communication
+                registry.connect(contextPath, path);           // system → container-service
+                registry.connect(path, contextPath);           // container-service → system
+                
+                Log.logMsg("[SystemProcess] Connected reactive streams with ContainerService");
+                
+                return registry.startProcess(path);
+            })
             .thenRun(() -> Log.logMsg(
                 "[SystemProcess] ContainerService: " + containerService.getContextPath()));
     }
@@ -245,11 +260,19 @@ public class SystemProcess extends FlowProcess {
                 bootstrapWizard = new BootstrapWizardProcess(
                     "bootstrap-wizard",
                     containerHandle,
-                    guiKeyboard
+                    defaultKeyboard
                 );
                 
                 return spawnChild(bootstrapWizard)
-                    .thenCompose(path -> startProcess(path))
+                    .thenCompose(path -> {
+                        // Connect wizard ↔ system
+                        registry.connect(contextPath, path);
+                        registry.connect(path, contextPath);
+                        
+                        Log.logMsg("[SystemProcess] Connected reactive streams with BootstrapWizard");
+                        
+                        return startProcess(path);
+                    })
                     .thenCompose(v -> bootstrapWizard.getCompletionFuture())
                     .thenRun(() -> {
                         unregisterProcess(bootstrapWizard.getContextPath());
@@ -262,17 +285,17 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<TerminalContainerHandle> createWizardContainer() {
-        NoteBytesMap createMsg = ContainerCommands.createContainer(
+        NoteBytesReadOnly createMsg = ContainerCommands.createContainer(
             "Bootstrap Wizard",
             ContainerType.TERMINAL,
             contextPath,
             new ContainerConfig()
                 .withClosable(false)
                 .withResizable(true)
-        );
-        
+        ).toNoteBytesReadOnly();
+   
         return request(containerService.getContextPath(), 
-                createMsg.toNoteBytesReadOnly(), 
+                createMsg, 
                 Duration.ofMillis(500))
             .thenApply(response -> {
                 NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
@@ -293,7 +316,15 @@ public class SystemProcess extends FlowProcess {
         
         return BootstrapConfig.initialize()
             .thenCompose(config -> spawnChild(config)
-                .thenCompose(path -> registry.startProcess(path))
+                .thenCompose(path -> {
+                    // Connect config ↔ system for bidirectional communication
+                    registry.connect(contextPath, path);
+                    registry.connect(path, contextPath);
+                    
+                    Log.logMsg("[SystemProcess] Connected reactive streams with BootstrapConfig");
+                    
+                    return registry.startProcess(path);
+                })
                 .thenRun(() -> Log.logMsg(
                     "[SystemProcess] BootstrapConfig: " + 
                     BootstrapConfig.BOOTSTRAP_CONFIG_PATH)));
@@ -305,7 +336,15 @@ public class SystemProcess extends FlowProcess {
         servicesProcess = new ServicesProcess(containerService);
         
         return spawnChild(servicesProcess)
-            .thenCompose(path -> registry.startProcess(path))
+            .thenCompose(path -> {
+                // Connect services ↔ system
+                registry.connect(contextPath, path);
+                registry.connect(path, contextPath);
+                
+                Log.logMsg("[SystemProcess] Connected reactive streams with ServicesProcess");
+                
+                return registry.startProcess(path);
+            })
             .thenCompose(v -> {
                 Log.logMsg("[SystemProcess] ServicesProcess: " + 
                     CoreConstants.SERVICES_PATH);
@@ -345,6 +384,8 @@ public class SystemProcess extends FlowProcess {
     /**
      * Create THE system terminal (singular, persistent)
      * 
+     * This is now called via handleOpenTerminal() command, not during init
+     * 
      * Terminal handles:
      * - Authentication (first run + login + unlock)
      * - SystemRuntime creation
@@ -352,6 +393,8 @@ public class SystemProcess extends FlowProcess {
      */
     private CompletableFuture<Void> createSystemTerminal() {
         Log.logMsg("[SystemProcess] Creating system terminal");
+        
+        state.addState(TERMINAL_CREATING);
         
         NoteBytesMap createMsg = ContainerCommands.createContainer(
             CoreConstants.SYSTEM_CONTAINER_NAME,
@@ -371,27 +414,34 @@ public class SystemProcess extends FlowProcess {
                     resp.get(Keys.CONTAINER_ID)
                 );
                 
-                // Get best input device (secure if available)
                 InputDevice terminalKeyboard = getBestInputDevice();
                 
-                // Create stateful terminal
-                // Terminal will handle authentication and SystemRuntime creation
                 systemTerminal = new SystemTerminalContainer(
                     containerId,
                     CoreConstants.SYSTEM_CONTAINER_NAME,
                     containerService.getContextPath(),
                     terminalKeyboard,
                     registry,
-                    contextPath  // Session path for SystemRuntime
+                    contextPath
                 );
                 
                 return systemTerminal;
             })
             .thenCompose(terminal -> spawnChild(terminal)
-                .thenCompose(path -> registry.startProcess(path))
-                .thenRun(() -> Log.logMsg(
-                    "[SystemProcess] System terminal: " + 
-                    systemTerminal.getContextPath())));
+                .thenCompose(path -> {
+                    // Connect terminal ↔ system
+                    registry.connect(contextPath, path);
+                    registry.connect(path, contextPath);
+                    
+                    Log.logMsg("[SystemProcess] Connected reactive streams with SystemTerminal");
+                    
+                    return registry.startProcess(path);
+                })
+                .thenRun(() -> {
+                    state.removeState(TERMINAL_CREATING);
+                    Log.logMsg("[SystemProcess] System terminal created: " + 
+                        systemTerminal.getContextPath());
+                }));
     }
     
     private InputDevice getBestInputDevice() {
@@ -414,7 +464,7 @@ public class SystemProcess extends FlowProcess {
         
         // Fallback to GUI keyboard
         Log.logMsg("[SystemProcess] Using GUI keyboard");
-        return guiKeyboard;
+        return defaultKeyboard;
     }
     
     // ===== MESSAGE HANDLERS =====
@@ -453,14 +503,40 @@ public class SystemProcess extends FlowProcess {
         throw new UnsupportedOperationException("SystemProcess does not handle streams");
     }
     
+    /**
+     * Handle OPEN_TERMINAL command
+     * 
+     * Creates terminal on first call, opens it on subsequent calls
+     */
     private CompletableFuture<Void> handleOpenTerminal(RoutedPacket packet) {
+        // If terminal doesn't exist yet, create it first
         if (systemTerminal == null) {
-            NoteBytesMap error = new NoteBytesMap();
-            error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-            error.put(Keys.ERROR_MESSAGE, new NoteBytes("Terminal not initialized"));
-            reply(packet, error.toNoteBytes());
-            return CompletableFuture.completedFuture(null);
+            Log.logMsg("[SystemProcess] Creating terminal for first time");
+            
+            return createSystemTerminal()
+                .thenCompose(v -> systemTerminal.open())
+                .thenRun(() -> {
+                    NoteBytesMap response = new NoteBytesMap();
+                    response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                    response.put(Keys.PATH, new NoteBytes(
+                        systemTerminal.getContextPath().toString()));
+                    reply(packet, response.toNoteBytes());
+                })
+                .exceptionally(ex -> {
+                    Log.logError("[SystemProcess] Failed to create/open terminal: " + 
+                        ex.getMessage());
+                    
+                    NoteBytesMap error = new NoteBytesMap();
+                    error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+                    error.put(Keys.ERROR_MESSAGE, new NoteBytes(
+                        "Failed to create terminal: " + ex.getMessage()));
+                    reply(packet, error.toNoteBytes());
+                    return null;
+                });
         }
+        
+        // Terminal already exists, just open it
+        Log.logMsg("[SystemProcess] Opening existing terminal");
         
         return systemTerminal.open()
             .thenRun(() -> {
@@ -469,6 +545,17 @@ public class SystemProcess extends FlowProcess {
                 response.put(Keys.PATH, new NoteBytes(
                     systemTerminal.getContextPath().toString()));
                 reply(packet, response.toNoteBytes());
+            })
+            .exceptionally(ex -> {
+                Log.logError("[SystemProcess] Failed to open terminal: " + 
+                    ex.getMessage());
+                
+                NoteBytesMap error = new NoteBytesMap();
+                error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+                error.put(Keys.ERROR_MESSAGE, new NoteBytes(
+                    "Failed to open terminal: " + ex.getMessage()));
+                reply(packet, error.toNoteBytes());
+                return null;
             });
     }
     
@@ -479,7 +566,7 @@ public class SystemProcess extends FlowProcess {
             response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
             response.put(Keys.PATH, process.getContextPath());
             response.put(Keys.ITEM_TYPE, new NoteBytes(
-                device == guiKeyboard ? "gui" : "secure"));
+                device == defaultKeyboard ? "native" : "secure"));
             
             reply(packet, response.toNoteBytes());
             return CompletableFuture.completedFuture(null);
@@ -525,7 +612,7 @@ public class SystemProcess extends FlowProcess {
                     "secure-input-installer",
                     os,
                     terminal,
-                    guiKeyboard
+                    defaultKeyboard
                 );
                 
                 return spawnChild(installer)

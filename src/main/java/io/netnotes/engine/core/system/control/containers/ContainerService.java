@@ -125,6 +125,7 @@ public class ContainerService extends FlowProcess {
         // Check if default renderer is active
         UIRenderer defaultRenderer = renderers.get(defaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
+             Log.logMsg("[ContainerService] renderer active");
             state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
         }
         
@@ -149,10 +150,16 @@ public class ContainerService extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
+        Log.logMsg("[ContainerService] handleMessage called");
+        Log.logMsg("[ContainerService] Packet source: " + packet.getSourcePath());
+        Log.logMsg("[ContainerService] Packet dest: " + packet.getDestinationPath());
+        Log.logMsg("[ContainerService] Has correlationId: " + packet.hasMetadata("correlationId"));
+    
         if (!ContainerServiceStates.canAcceptRequests(state)) {
             return replyError(packet, "Service not accepting requests");
         }
         
+
         try {
             NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
             NoteBytes cmdBytes = msg.get(Keys.CMD);
@@ -180,7 +187,7 @@ public class ContainerService extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        Log.logError("[ContainerService] Unexpected stream channel from: " + fromPath);
+        throw new IllegalStateException("Stream channels not supported byt container service");
     }
     
     // ===== COMMAND HANDLERS =====

@@ -1,6 +1,7 @@
 package io.netnotes.engine.utils;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
@@ -17,18 +18,61 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 
 public class LoggingHelpers {
     public enum LogLevel{
-        ALL,
-        ERRORS_ONLY,
-        NONE
+        NONE(0),
+        GENERAL(1),
+        HIGH_PRIORITY(2),
+        ERROR(3),
+        ALL(4);
+
+        private final int value;
+
+        // Define a private constructor to initialize the field
+        private LogLevel(int value) {
+            this.value = value;
+        }
+
+        // Provide a public getter method to access the value
+        public int getValue() {
+            return this.value;
+        }
+
     }
 
     public static class Log {
-        private static File logFile = new File("netnotes-log.txt");
+        public static String logDirName = "logs";
+        public static File logDir = new File(logDirName);
+        public static String logName = "log";
+        public static String logExt = ".txt";
+        
+        private static File logFile = createTimedLogFile();
+        
         private static final Semaphore semaphore = new Semaphore(1);
         
-        private static LogLevel logLevel = LogLevel.ALL;
+        private static int logLevel = LogLevel.ALL.getValue();
+
+        private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+
+
+    
+        public static File createTimedLogFile() {
+            return createTimedLogFile(logName);
+        }
+
+
+        public static File createTimedLogFile(String name){
+            try{
+                Files.createDirectories(logDir.toPath());
+                return new File(logDir.getAbsolutePath() + "/" + name + "-" + TimeHelpers.formatDate(System.currentTimeMillis()) + logExt);
+            }catch(IOException e){
+                return new File(name + "-" + TimeHelpers.formatDate(System.currentTimeMillis()) + logExt);
+            }
+        }
 
         public static CompletableFuture<Void> setLogLevel(LogLevel logLevel){
+            return setLogLevel(logLevel.getValue());
+        }
+       
+        public static CompletableFuture<Void> setLogLevel(int logLevel){
             return  CompletableFuture.runAsync(() -> {
                 try {
                     semaphore.acquire();
@@ -62,155 +106,101 @@ public class LoggingHelpers {
             }, VirtualExecutors.getVirtualExecutor());
         }
 
-        public static CompletableFuture<Void> log(String scope, String msg){
-            if(logLevel == LogLevel.ALL){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                            LoggingHelpers.writeLogMsg(logFile, scope, msg);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logError: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+         public static CompletableFuture<Void> log(String scope, String msg, LogLevel level) {
+            return enqueue(level.getValue(), () ->
+                write(scope + ": " + msg + "\n")
+            );
         }
 
-        public static CompletableFuture<Void> logMsg(String msg){
-            if(logLevel == LogLevel.ALL){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                           writeMsg(logFile, msg);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logError: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+        public static CompletableFuture<Void> logError(String msg) {
+            return enqueue(LogLevel.ERROR.getValue(), () ->
+                write("[ERROR] " + msg + "\n")
+            );
         }
 
-        public static CompletableFuture<Void> logError(String msg){
-            if(logLevel == LogLevel.ALL || logLevel == LogLevel.ERRORS_ONLY){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                           writeMsg(logFile, msg);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logError: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+        public static CompletableFuture<Void> logError(String scope, Throwable error) {
+            return enqueue(LogLevel.ERROR.getValue(), () ->
+                write(scope + ": " + getThrowableMsg(error) + "\n")
+            );
         }
 
-        public static CompletableFuture<Void> logError(String scope, Throwable throwable){
-             if(logLevel == LogLevel.ALL || logLevel == LogLevel.ERRORS_ONLY){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                            LoggingHelpers.writeLogMsg(logFile, scope, throwable);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logError: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+        public static CompletableFuture<Void> logError(String scope, String msg, Throwable error) {
+            return enqueue(LogLevel.ERROR.getValue(), () ->
+                write(scope + ": '" + msg + "' - " + getThrowableMsg(error) + "\n")
+            );
+        }
+
+        public static CompletableFuture<Void> logJson(String scope, JsonObject json) {
+            return enqueue(LogLevel.ALL.getValue(), () ->
+                write("**" + scope + "**\n" + gson.toJson(json) + "\n")
+            );
+        }
+
+        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytes nb) {
+            return enqueue(LogLevel.ALL.getValue(), () -> {
+                JsonElement json = NoteBytes.toJson(nb);
+                write("**" + scope + "**\n" + gson.toJson(json) + "\n");
+            });
+        }
+
+        public static CompletableFuture<Void> logMsg(String msg) {
+            return enqueue(LogLevel.ALL.getValue(), () -> {
+              
+                write(msg + "\n");
+            });
         }
 
 
-        public static CompletableFuture<Void> logError(String scope, String msg, Throwable throwable){
-            if(logLevel == LogLevel.ALL || logLevel == LogLevel.ERRORS_ONLY){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                            LoggingHelpers.writeLogMsg(logFile, scope, msg, throwable);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logError: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
+        // ----------------------------------------------------------
+        // Core executor + gating
+        // ----------------------------------------------------------
+        private static CompletableFuture<Void> enqueue(int priority, Runnable action) {
+            if (priority > logLevel) {
                 return CompletableFuture.completedFuture(null);
+            }
+
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    semaphore.acquire();
+                    action.run();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    write("[FATAL LOGGING ERROR] Interrupted\n");
+                } finally {
+                    semaphore.release();
+                }
+            }, VirtualExecutors.getVirtualExecutor());
+        }
+
+
+        // ----------------------------------------------------------
+        // File creation + raw write
+        // ----------------------------------------------------------
+ 
+
+        private static void write(String text) {
+            try {
+                Files.writeString(
+                    logFile.toPath(),
+                    text,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND
+                );
+            } catch (Exception e) {
+                // avoid recursion — write directly
+                System.err.println("Logging failed: " + e.getMessage());
             }
         }
 
-        public static CompletableFuture<Void> logJson(String scope, JsonObject json){
-             if(logLevel == LogLevel.ALL){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                            LoggingHelpers.logJson(logFile, scope, json);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logJson: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+        boolean shouldLog(int priority) {
+            return priority >= logLevel;
         }
 
-        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytes noteBytes){
-             if(logLevel == LogLevel.ALL){
-                return  CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        try{
-                            LoggingHelpers.writeLogNoteBytes(logFile, noteBytes);
-                        }finally{
-                            semaphore.release();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Log.logError("LoggingHelpers.logNoteBytes: InterruptedException when printing to file: " + e.toString());
-                        throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                    }
-                }, VirtualExecutors.getVirtualExecutor());
-            }else{
-                return CompletableFuture.completedFuture(null);
-            }
+        boolean shouldLog(LogLevel priority) {
+            return priority.getValue() <= logLevel;
         }
-
     }
+    
     
 
     public static void logJson(File logFile, String heading, JsonObject json){

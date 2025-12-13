@@ -1,5 +1,6 @@
 package io.netnotes.engine.core.system.control.containers;
 
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
@@ -119,18 +120,29 @@ public class ContainerConfig {
     
     public static ContainerConfig fromNoteBytes(NoteBytesMap map) {
         ContainerConfig config = new ContainerConfig();
-        
-        if (map.has("width")) config.width = map.get("width").getAsInt();
-        if (map.has("height")) config.height = map.get("height").getAsInt();
-        if (map.has("x")) config.x = map.get("x").getAsInt();
-        if (map.has("y")) config.y = map.get("y").getAsInt();
-        if (map.has("resizable")) config.resizable = map.get("resizable").getAsBoolean();
-        if (map.has("closable")) config.closable = map.get("closable").getAsBoolean();
-        if (map.has("movable")) config.movable = map.get("movable").getAsBoolean();
-        if (map.has("minimizable")) config.minimizable = map.get("minimizable").getAsBoolean();
-        if (map.has("maximizable")) config.maximizable = map.get("maximizable").getAsBoolean();
-        if (map.has("icon")) config.icon = map.get("icon").getAsString();
-        if (map.has("metadata")) config.metadata = map.get("metadata").getAsNoteBytesMap();
+        NoteBytes widthBytes = map.get("width");
+        NoteBytes heightBytes = map.get("height");
+        NoteBytes xBytes = map.get("x");
+        NoteBytes yBytes = map.get("y");
+        NoteBytes resizableBytes = map.get("resizable");
+        NoteBytes closableBytes = map.get("closable");
+        NoteBytes movableBytes = map.get("movable");
+        NoteBytes minimizableBytes = map.get("minimizable");
+        NoteBytes maximizableBytes = map.get("maximizable");
+        NoteBytes iconBytes = map.get("icon");
+        NoteBytes metadataBytes = map.get("metadata");
+
+        if (widthBytes != null) config.width = widthBytes.getAsInt();
+        if (heightBytes != null) config.height = heightBytes.getAsInt();
+        if (xBytes != null) config.x = xBytes.getAsInt();
+        if (yBytes != null) config.y = yBytes.getAsInt();
+        if (resizableBytes != null) config.resizable = resizableBytes.getAsBoolean();
+        if (closableBytes != null) config.closable = closableBytes.getAsBoolean();
+        if (movableBytes != null) config.movable = movableBytes.getAsBoolean();
+        if (minimizableBytes != null) config.minimizable = minimizableBytes.getAsBoolean();
+        if (maximizableBytes != null) config.maximizable = maximizableBytes.getAsBoolean();
+        if (iconBytes != null) config.icon = iconBytes.getAsString();
+        if (metadataBytes != null) config.metadata = metadataBytes.getAsNoteBytesMap();
         
         return config;
     }

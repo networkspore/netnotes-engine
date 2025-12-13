@@ -67,7 +67,7 @@ public class FlowProcessService {
     /**
      * Register process at EXPLICIT path
      * 
-     * Path is independent of parent relationship!
+     * Path is independent of parent relationship
      */
     ContextPath registerProcess(
         FlowProcess process,
@@ -75,7 +75,7 @@ public class FlowProcessService {
         ContextPath parentPath,
         ProcessRegistryInterface interfaceForNewProcess
     ) {
-        
+        Log.logMsg("[FlowProcessService] registering " + process.getName() + "...");
         if (processes.containsKey(path)) {
             throw new IllegalStateException("Process already registered at: " + path);
         }
@@ -187,6 +187,9 @@ public class FlowProcessService {
     
     /**
      * Start a process
+     * 
+     * FIXED: Returns immediately after starting, doesn't wait for completion
+     * The process runs in background, getCompletionFuture() tracks when it finishes
      */
     CompletableFuture<Void> startProcess(ContextPath path) {
         FlowProcess process = processes.get(path);
@@ -195,20 +198,31 @@ public class FlowProcessService {
                 new IllegalArgumentException("Process not found: " + path));
         }
     
-        return CompletableFuture
-            .runAsync(process::onStart, virtualExec)
-            .thenCompose(v -> process.run())
-            .whenComplete((v, ex) -> {
-                if (ex != null) {
-                    Log.logError("Process " + path + " error: " + ex);
-                    ex.printStackTrace();
-                }
-                try {
-                    process.onStop();
-                } finally {
-                    process.complete();
-                }
-            });
+        // Call onStart and run() in background
+        // Don't wait for run() to complete - it may run indefinitely
+        CompletableFuture.runAsync(() -> {
+            try {
+                process.onStart();
+                process.run().whenComplete((v, ex) -> {
+                    if (ex != null) {
+                        Log.logError("Process " + path + " error: " + ex);
+                        ex.printStackTrace();
+                    }
+                    try {
+                        process.onStop();
+                    } finally {
+                        process.complete();
+                    }
+                });
+            } catch (Exception e) {
+                Log.logError("Process " + path + " startup error: " + e);
+                e.printStackTrace();
+                process.complete();
+            }
+        }, virtualExec);
+        
+        // Return immediately - process is starting
+        return CompletableFuture.completedFuture(null);
     }
 
     

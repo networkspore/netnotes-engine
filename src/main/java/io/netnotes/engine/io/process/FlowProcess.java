@@ -42,7 +42,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     private final CompletableFuture<Void> completionFuture = new CompletableFuture<>();
     
     // ===== REACTIVE STREAMS =====
-    private final ProcessSubscriber incomingSubscriber = new ProcessSubscriber();
+    private final ProcessSubscriber incomingSubscriber;
     private Flow.Subscription incomingSubscription;
     private final SubmissionPublisher<RoutedPacket> outgoingPublisher;
     private final ExecutorService publisherExecutor;
@@ -63,6 +63,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
      * Registry interface is set later during initialize()
      */
     public FlowProcess(String name, ProcessType type) {
+
+     
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("Process name required");
         }
@@ -70,9 +72,10 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             throw new IllegalArgumentException(
                 "Process name cannot contain path separators: " + name);
         }
-
+        
         this.processType = type;
         this.name = name;
+        this.incomingSubscriber = new ProcessSubscriber();
         this.publisherExecutor = getExecutorForType(type);
         this.outgoingPublisher = new SubmissionPublisher<>(
             publisherExecutor,
@@ -391,6 +394,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             .withMetadata("correlationId", correlationId)
             .withMetadata("replyTo", contextPath.toString());
         
+            
+
         emit(request);
         
         // Setup timeout

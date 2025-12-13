@@ -263,7 +263,7 @@ public class NoteBytesMap{
     }
 
     
-    public boolean containsKey(Object key) {
+    public boolean containsKey(NoteBytes key) {
         return m_pairs.containsKey(key);
     }
 
@@ -272,7 +272,7 @@ public class NoteBytesMap{
     }
 
     
-    public boolean containsValue(Object value) {
+    public boolean containsValue(NoteBytes value) {
         return m_pairs.containsValue(value);
     }
 
@@ -282,8 +282,8 @@ public class NoteBytesMap{
     }
 
     
-    public NoteBytes get(Object key) {
-        return m_pairs.get(key);
+    public NoteBytes get(String key) {
+        return m_pairs.get(new NoteBytes(key));
     }
 
     public NoteBytes getOrDefault(NoteBytes key, NoteBytes defaultValue){
@@ -390,9 +390,6 @@ public class NoteBytesMap{
         m_pairs.forEach(biConsumer);
     }
     
-    public NoteBytes remove(Object key) {
-        return m_pairs.remove(key);
-    }
 
     public boolean has(NoteBytes noteBytes){
         return m_pairs.containsKey(noteBytes);
