@@ -7,7 +7,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 public class KeyRunTable {
     private final Runnable[] CP_TO_RUNNABLE_TABLE = new Runnable[127];
-    private final int[] codepoint = new int[0];
+    private final int[] codepoint = new int[1];
 
     public KeyRunTable(NoteBytesRunnablePair... keyRunnables){
         Arrays.fill(CP_TO_RUNNABLE_TABLE, null);

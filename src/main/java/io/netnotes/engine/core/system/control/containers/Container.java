@@ -120,11 +120,11 @@ public class Container {
      * Handle incoming render stream FROM ContainerHandle
      * Similar to ClaimedDevice.handleStreamChannel()
      */
-    public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
+   public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
         Log.logMsg("[Container] Render stream received from: " + fromPath);
         
         this.renderStream = channel;
-        channel.getReadyFuture().complete(null);
+        channel.getReadyFuture().complete(null);  // Signal ready
         
         // Start reading render commands
         channel.startReceiving(input -> {
@@ -135,14 +135,9 @@ public class Container {
                     if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                         NoteBytesMap command = nextBytes.getAsNoteBytesMap();
                         handleRenderCommand(command);
-                    } else {
-                        Log.logError("[Container] Unexpected message type: " + 
-                            nextBytes.getType());
                     }
-                    
                     nextBytes = reader.nextNoteBytesReadOnly();
                 }
-                
             } catch (IOException e) {
                 Log.logError("[Container] Render stream error: " + e.getMessage());
                 active = false;
@@ -159,10 +154,13 @@ public class Container {
         
         // Update local state if needed
         if (cmd.equals(ContainerCommands.UPDATE_CONTAINER)) {
-            NoteBytesMap updates = cmdMap.get(Keys.UPDATES).getAsNoteBytesMap();
-            NoteBytes titleBytes = updates.get(Keys.TITLE);
-            if (titleBytes != null) {
-                title.set(titleBytes.getAsString());
+            NoteBytes updatesBytes = cmdMap.get(Keys.UPDATES);
+            if(updatesBytes != null && updatesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+                NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
+                NoteBytes titleBytes = updates.get(Keys.TITLE);
+                if (titleBytes != null) {
+                    title.set(titleBytes.getAsString());
+                }
             }
         }
         

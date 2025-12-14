@@ -201,17 +201,17 @@ public class SystemProcess extends FlowProcess {
     
     private CompletableFuture<Void> startDefaultKeyboard() {
         return spawnChild(defaultKeyboard)
-            .thenCompose(path -> {
-                // Connect keyboard → system (keyboard emits input events)
+            .thenCompose(path -> registry.startProcess(path))
+            .thenRun(() -> {
+                ContextPath path = defaultKeyboard.getContextPath();
+                
+                // Keyboard only needs to send to system (one-way)
                 registry.connect(path, contextPath);
                 
-                Log.logMsg("[SystemProcess] Connected reactive streams with keyboard");
-                
-                return registry.startProcess(path);
-            })
-            .thenRun(() -> Log.logMsg(
-                "[SystemProcess] native keyboard: " + defaultKeyboard.getContextPath()));
+                Log.logMsg("[SystemProcess] native keyboard: " + path);
+            });
     }
+
     
     private CompletableFuture<Void> initializeUIRenderer() {
         Log.logMsg( "[SystemProcess] initializing UIRenderer");
@@ -228,16 +228,40 @@ public class SystemProcess extends FlowProcess {
         
         return spawnChild(containerService)
             .thenCompose(path -> {
-                // CRITICAL: Connect via reactive streams for bidirectional communication
-                registry.connect(contextPath, path);           // system → container-service
-                registry.connect(path, contextPath);           // container-service → system
-                
-                Log.logMsg("[SystemProcess] Connected reactive streams with ContainerService");
-                
+                // START the process first, THEN connect
                 return registry.startProcess(path);
             })
-            .thenRun(() -> Log.logMsg(
-                "[SystemProcess] ContainerService: " + containerService.getContextPath()));
+            .thenRun(() -> {
+                ContextPath path = containerService.getContextPath();
+                
+                Log.logMsg("[SystemProcess] Connecting streams with ContainerService (after start)...");
+                
+                // Now connect after both are running
+                registry.connect(contextPath, path);  // system → container-service
+                registry.connect(path, contextPath);  // container-service → system
+                
+                // Verify
+                verifyConnection(contextPath, path, "system → container-service");
+                verifyConnection(path, contextPath, "container-service → system");
+                
+                Log.logMsg("[SystemProcess] ContainerService: " + containerService.getContextPath());
+            });
+    }
+
+    private void verifyConnection(ContextPath from, ContextPath to, String label) {
+        FlowProcess fromProcess = registry.getProcess(from);
+        FlowProcess toProcess = registry.getProcess(to);
+        
+        Log.logMsg("[SystemProcess] === Verifying: " + label + " ===");
+        Log.logMsg("  From: " + from);
+        Log.logMsg("  From exists: " + (fromProcess != null));
+        Log.logMsg("  From alive: " + (fromProcess != null && fromProcess.isAlive()));
+        Log.logMsg("  From subscribers: " + (fromProcess != null ? fromProcess.getSubscriberCount() : "N/A"));
+        
+        Log.logMsg("  To: " + to);
+        Log.logMsg("  To exists: " + (toProcess != null));
+        Log.logMsg("  To alive: " + (toProcess != null && toProcess.isAlive()));
+        Log.logMsg("  To subscribers: " + (toProcess != null ? toProcess.getSubscriberCount() : "N/A"));
     }
     
     private CompletableFuture<Boolean> checkBootstrapNeeded() {
@@ -263,24 +287,22 @@ public class SystemProcess extends FlowProcess {
                     defaultKeyboard
                 );
                 
-                return spawnChild(bootstrapWizard)
-                    .thenCompose(path -> {
-                        // Connect wizard ↔ system
-                        registry.connect(contextPath, path);
-                        registry.connect(path, contextPath);
-                        
-                        Log.logMsg("[SystemProcess] Connected reactive streams with BootstrapWizard");
-                        
-                        return startProcess(path);
-                    })
-                    .thenCompose(v -> bootstrapWizard.getCompletionFuture())
-                    .thenRun(() -> {
-                        unregisterProcess(bootstrapWizard.getContextPath());
-                        bootstrapWizard = null;
-                        state.removeState(BOOTSTRAP_RUNNING);
-                        state.removeState(BOOTSTRAP_NEEDED);
-                        Log.logMsg("[SystemProcess] Bootstrap wizard complete");
-                    });
+                return spawnChild(bootstrapWizard);
+            })
+            .thenCompose(path -> registry.startProcess(path))
+            .thenRun(() -> {
+                ContextPath path = bootstrapWizard.getContextPath();
+                
+                registry.connect(contextPath, path);
+                registry.connect(path, contextPath);
+            })
+            .thenCompose(v -> bootstrapWizard.getCompletionFuture())
+            .thenRun(() -> {
+                unregisterProcess(bootstrapWizard.getContextPath());
+                bootstrapWizard = null;
+                state.removeState(BOOTSTRAP_RUNNING);
+                state.removeState(BOOTSTRAP_NEEDED);
+                Log.logMsg("[SystemProcess] Bootstrap wizard complete");
             });
     }
     
@@ -293,7 +315,7 @@ public class SystemProcess extends FlowProcess {
                 .withClosable(false)
                 .withResizable(true)
         ).toNoteBytesReadOnly();
-   
+        Log.logMsg("[SystemProcess.createWizardContainer] creating container");
         return request(containerService.getContextPath(), 
                 createMsg, 
                 Duration.ofMillis(500))
@@ -302,7 +324,7 @@ public class SystemProcess extends FlowProcess {
                 ContainerId containerId = ContainerId.fromNoteBytes(
                     resp.get(Keys.CONTAINER_ID)
                 );
-                
+                 Log.logMsg("[SystemProcess.createWizardContainer] creating handle:" + containerId);
                 return new TerminalContainerHandle(
                     containerId,
                     "Bootstrap Wizard",
@@ -315,19 +337,16 @@ public class SystemProcess extends FlowProcess {
         Log.logMsg("[SystemProcess] Initializing BootstrapConfig");
         
         return BootstrapConfig.initialize()
-            .thenCompose(config -> spawnChild(config)
-                .thenCompose(path -> {
-                    // Connect config ↔ system for bidirectional communication
-                    registry.connect(contextPath, path);
-                    registry.connect(path, contextPath);
-                    
-                    Log.logMsg("[SystemProcess] Connected reactive streams with BootstrapConfig");
-                    
-                    return registry.startProcess(path);
-                })
-                .thenRun(() -> Log.logMsg(
-                    "[SystemProcess] BootstrapConfig: " + 
-                    BootstrapConfig.BOOTSTRAP_CONFIG_PATH)));
+            .thenCompose(config -> spawnChild(config))
+            .thenCompose(path -> registry.startProcess(path))
+            .thenRun(() -> {
+                ContextPath path = BootstrapConfig.BOOTSTRAP_CONFIG_PATH;
+                
+                registry.connect(contextPath, path);
+                registry.connect(path, contextPath);
+                
+                Log.logMsg("[SystemProcess] BootstrapConfig: " + path);
+            });
     }
     
     private CompletableFuture<Void> startServicesProcess() {
@@ -336,18 +355,14 @@ public class SystemProcess extends FlowProcess {
         servicesProcess = new ServicesProcess(containerService);
         
         return spawnChild(servicesProcess)
-            .thenCompose(path -> {
-                // Connect services ↔ system
+            .thenCompose(path -> registry.startProcess(path))
+            .thenCompose(v -> {
+                ContextPath path = servicesProcess.getContextPath();
+                
                 registry.connect(contextPath, path);
                 registry.connect(path, contextPath);
                 
-                Log.logMsg("[SystemProcess] Connected reactive streams with ServicesProcess");
-                
-                return registry.startProcess(path);
-            })
-            .thenCompose(v -> {
-                Log.logMsg("[SystemProcess] ServicesProcess: " + 
-                    CoreConstants.SERVICES_PATH);
+                Log.logMsg("[SystemProcess] ServicesProcess: " + CoreConstants.SERVICES_PATH);
                 
                 if (servicesProcess.getIODaemon() != null) {
                     return createIOClientSession();
@@ -427,21 +442,17 @@ public class SystemProcess extends FlowProcess {
                 
                 return systemTerminal;
             })
-            .thenCompose(terminal -> spawnChild(terminal)
-                .thenCompose(path -> {
-                    // Connect terminal ↔ system
-                    registry.connect(contextPath, path);
-                    registry.connect(path, contextPath);
-                    
-                    Log.logMsg("[SystemProcess] Connected reactive streams with SystemTerminal");
-                    
-                    return registry.startProcess(path);
-                })
-                .thenRun(() -> {
-                    state.removeState(TERMINAL_CREATING);
-                    Log.logMsg("[SystemProcess] System terminal created: " + 
-                        systemTerminal.getContextPath());
-                }));
+            .thenCompose(terminal -> spawnChild(terminal))
+            .thenCompose(path -> registry.startProcess(path))
+            .thenRun(() -> {
+                ContextPath path = systemTerminal.getContextPath();
+                
+                registry.connect(contextPath, path);
+                registry.connect(path, contextPath);
+                
+                state.removeState(TERMINAL_CREATING);
+                Log.logMsg("[SystemProcess] System terminal created: " + path);
+            });
     }
     
     private InputDevice getBestInputDevice() {
@@ -477,6 +488,7 @@ public class SystemProcess extends FlowProcess {
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         try {
+            Log.logNoteBytes("[SystemProcess.handleMessage] from:"+ packet.getSourcePath() +"\n", packet.getPayload());
             NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
             NoteBytes cmdBytes = msg.get(Keys.CMD);
             

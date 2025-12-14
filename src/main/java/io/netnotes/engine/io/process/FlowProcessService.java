@@ -156,15 +156,28 @@ public class FlowProcessService {
         FlowProcess upstream = processes.get(upstreamPath);
         FlowProcess downstream = processes.get(downstreamPath);
         
+        // ADD THESE LOGS
+        Log.logMsg("[FlowProcessService] connect() called: " + upstreamPath + " → " + downstreamPath);
+        Log.logMsg("  Upstream process exists: " + (upstream != null));
+        Log.logMsg("  Downstream process exists: " + (downstream != null));
+        
         if (upstream == null) {
+            Log.logError("[FlowProcessService] Upstream process not found: " + upstreamPath);
             throw new IllegalArgumentException("Upstream process not found: " + upstreamPath);
         }
         if (downstream == null) {
+            Log.logError("[FlowProcessService] Downstream process not found: " + downstreamPath);
             throw new IllegalArgumentException("Downstream process not found: " + downstreamPath);
         }
         
+        // ADD THIS LOG
+        Log.logMsg("  Upstream subscribers before: " + upstream.getSubscriberCount());
+        
         // Subscribe downstream to upstream
         upstream.subscribe(downstream.getSubscriber());
+        
+        // ADD THIS LOG
+        Log.logMsg("  Upstream subscribers after: " + upstream.getSubscriberCount());
         
         // Track connection
         connections.computeIfAbsent(downstreamPath, k -> ConcurrentHashMap.newKeySet())
@@ -194,16 +207,28 @@ public class FlowProcessService {
     CompletableFuture<Void> startProcess(ContextPath path) {
         FlowProcess process = processes.get(path);
         if (process == null) {
+            Log.logError("[FlowProcessService] startProcess: Process not found at " + path);
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Process not found: " + path));
         }
-    
+
+        Log.logMsg("[FlowProcessService] Starting process: " + path + 
+            " (type: " + process.getClass().getSimpleName() + ")");
+        
         // Call onStart and run() in background
-        // Don't wait for run() to complete - it may run indefinitely
         CompletableFuture.runAsync(() -> {
             try {
+                Log.logMsg("[FlowProcessService] Calling onStart() for " + path);
                 process.onStart();
-                process.run().whenComplete((v, ex) -> {
+                
+                Log.logMsg("[FlowProcessService] Calling run() for " + path);
+                CompletableFuture<Void> runFuture = process.run();
+                
+                Log.logMsg("[FlowProcessService] run() returned future for " + path + 
+                    " (completed: " + runFuture.isDone() + ")");
+                
+                runFuture.whenComplete((v, ex) -> {
+                    Log.logMsg("[FlowProcessService] run() completed for " + path);
                     if (ex != null) {
                         Log.logError("Process " + path + " error: " + ex);
                         ex.printStackTrace();
@@ -211,6 +236,7 @@ public class FlowProcessService {
                     try {
                         process.onStop();
                     } finally {
+                        Log.logMsg("[FlowProcessService] Calling complete() for " + path);
                         process.complete();
                     }
                 });

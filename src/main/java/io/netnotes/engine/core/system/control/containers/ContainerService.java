@@ -10,7 +10,9 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -187,7 +189,33 @@ public class ContainerService extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        throw new IllegalStateException("Stream channels not supported byt container service");
+        Log.logMsg("[ContainerService] Stream channel received from: " + fromPath);
+        
+        // Find which container this handle belongs to
+        // fromPath should be something like /system/bootstrap-wizard or /system/system-terminal
+        // We need to find the container owned by this path
+        
+        Container targetContainer = null;
+        for (Container container : containers.values()) {
+            if (container.getOwnerPath().equals(fromPath)) {
+                targetContainer = container;
+                break;
+            }
+        }
+        
+        if (targetContainer == null) {
+            Log.logError("[ContainerService] No container found for owner: " + fromPath);
+            channel.getReadyFuture().completeExceptionally(
+                new IllegalStateException("No container found for owner: " + fromPath)
+            );
+            return;
+        }
+        
+        Log.logMsg("[ContainerService] Routing stream to container: " + 
+            targetContainer.getId());
+        
+        // Pass stream to Container
+        targetContainer.handleRenderStream(channel, fromPath);
     }
     
     // ===== COMMAND HANDLERS =====
@@ -265,17 +293,16 @@ public class ContainerService extends FlowProcess {
                 Log.logMsg("[ContainerService] Container created: " + containerId);
                 
                 // Reply with container ID
-                NoteBytesMap response = new NoteBytesMap();
-                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                response.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
-                response.put(Keys.PATH, container.getPath().toString());
+                reply(packet, new NoteBytesObject(new NoteBytesPair[]{
+                    new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                    new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                    new NoteBytesPair(Keys.PATH, container.getPath().toString())
+                }));
                 
-                reply(packet, response.toNoteBytes());
-                
-                // Send event to owner
+                /*
                 sendEvent(ownerPath, ContainerCommands.containerCreated(
                     containerId, container.getPath()
-                ));
+                ));*/
             })
             .exceptionally(ex -> {
                 state.removeState(ContainerServiceStates.CREATING_CONTAINER);
@@ -340,9 +367,9 @@ public class ContainerService extends FlowProcess {
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(packet, response.toNoteBytes());
                 
-                // Send event to owner
+                /*
                 sendEvent(container.getOwnerPath(), 
-                    ContainerCommands.containerClosed(containerId));
+                    ContainerCommands.containerClosed(containerId));*/
             });
     }
     
@@ -421,8 +448,8 @@ public class ContainerService extends FlowProcess {
                 replySuccess(packet);
                 
                 // Send focus event to owner
-                sendEvent(container.getOwnerPath(),
-                    ContainerCommands.containerFocused(containerId));
+               /* sendEvent(container.getOwnerPath(),
+                    ContainerCommands.containerFocused(containerId)); */
             });
     }
     
@@ -480,11 +507,11 @@ public class ContainerService extends FlowProcess {
     
     // ===== HELPERS =====
     
-    private void sendEvent(ContextPath target, NoteBytesMap event) {
+    /*private void sendEvent(ContextPath target, NoteBytesMap event) {
         if (registry.exists(target)) {
             emitTo(target, event.toNoteBytes());
         }
-    }
+    }*/
     
     private void replySuccess(RoutedPacket packet) {
         reply(packet, ProtocolObjects.SUCCESS_OBJECT);

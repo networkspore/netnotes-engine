@@ -71,11 +71,8 @@ public class ContainerHandle extends FlowProcess {
     public void onStart() {
         Log.logMsg("[ContainerHandle] Started for container: " + containerId);
         
-        // Request render stream TO Container
-        // Container path is: ownerPath/container/{containerId}
-        ContextPath containerPath = contextPath.append("container", containerId.toString());
-        
-        requestStreamChannel(containerPath)
+        // Request render stream TO ContainerService (not container path!)
+        requestStreamChannel(containerServicePath)
             .thenAccept(channel -> {
                 this.renderStream = channel;
                 this.renderWriter = new AsyncNoteBytesWriter(
@@ -83,7 +80,7 @@ public class ContainerHandle extends FlowProcess {
                 );
                 
                 Log.logMsg("[ContainerHandle] Render stream ready: " + 
-                    contextPath + " → " + containerPath);
+                    contextPath + " → " + containerServicePath);
                 
                 // Signal ready
                 channel.getReadyFuture().complete(null);

@@ -300,8 +300,8 @@ public final class Keyboard {
     }
 
 
-    private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[127];
-    private static final int[] codepoint = new int[0];
+    private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[128];
+    private static final int[] codepoint = new int[1];
   
     static {
         
