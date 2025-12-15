@@ -7,13 +7,13 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.IODaemonProtocol.AsyncNoteBytesWriter;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
@@ -42,8 +42,8 @@ public class ContainerHandle extends FlowProcess {
     
     // Stream TO Container (for render commands)
     private StreamChannel renderStream;
-    private AsyncNoteBytesWriter renderWriter;
-    
+    private NoteBytesWriter renderWriter;
+
     /**
      * Constructor
      * 
@@ -66,28 +66,25 @@ public class ContainerHandle extends FlowProcess {
         this.containerId = containerId;
         this.containerServicePath = containerServicePath;
     }
+
+
     
     @Override
-    public void onStart() {
+      public CompletableFuture<Void> run() {
         Log.logMsg("[ContainerHandle] Started for container: " + containerId);
         
         // Request render stream TO ContainerService (not container path!)
-        requestStreamChannel(containerServicePath)
+        return requestStreamChannel(containerServicePath)
             .thenAccept(channel -> {
                 this.renderStream = channel;
-                this.renderWriter = new AsyncNoteBytesWriter(
+                this.renderWriter = new NoteBytesWriter(
                     channel.getOutputStream()
                 );
                 
-                Log.logMsg("[ContainerHandle] Render stream ready: " + 
-                    contextPath + " → " + containerServicePath);
-                
-                // Signal ready
-                channel.getReadyFuture().complete(null);
+                Log.logMsg("[ContainerHandle] Stream channel setup complete");
             })
             .exceptionally(ex -> {
-                Log.logError("[ContainerHandle] Failed to setup render stream: " + 
-                    ex.getMessage());
+                Log.logError("[ContainerHandle] Failed to setup render stream: " + ex.getMessage());
                 return null;
             });
     }
@@ -96,11 +93,6 @@ public class ContainerHandle extends FlowProcess {
     public void onStop() {
         Log.logMsg("[ContainerHandle] Stopped for container: " + containerId);
         isDestroyed = true;
-        
-        // Cleanup render stream
-        if (renderWriter != null) {
-            renderWriter.shutdown();
-        }
         
         if (renderStream != null) {
             try {
@@ -139,8 +131,8 @@ public class ContainerHandle extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        // ContainerHandle doesn't receive streams currently
-        Log.logError("[ContainerHandle] Unexpected stream channel from: " + fromPath);
+
+       throw new IllegalStateException("ContainerHandle doesn't receive streams currently");
     }
     
     // ===== CONTAINER OPERATIONS =====
@@ -221,26 +213,31 @@ public class ContainerHandle extends FlowProcess {
      * This is used by subclasses like TerminalContainerHandle
      */
     protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command) {
-        if (renderWriter == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Render stream not ready")
-            );
-        }
-        
+
         if (isDestroyed) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Container already destroyed")
             );
         }
         
-
-        return renderWriter.writeAsync(command.toNoteBytes())
-            .exceptionally(ex -> {
-                Log.logError("[ContainerHandle] Render command failed: " + 
-                    ex.getMessage());
-                return null;
-            });
+        // Stream must be ready at this point
+        if (renderWriter == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Render stream not initialized")
+            );
+        }
+        
+        Log.logMsg("[ContainerHandle.sendRenderCommand]");
+        try{
+            renderWriter.write(command.toNoteBytes());
+            return CompletableFuture.completedFuture(null);
+        }catch(IOException ex){
+            return CompletableFuture.failedFuture(ex);
+        }
+    
     }
+
+   
     
     // ===== SERVICE COMMUNICATION =====
     
@@ -322,8 +319,33 @@ public class ContainerHandle extends FlowProcess {
     public boolean isDestroyed() {
         return isDestroyed;
     }
-    
+
+ 
     public boolean isRenderStreamReady() {
-        return renderWriter != null;
+        return renderStream != null && 
+               renderStream.getReadyFuture().isDone() &&
+               !renderStream.getReadyFuture().isCompletedExceptionally();
+    }
+
+    public CompletableFuture<Void> waitUntilReady() {
+        if (renderStream == null) {
+            // Stream hasn't been created yet, wait for it
+            return CompletableFuture.runAsync(() -> {
+                while (renderStream == null && !isDestroyed) {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(e);
+                    }
+                }
+                if (isDestroyed) {
+                    throw new IllegalStateException("Container destroyed before ready");
+                }
+            }).thenCompose(v -> renderStream.getReadyFuture());
+        }
+        
+        // Stream exists, just return its ready future
+        return renderStream.getReadyFuture();
     }
 }

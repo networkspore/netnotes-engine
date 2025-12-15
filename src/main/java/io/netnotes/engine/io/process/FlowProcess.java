@@ -660,7 +660,12 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     public CompletableFuture<StreamChannel> requestStreamChannel(ContextPath target) {
         if (registry == null) {
             return CompletableFuture.failedFuture(
-                new IllegalStateException("Process not initialized"));
+                new IllegalStateException("Process not registered"));
+        }
+
+        if(contextPath == null){
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Process not fully initialized"));
         }
         
         return registry.requestStreamChannel(contextPath, target);

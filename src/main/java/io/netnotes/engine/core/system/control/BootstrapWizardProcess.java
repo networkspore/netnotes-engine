@@ -76,7 +76,7 @@ public class BootstrapWizardProcess extends FlowProcess {
     @Override
     public CompletableFuture<Void> run() {
         state.addState(DETECTING);
-        
+        Log.logMsg("[BootstrapWizardProcess] running");
         // Create default config
         bootstrapConfig = BootstrapConfig.createDefault();
         
@@ -84,8 +84,16 @@ public class BootstrapWizardProcess extends FlowProcess {
         menuNavigator = new MenuNavigatorProcess("menu-navigator", terminal, keyboard);
         
         return spawnChild(menuNavigator)
-            .thenCompose(path -> registry.startProcess(path))
-            .thenCompose(v -> showWelcomeScreen())
+            .thenCompose(path -> {
+                Log.logMsg("[BootstrapWizardProcess] starting menuNavigator");
+                return registry.startProcess(path);
+            });
+           
+    }
+
+    public CompletableFuture<Void> start(){
+          Log.logMsg("[BootstrapWizardProcess] start called");
+        return showWelcomeScreen()
             .thenCompose(v -> detectSecureInput())
             .thenCompose(result -> {
                 this.detectionResult = result;
@@ -93,7 +101,10 @@ public class BootstrapWizardProcess extends FlowProcess {
                 state.addState(CONFIGURING);
                 return showSecureInputOptionsMenu();
             })
-            .thenCompose(v -> getCompletionFuture());
+            .thenRun(() -> {
+                Log.logMsg("[BootstrapWizardProcess] Wizard flow started");
+            });
+            
     }
     
     // ===== KEYBOARD EVENT HANDLING =====
@@ -139,6 +150,7 @@ public class BootstrapWizardProcess extends FlowProcess {
     // ===== WELCOME =====
     
     private CompletableFuture<Void> showWelcomeScreen() {
+        Log.logMsg("[BootstrapWizardProcess] **Showing Welcome Screen**");
         return terminal.clear()
             .thenCompose(v -> terminal.println("=".repeat(60)))
             .thenCompose(v -> terminal.println(""))
@@ -157,6 +169,7 @@ public class BootstrapWizardProcess extends FlowProcess {
     // ===== DETECTION =====
     
     private CompletableFuture<SecureInputDetectionResult> detectSecureInput() {
+        Log.logMsg("[BootstrapWizardProcess] detecting secure input");
         terminal.clear()
             .thenCompose(v -> terminal.println("Detecting secure input...", 
                 TerminalContainerHandle.TextStyle.INFO))

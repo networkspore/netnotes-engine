@@ -201,8 +201,12 @@ public class FlowProcessService {
     /**
      * Start a process
      * 
-     * FIXED: Returns immediately after starting, doesn't wait for completion
-     * The process runs in background, getCompletionFuture() tracks when it finishes
+     * FIXED: Separates "startup" from "completion"
+     * - run() future = startup phase (initialization, setup)
+     * - getCompletionFuture() = actual process lifetime
+     * 
+     * When run() completes: process is started and running
+     * When getCompletionFuture() completes: process is done
      */
     CompletableFuture<Void> startProcess(ContextPath path) {
         FlowProcess process = processes.get(path);
@@ -215,7 +219,9 @@ public class FlowProcessService {
         Log.logMsg("[FlowProcessService] Starting process: " + path + 
             " (type: " + process.getClass().getSimpleName() + ")");
         
-        // Call onStart and run() in background
+        // Start the process in background
+        CompletableFuture<Void> startupFuture = new CompletableFuture<>();
+        
         CompletableFuture.runAsync(() -> {
             try {
                 Log.logMsg("[FlowProcessService] Calling onStart() for " + path);
@@ -227,30 +233,44 @@ public class FlowProcessService {
                 Log.logMsg("[FlowProcessService] run() returned future for " + path + 
                     " (completed: " + runFuture.isDone() + ")");
                 
+                // Wait for run() to complete (startup phase)
                 runFuture.whenComplete((v, ex) -> {
-                    Log.logMsg("[FlowProcessService] run() completed for " + path);
                     if (ex != null) {
-                        Log.logError("Process " + path + " error: " + ex);
+                        Log.logError("[FlowProcessService] Process " + path + 
+                            " startup error: " + ex);
                         ex.printStackTrace();
-                    }
-                    try {
-                        process.onStop();
-                    } finally {
-                        Log.logMsg("[FlowProcessService] Calling complete() for " + path);
-                        process.complete();
+                        startupFuture.completeExceptionally(ex);
+                    } else {
+                        Log.logMsg("[FlowProcessService] Process " + path + 
+                            " startup complete, now running");
+                        startupFuture.complete(null);
                     }
                 });
+                
+                // SEPARATELY: Wait for process completion (lifetime)
+                // This doesn't block startup, it just sets up cleanup
+                process.getCompletionFuture().whenComplete((v, ex) -> {
+                    Log.logMsg("[FlowProcessService] Process " + path + " completed");
+                    try {
+                        process.onStop();
+                    } catch (Exception e) {
+                        Log.logError("[FlowProcessService] onStop() error for " + path + 
+                            ": " + e);
+                    }
+                });
+                
             } catch (Exception e) {
-                Log.logError("Process " + path + " startup error: " + e);
+                Log.logError("[FlowProcessService] Process " + path + 
+                    " startup exception: " + e);
                 e.printStackTrace();
+                startupFuture.completeExceptionally(e);
                 process.complete();
             }
         }, virtualExec);
         
-        // Return immediately - process is starting
-        return CompletableFuture.completedFuture(null);
+        // Return the startup future, not the completion future
+        return startupFuture;
     }
-
     
     /**
      * Kill a process

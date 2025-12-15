@@ -5,16 +5,14 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalContainerHandle - Terminal-style container operations
  * 
  * Extends ContainerHandle with terminal/console-specific operations.
  * 
- * NOW SIMPLIFIED:
- * - No message wrapping (sendTerminalCommand writes directly to stream!)
- * - Clean separation: lifecycle → service, rendering → stream
- * - Matches IODaemon/ClaimedDevice pattern
+ * CRITICAL: All terminal operations now wait for stream to be ready first!
  * 
  * Usage:
  * <pre>
@@ -22,13 +20,13 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * registry.registerChild(ownerPath, terminal);
  * registry.startProcess(terminal.getContextPath());
  * 
- * // Clear screen - goes directly through stream!
- * terminal.clear();
- * 
- * // Print menu at position
- * terminal.printAt(5, 10, "=== Main Menu ===", TextStyle.BOLD);
- * terminal.printAt(7, 10, "1. Files");
- * terminal.printAt(8, 10, "2. Settings");
+ * // Wait for ready, then use
+ * terminal.waitUntilReady().thenCompose(v -> {
+ *     return terminal.clear()
+ *         .thenCompose(v2 -> terminal.printAt(5, 10, "=== Main Menu ===", TextStyle.BOLD))
+ *         .thenCompose(v2 -> terminal.printAt(7, 10, "1. Files"))
+ *         .thenCompose(v2 -> terminal.printAt(8, 10, "2. Settings"));
+ * });
  * </pre>
  */
 public class TerminalContainerHandle extends ContainerHandle {
@@ -53,16 +51,21 @@ public class TerminalContainerHandle extends ContainerHandle {
     }
     
     // ===== TERMINAL-SPECIFIC OPERATIONS =====
+    // All operations now properly wait for ready state first!
+    
+
     
     /**
      * Clear the entire terminal screen
      */
     public CompletableFuture<Void> clear() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);  // Direct to stream!
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
@@ -76,13 +79,15 @@ public class TerminalContainerHandle extends ContainerHandle {
      * Print styled text at current cursor position
      */
     public CompletableFuture<Void> print(String text, TextStyle style) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.TEXT, text);
+            command.put(Keys.STYLE, style.toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
@@ -96,13 +101,15 @@ public class TerminalContainerHandle extends ContainerHandle {
      * Print styled text + newline
      */
     public CompletableFuture<Void> println(String text, TextStyle style) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.TEXT, text);
+            command.put(Keys.STYLE, style.toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
@@ -117,88 +124,102 @@ public class TerminalContainerHandle extends ContainerHandle {
      * Print styled text at specific position
      */
     public CompletableFuture<Void> printAt(int row, int col, String text, TextStyle style) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD,TerminalCommands.TERMINAL_PRINT_AT);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(Keys.COL, col);
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT_AT);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.ROW, row);
+            command.put(Keys.COL, col);
+            command.put(Keys.TEXT, text);
+            command.put(Keys.STYLE, style.toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Move cursor to position (without printing)
      */
     public CompletableFuture<Void> moveCursor(int row, int col) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(Keys.COL, col);
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.ROW, row);
+            command.put(Keys.COL, col);
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Show cursor (make visible)
      */
     public CompletableFuture<Void> showCursor() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Hide cursor (useful during menu rendering)
      */
     public CompletableFuture<Void> hideCursor() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Clear from cursor to end of line
      */
     public CompletableFuture<Void> clearLine() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Clear specific line
      */
     public CompletableFuture<Void> clearLine(int row) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.ROW, row);
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Clear rectangular region
      */
     public CompletableFuture<Void> clearRegion(int startRow, int startCol, int endRow, int endCol) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(TerminalCommands.START_ROW, startRow);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(TerminalCommands.END_ROW, endRow);
-        command.put(TerminalCommands.END_COL, endCol);
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(TerminalCommands.START_ROW, startRow);
+            command.put(TerminalCommands.START_COL, startCol);
+            command.put(TerminalCommands.END_ROW, endRow);
+            command.put(TerminalCommands.END_COL, endCol);
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
@@ -221,31 +242,35 @@ public class TerminalContainerHandle extends ContainerHandle {
         String title,
         BoxStyle boxStyle
     ) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_BOX);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(TerminalCommands.START_ROW, startRow);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(Keys.WIDTH, width);
-        command.put(Keys.HEIGHT, height);
-        command.put(Keys.TITLE, title);
-        command.put(TerminalCommands.BOX_STYLE, boxStyle.name());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_BOX);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(TerminalCommands.START_ROW, startRow);
+            command.put(TerminalCommands.START_COL, startCol);
+            command.put(Keys.WIDTH, width);
+            command.put(Keys.HEIGHT, height);
+            command.put(Keys.TITLE, title);
+            command.put(TerminalCommands.BOX_STYLE, boxStyle.name());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * Print a horizontal line (separator)
      */
     public CompletableFuture<Void> drawHLine(int row, int startCol, int length) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(Keys.LENGTH, length);
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            command.put(Keys.ROW, row);
+            command.put(TerminalCommands.START_COL, startCol);
+            command.put(Keys.LENGTH, length);
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
@@ -314,22 +339,26 @@ public class TerminalContainerHandle extends ContainerHandle {
      * UI can buffer these and render all at once (reduces flicker)
      */
     public CompletableFuture<Void> beginBatch() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_BEGIN_BATCH);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_BEGIN_BATCH);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     /**
      * End batch and render all buffered operations
      */
     public CompletableFuture<Void> endBatch() {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_END_BATCH);
-        command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        
-        return sendRenderCommand(command);
+        return waitUntilReady().thenCompose(v -> {
+            NoteBytesMap command = new NoteBytesMap();
+            command.put(Keys.CMD, TerminalCommands.TERMINAL_END_BATCH);
+            command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
+            
+            return sendRenderCommand(command);
+        });
     }
     
     // ===== TEXT STYLING =====

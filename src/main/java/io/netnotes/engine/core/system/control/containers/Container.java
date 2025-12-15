@@ -130,7 +130,7 @@ public class Container {
         channel.startReceiving(input -> {
             try (NoteBytesReader reader = new NoteBytesReader(input)) {
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-                
+                Log.logNoteBytes("[Container.handleREnderStream]", nextBytes);
                 while (nextBytes != null && active) {
                     if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                         NoteBytesMap command = nextBytes.getAsNoteBytesMap();

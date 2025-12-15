@@ -62,6 +62,8 @@ public class NoteBytesWriter implements AutoCloseable {
         return count;
     }
 
+
+
     @Override
     public void close() throws IOException {
         m_out.close();

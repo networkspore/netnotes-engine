@@ -130,7 +130,7 @@ public class MenuNavigatorProcess extends FlowProcess {
     @Override
     public CompletableFuture<Void> run() {
         state.addState(IDLE);
-        return getCompletionFuture();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override

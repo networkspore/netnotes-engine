@@ -127,7 +127,7 @@ public class ContainerService extends FlowProcess {
         // Check if default renderer is active
         UIRenderer defaultRenderer = renderers.get(defaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
-             Log.logMsg("[ContainerService] renderer active");
+            Log.logMsg("[ContainerService] renderer active");
             state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
         }
         
@@ -135,7 +135,9 @@ public class ContainerService extends FlowProcess {
         state.addState(ContainerServiceStates.READY);
         state.addState(ContainerServiceStates.ACCEPTING_REQUESTS);
         
-        return getCompletionFuture();
+        // Service is now running and will stay alive until shutdown()
+        Log.logMsg("[ContainerService] Initialization complete, service running");
+        return CompletableFuture.completedFuture(null);
     }
 
     
@@ -189,24 +191,43 @@ public class ContainerService extends FlowProcess {
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        
         Log.logMsg("[ContainerService] Stream channel received from: " + fromPath);
         
-        // Find which container this handle belongs to
-        // fromPath should be something like /system/bootstrap-wizard or /system/system-terminal
-        // We need to find the container owned by this path
+        if (fromPath == null) {
+            Log.logError("[ContainerService] fromPath is null!");
+            channel.getReadyFuture().completeExceptionally(
+                new IllegalStateException("fromPath is null")
+            );
+            return;
+        }
+        
+        // Find container by looking for handles that are children of owners
+        // fromPath will be something like /system/bootstrap-wizard-container
+        // We need to find its parent (the owner) and then find that owner's container
         
         Container targetContainer = null;
-        for (Container container : containers.values()) {
-            if (container.getOwnerPath().equals(fromPath)) {
-                targetContainer = container;
-                break;
+        
+        // Try to find container where the handle's parent is the owner
+        ContextPath handleParent = registry.getParent(fromPath);
+        Log.logMsg("[ContainerService] Handle parent: " + handleParent);
+        
+        if (handleParent != null) {
+            for (Container container : containers.values()) {
+                Log.logMsg("[ContainerService] Checking container owner: " + 
+                    container.getOwnerPath() + " vs " + handleParent);
+                if (container.getOwnerPath().equals(handleParent)) {
+                    targetContainer = container;
+                    break;
+                }
             }
         }
         
         if (targetContainer == null) {
-            Log.logError("[ContainerService] No container found for owner: " + fromPath);
+            Log.logError("[ContainerService] No container found for handle: " + fromPath + 
+                " (parent: " + handleParent + ")");
             channel.getReadyFuture().completeExceptionally(
-                new IllegalStateException("No container found for owner: " + fromPath)
+                new IllegalStateException("No container found for handle: " + fromPath)
             );
             return;
         }

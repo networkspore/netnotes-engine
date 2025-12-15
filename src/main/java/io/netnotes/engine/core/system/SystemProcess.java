@@ -281,12 +281,13 @@ public class SystemProcess extends FlowProcess {
         
         return createWizardContainer()
             .thenCompose(containerHandle -> {
+                  Log.logMsg("[SystemProcess.launchBootstrapWizard] instantiating BootstrapWizardProcess");
                 bootstrapWizard = new BootstrapWizardProcess(
                     "bootstrap-wizard",
                     containerHandle,
                     defaultKeyboard
                 );
-                
+                Log.logMsg("[SystemProcess.launchBootstrapWizard] BootstrapWizardProcess instantiated");
                 return spawnChild(bootstrapWizard);
             })
             .thenCompose(path -> registry.startProcess(path))
@@ -296,6 +297,7 @@ public class SystemProcess extends FlowProcess {
                 registry.connect(contextPath, path);
                 registry.connect(path, contextPath);
             })
+            .thenCompose(v -> bootstrapWizard.start())
             .thenCompose(v -> bootstrapWizard.getCompletionFuture())
             .thenRun(() -> {
                 unregisterProcess(bootstrapWizard.getContextPath());
@@ -315,21 +317,32 @@ public class SystemProcess extends FlowProcess {
                 .withClosable(false)
                 .withResizable(true)
         ).toNoteBytesReadOnly();
+        
         Log.logMsg("[SystemProcess.createWizardContainer] creating container");
         return request(containerService.getContextPath(), 
                 createMsg, 
                 Duration.ofMillis(500))
-            .thenApply(response -> {
+            .thenCompose(response -> {
                 NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
                 ContainerId containerId = ContainerId.fromNoteBytes(
                     resp.get(Keys.CONTAINER_ID)
                 );
-                 Log.logMsg("[SystemProcess.createWizardContainer] creating handle:" + containerId);
-                return new TerminalContainerHandle(
+                Log.logMsg("[SystemProcess.createWizardContainer] creating handle:" + containerId);
+                
+                TerminalContainerHandle handle = new TerminalContainerHandle(
                     containerId,
-                    "Bootstrap Wizard",
+                    "bootstrap-wizard-container",
                     containerService.getContextPath()
                 );
+                
+                // Register and start the handle
+                return spawnChild(handle)
+                    .thenCompose(path -> registry.startProcess(path))
+                    .thenApply(v -> {
+                        Log.logMsg("[SystemProcess.createWizardContainer] handle started, returning");
+                        // Don't wait here - let terminal operations wait as needed
+                        return handle;
+                    });
             });
     }
     
@@ -423,7 +436,7 @@ public class SystemProcess extends FlowProcess {
         return request(containerService.getContextPath(),
                 createMsg.toNoteBytesReadOnly(),
                 Duration.ofMillis(500))
-            .thenApply(response -> {
+            .thenCompose(response -> {
                 NoteBytesMap resp = response.getPayload().getAsNoteBytesMap();
                 ContainerId containerId = ContainerId.fromNoteBytes(
                     resp.get(Keys.CONTAINER_ID)
@@ -433,16 +446,16 @@ public class SystemProcess extends FlowProcess {
                 
                 systemTerminal = new SystemTerminalContainer(
                     containerId,
-                    CoreConstants.SYSTEM_CONTAINER_NAME,
+                    "system-terminal-container",  // Process name
                     containerService.getContextPath(),
                     terminalKeyboard,
                     registry,
                     contextPath
                 );
                 
-                return systemTerminal;
+                // Register and start the handle
+                return spawnChild(systemTerminal);
             })
-            .thenCompose(terminal -> spawnChild(terminal))
             .thenCompose(path -> registry.startProcess(path))
             .thenRun(() -> {
                 ContextPath path = systemTerminal.getContextPath();
@@ -620,13 +633,13 @@ public class SystemProcess extends FlowProcess {
         
         return createWizardContainer()
             .thenCompose(terminal -> {
+       
                 SecureInputInstaller installer = new SecureInputInstaller(
                     "secure-input-installer",
                     os,
                     terminal,
                     defaultKeyboard
                 );
-                
                 return spawnChild(installer)
                     .thenCompose(path -> startProcess(path))
                     .thenCompose(v -> installer.getCompletionFuture())

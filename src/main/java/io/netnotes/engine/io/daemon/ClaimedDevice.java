@@ -2,14 +2,13 @@ package io.netnotes.engine.io.daemon;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -17,14 +16,16 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
+
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
-import io.netnotes.engine.io.daemon.IODaemonProtocol.AsyncNoteBytesWriter;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.InputEventFactory;
@@ -59,7 +60,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     // TWO channels: incoming events + outgoing control
     private StreamChannel incomingEventStream;
     private StreamChannel outgoingControlStream;
-    private AsyncNoteBytesWriter controlStreamWriter;
+    private NoteBytesWriter controlStreamWriter;
     
     private DeviceEncryptionSession encryptionSession;
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
@@ -112,7 +113,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         requestStreamChannel(ioDaemonPath)
             .thenAccept(channel -> {
                 this.outgoingControlStream = channel;
-                this.controlStreamWriter = new AsyncNoteBytesWriter(
+                this.controlStreamWriter = new NoteBytesWriter(
                     channel.getOutputStream()
                 );
                 
@@ -281,17 +282,13 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             encryptionSession.acceptOffer(serverPublicKey, cipher);
             
             byte[] clientPublicKey = encryptionSession.getPublicKey();
-            NoteBytesObject accept = new NoteBytesObject();
-            accept.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_ACCEPT);
-            accept.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
-            accept.add(Keys.PUBLIC_KEY, clientPublicKey);
-            
-            sendDeviceControlMessage(accept)
-                .thenRun(() -> Log.logMsg("Encryption accept sent"))
-                .exceptionally(ex -> {
-                    Log.logError("Failed to send accept: " + ex.getMessage());
-                    return null;
-                });
+            NoteBytesObject accept = new NoteBytesObject(new NoteBytesPair[]{
+                new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_ACCEPT),
+                new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
+                new NoteBytesPair(Keys.PUBLIC_KEY, new NoteBytes(clientPublicKey))
+            });
+            sendDeviceControlMessage(accept);
+            Log.logMsg("Encryption accept sent");
             
         } catch (Exception e) {
             Log.logError("Encryption offer failed: " + e.getMessage());
@@ -334,27 +331,29 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     /**
      * Send control message via control stream (already setup in onStart)
      */
-     private CompletableFuture<Void> sendDeviceControlMessage(NoteBytesObject message) {
+    private void sendDeviceControlMessage(NoteBytesObject message) {
         if (controlStreamWriter == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Control stream not ready")
-            );
+            Log.logError("Control stream not ready");
+            return;
         }
         
-        // Write routed message: [STRING:deviceId][OBJECT:message]
-        return controlStreamWriter.writeAsync(new NoteBytes(deviceId))
-            .thenCompose(v -> controlStreamWriter.writeAsync(message))
-            .exceptionally(ex -> {
-                Log.logError("Failed to send control message: " + ex.getMessage());
-                return null;
-            });
+        try {
+            // Write routed message: [STRING:deviceId][OBJECT:message]
+            synchronized(controlStreamWriter) {
+                controlStreamWriter.write(new NoteBytes(deviceId));
+                controlStreamWriter.write(message);
+                controlStreamWriter.flush();
+            }
+        } catch (IOException e) {
+            Log.logError("Failed to send control message: " + e.getMessage());
+        }
     }
     
     // ===== BACKPRESSURE ACK =====
     
-    private CompletableFuture<Void> sendAck(int count) {
+    private void sendAck(int count) {
         
-        return sendDeviceControlMessage(new NoteBytesObject(new NoteBytesPair[]{
+        sendDeviceControlMessage(new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_CMD),
             new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
@@ -363,18 +362,19 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         }));
     }
 
-    private CompletableFuture<Void> sendReleaseNotification() {
+    private void sendReleaseNotification() {
         if (controlStreamWriter == null) {
-            return CompletableFuture.completedFuture(null);
+            return;
         }
         
-        NoteBytesObject notification = new NoteBytesObject();
-        notification.add(Keys.TYPE, EventBytes.TYPE_CMD);
-        notification.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
-        notification.add(Keys.CMD, ProtocolMesssages.DEVICE_DISCONNECTED);
-        notification.add(Keys.DEVICE_ID, deviceId);
+        NoteBytesObject notification = new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_CMD),
+            new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
+            new NoteBytesPair(Keys.CMD, ProtocolMesssages.DEVICE_DISCONNECTED),
+            new NoteBytesPair(Keys.DEVICE_ID, deviceId)
+        });
         
-        return controlStreamWriter.writeRoutedMessageAsync(deviceId, notification);
+        sendDeviceControlMessage(notification);
     }
     
     /**
@@ -382,34 +382,34 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      */
     public void release() {
         active = false;
-        // Send release notification to IODaemon BEFORE cleanup
-        sendReleaseNotification()
-            .thenApply((v) -> {
-                // Send remaining ACKs
-                int remaining = processedEvents.get() % ACK_BATCH_SIZE;
-                if (remaining > 0) {
-                    return sendAck(remaining);
-                }
-                return CompletableFuture.completedFuture(null);
-            })
-            .thenRun(this::cleanup)
-            .exceptionally(ex -> {
-                Log.logError("Release notification failed, cleaning up anyway");
-                cleanup();
-                return null;
-            });
         
+        // Send release notification BEFORE cleanup
+        sendReleaseNotification();
+        
+        // Send remaining ACKs
+        int remaining = processedEvents.get() % ACK_BATCH_SIZE;
+        if (remaining > 0) {
+            sendAck(remaining);
+        }
+        
+        // Small delay to let messages flush
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        cleanup();
     }
 
     private void cleanup() {
         
         // Shutdown async writer (drains queue)
         if (controlStreamWriter != null) {
-            controlStreamWriter.shutdown();
             try {
-                controlStreamWriter.awaitTermination(2, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                controlStreamWriter.close();
+            } catch (IOException e) {
+                Log.logError("Error closing control writer: " + e.getMessage());
             }
         }
         
