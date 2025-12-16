@@ -1,7 +1,10 @@
 package io.netnotes.engine.core.system.control.ui;
 
 
+import io.netnotes.engine.core.system.control.containers.ContainerType;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -37,4 +40,13 @@ public interface UIRenderer {
      * Shutdown the renderer
      */
     void shutdown();
+
+    boolean supports(ContainerType type);
+      
+
+    Set<ContainerType> getSupportedTypes();
+      
+
+    String getDescription();
+    
 }

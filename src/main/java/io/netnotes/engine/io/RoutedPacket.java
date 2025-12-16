@@ -143,12 +143,6 @@ public final class RoutedPacket {
     
     // ===== METADATA MANAGEMENT =====
     
-    /**
-     * Check if metadata key exists
-    
-    public boolean hasMetadata(String key) {
-        return metadata.containsKey(key);
-    } */
 
     public boolean hasMetadata(NoteBytes key) {
         return metadata.containsKey(key);
@@ -169,22 +163,6 @@ public final class RoutedPacket {
             return ContextPath.parse(value.getAsString());
         }
         return null;
-    }
-    
-    /**
-     * Get metadata as string
-    
-    public String getMetadataString(String key) {
-        NoteBytes value = metadata.get(key);
-        return value != null ? value.toString() : null;
-    } */
-    
-    /**
-     * Get metadata as integer
-     */
-    public Integer getMetadataInt(NoteBytes key) {
-        NoteBytes value = metadata.get(key);
-        return ByteDecoding.forceAsBigDecimal(value).intValue();
     }
     
     /**

@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -46,7 +45,7 @@ public class ContainerService extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // Renderer management
-    private final Map<String, RendererInfo> renderers = new ConcurrentHashMap<>();
+    private final Map<String, UIRenderer> renderers = new ConcurrentHashMap<>();
     private final String systemDefaultRendererId;
     private final Map<ContainerType, String> typeDefaultRenderers = new ConcurrentHashMap<>();
 
@@ -64,7 +63,7 @@ public class ContainerService extends FlowProcess {
      * @param name Service name
      * @param defaultRenderer Default UI renderer (e.g., ConsoleUIRenderer)
      */
-    public ContainerService(String name, RendererInfo systemDefaultRenderer) {
+    public ContainerService(String name, UIRenderer systemDefaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine("container-service");
         
@@ -78,30 +77,29 @@ public class ContainerService extends FlowProcess {
 
     public void registerRenderer(
         String rendererId,
-        UIRenderer renderer,
-        Set<ContainerType> supportedTypes,
-        String description
+        UIRenderer renderer
+
     ) {
         
         if (rendererId == null || renderer == null) {
             throw new IllegalArgumentException("rendererId and renderer required");
         }
         
-        renderers.put(rendererId, new RendererInfo(renderer, supportedTypes, description));
+        renderers.put(rendererId, renderer);
         
         Log.logMsg(String.format(
             "[ContainerService] Registered renderer '%s': %s (supports: %s)",
-            rendererId, description, supportedTypes
+            rendererId, renderer.getDescription(), renderer.getSupportedTypes()
         ));
     }
 
     public void setDefaultRendererForType(ContainerType type, String rendererId) {
-        RendererInfo info = renderers.get(rendererId);
-        if (info == null) {
+        UIRenderer renderer = renderers.get(rendererId);
+        if (renderer == null) {
             throw new IllegalArgumentException("Renderer not found: " + rendererId);
         }
         
-        if (!info.supports(type)) {
+        if (!renderer.supports(type)) {
             throw new IllegalArgumentException(String.format(
                 "Renderer '%s' does not support container type %s",
                 rendererId, type
@@ -155,18 +153,18 @@ public class ContainerService extends FlowProcess {
         
         // TIER 1: Explicit renderer specified
         if (explicitRendererId != null && !explicitRendererId.isEmpty()) {
-            RendererInfo info = renderers.get(explicitRendererId);
+            UIRenderer renderer = renderers.get(explicitRendererId);
             
-            if (info == null) {
+            if (renderer == null) {
                 throw new IllegalArgumentException(
                     "Renderer not found: " + explicitRendererId
                 );
             }
             
-            if (!info.supports(containerType)) {
+            if (!renderer.supports(containerType)) {
                 throw new IllegalArgumentException(String.format(
                     "Renderer '%s' does not support container type %s (supports: %s)",
-                    explicitRendererId, containerType, info.getSupportedTypes()
+                    explicitRendererId, containerType, renderer.getSupportedTypes()
                 ));
             }
             
@@ -175,24 +173,24 @@ public class ContainerService extends FlowProcess {
                 explicitRendererId, containerType
             ));
             
-            return new RendererSelection(explicitRendererId, info);
+            return new RendererSelection(explicitRendererId, renderer);
         }
         
         // TIER 2: Type-specific default
         String typeDefaultId = typeDefaultRenderers.get(containerType);
         if (typeDefaultId != null) {
-            RendererInfo info = renderers.get(typeDefaultId);
-            if (info != null) {
+            UIRenderer renderer = renderers.get(typeDefaultId);
+            if (renderer != null) {
                 Log.logMsg(String.format(
                     "[ContainerService] Using type default renderer '%s' for %s container",
                     typeDefaultId, containerType
                 ));
-                return new RendererSelection(typeDefaultId, info);
+                return new RendererSelection(typeDefaultId, renderer);
             }
         }
         
         // TIER 3: System default
-        RendererInfo systemDefault = renderers.get(systemDefaultRendererId);
+        UIRenderer systemDefault = renderers.get(systemDefaultRendererId);
         Log.logMsg(String.format(
             "[ContainerService] Using system default renderer for %s container",
             containerType
@@ -242,8 +240,8 @@ public class ContainerService extends FlowProcess {
         Log.logMsg("[ContainerService] Started at: " + contextPath);
         
         // Check if default renderer is active
-        RendererInfo defaultRenderer = renderers.get(systemDefaultRendererId);
-        if (defaultRenderer != null && defaultRenderer.getRenderer().isActive()) {
+        UIRenderer defaultRenderer = renderers.get(systemDefaultRendererId);
+        if (defaultRenderer != null && defaultRenderer.isActive()) {
             Log.logMsg("[ContainerService] renderer active");
             state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
         }
@@ -407,7 +405,7 @@ public class ContainerService extends FlowProcess {
             type,
             ownerPath,
             config,
-            selection.info.getRenderer(),
+            selection.renderer,
             selection.rendererId,  // NEW: Pass renderer ID
             contextPath
         );
@@ -759,8 +757,8 @@ public class ContainerService extends FlowProcess {
      * Check if renderer supports type
      */
     public boolean rendererSupportsType(String rendererId, ContainerType type) {
-        RendererInfo info = renderers.get(rendererId);
-        return info != null && info.supports(type);
+        UIRenderer renderer = renderers.get(rendererId);
+        return renderer != null && renderer.supports(type);
     }
 
     /**
@@ -804,11 +802,11 @@ public class ContainerService extends FlowProcess {
 
     private static class RendererSelection {
         final String rendererId;
-        final RendererInfo info;
+        final UIRenderer renderer;
         
-        RendererSelection(String rendererId, RendererInfo info) {
+        RendererSelection(String rendererId, UIRenderer info) {
             this.rendererId = rendererId;
-            this.info = info;
+            this.renderer = info;
         }
     }
 }

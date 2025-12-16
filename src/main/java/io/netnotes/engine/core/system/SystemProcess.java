@@ -6,6 +6,7 @@ import io.netnotes.engine.core.system.control.BootstrapWizardProcess;
 import io.netnotes.engine.core.system.control.SecureInputInstaller;
 import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.core.system.control.containers.*;
+import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClientSession;
@@ -67,7 +68,7 @@ public class SystemProcess extends FlowProcess {
 
     // Core components
     private final KeyboardInput defaultKeyboard;
-    private final RendererInfo uiRendererInfo;
+    private final UIRenderer uiRenderer;
     private ContainerService containerService;
     private ServicesProcess servicesProcess;
     private ClientSession systemClientSession;
@@ -91,12 +92,12 @@ public class SystemProcess extends FlowProcess {
     private SystemProcess(
         FlowProcessService processService,
         KeyboardInput defaultKeyboard,
-        RendererInfo uiRendererInfo
+        UIRenderer uiRenderer
     ) {
         super(CoreConstants.SYSTEM, ProcessType.BIDIRECTIONAL);
         this.processService = processService;
         this.defaultKeyboard = defaultKeyboard;
-        this.uiRendererInfo = uiRendererInfo;
+        this.uiRenderer = uiRenderer;
         this.state = new BitFlagStateMachine(CoreConstants.SYSTEM + "-state");
         
         setupStateTransitions();
@@ -116,7 +117,7 @@ public class SystemProcess extends FlowProcess {
     
     public static CompletableFuture<SystemProcess> bootstrap(
         KeyboardInput defaultKeyboard,
-        RendererInfo uiRendererInfo
+        UIRenderer uiRendererInfo
     ) {
         FlowProcessService flowProcessService = new FlowProcessService();
 
@@ -213,9 +214,9 @@ public class SystemProcess extends FlowProcess {
     
     private CompletableFuture<Void> initializeUIRenderer() {
         Log.logMsg( "[SystemProcess] initializing UIRenderer");
-        return uiRendererInfo.getRenderer().initialize()
+        return uiRenderer.initialize()
             .thenRun(() -> Log.logMsg(
-                "[SystemProcess] UIRenderer: " + uiRendererInfo.getRenderer().getClass().getSimpleName()));
+                "[SystemProcess] UIRenderer: " + uiRenderer.getClass().getSimpleName()));
     }
     
     private CompletableFuture<Void> startContainerService() {
@@ -223,7 +224,7 @@ public class SystemProcess extends FlowProcess {
 
         containerService = new ContainerService(
             CoreConstants.CONTAINER_SERVICE, 
-            uiRendererInfo
+            uiRenderer
         );
         
         return spawnChild(containerService)
