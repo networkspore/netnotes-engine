@@ -4,6 +4,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PipedInputStream;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
@@ -39,6 +40,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 /**
  * IODaemon - Socket manager for daemon connection
@@ -144,13 +146,12 @@ public class IODaemon extends FlowProcess {
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         Log.logMsg("Received control stream from: " + fromPath);
         
-
-        channel.getReadyFuture().complete(null);
-        
-        channel.startReceiving(input -> {
-            try (NoteBytesReader reader = new NoteBytesReader(input)) {
+        VirtualExecutors.getVirtualExecutor().execute(() -> {
+ 
+            try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream( channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE))) {
+                channel.getReadyFuture().complete(null);
+                 Log.logMsg("[IODaemon.handleStreamChannel] active, from: " + fromPath + " waiting for commands...");
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-                
                 while (nextBytes != null && connected) {
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
                         NoteBytes deviceIdBytes = nextBytes;
@@ -517,7 +518,7 @@ public class IODaemon extends FlowProcess {
                 
                 // Create async writer for this channel
                 NoteBytesWriter eventWriter = new NoteBytesWriter(
-                    eventChannel.getOutputStream()
+                    eventChannel.getQueuedOutputStream()
                 );
                 deviceEventWriters.put(deviceIdBytes, eventWriter);
                 

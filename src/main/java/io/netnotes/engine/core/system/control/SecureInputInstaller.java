@@ -47,7 +47,7 @@ public class SecureInputInstaller extends FlowProcess {
     private final InputDevice keyboard;
     private final BitFlagStateMachine state;
     
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     private GitHubAsset[] availableReleases;
     private GitHubAsset selectedAsset;
     private String selectedVersion;
@@ -119,15 +119,11 @@ public class SecureInputInstaller extends FlowProcess {
         state.addState(IDLE);
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess("installer-menu", terminal, keyboard);
-        
-        return spawnChild(menuNavigator)
-            .thenCompose(path -> registry.startProcess(path))
-            .thenCompose(v -> {
-                state.removeState(IDLE);
-                state.addState(FETCHING_RELEASES);
-                return fetchReleases();
-            })
+        menuNavigator = new MenuNavigator(terminal, keyboard);
+        state.removeState(IDLE);
+        state.addState(FETCHING_RELEASES);
+
+        return fetchReleases()
             .thenCompose(assets -> {
                 this.availableReleases = assets;
                 state.removeState(FETCHING_RELEASES);

@@ -66,7 +66,7 @@ class PackageInstallScreen extends TerminalScreen {
     ) {
         super(name, terminal, keyboard);
         this.packageInfo = packageInfo;
-        this.basePath = ContextPath.parse("install/" + packageInfo.getName());
+        this.basePath = ContextPath.of("install", packageInfo.getName());
         this.nodeCommands = nodeCommands;
     }
     

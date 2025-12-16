@@ -6,7 +6,6 @@ import io.netnotes.engine.core.system.control.BootstrapWizardProcess;
 import io.netnotes.engine.core.system.control.SecureInputInstaller;
 import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.core.system.control.containers.*;
-import io.netnotes.engine.core.system.control.ui.*;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClientSession;
@@ -17,15 +16,14 @@ import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.FlowProcessService;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.io.process.StreamChannel;
-import io.netnotes.engine.messaging.NoteMessaging.ErrorCodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
@@ -69,7 +67,7 @@ public class SystemProcess extends FlowProcess {
 
     // Core components
     private final KeyboardInput defaultKeyboard;
-    private final UIRenderer uiRenderer;
+    private final RendererInfo uiRendererInfo;
     private ContainerService containerService;
     private ServicesProcess servicesProcess;
     private ClientSession systemClientSession;
@@ -93,12 +91,12 @@ public class SystemProcess extends FlowProcess {
     private SystemProcess(
         FlowProcessService processService,
         KeyboardInput defaultKeyboard,
-        UIRenderer uiRenderer
+        RendererInfo uiRendererInfo
     ) {
         super(CoreConstants.SYSTEM, ProcessType.BIDIRECTIONAL);
         this.processService = processService;
         this.defaultKeyboard = defaultKeyboard;
-        this.uiRenderer = uiRenderer;
+        this.uiRendererInfo = uiRendererInfo;
         this.state = new BitFlagStateMachine(CoreConstants.SYSTEM + "-state");
         
         setupStateTransitions();
@@ -118,7 +116,7 @@ public class SystemProcess extends FlowProcess {
     
     public static CompletableFuture<SystemProcess> bootstrap(
         KeyboardInput defaultKeyboard,
-        UIRenderer uiRenderer
+        RendererInfo uiRendererInfo
     ) {
         FlowProcessService flowProcessService = new FlowProcessService();
 
@@ -128,7 +126,7 @@ public class SystemProcess extends FlowProcess {
         SystemProcess process = new SystemProcess(
             flowProcessService,
             defaultKeyboard,
-            uiRenderer
+            uiRendererInfo
         );
 
         bootstrapInterface.registerProcess(process, CoreConstants.SYSTEM_PATH, null, bootstrapInterface);
@@ -215,15 +213,17 @@ public class SystemProcess extends FlowProcess {
     
     private CompletableFuture<Void> initializeUIRenderer() {
         Log.logMsg( "[SystemProcess] initializing UIRenderer");
-        return uiRenderer.initialize()
+        return uiRendererInfo.getRenderer().initialize()
             .thenRun(() -> Log.logMsg(
-                "[SystemProcess] UIRenderer: " + uiRenderer.getClass().getSimpleName()));
+                "[SystemProcess] UIRenderer: " + uiRendererInfo.getRenderer().getClass().getSimpleName()));
     }
     
     private CompletableFuture<Void> startContainerService() {
+       
+
         containerService = new ContainerService(
             CoreConstants.CONTAINER_SERVICE, 
-            uiRenderer
+            uiRendererInfo
         );
         
         return spawnChild(containerService)
@@ -309,7 +309,7 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<TerminalContainerHandle> createWizardContainer() {
-        NoteBytesReadOnly createMsg = ContainerCommands.createContainer(
+        NoteBytesReadOnly createMsg = ContainerCommands.createAndFocusContainer(
             "Bootstrap Wizard",
             ContainerType.TERMINAL,
             contextPath,
@@ -543,19 +543,14 @@ public class SystemProcess extends FlowProcess {
                 .thenRun(() -> {
                     NoteBytesMap response = new NoteBytesMap();
                     response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                    response.put(Keys.PATH, new NoteBytes(
-                        systemTerminal.getContextPath().toString()));
+                    response.put(Keys.PATH, systemTerminal.getContextPath());
                     reply(packet, response.toNoteBytes());
                 })
                 .exceptionally(ex -> {
                     Log.logError("[SystemProcess] Failed to create/open terminal: " + 
                         ex.getMessage());
                     
-                    NoteBytesMap error = new NoteBytesMap();
-                    error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                    error.put(Keys.ERROR_MESSAGE, new NoteBytes(
-                        "Failed to create terminal: " + ex.getMessage()));
-                    reply(packet, error.toNoteBytes());
+                    reply(packet, ProtocolObjects.getErrorObject("Failed to create terminal: " + ex.getMessage()));
                     return null;
                 });
         }
@@ -567,19 +562,14 @@ public class SystemProcess extends FlowProcess {
             .thenRun(() -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                response.put(Keys.PATH, new NoteBytes(
-                    systemTerminal.getContextPath().toString()));
+                response.put(Keys.PATH, systemTerminal.getContextPath());
                 reply(packet, response.toNoteBytes());
             })
             .exceptionally(ex -> {
                 Log.logError("[SystemProcess] Failed to open terminal: " + 
                     ex.getMessage());
                 
-                NoteBytesMap error = new NoteBytesMap();
-                error.put(Keys.STATUS, ProtocolMesssages.ERROR);
-                error.put(Keys.ERROR_MESSAGE, new NoteBytes(
-                    "Failed to open terminal: " + ex.getMessage()));
-                reply(packet, error.toNoteBytes());
+                reply(packet, ProtocolObjects.getErrorObject("Failed to open terminal: " + ex.getMessage()));
                 return null;
             });
     }
@@ -596,18 +586,14 @@ public class SystemProcess extends FlowProcess {
             reply(packet, response.toNoteBytes());
             return CompletableFuture.completedFuture(null);
         }else{
-            return replyErrorCode(packet, ErrorCodes.UNKNOWN);
+            String msg = "No input devices available";
+            reply(packet, ProtocolObjects.getErrorObject(msg));
+            Log.logError("[SystemProcess.handleGetSecureInputDevice] " + msg);
+            throw new IllegalStateException(msg);
         }
     }
 
-    public CompletableFuture<Void> replyErrorCode(RoutedPacket packet, int errorCode){
-        reply(packet, 
-            new NoteBytesPair(Keys.STATUS, ProtocolMesssages.FAILED),
-            new NoteBytesPair(Keys.ERROR_CODE, errorCode));
-        
-        return CompletableFuture.completedFuture(null);
-    }
-    
+
     
     
     private CompletableFuture<Void> handleReconfigureBootstrap(RoutedPacket packet) {

@@ -7,7 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
+import io.netnotes.engine.core.system.control.MenuNavigator;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
@@ -53,7 +53,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     private boolean loadImmediately = false;
     private Runnable onBack;
     
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     private PasswordReader passwordReader;
     private TerminalInputReader inputReader;
     private final NodeCommands nodeCommands;
@@ -182,10 +182,8 @@ class BrowsePackagesScreen extends TerminalScreen {
         menu.addItem("refresh", "Refresh Package List", "Update from repositories", this::onShow);
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigatorProcess("category-menu", terminal, keyboard);
-        
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator.showMenu(menu);
     }
     
     // ===== PACKAGE LIST =====
@@ -277,10 +275,8 @@ class BrowsePackagesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigatorProcess("package-list-menu", terminal, keyboard);
-        
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator.showMenu(menu);
     }
     
     // ===== PACKAGE DETAILS =====
@@ -347,10 +343,8 @@ class BrowsePackagesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigatorProcess("package-details-menu", terminal, keyboard);
-        
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator.showMenu(menu);
     }
     
     // ===== CONFIGURE INSTALL =====
@@ -571,7 +565,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     
     private void cleanupMenuNavigator() {
         if (menuNavigator != null) {
-            terminal.getRegistry().unregisterProcess(menuNavigator.getContextPath());
+            menuNavigator.cleanup();
             menuNavigator = null;
         }
     }

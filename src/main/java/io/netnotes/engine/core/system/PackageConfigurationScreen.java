@@ -114,7 +114,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showConfigMenu() {
-        ContextPath basePath = ContextPath.parse("config/" + originalPackage.getName());
+        ContextPath basePath = ContextPath.of("config", originalPackage.getName());
         MenuContext menu = new MenuContext(basePath, "Configuration Options")
             .addItem("process-id", "Change ProcessId (Namespace)", 
                 this::startProcessIdConfig)

@@ -9,9 +9,13 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -31,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * - No message wrapping/unwrapping needed!
  */
 public class Container {
-    
+    private final String rendererId; 
     private final ContainerId id;
     private final ContextPath path;
     private final ContextPath ownerPath;
@@ -53,10 +57,12 @@ public class Container {
     private volatile boolean isMaximized = false;   // Fills screen
     private volatile boolean isVisible = false;     // Shown (not hidden)
     
+    private CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
+    
     // Render stream
     private StreamChannel renderStream;
     private volatile boolean active = false;
-    
+
     
     public Container(
         ContainerId id,
@@ -65,6 +71,7 @@ public class Container {
         ContextPath ownerPath,
         ContainerConfig config,
         UIRenderer uiRenderer,
+        String rendererId,  // NEW: Add rendererId parameter
         ContextPath servicePath
     ) {
         this.id = id;
@@ -72,6 +79,7 @@ public class Container {
         this.ownerPath = ownerPath;
         this.servicePath = servicePath;
         this.uiRenderer = uiRenderer;
+        this.rendererId = rendererId;  // NEW: Store rendererId
         
         this.title = new AtomicReference<>(title);
         this.type = new AtomicReference<>(type);
@@ -115,7 +123,13 @@ public class Container {
                 return null;
             });
     }
-    
+    public String getRendererId() { 
+        return rendererId; 
+    }
+   
+    public CompletableFuture<Void> getRenderStreamFuture(){
+        return renderStreamFuture;
+    }
     /**
      * Handle incoming render stream FROM ContainerHandle
      * Similar to ClaimedDevice.handleStreamChannel()
@@ -124,11 +138,19 @@ public class Container {
         Log.logMsg("[Container] Render stream received from: " + fromPath);
         
         this.renderStream = channel;
-        channel.getReadyFuture().complete(null);  // Signal ready
-        
-        // Start reading render commands
-        channel.startReceiving(input -> {
-            try (NoteBytesReader reader = new NoteBytesReader(input)) {
+
+        renderStreamFuture = CompletableFuture.runAsync(() -> {
+            PipedOutputStream channelStream = channel.getChannelStream();
+
+            try (
+                NoteBytesReader reader = new NoteBytesReader(
+                    new PipedInputStream(channelStream, StreamUtils.PIPE_BUFFER_SIZE)
+                );
+            ) {
+                channel.getReadyFuture().complete(null);  // Signal ready
+                
+                Log.logMsg("[Container] Render stream reader active, waiting for commands...");
+
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
                 Log.logNoteBytes("[Container.handleREnderStream]", nextBytes);
                 while (nextBytes != null && active) {
@@ -142,7 +164,7 @@ public class Container {
                 Log.logError("[Container] Render stream error: " + e.getMessage());
                 active = false;
             }
-        });
+        }, VirtualExecutors.getVirtualExecutor());
     }
     
     /**
@@ -201,6 +223,7 @@ public class Container {
                             e.getMessage());
                     }
                 }
+                
                 
                 Log.logMsg("[Container] Destroyed: " + id);
             })
@@ -335,6 +358,7 @@ public class Container {
                 state.set(isCurrent ? ContainerState.FOCUSED : ContainerState.VISIBLE);
             });
     }
+
     
     // ===== GETTERS =====
     
@@ -373,8 +397,8 @@ public class Container {
     @Override
     public String toString() {
         return String.format(
-            "Container[id=%s, title=%s, type=%s, state=%s, visible=%s, current=%s]",
-            id, title.get(), type.get(), state.get(), isVisible, isCurrent
+            "Container[id=%s, title=%s, type=%s, state=%s, visible=%s, current=%s, renderer=%s]",
+            id, title.get(), type.get(), state.get(), isVisible, isCurrent, rendererId
         );
     }
 }

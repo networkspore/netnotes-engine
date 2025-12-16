@@ -13,7 +13,7 @@ import javax.crypto.SecretKey;
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
+import io.netnotes.engine.core.system.control.MenuNavigator;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
@@ -54,7 +54,7 @@ class FailedSettingsScreen extends TerminalScreen {
     private String errorDetails = "";
     private Map<NoteBytes, RecoveredData> recoveredData = new HashMap<>();
     private PasswordReader passwordReader;
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     private TerminalInputReader inputReader;
     
     private static class RecoveredData {
@@ -169,11 +169,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showCorruptFileMenu() {
-        menuNavigator = new MenuNavigatorProcess(
-            "corrupt-file-menu",
-            terminal,
-            keyboard
-        );
+        menuNavigator = new MenuNavigator(terminal, keyboard);
         
         ContextPath menuPath = terminal.getSessionPath().append("menu", "corrupt-file");
         MenuContext menu = new MenuContext(menuPath, "Recovery Options");
@@ -197,8 +193,8 @@ class FailedSettingsScreen extends TerminalScreen {
             "Close application (to restore backup manually)",
             () -> System.exit(0));
         
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+     
+        menuNavigator.showMenu(menu);
     }
     
     private void attemptRecovery() {
@@ -524,11 +520,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showRecoveryFailedMenu() {
-        menuNavigator = new MenuNavigatorProcess(
-            "recovery-failed-menu",
-            terminal,
-            keyboard
-        );
+        menuNavigator = new MenuNavigator( terminal, keyboard );
         
         ContextPath menuPath = terminal.getSessionPath().append("menu", "recovery-failed");
         MenuContext menu = new MenuContext(menuPath, "Recovery Failed");
@@ -544,8 +536,8 @@ class FailedSettingsScreen extends TerminalScreen {
             "Close to restore from backup",
             () -> System.exit(0));
         
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+   
+        menuNavigator.showMenu(menu);
     }
     
     private CompletableFuture<Void> showMissingFileScreen() {
@@ -562,8 +554,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showMissingFileMenu() {
-        menuNavigator = new MenuNavigatorProcess(
-            "missing-file-menu",
+        menuNavigator = new MenuNavigator(
             terminal,
             keyboard
         );
@@ -581,9 +572,8 @@ class FailedSettingsScreen extends TerminalScreen {
         menu.addItem("exit", "Exit to Restore Backup",
             "Close application to restore settings.dat manually",
             () -> System.exit(0));
-        
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+
+        menuNavigator.showMenu(menu);
     }
     
     private CompletableFuture<Void> showUnrecoverableScreen() {
@@ -694,7 +684,7 @@ class FailedSettingsScreen extends TerminalScreen {
     
     private void cleanupMenuNavigator() {
         if (menuNavigator != null) {
-            terminal.getRegistry().unregisterProcess(menuNavigator.getContextPath());
+            menuNavigator.cleanup();
             menuNavigator = null;
         }
     }

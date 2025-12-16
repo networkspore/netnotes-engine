@@ -3,7 +3,7 @@ package io.netnotes.engine.core.system;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
+import io.netnotes.engine.core.system.control.MenuNavigator;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
@@ -15,7 +15,7 @@ import io.netnotes.engine.io.input.InputDevice;
  */
 class MainMenuScreen extends TerminalScreen {
     
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     
     public MainMenuScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
         super(name, terminal, keyboard);
@@ -24,8 +24,7 @@ class MainMenuScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess(
-            "main-menu-navigator",
+        menuNavigator = new MenuNavigator(
             terminal,
             keyboard
         );
@@ -34,17 +33,16 @@ class MainMenuScreen extends TerminalScreen {
         MenuContext menu = buildMainMenu();
         
         // Register and start navigator
-        return terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> {
-                // Show the menu
-                menuNavigator.showMenu(menu);
-            });
+     
+        menuNavigator.showMenu(menu);
+       
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
     public void onHide() {
         if (menuNavigator != null) {
-            terminal.getRegistry().unregisterProcess(menuNavigator.getContextPath());
+            menuNavigator.cleanup();
             menuNavigator = null;
         }
     }

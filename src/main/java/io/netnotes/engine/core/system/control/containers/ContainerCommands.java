@@ -2,6 +2,7 @@ package io.netnotes.engine.core.system.control.containers;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -12,6 +13,17 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * Similar to UICommands, but for container management
  */
 public class ContainerCommands {
+    public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
+    public static final NoteBytesReadOnly X = new NoteBytesReadOnly("x");
+    public static final NoteBytesReadOnly Y = new NoteBytesReadOnly("y");
+    public static final NoteBytesReadOnly RESIZABLE = new NoteBytesReadOnly("resizable");
+    public static final NoteBytesReadOnly CLOSABLE = new NoteBytesReadOnly("closable");
+    public static final NoteBytesReadOnly MOVABLE = new NoteBytesReadOnly("movable");
+    public static final NoteBytesReadOnly MINIMIZABLE = new NoteBytesReadOnly("minimizable");
+    public static final NoteBytesReadOnly MAXIMIZABLE = new NoteBytesReadOnly("maximizable");
+    public static final NoteBytesReadOnly ICON = new NoteBytesReadOnly("icon");
+    public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
+    public static final NoteBytesReadOnly AUTO_FOCUS = new NoteBytesReadOnly( "auto_focus");
     
     // ===== LIFECYCLE COMMANDS =====
     public static final NoteBytesReadOnly CREATE_CONTAINER = 
@@ -86,7 +98,7 @@ public class ContainerCommands {
         msg.put(Keys.CMD, CREATE_CONTAINER);
         msg.put(Keys.TITLE, new NoteBytes(title));
         msg.put(Keys.TYPE, new NoteBytes(type.name()));
-        msg.put(Keys.PATH, new NoteBytes(ownerPath.toString()));
+        msg.put(Keys.PATH, ownerPath.getSegments());
         
         if (config != null) {
             msg.put(Keys.CONFIG, config.toNoteBytes());
@@ -94,7 +106,18 @@ public class ContainerCommands {
         
         return msg;
     }
-    
+
+    public static NoteBytesMap createAndFocusContainer(
+        String title,
+        ContainerType type,
+        ContextPath ownerPath,
+        ContainerConfig config
+    ) {
+        NoteBytesMap msg = createContainer(title, type, ownerPath, config);
+        msg.put(AUTO_FOCUS, NoteBoolean.TRUE); // Flag for ContainerService
+        return msg;
+    }
+        
     /**
      * Destroy a container
      */
@@ -200,7 +223,7 @@ public class ContainerCommands {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, CONTAINER_CREATED);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
-        msg.put(Keys.PATH, new NoteBytes(containerPath.toString()));
+        msg.put(Keys.PATH, containerPath.getSegments());
         return msg;
     }
     
@@ -235,8 +258,8 @@ public class ContainerCommands {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, CONTAINER_RESIZED);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
-        msg.put("width", width);
-        msg.put("height", height);
+        msg.put(Keys.WIDTH, width);
+        msg.put(Keys.HEIGHT, height);
         return msg;
     }
 }

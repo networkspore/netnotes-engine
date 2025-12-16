@@ -10,8 +10,6 @@ import java.util.function.Consumer;
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.BoxStyle;
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.TextStyle;
-import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -20,24 +18,24 @@ import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.process.FlowProcess;
-import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 
 /**
- * MenuNavigatorProcess - Keyboard-driven terminal menu navigation
+ * MenuNavigator - Keyboard-driven terminal menu navigation
  * 
- * FIXED: Now handles BOTH regular and ephemeral keyboard events
- * - Regular events from GUI keyboards
- * - Ephemeral events from secure input devices (USB keyboards)
- * 
- * Integration:
+ * REFACTORED: Just a helper class, NOT a FlowProcess
  * - Registers with InputDevice via setEventConsumer()
  * - Handles up/down/enter/escape navigation
  * - Renders to TerminalContainerHandle
+ * 
+ * Usage:
+ * ```java
+ * MenuNavigator navigator = new MenuNavigator(terminal, keyboard);
+ * navigator.showMenu(myMenu);
+ * ```
  */
-public class MenuNavigatorProcess extends FlowProcess {
+public class MenuNavigator {
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
@@ -76,12 +74,10 @@ public class MenuNavigatorProcess extends FlowProcess {
     public static final long WAITING_PASSWORD = 1L << 3;
     public static final long EXECUTING_ACTION = 1L << 4;
     
-    public MenuNavigatorProcess(
-            String name, 
+    public MenuNavigator(
             TerminalContainerHandle terminal,
             InputDevice keyboardInput) {
         
-        super(name, ProcessType.BIDIRECTIONAL);
         this.terminal = terminal;
         this.keyboardInput = keyboardInput;
         this.state = new BitFlagStateMachine("menu-navigator");
@@ -93,6 +89,7 @@ public class MenuNavigatorProcess extends FlowProcess {
         );
         
         setupStateTransitions();
+        state.addState(IDLE);
     }
     
     private void setupStateTransitions() {
@@ -127,28 +124,8 @@ public class MenuNavigatorProcess extends FlowProcess {
         });
     }
     
-    @Override
-    public CompletableFuture<Void> run() {
-        state.addState(IDLE);
-        return CompletableFuture.completedFuture(null);
-    }
+    // ===== KEYBOARD EVENT HANDLING =====
     
-    @Override
-    public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        return CompletableFuture.completedFuture(null);
-    }
-    
-    @Override
-    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        throw new UnsupportedOperationException("MenuNavigator does not handle streams");
-    }
-    
-    // ===== KEYBOARD EVENT HANDLING (FIXED) =====
-    
-    /**
-     * Handle keyboard events - BOTH regular and ephemeral
-     * FIXED: Now properly handles ephemeral events from secure input devices
-     */
     private void handleKeyboardEvent(RoutedEvent event) {
         if (!state.hasState(DISPLAYING_MENU)) {
             return;
@@ -534,12 +511,10 @@ public class MenuNavigatorProcess extends FlowProcess {
         // Parent should handle closing or showing main menu
     }
     
-    @Override
-    public void onStop() {
+    public void cleanup() {
         if (keyboardInput != null) {
             keyboardInput.setEventConsumer(null);
         }
-        super.onStop();
     }
     
     // ===== GETTERS =====

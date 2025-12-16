@@ -2,7 +2,6 @@ package io.netnotes.engine.io.process;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -12,7 +11,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -41,17 +39,17 @@ public class StreamChannel {
     private final ContextPath source;
     private final ContextPath target;
     private final PipedOutputStream pipeOutput;
-    private final PipedInputStream pipeInput;
+
     private final CompletableFuture<Void> readyFuture;
     
     // Async write infrastructure
-    private final BlockingQueue<byte[]> writeQueue;
-    private final ExecutorService writeExecutor;
+    private BlockingQueue<byte[]> writeQueue = null;
+    private ExecutorService writeExecutor = null;
     private volatile boolean active = false;
     private volatile boolean closed = false;
     
     // Wrapper output stream that writes to queue instead of directly to pipe
-    private final QueuedOutputStream queuedOutput;
+    private QueuedOutputStream queuedOutput = null;
     
     /**
      * Package-private constructor - only ProcessRegistry creates these
@@ -60,26 +58,40 @@ public class StreamChannel {
         this.source = source;
         this.target = target;
         this.pipeOutput = new PipedOutputStream();
-        this.pipeInput = new PipedInputStream(pipeOutput, 64 * 1024); // 64KB buffer
+  
         this.readyFuture = new CompletableFuture<>();
+        
+        Log.logMsg("[StreamChannel] Created: " + source + " → " + target);
+    }
+
+    public OutputStream getQueuedOutputStream(){
         this.writeQueue = new LinkedBlockingQueue<>();
         this.writeExecutor = Executors.newSingleThreadExecutor(
             r -> Thread.ofVirtual().name("StreamChannel-Writer-" + source + "-to-" + target).unstarted(r)
         );
         this.queuedOutput = new QueuedOutputStream();
         
-        // Start the write pump immediately
         startWritePump();
-        
-        Log.logMsg("[StreamChannel] Created: " + source + " → " + target);
+     
+        active = true; // Mark as active when first accessed
+        return queuedOutput;
+    }
+
+    /**
+     * Get raw input stream for advanced usage
+     */
+    public PipedOutputStream getChannelStream() {
+        active = true;
+        return pipeOutput;
     }
     
     /**
      * Internal write pump - drains queue and writes to pipe on dedicated thread
      */
     private void startWritePump() {
-        writeExecutor.submit(() -> {
-            Log.logMsg("[StreamChannel] Write pump started for " + source + " → " + target);
+        Log.logMsg("[StreamChannel] startWritePump called for " + source + " → " + target +"\n\t waiting for ready...");
+        readyFuture.thenRunAsync(()-> {
+       
             try {
                 while (!closed || !writeQueue.isEmpty()) {
                     byte[] data = writeQueue.poll(100, TimeUnit.MILLISECONDS);
@@ -97,26 +109,20 @@ public class StreamChannel {
                 Thread.currentThread().interrupt();
                 Log.logMsg("[StreamChannel] Write pump interrupted");
             } finally {
+                /*This is a no op
                 try {
                     pipeOutput.close();
                 } catch (IOException e) {
                     // Ignore
-                }
+                } */
                 Log.logMsg("[StreamChannel] Write pump stopped for " + source + " → " + target);
             }
-        });
+        }, writeExecutor);
     }
     
     // ===== SENDER SIDE (Write) =====
     
-    /**
-     * Get output stream for writing
-     * This returns a wrapper that queues writes instead of blocking on pipe
-     */
-    public OutputStream getOutputStream() {
-        active = true; // Mark as active when first accessed
-        return queuedOutput;
-    }
+
     
     /**
      * OutputStream wrapper that queues writes instead of directly writing to pipe
@@ -171,52 +177,20 @@ public class StreamChannel {
         
         Log.logMsg("[StreamChannel] Closing: " + source + " → " + target);
         closed = true;
+        active = false;
         
         // Shutdown write executor (will finish draining queue)
-        writeExecutor.shutdown();
-        try {
-            writeExecutor.awaitTermination(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            writeExecutor.shutdownNow();
+        if(writeExecutor != null){
+            writeExecutor.shutdown();
+            try {
+                writeExecutor.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                writeExecutor.shutdownNow();
+            }
         }
     }
     
-    // ===== RECEIVER SIDE (Read) =====
-    
-    /**
-     * Start receiving on dedicated thread
-     * Call this from handleStreamChannel implementation
-     */
-    public void startReceiving(StreamReader reader) {
-        Log.logMsg("[StreamChannel] Starting receiver for " + source + " → " + target);
-        
-        VirtualExecutors.getVirtualExecutor().execute(() -> {
-            try {
-                // Process stream
-                reader.read(pipeInput);
-                
-            } catch (IOException e) {
-                if (!closed) {
-                    Log.logError("[StreamChannel] Stream read error: " + e.getMessage());
-                }
-            } finally {
-                try {
-                    pipeInput.close();
-                } catch (IOException e) {
-                    // Ignore
-                }
-                Log.logMsg("[StreamChannel] Receiver stopped for " + source + " → " + target);
-            }
-        });
-    }
-    
-    /**
-     * Get raw input stream for advanced usage
-     */
-    public PipedInputStream getInputStream() {
-        return pipeInput;
-    }
     
     // ===== STATUS =====
     
@@ -239,14 +213,8 @@ public class StreamChannel {
     public ContextPath getTarget() {
         return target;
     }
-    
-    // ===== FUNCTIONAL INTERFACES =====
-    
-    @FunctionalInterface
-    public interface StreamReader {
-        void read(PipedInputStream input) throws IOException;
-    }
-    
+
+
     @Override
     public String toString() {
         return String.format("StreamChannel{%s → %s, active=%s, closed=%s}",

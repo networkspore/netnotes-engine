@@ -10,8 +10,11 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.VirtualExecutors;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -50,14 +53,14 @@ public class KeyboardInput extends FlowProcess implements InputDevice {
         this.streamChannel = channel;
         this.active = true;
         
-        channel.getReadyFuture().complete(null);
         
-        channel.startReceiving(input -> {
+        VirtualExecutors.getVirtualExecutor().execute(() -> {
+  
             Log.logMsg("GUI keyboard stream ready: " + contextPath);
             
-            try (NoteBytesReader reader = new NoteBytesReader(input)) {
+            try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE))) {
+                channel.getReadyFuture().complete(null);
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-                
                 while (nextBytes != null && active) {
                     // Check if this is sourceId prefix
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {

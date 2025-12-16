@@ -851,6 +851,9 @@ public class ByteDecoding{
     }
 
     public static BigDecimal forceAsBigDecimal(NoteBytes value){
+        if(value.byteLength() == 0 || value == null){
+            return BigDecimal.ZERO;
+        }
         try{
             switch(value.getType()){
                 case NoteBytesMetaData.BIG_INTEGER_TYPE:

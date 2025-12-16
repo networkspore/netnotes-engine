@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.daemon;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -8,7 +9,8 @@ import java.util.function.Consumer;
 
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-
+import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -114,7 +116,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             .thenAccept(channel -> {
                 this.outgoingControlStream = channel;
                 this.controlStreamWriter = new NoteBytesWriter(
-                    channel.getOutputStream()
+                    channel.getQueuedOutputStream()
                 );
                 
                 Log.logMsg("Control stream ready: " + devicePath + " → " + ioDaemonPath);
@@ -158,13 +160,13 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         // This is the event stream FROM IODaemon
         this.incomingEventStream = channel;
         this.active = true;
+        VirtualExecutors.getVirtualExecutor().execute(() -> {
+       
         
-        channel.getReadyFuture().complete(null);
-        
-        channel.startReceiving(input -> {
             Log.logMsg("Event stream ready: " + devicePath);
             
-            try (NoteBytesReader reader = new NoteBytesReader(input)) {
+            try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(channel.getChannelStream(),StreamUtils.PIPE_BUFFER_SIZE))) {
+                channel.getReadyFuture().complete(null);
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
                 
                 while (nextBytes != null && active) {

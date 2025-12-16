@@ -1,5 +1,6 @@
 package io.netnotes.engine.core.system.control.containers;
 
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -14,17 +15,17 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * - Flags (resizable, closable) → UI capabilities
  */
 public class ContainerConfig {
-    private Integer width;
-    private Integer height;
-    private Integer x;
-    private Integer y;
-    private Boolean resizable;
-    private Boolean closable;
-    private Boolean movable;
-    private Boolean minimizable;
-    private Boolean maximizable;
-    private String icon;
-    private NoteBytesMap metadata;
+    private Integer width = null;
+    private Integer height = null;
+    private Integer x = null;
+    private Integer y = null;
+    private Boolean resizable = null;
+    private Boolean closable = null;
+    private Boolean movable = null;
+    private Boolean minimizable = null;
+    private Boolean maximizable = null;
+    private NoteBytes icon = null;
+    private NoteBytesMap metadata = null;
     
     public ContainerConfig() {
         // Defaults
@@ -74,8 +75,8 @@ public class ContainerConfig {
         return this;
     }
     
-    public ContainerConfig withIcon(String iconPath) {
-        this.icon = iconPath;
+    public ContainerConfig withIcon(NoteBytes icon) {
+        this.icon = icon;
         return this;
     }
     
@@ -95,7 +96,7 @@ public class ContainerConfig {
     public Boolean isMovable() { return movable; }
     public Boolean isMinimizable() { return minimizable; }
     public Boolean isMaximizable() { return maximizable; }
-    public String getIcon() { return icon; }
+    public NoteBytes getIcon() { return icon; }
     public NoteBytesMap getMetadata() { return metadata; }
     
     // ===== SERIALIZATION =====
@@ -117,20 +118,24 @@ public class ContainerConfig {
         
         return map.toNoteBytes();
     }
+
+    public static ContainerConfig fromNoteBytes(NoteBytes noteBytes) {
+        return fromNoteBytes(noteBytes.getAsMap());
+    }
     
     public static ContainerConfig fromNoteBytes(NoteBytesMap map) {
         ContainerConfig config = new ContainerConfig();
-        NoteBytes widthBytes = map.get("width");
-        NoteBytes heightBytes = map.get("height");
-        NoteBytes xBytes = map.get("x");
-        NoteBytes yBytes = map.get("y");
-        NoteBytes resizableBytes = map.get("resizable");
-        NoteBytes closableBytes = map.get("closable");
-        NoteBytes movableBytes = map.get("movable");
-        NoteBytes minimizableBytes = map.get("minimizable");
-        NoteBytes maximizableBytes = map.get("maximizable");
-        NoteBytes iconBytes = map.get("icon");
-        NoteBytes metadataBytes = map.get("metadata");
+        NoteBytes widthBytes = map.get(Keys.WIDTH);
+        NoteBytes heightBytes = map.get(Keys.HEIGHT);
+        NoteBytes xBytes = map.get(ContainerCommands.X);
+        NoteBytes yBytes = map.get(ContainerCommands.Y);
+        NoteBytes resizableBytes = map.get(ContainerCommands.RESIZABLE);
+        NoteBytes closableBytes = map.get(ContainerCommands.CLOSABLE);
+        NoteBytes movableBytes = map.get(ContainerCommands.MOVABLE);
+        NoteBytes minimizableBytes = map.get(ContainerCommands.MINIMIZABLE);
+        NoteBytes maximizableBytes = map.get(ContainerCommands.MAXIMIZABLE);
+        NoteBytes iconBytes = map.get(ContainerCommands.ICON);
+        NoteBytes metadataBytes = map.get( ContainerCommands.METADATA);
 
         if (widthBytes != null) config.width = widthBytes.getAsInt();
         if (heightBytes != null) config.height = heightBytes.getAsInt();
@@ -141,7 +146,7 @@ public class ContainerConfig {
         if (movableBytes != null) config.movable = movableBytes.getAsBoolean();
         if (minimizableBytes != null) config.minimizable = minimizableBytes.getAsBoolean();
         if (maximizableBytes != null) config.maximizable = maximizableBytes.getAsBoolean();
-        if (iconBytes != null) config.icon = iconBytes.getAsString();
+        if (iconBytes != null) config.icon = iconBytes;
         if (metadataBytes != null) config.metadata = metadataBytes.getAsNoteBytesMap();
         
         return config;

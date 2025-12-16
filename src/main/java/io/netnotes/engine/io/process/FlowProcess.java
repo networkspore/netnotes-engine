@@ -43,14 +43,14 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     // ===== REACTIVE STREAMS =====
     private final ProcessSubscriber incomingSubscriber;
-    private final ConcurrentHashMap<String, Flow.Subscription> incomingSubscriptions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<NoteBytes, Flow.Subscription> incomingSubscriptions = new ConcurrentHashMap<>();
 
     private final SubmissionPublisher<RoutedPacket> outgoingPublisher;
     private final ExecutorService publisherExecutor;
     
     // ===== ASYNC INFRASTRUCTURE =====
     private final ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private final ConcurrentHashMap<String, CompletableFuture<RoutedPacket>> pendingRequests = 
+    private final ConcurrentHashMap<NoteBytes, CompletableFuture<RoutedPacket>> pendingRequests = 
         new ConcurrentHashMap<>();
     
     // ===== PROCESS TYPE =====
@@ -315,7 +315,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             Log.logMsg("[ProcessSubscriber:" + contextPath + "] onSubscribe called");
             
             // Generate unique ID for this subscription
-            String subscriptionId = NoteUUID.createSafeUUID64();
+            NoteBytes subscriptionId = NoteUUID.createLocalUUID64();
             
             // Accept multiple subscriptions
             incomingSubscriptions.put(subscriptionId, subscription);
@@ -352,8 +352,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             pending.decrementAndGet();
             
             // CHECK IF THIS IS A REPLY FIRST
-            if (packet.hasMetadata("correlationId")) {
-                String corrId = packet.getMetadataString("correlationId");
+            if (packet.hasMetadata(ProcessKeys.CORRELATION_ID)) {
+                NoteBytes corrId = packet.getMetadata(ProcessKeys.CORRELATION_ID);
                 Log.logMsg("[ProcessSubscriber:" + contextPath + "] Packet has correlationId: " + corrId);
                 
                 // Try to handle as reply - if it was consumed, don't process as message
@@ -472,15 +472,15 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             NoteBytesReadOnly payload,
             Duration timeout) {
         
-        String correlationId = processId.getNextCorrelationId();
+        NoteBytes correlationId = processId.getNextCorrelationId();
         CompletableFuture<RoutedPacket> future = new CompletableFuture<>();
         
         pendingRequests.put(correlationId, future);
         
         RoutedPacket request = RoutedPacket
             .createDirect(contextPath, targetPath, payload)
-            .withMetadata("correlationId", correlationId)
-            .withMetadata("replyTo", contextPath.toString());
+            .withMetadata(ProcessKeys.CORRELATION_ID, correlationId)
+            .withMetadata(ProcessKeys.REPLY_TO, contextPath.getSegments());
         
         Log.logMsg("[FlowProcess:" + contextPath + "] Emitting request to " + targetPath);
 
@@ -512,8 +512,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     }
     
     public void reply(RoutedPacket originalRequest, NoteBytesReadOnly payload) {
-        String correlationId = originalRequest.getMetadataString("correlationId");
-        String replyTo = originalRequest.getMetadataString("replyTo");
+        NoteBytes correlationId = originalRequest.getMetadata(ProcessKeys.CORRELATION_ID);
+        ContextPath replyTo = originalRequest.getMetadataAsPath(ProcessKeys.REPLY_TO);
         
         if (correlationId == null || replyTo == null) {
             Log.logError("Cannot reply: missing correlation metadata");
@@ -521,8 +521,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         }
         
         RoutedPacket reply = RoutedPacket
-            .createDirect(contextPath, ContextPath.parse(replyTo), payload)
-            .withMetadata("correlationId", correlationId);
+            .createDirect(contextPath, replyTo, payload)
+            .withMetadata(ProcessKeys.CORRELATION_ID, correlationId);
         
         emit(reply);
     }

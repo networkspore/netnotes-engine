@@ -4,13 +4,14 @@ import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.ProcessKeys;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
+import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -44,9 +46,10 @@ public class ContainerService extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // Renderer management
-    private final Map<String, UIRenderer> renderers = new ConcurrentHashMap<>();
-    private final String defaultRendererId;
-    
+    private final Map<String, RendererInfo> renderers = new ConcurrentHashMap<>();
+    private final String systemDefaultRendererId;
+    private final Map<ContainerType, String> typeDefaultRenderers = new ConcurrentHashMap<>();
+
     // Container management
     private final Map<ContainerId, Container> containers = new ConcurrentHashMap<>();
     private final Map<ContextPath, List<ContainerId>> ownerContainers = new ConcurrentHashMap<>();
@@ -61,28 +64,142 @@ public class ContainerService extends FlowProcess {
      * @param name Service name
      * @param defaultRenderer Default UI renderer (e.g., ConsoleUIRenderer)
      */
-    public ContainerService(String name, UIRenderer defaultRenderer) {
+    public ContainerService(String name, RendererInfo systemDefaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine("container-service");
         
-        // Register default renderer
-        this.defaultRendererId = "default";
-        this.renderers.put(defaultRendererId, defaultRenderer);
+        // Register system default (supports all types)
+        this.systemDefaultRendererId = "system-default";
+        this.renderers.put(systemDefaultRendererId, systemDefaultRenderer);
+        
         setupMsgExcMap();
         setupStateTransitions();
     }
+
+    public void registerRenderer(
+        String rendererId,
+        UIRenderer renderer,
+        Set<ContainerType> supportedTypes,
+        String description
+    ) {
+        
+        if (rendererId == null || renderer == null) {
+            throw new IllegalArgumentException("rendererId and renderer required");
+        }
+        
+        renderers.put(rendererId, new RendererInfo(renderer, supportedTypes, description));
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Registered renderer '%s': %s (supports: %s)",
+            rendererId, description, supportedTypes
+        ));
+    }
+
+    public void setDefaultRendererForType(ContainerType type, String rendererId) {
+        RendererInfo info = renderers.get(rendererId);
+        if (info == null) {
+            throw new IllegalArgumentException("Renderer not found: " + rendererId);
+        }
+        
+        if (!info.supports(type)) {
+            throw new IllegalArgumentException(String.format(
+                "Renderer '%s' does not support container type %s",
+                rendererId, type
+            ));
+        }
+        
+        typeDefaultRenderers.put(type, rendererId);
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Default renderer for %s: %s",
+            type, rendererId
+        ));
+    }
     
     /**
-     * Register additional renderer (for multi-renderer scenarios)
-     * 
-     * Example: Desktop app might have:
-     * - "gui" renderer (NanoVG)
-     * - "terminal" renderer (for embedded terminal widgets)
+     * Remove renderer (fails if containers are using it)
      */
-    public void registerRenderer(String rendererId, UIRenderer renderer) {
-        renderers.put(rendererId, renderer);
-        Log.logMsg("[ContainerService] Registered renderer: " + rendererId);
+    public void unregisterRenderer(String rendererId) {
+        if (rendererId.equals(systemDefaultRendererId)) {
+            throw new IllegalArgumentException("Cannot unregister system default renderer");
+        }
+        
+        // Check if any containers are using this renderer
+        boolean inUse = containers.values().stream()
+            .anyMatch(c -> c.getRendererId().equals(rendererId));
+        
+        if (inUse) {
+            throw new IllegalStateException(
+                "Cannot unregister renderer in use: " + rendererId
+            );
+        }
+        
+        renderers.remove(rendererId);
+        
+        // Remove from type defaults
+        typeDefaultRenderers.entrySet()
+            .removeIf(entry -> entry.getValue().equals(rendererId));
+        
+        Log.logMsg("[ContainerService] Unregistered renderer: " + rendererId);
     }
+
+    /**
+     * Select renderer using 3-tier strategy:
+     * 1. Explicit rendererId (if provided and valid)
+     * 2. Type-specific default (if configured)
+     * 3. System default (always available)
+     */
+    private RendererSelection selectRenderer(
+            String explicitRendererId,
+            ContainerType containerType) {
+        
+        // TIER 1: Explicit renderer specified
+        if (explicitRendererId != null && !explicitRendererId.isEmpty()) {
+            RendererInfo info = renderers.get(explicitRendererId);
+            
+            if (info == null) {
+                throw new IllegalArgumentException(
+                    "Renderer not found: " + explicitRendererId
+                );
+            }
+            
+            if (!info.supports(containerType)) {
+                throw new IllegalArgumentException(String.format(
+                    "Renderer '%s' does not support container type %s (supports: %s)",
+                    explicitRendererId, containerType, info.getSupportedTypes()
+                ));
+            }
+            
+            Log.logMsg(String.format(
+                "[ContainerService] Using explicit renderer '%s' for %s container",
+                explicitRendererId, containerType
+            ));
+            
+            return new RendererSelection(explicitRendererId, info);
+        }
+        
+        // TIER 2: Type-specific default
+        String typeDefaultId = typeDefaultRenderers.get(containerType);
+        if (typeDefaultId != null) {
+            RendererInfo info = renderers.get(typeDefaultId);
+            if (info != null) {
+                Log.logMsg(String.format(
+                    "[ContainerService] Using type default renderer '%s' for %s container",
+                    typeDefaultId, containerType
+                ));
+                return new RendererSelection(typeDefaultId, info);
+            }
+        }
+        
+        // TIER 3: System default
+        RendererInfo systemDefault = renderers.get(systemDefaultRendererId);
+        Log.logMsg(String.format(
+            "[ContainerService] Using system default renderer for %s container",
+            containerType
+        ));
+        return new RendererSelection(systemDefaultRendererId, systemDefault);
+    }
+    
     
     private void setupStateTransitions() {
         state.onStateAdded(ContainerServiceStates.INITIALIZING, (old, now, bit) -> {
@@ -125,8 +242,8 @@ public class ContainerService extends FlowProcess {
         Log.logMsg("[ContainerService] Started at: " + contextPath);
         
         // Check if default renderer is active
-        UIRenderer defaultRenderer = renderers.get(defaultRendererId);
-        if (defaultRenderer != null && defaultRenderer.isActive()) {
+        RendererInfo defaultRenderer = renderers.get(systemDefaultRendererId);
+        if (defaultRenderer != null && defaultRenderer.getRenderer().isActive()) {
             Log.logMsg("[ContainerService] renderer active");
             state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
         }
@@ -157,7 +274,7 @@ public class ContainerService extends FlowProcess {
         Log.logMsg("[ContainerService] handleMessage called");
         Log.logMsg("[ContainerService] Packet source: " + packet.getSourcePath());
         Log.logMsg("[ContainerService] Packet dest: " + packet.getDestinationPath());
-        Log.logMsg("[ContainerService] Has correlationId: " + packet.hasMetadata("correlationId"));
+        Log.logMsg("[ContainerService] Has correlationId: " + packet.hasMetadata(ProcessKeys.CORRELATION_ID));
     
         if (!ContainerServiceStates.canAcceptRequests(state)) {
             return replyError(packet, "Service not accepting requests");
@@ -244,55 +361,60 @@ public class ContainerService extends FlowProcess {
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(ContainerServiceStates.CREATING_CONTAINER);
         
-        String title = msg.get(Keys.TITLE).getAsString();
-        ContainerType type = ContainerType.valueOf(
-            msg.get(Keys.TYPE).getAsString()
-        );
-        ContextPath ownerPath = ContextPath.parse(
-            msg.get(Keys.PATH).getAsString()
-        );
+        // Parse command
+        NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
+        NoteBytes titleBytes = msg.get(Keys.TITLE);
+        NoteBytes typeBytes = msg.get(Keys.TYPE);
+        NoteBytes pathBytes = msg.get(Keys.PATH);
+        NoteBytes configBytes = msg.get(Keys.CONFIG);
+        NoteBytes autoFocusBytes = msg.getOrDefault(ContainerCommands.AUTO_FOCUS, NoteBoolean.FALSE);
+
+        String title = titleBytes != null ? titleBytes.getAsString() : "Untitled";
+        ContainerType type = typeBytes != null ? 
+            ContainerType.valueOf(typeBytes.getAsString()) : ContainerType.TERMINAL;
+        ContextPath ownerPath = pathBytes != null ? 
+            ContextPath.fromNoteBytes(pathBytes) : null;
+        ContainerConfig config = configBytes != null ? 
+            ContainerConfig.fromNoteBytes(configBytes) : new ContainerConfig();
+        boolean autoFocus = autoFocusBytes.getAsBoolean();
         
-        ContainerConfig config = null;
-        if (msg.has(Keys.CONFIG)) {
-            config = ContainerConfig.fromNoteBytes(
-                msg.get(Keys.CONFIG).getAsNoteBytesMap()
-            );
-        }
+        // NEW: Explicit renderer ID (optional)
+        String explicitRendererId = rendererIdBytes != null ? 
+            rendererIdBytes.getAsString() : null;
         
-        // Determine which renderer to use
-        String rendererId = defaultRendererId;
-        if (msg.has("renderer_id")) {
-            rendererId = msg.get("renderer_id").getAsString();
-        }
+        // SELECT RENDERER using 3-tier strategy
+        RendererSelection selection;
         
-        UIRenderer containerRenderer = renderers.get(rendererId);
-        if (containerRenderer == null) {
+        try {
+            selection = selectRenderer(explicitRendererId, type);
+        } catch (IllegalArgumentException e) {
             state.removeState(ContainerServiceStates.CREATING_CONTAINER);
-            return replyError(packet, "Renderer not found: " + rendererId);
+            return replyError(packet, e.getMessage());
         }
         
         Log.logMsg(String.format(
             "[ContainerService] Creating %s container: %s (owner: %s, renderer: %s)",
-            type, title, ownerPath, rendererId
+            type, title, ownerPath, selection.rendererId
         ));
         
         // Generate container ID
         ContainerId containerId = ContainerId.generate();
         
-        // Create container with assigned renderer
+        // Create container with selected renderer
         Container container = new Container(
             containerId,
             title,
             type,
             ownerPath,
-            config != null ? config : new ContainerConfig(),
-            containerRenderer,  // Pass renderer directly
-            contextPath         // Service path for requesting streams
+            config,
+            selection.info.getRenderer(),
+            selection.rendererId,  // NEW: Pass renderer ID
+            contextPath
         );
         
-        // Initialize container (creates stream channel for render commands)
+        // Initialize container
         return container.initialize()
-            .thenRun(() -> {
+            .thenCompose(v -> {
                 // Register container
                 containers.put(containerId, container);
                 
@@ -313,24 +435,35 @@ public class ContainerService extends FlowProcess {
                 
                 Log.logMsg("[ContainerService] Container created: " + containerId);
                 
-                // Reply with container ID
-                reply(packet, new NoteBytesObject(new NoteBytesPair[]{
-                    new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-                    new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
-                    new NoteBytesPair(Keys.PATH, container.getPath().toString())
-                }));
+                return autoFocus 
+                    ? autoFocusContainer(container)
+                    : CompletableFuture.completedFuture(false);
+            })
+            .thenAccept(isAutoFocus -> {
+                // Build response with renderer info
+                if (isAutoFocus) {
+                    reply(packet,  
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId),  
+                        new NoteBytesPair(ContainerCommands.AUTO_FOCUS, true)
+                    );
+                }else{
+                    reply(packet,                  
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId)  
+                    );
+                }
                 
-                /*
-                sendEvent(ownerPath, ContainerCommands.containerCreated(
-                    containerId, container.getPath()
-                ));*/
+                
             })
             .exceptionally(ex -> {
                 state.removeState(ContainerServiceStates.CREATING_CONTAINER);
                 String errorMsg = ex.getMessage();
-                Log.logError("[ContainerService] Failed to create container: " + 
-                    errorMsg);
-                
+                Log.logError("[ContainerService] Failed to create container: " + errorMsg);
                 reply(packet, ProtocolObjects.getErrorObject(errorMsg));
                 return null;
             });
@@ -436,6 +569,28 @@ public class ContainerService extends FlowProcess {
             });
     }
     
+    private CompletableFuture<Boolean> autoFocusContainer(Container container){
+        ContainerId containerId = container.getId();
+        ContainerId previousFocus = focusedContainer;
+        focusedContainer = containerId;
+        state.addState(ContainerServiceStates.HAS_FOCUSED_CONTAINER);
+
+        if (previousFocus != null && !previousFocus.equals(containerId)) {
+            Container prevContainer = containers.get(previousFocus);
+            if (prevContainer != null) {
+                prevContainer.unfocus();
+            }
+        }
+
+        return container.focus()
+            .thenApply((v) -> {
+                updateVisibilityState();
+                state.removeState(ContainerServiceStates.RENDERING);
+                return true;
+            });
+    }
+    
+
     private CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) {
   
         ContainerId containerId = ContainerId.fromNoteBytes(
@@ -467,10 +622,6 @@ public class ContainerService extends FlowProcess {
                 updateVisibilityState();
                 state.removeState(ContainerServiceStates.RENDERING);
                 replySuccess(packet);
-                
-                // Send focus event to owner
-               /* sendEvent(container.getOwnerPath(),
-                    ContainerCommands.containerFocused(containerId)); */
             });
     }
     
@@ -585,6 +736,41 @@ public class ContainerService extends FlowProcess {
     public BitFlagStateMachine getState() {
         return state;
     }
+
+    /**
+     * Get all registered renderers
+     */
+    public Map<String, String> getRendererInfo() {
+        Map<String, String> info = new HashMap<>();
+        renderers.forEach((id, rendererInfo) -> 
+            info.put(id, rendererInfo.getDescription())
+        );
+        return info;
+    }
+
+    /**
+     * Get default renderer for a type
+     */
+    public String getDefaultRendererForType(ContainerType type) {
+        return typeDefaultRenderers.getOrDefault(type, systemDefaultRendererId);
+    }
+
+    /**
+     * Check if renderer supports type
+     */
+    public boolean rendererSupportsType(String rendererId, ContainerType type) {
+        RendererInfo info = renderers.get(rendererId);
+        return info != null && info.supports(type);
+    }
+
+    /**
+     * Get containers by renderer
+     */
+    public List<Container> getContainersByRenderer(String rendererId) {
+        return containers.values().stream()
+            .filter(c -> c.getRendererId().equals(rendererId))
+            .toList();
+    }
     
     // ===== SHUTDOWN =====
     
@@ -614,5 +800,15 @@ public class ContainerService extends FlowProcess {
                 
                 Log.logMsg("[ContainerService] Shutdown complete");
             });
+    }
+
+    private static class RendererSelection {
+        final String rendererId;
+        final RendererInfo info;
+        
+        RendererSelection(String rendererId, RendererInfo info) {
+            this.rendererId = rendererId;
+            this.info = info;
+        }
     }
 }

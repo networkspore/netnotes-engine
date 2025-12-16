@@ -41,7 +41,7 @@ public class BootstrapWizardProcess extends FlowProcess {
     private final TerminalContainerHandle terminal;
     private final InputDevice keyboard;
     
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     private NoteBytesMap bootstrapConfig;
     private SecureInputDetectionResult detectionResult;
     
@@ -77,18 +77,15 @@ public class BootstrapWizardProcess extends FlowProcess {
     public CompletableFuture<Void> run() {
         state.addState(DETECTING);
         Log.logMsg("[BootstrapWizardProcess] running");
+        
         // Create default config
         bootstrapConfig = BootstrapConfig.createDefault();
         
         // Create menu navigator
-        menuNavigator = new MenuNavigatorProcess("menu-navigator", terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal, keyboard);
         
-        return spawnChild(menuNavigator)
-            .thenCompose(path -> {
-                Log.logMsg("[BootstrapWizardProcess] starting menuNavigator");
-                return registry.startProcess(path);
-            });
-           
+        Log.logMsg("[BootstrapWizardProcess] run() completing, menuNavigator created");
+        return CompletableFuture.completedFuture(null);
     }
 
     public CompletableFuture<Void> start(){

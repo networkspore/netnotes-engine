@@ -141,7 +141,7 @@ class PackageUninstallScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showInstanceStopMenu() {
-        ContextPath basePath = ContextPath.parse("uninstall/stop-instances");
+        ContextPath basePath = ContextPath.of("uninstall", "stop-instances");
         MenuContext menu = new MenuContext(basePath, "Options")
             .addItem("stop-all", "Stop All Instances", this::stopAllInstances)
             .addItem("cancel", "Cancel Uninstall", this::cancelUninstall);
@@ -208,7 +208,7 @@ class PackageUninstallScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showDataOptionsMenu() {
-        ContextPath basePath = ContextPath.parse("uninstall/data-options");
+        ContextPath basePath = ContextPath.of("uninstall", "data-options");
         MenuContext menu = new MenuContext(basePath, "Data Handling")
             .addItem("keep-data", "Uninstall but keep data", () -> {
                 deleteData = false;

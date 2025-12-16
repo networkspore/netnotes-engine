@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigatorProcess;
+import io.netnotes.engine.core.system.control.MenuNavigator;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
@@ -36,7 +36,7 @@ class RunningInstancesScreen extends TerminalScreen {
     private NodeInstance selectedInstance;
     private Runnable onBack;
     
-    private MenuNavigatorProcess menuNavigator;
+    private MenuNavigator menuNavigator;
     private PasswordReader passwordReader;
     private final NodeCommands nodeCommands;
     
@@ -164,10 +164,11 @@ class RunningInstancesScreen extends TerminalScreen {
         menu.addItem("refresh", "Refresh List", "Reload instance list", this::onShow);
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigatorProcess("instance-list-menu", terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal, keyboard);
         
-        return terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+     
+        menuNavigator.showMenu(menu);
+        return CompletableFuture.completedFuture(null);
     }
     
     // ===== INSTANCE DETAILS =====
@@ -226,10 +227,11 @@ class RunningInstancesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigatorProcess("instance-details-menu", terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal, keyboard);
         
-        terminal.spawnPasswordProcess(menuNavigator)
-            .thenRun(() -> menuNavigator.showMenu(menu));
+  
+        menuNavigator.showMenu(menu);
+
     }
     
     // ===== CONFIRM STOP =====
@@ -323,7 +325,7 @@ class RunningInstancesScreen extends TerminalScreen {
     
     private void cleanupMenuNavigator() {
         if (menuNavigator != null) {
-            terminal.getRegistry().unregisterProcess(menuNavigator.getContextPath());
+            menuNavigator.cleanup();
             menuNavigator = null;
         }
     }

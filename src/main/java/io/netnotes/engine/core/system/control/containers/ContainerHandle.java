@@ -74,11 +74,12 @@ public class ContainerHandle extends FlowProcess {
         Log.logMsg("[ContainerHandle] Started for container: " + containerId);
         
         // Request render stream TO ContainerService (not container path!)
-        return requestStreamChannel(containerServicePath)
+        requestStreamChannel(containerServicePath)
             .thenAccept(channel -> {
+                Log.logMsg("[ContainerHandle] creating writer");
                 this.renderStream = channel;
                 this.renderWriter = new NoteBytesWriter(
-                    channel.getOutputStream()
+                    channel.getQueuedOutputStream()
                 );
                 
                 Log.logMsg("[ContainerHandle] Stream channel setup complete");
@@ -87,6 +88,7 @@ public class ContainerHandle extends FlowProcess {
                 Log.logError("[ContainerHandle] Failed to setup render stream: " + ex.getMessage());
                 return null;
             });
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override

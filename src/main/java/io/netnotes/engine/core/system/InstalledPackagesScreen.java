@@ -53,7 +53,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     public InstalledPackagesScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard, NodeCommands nodeCommands) {
         super(name, terminal, keyboard);
-        this.menuBasePath = ContextPath.parse("installed-packages");
+        this.menuBasePath = ContextPath.of("installed-packages");
         this.nodeCommands = nodeCommands;
     }
     

@@ -4,6 +4,7 @@ package io.netnotes.engine.io.process;
 import java.util.Objects;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteUUID;
 
 /**
@@ -23,8 +24,8 @@ public final class FlowProcessId {
         this(path, null);
     }
 
-    public String getNextCorrelationId() { 
-        return asString() + NoteUUID.createSafeUUID64();
+    public NoteBytes getNextCorrelationId() { 
+        return NoteUUID.createLocalUUID64();
        
     }
     

@@ -32,6 +32,14 @@ public class NoteBytesMap{
         m_pairs = new HashMap<>();
     }
 
+    public NoteBytesMap(NoteBytesMap map){
+        m_pairs = new HashMap<>(map.getHashMap());
+    }
+
+    public NoteBytesMap(Map<NoteBytes, NoteBytes> map ){
+        m_pairs = new HashMap<>(map);
+    }
+
     public NoteBytesMap(NoteBytesObject noteBytes){
         init(noteBytes.get());
     }
@@ -267,6 +275,10 @@ public class NoteBytesMap{
         return m_pairs.containsKey(key);
     }
 
+    public boolean containsKey(String key) {
+        return has(key);
+    }
+
     public boolean has(String key) {
         return m_pairs.containsKey(new NoteString(key));
     }
@@ -386,6 +398,10 @@ public class NoteBytesMap{
         m_pairs.putAll(m);
     }
 
+    public void putAll(NoteBytesMap m) {
+        m_pairs.putAll(m.getHashMap());
+    }
+
     public void forEach(BiConsumer<? super NoteBytes,? super NoteBytes> biConsumer){
         m_pairs.forEach(biConsumer);
     }
@@ -400,7 +416,7 @@ public class NoteBytesMap{
         return m_pairs.values();
     }
 
-    public Map<NoteBytes, NoteBytes> getAsMap(){
+    public Map<NoteBytes, NoteBytes> getHashMap(){
         return m_pairs;
     }
 

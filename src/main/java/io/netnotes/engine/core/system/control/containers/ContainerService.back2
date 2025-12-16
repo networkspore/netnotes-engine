@@ -1,0 +1,480 @@
+package io.netnotes.engine.core.system.control.containers;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+
+import io.netnotes.engine.core.system.control.ui.UIRenderer;
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
+import io.netnotes.engine.noteBytes.NoteBoolean;
+import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
+/**
+ * ContainerService - Enhanced renderer management architecture
+ * 
+ * RENDERER SELECTION STRATEGY:
+ * 
+ * 1. PRIMARY: Explicit rendererId in command
+ *    - User specifies exact renderer: "gui-main", "terminal-1", etc.
+ *    - Supports multiple renderers of same type
+ * 
+ * 2. FALLBACK: Default renderer for ContainerType
+ *    - TERMINAL containers → terminalRenderer
+ *    - PANEL containers → guiRenderer
+ *    - DIALOG containers → guiRenderer
+ * 
+ * 3. LAST RESORT: System default renderer
+ *    - When no type-specific default exists
+ * 
+ * RENDERER REGISTRATION:
+ * - registerRenderer(id, renderer, types) - Register with supported types
+ * - setDefaultRendererForType(type, id) - Set type-specific default
+ * - Validates renderer capabilities match container types
+ */
+public class ContainerService extends FlowProcess {
+    
+    private final BitFlagStateMachine state;
+    
+    // ENHANCED: Renderer management with type awareness
+    private final Map<String, RendererInfo> renderers = new ConcurrentHashMap<>();
+    private final String systemDefaultRendererId;
+    
+    // Type-specific default renderers
+    private final Map<ContainerType, String> typeDefaultRenderers = new ConcurrentHashMap<>();
+    
+    // Container management (unchanged)
+    private final Map<ContainerId, Container> containers = new ConcurrentHashMap<>();
+    private final Map<ContextPath, List<ContainerId>> ownerContainers = new ConcurrentHashMap<>();
+    private final HashMap<NoteBytes, RoutedMessageExecutor> m_msgExecMap = new HashMap<>();
+    private ContainerId focusedContainer = null;
+    
+    /**
+     * Renderer metadata
+     */
+    private static class RendererInfo {
+        final UIRenderer renderer;
+        final Set<ContainerType> supportedTypes;
+        final String description;
+        
+        RendererInfo(UIRenderer renderer, Set<ContainerType> supportedTypes, String description) {
+            this.renderer = renderer;
+            this.supportedTypes = supportedTypes;
+            this.description = description;
+        }
+        
+        boolean supports(ContainerType type) {
+            return supportedTypes.isEmpty() || supportedTypes.contains(type);
+        }
+    }
+    
+    /**
+     * Constructor with system default renderer
+     * 
+     * @param name Service name
+     * @param systemDefaultRenderer Fallback renderer (supports all types)
+     */
+    public ContainerService(String name, UIRenderer systemDefaultRenderer) {
+        super(name, ProcessType.BIDIRECTIONAL);
+        this.state = new BitFlagStateMachine("container-service");
+        
+        // Register system default (supports all types)
+        this.systemDefaultRendererId = "system-default";
+        this.renderers.put(systemDefaultRendererId, new RendererInfo(
+            systemDefaultRenderer,
+            Set.of(ContainerType.values()), // Supports all
+            "System default renderer"
+        ));
+        
+        setupMsgExcMap();
+        setupStateTransitions();
+    }
+    
+    // ===== RENDERER REGISTRATION =====
+    
+    /**
+     * Register renderer that supports ALL container types
+     * 
+     * Example:
+     * <pre>
+     * UIRenderer guiRenderer = new NanoVGRenderer();
+     * service.registerRenderer("gui-main", guiRenderer, "Main GUI renderer");
+     * </pre>
+     */
+    public void registerRenderer(String rendererId, UIRenderer renderer, String description) {
+        registerRenderer(rendererId, renderer, Set.of(ContainerType.values()), description);
+    }
+    
+    /**
+     * Register renderer with SPECIFIC type support
+     * 
+     * Example:
+     * <pre>
+     * // Terminal-only renderer
+     * UIRenderer terminalRenderer = new ANSITerminalRenderer();
+     * service.registerRenderer(
+     *     "terminal-ansi",
+     *     terminalRenderer,
+     *     Set.of(ContainerType.TERMINAL),
+     *     "ANSI terminal renderer"
+     * );
+     * 
+     * // GUI panels and dialogs only
+     * UIRenderer guiRenderer = new NanoVGRenderer();
+     * service.registerRenderer(
+     *     "gui-main",
+     *     guiRenderer,
+     *     Set.of(ContainerType.PANEL, ContainerType.DIALOG),
+     *     "Main GUI renderer"
+     * );
+     * </pre>
+     */
+    public void registerRenderer(
+            String rendererId,
+            UIRenderer renderer,
+            Set<ContainerType> supportedTypes,
+            String description) {
+        
+        if (rendererId == null || renderer == null) {
+            throw new IllegalArgumentException("rendererId and renderer required");
+        }
+        
+        renderers.put(rendererId, new RendererInfo(renderer, supportedTypes, description));
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Registered renderer '%s': %s (supports: %s)",
+            rendererId, description, supportedTypes
+        ));
+    }
+    
+    /**
+     * Set default renderer for a container type
+     * 
+     * Example:
+     * <pre>
+     * service.setDefaultRendererForType(ContainerType.TERMINAL, "terminal-ansi");
+     * service.setDefaultRendererForType(ContainerType.PANEL, "gui-main");
+     * service.setDefaultRendererForType(ContainerType.DIALOG, "gui-main");
+     * </pre>
+     */
+    public void setDefaultRendererForType(ContainerType type, String rendererId) {
+        RendererInfo info = renderers.get(rendererId);
+        if (info == null) {
+            throw new IllegalArgumentException("Renderer not found: " + rendererId);
+        }
+        
+        if (!info.supports(type)) {
+            throw new IllegalArgumentException(String.format(
+                "Renderer '%s' does not support container type %s",
+                rendererId, type
+            ));
+        }
+        
+        typeDefaultRenderers.put(type, rendererId);
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Default renderer for %s: %s",
+            type, rendererId
+        ));
+    }
+    
+    /**
+     * Remove renderer (fails if containers are using it)
+     */
+    public void unregisterRenderer(String rendererId) {
+        if (rendererId.equals(systemDefaultRendererId)) {
+            throw new IllegalArgumentException("Cannot unregister system default renderer");
+        }
+        
+        // Check if any containers are using this renderer
+        boolean inUse = containers.values().stream()
+            .anyMatch(c -> c.getRendererId().equals(rendererId));
+        
+        if (inUse) {
+            throw new IllegalStateException(
+                "Cannot unregister renderer in use: " + rendererId
+            );
+        }
+        
+        renderers.remove(rendererId);
+        
+        // Remove from type defaults
+        typeDefaultRenderers.entrySet()
+            .removeIf(entry -> entry.getValue().equals(rendererId));
+        
+        Log.logMsg("[ContainerService] Unregistered renderer: " + rendererId);
+    }
+    
+    // ===== RENDERER SELECTION LOGIC =====
+    
+    /**
+     * Select renderer using 3-tier strategy:
+     * 1. Explicit rendererId (if provided and valid)
+     * 2. Type-specific default (if configured)
+     * 3. System default (always available)
+     */
+    private RendererInfo selectRenderer(
+            String explicitRendererId,
+            ContainerType containerType) {
+        
+        // TIER 1: Explicit renderer specified
+        if (explicitRendererId != null && !explicitRendererId.isEmpty()) {
+            RendererInfo info = renderers.get(explicitRendererId);
+            
+            if (info == null) {
+                throw new IllegalArgumentException(
+                    "Renderer not found: " + explicitRendererId
+                );
+            }
+            
+            if (!info.supports(containerType)) {
+                throw new IllegalArgumentException(String.format(
+                    "Renderer '%s' does not support container type %s (supports: %s)",
+                    explicitRendererId, containerType, info.supportedTypes
+                ));
+            }
+            
+            Log.logMsg(String.format(
+                "[ContainerService] Using explicit renderer '%s' for %s container",
+                explicitRendererId, containerType
+            ));
+            
+            return info;
+        }
+        
+        // TIER 2: Type-specific default
+        String typeDefaultId = typeDefaultRenderers.get(containerType);
+        if (typeDefaultId != null) {
+            RendererInfo info = renderers.get(typeDefaultId);
+            if (info != null) {
+                Log.logMsg(String.format(
+                    "[ContainerService] Using type default renderer '%s' for %s container",
+                    typeDefaultId, containerType
+                ));
+                return info;
+            }
+            // Fall through if type default is somehow missing
+        }
+        
+        // TIER 3: System default
+        RendererInfo systemDefault = renderers.get(systemDefaultRendererId);
+        Log.logMsg(String.format(
+            "[ContainerService] Using system default renderer for %s container",
+            containerType
+        ));
+        return systemDefault;
+    }
+    
+    // ===== CONTAINER CREATION (UPDATED) =====
+    
+    private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
+        state.addState(ContainerServiceStates.CREATING_CONTAINER);
+        
+        // Parse command
+        NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
+        NoteBytes titleBytes = msg.get(Keys.TITLE);
+        NoteBytes typeBytes = msg.get(Keys.TYPE);
+        NoteBytes pathBytes = msg.get(Keys.PATH);
+        NoteBytes configBytes = msg.get(Keys.CONFIG);
+        NoteBytes autoFocusBytes = msg.getOrDefault(ContainerCommands.AUTO_FOCUS, NoteBoolean.FALSE);
+
+        String title = titleBytes != null ? titleBytes.getAsString() : "Untitled";
+        ContainerType type = typeBytes != null ? 
+            ContainerType.valueOf(typeBytes.getAsString()) : ContainerType.TERMINAL;
+        ContextPath ownerPath = pathBytes != null ? 
+            ContextPath.fromNoteBytes(pathBytes) : null;
+        ContainerConfig config = configBytes != null ? 
+            ContainerConfig.fromNoteBytes(configBytes) : new ContainerConfig();
+        boolean autoFocus = autoFocusBytes.getAsBoolean();
+        
+        // NEW: Explicit renderer ID (optional)
+        String explicitRendererId = rendererIdBytes != null ? 
+            rendererIdBytes.getAsString() : null;
+        
+        // SELECT RENDERER using 3-tier strategy
+        RendererInfo selectedRenderer;
+        String selectedRendererId;
+        
+        try {
+            selectedRenderer = selectRenderer(explicitRendererId, type);
+            
+            // Find the renderer ID (reverse lookup)
+            selectedRendererId = renderers.entrySet().stream()
+                .filter(e -> e.getValue() == selectedRenderer)
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(systemDefaultRendererId);
+            
+        } catch (IllegalArgumentException e) {
+            state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+            return replyError(packet, e.getMessage());
+        }
+        
+        Log.logMsg(String.format(
+            "[ContainerService] Creating %s container: %s (owner: %s, renderer: %s)",
+            type, title, ownerPath, selectedRendererId
+        ));
+        
+        // Generate container ID
+        ContainerId containerId = ContainerId.generate();
+        
+        // Create container with selected renderer
+        Container container = new Container(
+            containerId,
+            title,
+            type,
+            ownerPath,
+            config,
+            selectedRenderer.renderer,
+            selectedRendererId,  // NEW: Store renderer ID
+            contextPath
+        );
+        
+        // Initialize container
+        return container.initialize()
+            .thenCompose(v -> {
+                // Register container
+                containers.put(containerId, container);
+                
+                // Track by owner
+                ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
+                    .add(containerId);
+                
+                // Update states
+                if (containers.size() == 1) {
+                    state.addState(ContainerServiceStates.HAS_CONTAINERS);
+                }
+                
+                if (container.isVisible()) {
+                    updateVisibilityState();
+                }
+                
+                state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+                
+                Log.logMsg("[ContainerService] Container created: " + containerId);
+                
+                return autoFocus 
+                    ? autoFocusContainer(container)
+                    : CompletableFuture.completedFuture(false);
+            })
+            .thenAccept(isAutoFocus -> {
+                // Build response with renderer info
+                if (isAutoFocus) {
+                    reply(packet,  
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selectedRendererId)
+                    );
+                }else{
+                    reply(packet,  
+                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selectedRendererId),
+                        new NoteBytesPair(ContainerCommands.AUTO_FOCUS, true)
+                    );
+                }
+                
+                
+            })
+            .exceptionally(ex -> {
+                state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+                String errorMsg = ex.getMessage();
+                Log.logError("[ContainerService] Failed to create container: " + errorMsg);
+                reply(packet, ProtocolObjects.getErrorObject(errorMsg));
+                return null;
+            });
+    }
+    
+    // ===== QUERIES (ENHANCED) =====
+    
+    /**
+     * Get all registered renderers
+     */
+    public Map<String, String> getRendererInfo() {
+        Map<String, String> info = new HashMap<>();
+        renderers.forEach((id, rendererInfo) -> 
+            info.put(id, rendererInfo.description)
+        );
+        return info;
+    }
+    
+    /**
+     * Get default renderer for a type
+     */
+    public String getDefaultRendererForType(ContainerType type) {
+        return typeDefaultRenderers.getOrDefault(type, systemDefaultRendererId);
+    }
+    
+    /**
+     * Check if renderer supports type
+     */
+    public boolean rendererSupportsType(String rendererId, ContainerType type) {
+        RendererInfo info = renderers.get(rendererId);
+        return info != null && info.supports(type);
+    }
+    
+    /**
+     * Get containers by renderer
+     */
+    public List<Container> getContainersByRenderer(String rendererId) {
+        return containers.values().stream()
+            .filter(c -> c.getRendererId().equals(rendererId))
+            .toList();
+    }
+    
+    // ... rest of ContainerService implementation unchanged ...
+    
+    private void setupStateTransitions() { /* unchanged */ }
+    
+    @Override
+    public CompletableFuture<Void> run() { /* unchanged */ }
+    
+    private void setupMsgExcMap() { /* unchanged */ }
+    
+    @Override
+    public CompletableFuture<Void> handleMessage(RoutedPacket packet) { /* unchanged */ }
+    
+    @Override
+    public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) { /* unchanged */ }
+    
+    // Other command handlers unchanged...
+    private CompletableFuture<Void> handleDestroyContainer(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Void> handleShowContainer(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Void> handleHideContainer(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Boolean> autoFocusContainer(Container container) { /* unchanged */ }
+    private CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Void> handleQueryContainer(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) { /* unchanged */ }
+    
+    private void updateVisibilityState() { /* unchanged */ }
+    private void replySuccess(RoutedPacket packet) { /* unchanged */ }
+    private CompletableFuture<Void> replyError(RoutedPacket packet, String message) { /* unchanged */ }
+    
+    public boolean isOperational() { /* unchanged */ }
+    public int getContainerCount() { /* unchanged */ }
+    public List<Container> getAllContainers() { /* unchanged */ }
+    public List<Container> getContainersByOwner(ContextPath ownerPath) { /* unchanged */ }
+    public Container getFocusedContainer() { /* unchanged */ }
+    public String getStateDescription() { /* unchanged */ }
+    public String getDetailedStatus() { /* unchanged */ }
+    public BitFlagStateMachine getState() { /* unchanged */ }
+    
+    public CompletableFuture<Void> shutdown() { /* unchanged */ }
+}

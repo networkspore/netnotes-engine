@@ -6,9 +6,9 @@ import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -35,7 +35,7 @@ public final class RoutedPacket {
     private final ContextPath sourcePath;
     private final ContextPath destinationPath;  // Optional: explicit destination
     private final NoteBytesReadOnly payload;
-    private final Map<String, Object> metadata;
+    private final NoteBytesMap metadata;
     private final long timestamp;
     
     // Routing modes
@@ -45,7 +45,7 @@ public final class RoutedPacket {
      * Create a routed packet with source path only (registry determines destination)
      */
     public RoutedPacket(ContextPath sourcePath, NoteBytesReadOnly payload) {
-        this(sourcePath, null, payload, new HashMap<>(), RoutingMode.REGISTRY);
+        this(sourcePath, null, payload, new NoteBytesMap(), RoutingMode.REGISTRY);
     }
     
     /**
@@ -55,7 +55,7 @@ public final class RoutedPacket {
             ContextPath sourcePath, 
             ContextPath destinationPath,
             NoteBytesReadOnly payload) {
-        this(sourcePath, destinationPath, payload, new HashMap<>(), RoutingMode.DIRECT);
+        this(sourcePath, destinationPath, payload, new NoteBytesMap(), RoutingMode.DIRECT);
     }
     
     /**
@@ -65,7 +65,7 @@ public final class RoutedPacket {
             ContextPath sourcePath,
             ContextPath destinationPath,
             NoteBytesReadOnly payload,
-            Map<String, Object> metadata,
+            NoteBytesMap metadata,
             RoutingMode routingMode) {
         
         Objects.requireNonNull(sourcePath, "sourcePath cannot be null");
@@ -74,7 +74,7 @@ public final class RoutedPacket {
         this.sourcePath = sourcePath;
         this.destinationPath = destinationPath;
         this.payload = payload;
-        this.metadata = new HashMap<>(metadata);
+        this.metadata = new NoteBytesMap(metadata);
         this.routingMode = routingMode;
         this.timestamp = System.currentTimeMillis();
     }
@@ -145,48 +145,53 @@ public final class RoutedPacket {
     
     /**
      * Check if metadata key exists
-     */
+    
     public boolean hasMetadata(String key) {
+        return metadata.containsKey(key);
+    } */
+
+    public boolean hasMetadata(NoteBytes key) {
         return metadata.containsKey(key);
     }
     
     /**
      * Get metadata value
      */
-    public Object getMetadata(String key) {
+    public NoteBytes getMetadata(NoteBytes key) {
         return metadata.get(key);
     }
-    
-    /**
-     * Get metadata as string
-     */
-    public String getMetadataString(String key) {
-        Object value = metadata.get(key);
-        return value != null ? value.toString() : null;
-    }
-    
-    /**
-     * Get metadata as integer
-     */
-    public Integer getMetadataInt(String key) {
-        Object value = metadata.get(key);
-        if (value instanceof Integer) return (Integer) value;
-        if (value instanceof Number) return ((Number) value).intValue();
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return null;
-            }
+
+    public ContextPath getMetadataAsPath(NoteBytes key){
+        NoteBytes value = metadata.get(key);
+        if(key != null && key.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+            return ContextPath.fromNoteBytes(value);
+        }else if( key != null && ByteDecoding.isStringType(value.getType())){
+            return ContextPath.parse(value.getAsString());
         }
         return null;
     }
     
     /**
+     * Get metadata as string
+    
+    public String getMetadataString(String key) {
+        NoteBytes value = metadata.get(key);
+        return value != null ? value.toString() : null;
+    } */
+    
+    /**
+     * Get metadata as integer
+     */
+    public Integer getMetadataInt(NoteBytes key) {
+        NoteBytes value = metadata.get(key);
+        return ByteDecoding.forceAsBigDecimal(value).intValue();
+    }
+    
+    /**
      * Get all metadata
      */
-    public Map<String, Object> getAllMetadata() {
-        return new HashMap<>(metadata);
+    public NoteBytesMap getAllMetadata() {
+        return new NoteBytesMap(metadata);
     }
     
     // ===== ROUTING CONTROL =====
@@ -219,8 +224,8 @@ public final class RoutedPacket {
     /**
      * Create a new packet with additional metadata
      */
-    public RoutedPacket withMetadata(String key, Object value) {
-        Map<String, Object> newMetadata = new HashMap<>(this.metadata);
+    public RoutedPacket withMetadata(NoteBytes key, NoteBytes value) {
+        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata);
         newMetadata.put(key, value);
         return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
     }
@@ -228,8 +233,8 @@ public final class RoutedPacket {
     /**
      * Create a new packet with multiple metadata entries
      */
-    public RoutedPacket withMetadata(Map<String, Object> additionalMetadata) {
-        Map<String, Object> newMetadata = new HashMap<>(this.metadata);
+    public RoutedPacket withMetadata(NoteBytesMap additionalMetadata) {
+        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata);
         newMetadata.putAll(additionalMetadata);
         return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
     }
@@ -315,7 +320,7 @@ public final class RoutedPacket {
             sourcePath,
             targetPrefix,
             payload,
-            new HashMap<>(),
+            new NoteBytesMap(),
             RoutingMode.MULTICAST
         );
     }
@@ -330,7 +335,7 @@ public final class RoutedPacket {
             sourcePath,
             null,
             payload,
-            new HashMap<>(),
+            new NoteBytesMap(),
             RoutingMode.HIERARCHICAL
         );
     }

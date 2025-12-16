@@ -46,7 +46,7 @@ class NodeManagerScreen extends TerminalScreen {
     
     public NodeManagerScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
         super(name, terminal, keyboard);
-        this.basePath = ContextPath.parse("node-manager");
+        this.basePath = ContextPath.of("node-manager");
         
     }
     

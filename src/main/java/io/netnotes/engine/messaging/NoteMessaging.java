@@ -161,7 +161,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly APPROVED      = new NoteBytesReadOnly("approved");
         public static final NoteBytesReadOnly FILTER        = new NoteBytesReadOnly("filter");
         public static final NoteBytesReadOnly INSTANCES     = new NoteBytesReadOnly("instances");
-        public static final NoteBytesReadOnly INSTANCE     = new NoteBytesReadOnly("instance");
+        public static final NoteBytesReadOnly INSTANCE      = new NoteBytesReadOnly("instance");
         // Metadata
         public static final NoteBytesReadOnly NAME          = new NoteBytesReadOnly("name");
         public static final NoteBytesReadOnly TIMESTAMP     = new NoteBytesReadOnly("time_stamp");
