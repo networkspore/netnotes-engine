@@ -284,7 +284,9 @@ public class NoteBytes {
      public long getAsLong(){
         byte[] bytes = m_value;
         int len = bytes.length;
-        return len == 0 ? 0 : m_type == NoteBytesMetaData.LONG_LE_TYPE ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes);
+        return len == 0 ? 0 : m_type == NoteBytesMetaData.LONG_LE_TYPE 
+            ? ByteDecoding.bytesToLongLittleEndian(bytes) 
+            : ByteDecoding.bytesToLongBigEndian(bytes);
     }
 
     public BigDecimal getAsBigDecimal(){
@@ -643,35 +645,39 @@ public class NoteBytes {
         return m_value.length == 0;
     }
 
-
+    
     public JsonElement getAsJsonElement() {
-        
-        switch(m_type) {
-            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
-                return getAsJsonObject();
-            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
-                return getAsJsonArray();
+
+        return createPrimitiveForType(this);
+    }
+
+    public static JsonPrimitive createPrimitiveForType(NoteBytes noteBytes){
+        switch(noteBytes.getType()) {
             case NoteBytesMetaData.BIG_DECIMAL_TYPE:
-                return new JsonPrimitive(getAsBigDecimal());
+                return new JsonPrimitive(noteBytes.getAsBigDecimal());
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
-                return new JsonPrimitive(getAsBigInteger());
+                return new JsonPrimitive(noteBytes.getAsBigInteger());
             case NoteBytesMetaData.LONG_LE_TYPE:
             case NoteBytesMetaData.LONG_TYPE:
-                return new JsonPrimitive(getAsLong());
+                return new JsonPrimitive(noteBytes.getAsLong());
             case NoteBytesMetaData.INTEGER_LE_TYPE:
             case NoteBytesMetaData.INTEGER_TYPE:
-                return new JsonPrimitive(getAsInt());
+                return new JsonPrimitive(noteBytes.getAsInt());
             case NoteBytesMetaData.DOUBLE_LE_TYPE:
             case NoteBytesMetaData.DOUBLE_TYPE:
-                return new JsonPrimitive(getAsDouble());
+                return new JsonPrimitive(noteBytes.getAsDouble());
             case NoteBytesMetaData.BOOLEAN_TYPE:
-                return new JsonPrimitive(getAsBoolean());
+                return new JsonPrimitive(noteBytes.getAsBoolean());
             case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
-                return new JsonPrimitive(getAsString());
+                return new JsonPrimitive(noteBytes.getAsString());
             case NoteBytesMetaData.STRING_TYPE:
-            case NoteBytesMetaData.STRING_UTF16_TYPE:
+                return new JsonPrimitive(noteBytes.getAsString());
             default:
-                return new JsonPrimitive(getAsString());
+                if(ByteDecoding.isStringType(noteBytes.getType())){
+                    return new JsonPrimitive(noteBytes.getAsString());
+                }else{
+                    return new JsonPrimitive(noteBytes.toString());
+                }
         }
     }
 
@@ -679,14 +685,13 @@ public class NoteBytes {
         byte type = m_type;
         try{
             switch(type){
-
                 case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                     return new NoteBytesObject(m_value).getAsJsonObject();
                 case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
                     return new NoteBytesArray(m_value).getAsJsonObject();
                 default:
                     JsonObject json = new JsonObject();
-                    json.add("value", getAsJsonElement());
+                    json.add("value", createPrimitiveForType(this));
                     json.add("type", new JsonPrimitive((int) m_type));
                     return json;
             }
@@ -705,7 +710,7 @@ public class NoteBytes {
                     return new NoteBytesArray(m_value).getAsJsonArray();
                 default:
                     JsonArray jsonArray = new JsonArray();
-                    jsonArray.add(getAsJsonObject());
+                    jsonArray.add(createPrimitiveForType(this));
                     return jsonArray;
             }
         }catch(Exception e){
@@ -998,9 +1003,10 @@ public class NoteBytes {
             case NoteBytesMetaData.STRING_US_ASCII_TYPE:
             case NoteBytesMetaData.STRING_TYPE:
             case NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE:
+            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
                 return new JsonPrimitive(noteBytes.getAsString());
             case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
-                return noteBytes.getAsJsonObject();
+                return  noteBytes.getAsJsonObject();
             case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
                 return noteBytes.getAsJsonArray();
             case NoteBytesMetaData.BIG_INTEGER_TYPE:
@@ -1017,8 +1023,6 @@ public class NoteBytes {
                 return new JsonPrimitive(noteBytes.getAsDouble());
             case NoteBytesMetaData.LONG_LE_TYPE:
                 return new JsonPrimitive(noteBytes.getAsLong());
-            case NoteBytesMetaData.STRING_UTF16_LE_TYPE:
-                return new JsonPrimitive(noteBytes.getAsString());
             case NoteBytesMetaData.IMAGE_TYPE:
             case NoteBytesMetaData.VIDEO_TYPE:
             case NoteBytesMetaData.SERIALIZABLE_OBJECT_TYPE:

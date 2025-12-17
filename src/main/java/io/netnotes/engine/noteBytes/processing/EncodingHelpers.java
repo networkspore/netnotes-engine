@@ -60,11 +60,11 @@ public class EncodingHelpers {
     }
 
     public static byte[] encodeBase64(byte[] base64){
-        return Base64.getEncoder().encode(base64);
+        return Base64.getEncoder().withoutPadding().encode(base64);
     }
 
     public static byte[] encodeUrlSafe(byte[] urlSafe){
-        return Base64.getUrlEncoder().encode(urlSafe);
+        return Base64.getUrlEncoder().withoutPadding().encode(urlSafe);
     }
 
 

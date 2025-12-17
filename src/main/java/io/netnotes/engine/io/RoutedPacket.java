@@ -8,6 +8,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.Objects;
 
@@ -74,7 +75,7 @@ public final class RoutedPacket {
         this.sourcePath = sourcePath;
         this.destinationPath = destinationPath;
         this.payload = payload;
-        this.metadata = new NoteBytesMap(metadata);
+        this.metadata = new NoteBytesMap(metadata.getHashMap());
         this.routingMode = routingMode;
         this.timestamp = System.currentTimeMillis();
     }
@@ -157,11 +158,10 @@ public final class RoutedPacket {
 
     public ContextPath getMetadataAsPath(NoteBytes key){
         NoteBytes value = metadata.get(key);
-        if(key != null && key.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+        if(value != null){
             return ContextPath.fromNoteBytes(value);
-        }else if( key != null && ByteDecoding.isStringType(value.getType())){
-            return ContextPath.parse(value.getAsString());
         }
+
         return null;
     }
     
@@ -169,7 +169,8 @@ public final class RoutedPacket {
      * Get all metadata
      */
     public NoteBytesMap getAllMetadata() {
-        return new NoteBytesMap(metadata);
+        Log.logMsg("[RoutedPacket] get All metadata " + (metadata != null ? metadata.size() : "null"));
+        return new NoteBytesMap(metadata.getHashMap());
     }
     
     // ===== ROUTING CONTROL =====
@@ -203,7 +204,7 @@ public final class RoutedPacket {
      * Create a new packet with additional metadata
      */
     public RoutedPacket withMetadata(NoteBytes key, NoteBytes value) {
-        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata);
+        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata.getHashMap());
         newMetadata.put(key, value);
         return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
     }
@@ -212,7 +213,7 @@ public final class RoutedPacket {
      * Create a new packet with multiple metadata entries
      */
     public RoutedPacket withMetadata(NoteBytesMap additionalMetadata) {
-        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata);
+        NoteBytesMap newMetadata = new NoteBytesMap(this.metadata.getHashMap());
         newMetadata.putAll(additionalMetadata);
         return new RoutedPacket(sourcePath, destinationPath, payload, newMetadata, routingMode);
     }

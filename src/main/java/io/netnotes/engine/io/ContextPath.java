@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
@@ -11,22 +13,6 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 
 /**
  * ContextPath - Hierarchical path for organizing input sources.
- * 
- * ABSOLUTE vs RELATIVE PATHS:
- * 
- * Absolute Path:
- *   - Starts from system root
- *   - First segment is a root segment (system, user, etc.)
- *   - Example: /system/nodes/registry
- *   - String form: "/system/nodes/registry"
- *   - Created with: ContextPath.of("system", "nodes", "registry")
- * 
- * Relative Path:
- *   - Relative to some base path
- *   - Does NOT start with root segment
- *   - Example: config/settings
- *   - String form: "config/settings" (no leading /)
- *   - Created with: ContextPath.relative("config", "settings")
  * 
  * Root Path:
  *   - Special case: the root itself
@@ -53,15 +39,7 @@ public final class ContextPath {
         this.pathString = buildPathString();
     }
 
-    public static ContextPath fromNoteBytes(NoteBytes noteBytes){
-        if(noteBytes == null){
-            throw new NullPointerException("fromNoteBytes cannot be null");
-        }
-        if(noteBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
-            throw new IllegalArgumentException("ContextPath must be constructed from Array NoteBytes");
-        }
-        return ContextPath.of(noteBytes.getAsNoteBytesArrayReadOnly()); 
-    }
+    
 
     public static ContextPath parseExternal(String path, boolean urlEncoded) {
         if (path == null || path.isEmpty() || path.equals(DELIMITER)) return ROOT;
@@ -93,11 +71,43 @@ public final class ContextPath {
         return new ContextPath(segments);
     }
 
-    public static ContextPath of(NoteStringArrayReadOnly stringArray) {
-        return of(stringArray.getAsArray());
+    public static ContextPath fromNoteBytes(NoteBytes noteBytes){
+        if(noteBytes == null){
+            return ROOT;
+        }
+        if(noteBytes.byteLength() == 0){
+            return ROOT;
+        }
+
+        byte type = noteBytes.getType();
+
+        if(ByteDecoding.isStringType(type)){
+            return new ContextPath(new NoteStringArrayReadOnly(noteBytes));
+        }else if(noteBytes instanceof NoteBytesArrayReadOnly array){
+            return verifyArray(array.getAsArray());
+        }else if(noteBytes instanceof NoteBytesArray array){
+            return verifyArray(array.getAsArray());
+        }else if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+            NoteBytesArrayReadOnly array = noteBytes.getAsNoteBytesArrayReadOnly();
+            return verifyArray(array.getAsArray());
+        }else{
+            throw new IllegalArgumentException(" Invalid or corrupt [fromNoteBytes] ContextPath: " + noteBytes);
+        }
     }
+   
     public static ContextPath of(NoteBytes... arrayOfNoteBytes) {
-  
+        if(arrayOfNoteBytes == null){
+            return ROOT;
+        }
+
+        if(arrayOfNoteBytes.length == 1){
+            return fromNoteBytes(arrayOfNoteBytes[0]);
+        }
+
+        return verifyArray(arrayOfNoteBytes);
+    }
+
+    private static ContextPath verifyArray(NoteBytes... arrayOfNoteBytes){
         for(int i = 0; i < arrayOfNoteBytes.length ; i++){
             if(!ByteDecoding.isStringType(arrayOfNoteBytes[i].getType())){
                 throw new IllegalStateException("ContextPath requires string types");
@@ -111,14 +121,12 @@ public final class ContextPath {
     /** Create ABSOLUTE path from varargs segments */
     public static ContextPath of(String... segments) {
         if (segments == null || segments.length == 0) return ROOT;
-        List<String> valid = new ArrayList<>();
         for (String s : segments) {
             if (s != null && !s.isEmpty()) {
                 validateSegment(s);
-                valid.add(s);
             }
         }
-        NoteStringArrayReadOnly array = new NoteStringArrayReadOnly(valid.toArray(new String[0]));
+        NoteStringArrayReadOnly array = new NoteStringArrayReadOnly(segments);
         
         return new ContextPath(array);
     }

@@ -5,7 +5,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -15,6 +19,8 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 public class LoggingHelpers {
     public enum LogLevel{
@@ -26,16 +32,13 @@ public class LoggingHelpers {
 
         private final int value;
 
-        // Define a private constructor to initialize the field
         private LogLevel(int value) {
             this.value = value;
         }
 
-        // Provide a public getter method to access the value
         public int getValue() {
             return this.value;
         }
-
     }
 
     public static class Log {
@@ -46,18 +49,19 @@ public class LoggingHelpers {
         
         private static File logFile = createTimedLogFile();
         
-        private static final Semaphore semaphore = new Semaphore(1);
+        // Single-threaded executor for all log writes
+        private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r);
+            t.setDaemon(true);
+            t.setName("LogWriter");
+            return t;
+        });
         
-        private static int logLevel = LogLevel.ALL.getValue();
+        private static volatile int logLevel = LogLevel.ALL.getValue();
 
-        private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-
-
-    
         public static File createTimedLogFile() {
             return createTimedLogFile(logName);
         }
-
 
         public static File createTimedLogFile(String name){
             try{
@@ -72,41 +76,19 @@ public class LoggingHelpers {
             return setLogLevel(logLevel.getValue());
         }
        
-        public static CompletableFuture<Void> setLogLevel(int logLevel){
-            return  CompletableFuture.runAsync(() -> {
-                try {
-                    semaphore.acquire();
-                    try{
-                        Log.logLevel = logLevel;
-                    }finally{
-                        semaphore.release();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    Log.logError("LoggingHelpers.setLogLevel: InterruptedException: " + e.toString());
-                    throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                }
-            }, VirtualExecutors.getVirtualExecutor());
+        public static CompletableFuture<Void> setLogLevel(int level){
+            return CompletableFuture.runAsync(() -> {
+                Log.logLevel = level;
+            }, logExecutor);
         }
 
-        public static CompletableFuture<Void> setLogFile(File logFile){
-            return  CompletableFuture.runAsync(() -> {
-                try {
-                    semaphore.acquire();
-                    try{
-                        Log.logFile = logFile;
-                    }finally{
-                        semaphore.release();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    Log.logError("LoggingHelpers.setLogFile: InterruptedException: " + e.toString());
-                    throw new RuntimeException(NoteMessaging.Error.INTERRUPTED, e);
-                }
-            }, VirtualExecutors.getVirtualExecutor());
+        public static CompletableFuture<Void> setLogFile(File file){
+            return CompletableFuture.runAsync(() -> {
+                Log.logFile = file;
+            }, logExecutor);
         }
 
-         public static CompletableFuture<Void> log(String scope, String msg, LogLevel level) {
+        public static CompletableFuture<Void> log(String scope, String msg, LogLevel level) {
             return enqueue(level.getValue(), () ->
                 write(scope + ": " + msg + "\n")
             );
@@ -131,52 +113,67 @@ public class LoggingHelpers {
         }
 
         public static CompletableFuture<Void> logJson(String scope, JsonObject json) {
-            return enqueue(LogLevel.ALL.getValue(), () ->
-                write("**" + scope + "**\n" + gson.toJson(json) + "\n")
-            );
+            return enqueue(LogLevel.ALL.getValue(), () ->{
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                write("**" + scope + "**\n" + gson.toJson(json) + "\n");
+            });
         }
 
         public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytes nb) {
+            if(nb == null){
+                return enqueue(LogLevel.ALL.getValue(), () -> {
+                    write("**" + scope + "**\n" + "null" + "\n");
+                });
+            }
+            
             return enqueue(LogLevel.ALL.getValue(), () -> {
-                JsonElement json = NoteBytes.toJson(nb);
-                write("**" + scope + "**\n" + gson.toJson(json) + "\n");
+                writeLogNoteBytes(logFile, nb);
+            });
+        }
+
+        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytesMap map) {
+            if(map == null){
+                return enqueue(LogLevel.ALL.getValue(), () -> {
+                    write("**" + scope + "**\n" + "null" + "\n");
+                });
+            }
+   
+            return enqueue(LogLevel.ALL.getValue(), () -> {
+                
+                writeLogNoteBytes(logFile, map);
             });
         }
 
         public static CompletableFuture<Void> logMsg(String msg) {
             return enqueue(LogLevel.ALL.getValue(), () -> {
-              
                 write(msg + "\n");
             });
         }
 
-
-        // ----------------------------------------------------------
-        // Core executor + gating
-        // ----------------------------------------------------------
+        // Core executor with timeout
         private static CompletableFuture<Void> enqueue(int priority, Runnable action) {
             if (priority > logLevel) {
                 return CompletableFuture.completedFuture(null);
             }
-
-            return CompletableFuture.runAsync(() -> {
-                try {
-                    semaphore.acquire();
-                    action.run();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    write("[FATAL LOGGING ERROR] Interrupted\n");
-                } finally {
-                    semaphore.release();
-                }
-            }, VirtualExecutors.getVirtualExecutor());
+            
+            // Emergency fallback - if submit fails, write to stderr immediately
+            try {
+                return CompletableFuture.runAsync(() -> {
+                    Future<?> future = logExecutor.submit(action);
+                    try {
+                        future.get(2, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        future.cancel(true);
+                        System.err.println("[LOG TIMEOUT] Write hung");
+                    } catch (Exception e) {
+                        System.err.println("[LOG ERROR] " + e.toString());
+                    }
+                }, Executors.newVirtualThreadPerTaskExecutor());
+            } catch (Exception e) {
+                System.err.println("[LOG SUBMIT FAILED] " + e.toString());
+                return CompletableFuture.completedFuture(null);
+            }
         }
-
-
-        // ----------------------------------------------------------
-        // File creation + raw write
-        // ----------------------------------------------------------
- 
 
         private static void write(String text) {
             try {
@@ -187,8 +184,7 @@ public class LoggingHelpers {
                     StandardOpenOption.APPEND
                 );
             } catch (Exception e) {
-                // avoid recursion — write directly
-                System.err.println("Logging failed: " + e.getMessage());
+                System.err.println("[LOG WRITE FAILED] " + e.getMessage());
             }
         }
 
@@ -200,8 +196,6 @@ public class LoggingHelpers {
             return priority.getValue() <= logLevel;
         }
     }
-    
-    
 
     public static void logJson(File logFile, String heading, JsonObject json){
         try {
@@ -211,8 +205,8 @@ public class LoggingHelpers {
             Log.logError("LoggingHelpers.logJson: IOException when printing to file: " + e.toString());
             throw new RuntimeException(NoteMessaging.Error.IO, e);
         }
-        
     }
+    
     public static int logJsonArray(File logFile, String heading, JsonArray jsonArray){
         try {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -224,6 +218,7 @@ public class LoggingHelpers {
             return 0;
         }
     }
+    
     public static int writeLogMsg(File logFile, String scope, String msg){
         try {
             String line = scope + ": " + msg + "\n";
@@ -254,12 +249,28 @@ public class LoggingHelpers {
         return writeLogMsg(file, scope, "'" + msg + "' - " + getThrowableMsg(failed));
     }
 
-
     public static String getThrowableMsg(Throwable throwable){
         if(throwable != null){
             return throwable.getMessage();
         }else{
             return NoteMessaging.Error.UNKNOWN;
+        }
+    }
+
+    public static int writeLogNoteBytes(File logFile, NoteBytesMap message){
+        if(message != null){
+            NoteBytesObject nbo = message.toNoteBytes();
+            JsonElement json = NoteBytes.toJson(nbo);
+            try {
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                String line = gson.toJson(json)+"\n";
+                Files.writeString(logFile.toPath(), line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                return line.length();
+            } catch (Exception e) {
+                return writeLogMsg(logFile, "Logging error", e);
+            }  
+        }else{
+            return writeLogMsg(logFile, "Logging error", "message is null");
         }
     }
 
@@ -278,5 +289,4 @@ public class LoggingHelpers {
             return writeLogMsg(logFile, "Logging error", "message is null");
         }
     }
-
 }

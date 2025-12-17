@@ -229,7 +229,6 @@ public class ContainerHandle extends FlowProcess {
             );
         }
         
-        Log.logMsg("[ContainerHandle.sendRenderCommand]");
         try{
             renderWriter.write(command.toNoteBytes());
             return CompletableFuture.completedFuture(null);

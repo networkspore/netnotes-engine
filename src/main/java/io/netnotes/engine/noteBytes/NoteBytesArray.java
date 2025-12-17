@@ -463,7 +463,7 @@ public class NoteBytesArray extends NoteBytes{
     
     @Override
     public JsonArray getAsJsonArray(){
-        byte[] bytes = getBytesInternal();
+        byte[] bytes = get();
         if(bytes != null){
             int length = m_length;
             if(length == 0){
@@ -482,7 +482,7 @@ public class NoteBytesArray extends NoteBytes{
                 } else if(type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     jsonArray.add(noteBytes.getAsJsonObject());
                 } else {
-                    jsonArray.add(noteBytes.getAsJsonElement());
+                    jsonArray.add(createPrimitiveForType(noteBytes));
                 }
                 
                 offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content
@@ -495,7 +495,7 @@ public class NoteBytesArray extends NoteBytes{
 
     @Override
     public JsonObject getAsJsonObject() {
-        byte[] bytes = getBytesInternal();
+        byte[] bytes = get();
         if(bytes != null){
             int length = m_length;
             if(length == 0){
@@ -514,7 +514,7 @@ public class NoteBytesArray extends NoteBytes{
                 } else if(type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     jsonObject.add(i + "", noteBytes.getAsJsonObject());
                 } else {
-                    jsonObject.add(i + "", noteBytes.getAsJsonElement());
+                    jsonObject.add(i + "", createPrimitiveForType(noteBytes) );
                 }
                 
                 offset += 5 + noteBytes.byteLength(); // 1 byte type + 4 bytes length + content

@@ -450,14 +450,14 @@ public class NoteBytesObject extends NoteBytes{
             while(offset < length){
                 NoteBytesPair pair = NoteBytesPair.read(bytes, offset);
                 NoteBytes value = pair.getValue();
-                byte type = getType();
+                byte type = value.getType();
                 
                 if(type == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
                     jsonObject.add(pair.getKeyAsString(), value.getAsJsonArray());
                 } else if(type == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     jsonObject.add(pair.getKeyAsString(), value.getAsJsonObject());
                 } else {
-                    jsonObject.add(pair.getKeyAsString(), value.getAsJsonElement());
+                    jsonObject.add(pair.getKeyAsString(), createPrimitiveForType(value) );
                 }
                 offset += 10 + pair.getKey().byteLength() + pair.getValue().byteLength();
             }

@@ -336,7 +336,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
                 Log.logMsg("[ProcessSubscriber:" + contextPath + "] Ignoring packet - not alive");
                 return;
             }
-            
+
             // ROUTING FILTER: Only process packets addressed to us or broadcasts (null destination)
             ContextPath destination = packet.getDestinationPath();
             if (destination != null && !destination.equals(contextPath)) {
@@ -471,7 +471,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             ContextPath targetPath,
             NoteBytesReadOnly payload,
             Duration timeout) {
-        
+
         NoteBytes correlationId = processId.getNextCorrelationId();
         CompletableFuture<RoutedPacket> future = new CompletableFuture<>();
         
@@ -485,6 +485,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         Log.logMsg("[FlowProcess:" + contextPath + "] Emitting request to " + targetPath);
 
         emit(request);
+
         
         // Setup timeout
         virtualExecutor.execute(() -> {
@@ -516,7 +517,10 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         ContextPath replyTo = originalRequest.getMetadataAsPath(ProcessKeys.REPLY_TO);
         
         if (correlationId == null || replyTo == null) {
-            Log.logError("Cannot reply: missing correlation metadata");
+            Log.logError("Cannot reply: " + 
+                (correlationId == null ? "correlationId is null " : "") +
+                (replyTo == null ? "replyTo is null " : "")
+            );
             return;
         }
         

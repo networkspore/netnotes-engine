@@ -92,14 +92,15 @@ public class ContainerCommands {
         String title,
         ContainerType type,
         ContextPath ownerPath,
-        ContainerConfig config
+        ContainerConfig config,
+        boolean autoFocus
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, CREATE_CONTAINER);
         msg.put(Keys.TITLE, new NoteBytes(title));
         msg.put(Keys.TYPE, new NoteBytes(type.name()));
         msg.put(Keys.PATH, ownerPath.getSegments());
-        
+        msg.put(AUTO_FOCUS, autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE); // Flag for ContainerService
         if (config != null) {
             msg.put(Keys.CONFIG, config.toNoteBytes());
         }
@@ -107,17 +108,7 @@ public class ContainerCommands {
         return msg;
     }
 
-    public static NoteBytesMap createAndFocusContainer(
-        String title,
-        ContainerType type,
-        ContextPath ownerPath,
-        ContainerConfig config
-    ) {
-        NoteBytesMap msg = createContainer(title, type, ownerPath, config);
-        msg.put(AUTO_FOCUS, NoteBoolean.TRUE); // Flag for ContainerService
-        return msg;
-    }
-        
+   
     /**
      * Destroy a container
      */

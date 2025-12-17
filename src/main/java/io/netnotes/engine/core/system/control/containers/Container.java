@@ -152,7 +152,7 @@ public class Container {
                 Log.logMsg("[Container] Render stream reader active, waiting for commands...");
 
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-                Log.logNoteBytes("[Container.handleREnderStream]", nextBytes);
+           
                 while (nextBytes != null && active) {
                     if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
                         NoteBytesMap command = nextBytes.getAsNoteBytesMap();

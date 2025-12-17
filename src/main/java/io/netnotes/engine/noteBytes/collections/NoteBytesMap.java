@@ -32,12 +32,10 @@ public class NoteBytesMap{
         m_pairs = new HashMap<>();
     }
 
-    public NoteBytesMap(NoteBytesMap map){
-        m_pairs = new HashMap<>(map.getHashMap());
-    }
 
     public NoteBytesMap(Map<NoteBytes, NoteBytes> map ){
-        m_pairs = new HashMap<>(map);
+        this();
+        m_pairs.putAll(map);
     }
 
     public NoteBytesMap(NoteBytesObject noteBytes){
@@ -169,8 +167,10 @@ public class NoteBytesMap{
         byte[] bytes = new byte[byteLength_w_MetaData()];
         int offset = 0;
         for(Map.Entry<NoteBytes, NoteBytes> entry : m_pairs.entrySet()) {
-            offset = NoteBytes.writeNote(entry.getKey(), bytes, offset);
-            offset = NoteBytes.writeNote(entry.getValue(), bytes, offset);
+            NoteBytes key = entry.getKey();
+            NoteBytes value = entry.getValue();
+            offset = NoteBytes.writeNote(key, bytes, offset);
+            offset = NoteBytes.writeNote(value, bytes, offset);
         }
         return new NoteBytesObject(bytes);
     }

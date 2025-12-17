@@ -310,10 +310,6 @@ public class ContainerService extends FlowProcess {
         Log.logMsg("[ContainerService] Stream channel received from: " + fromPath);
         
         if (fromPath == null) {
-            Log.logError("[ContainerService] fromPath is null!");
-            channel.getReadyFuture().completeExceptionally(
-                new IllegalStateException("fromPath is null")
-            );
             return;
         }
         
@@ -368,15 +364,17 @@ public class ContainerService extends FlowProcess {
         NoteBytes autoFocusBytes = msg.getOrDefault(ContainerCommands.AUTO_FOCUS, NoteBoolean.FALSE);
 
         String title = titleBytes != null ? titleBytes.getAsString() : "Untitled";
-        ContainerType type = typeBytes != null ? 
-            ContainerType.valueOf(typeBytes.getAsString()) : ContainerType.TERMINAL;
-        ContextPath ownerPath = pathBytes != null ? 
-            ContextPath.fromNoteBytes(pathBytes) : null;
-        ContainerConfig config = configBytes != null ? 
-            ContainerConfig.fromNoteBytes(configBytes) : new ContainerConfig();
+        ContainerType type = typeBytes != null 
+            ? ContainerType.valueOf(typeBytes.getAsString()) 
+            : ContainerType.TERMINAL;
+        ContextPath ownerPath = pathBytes != null 
+            ? ContextPath.fromNoteBytes(pathBytes) 
+            : null;
+        ContainerConfig config = configBytes != null 
+            ? ContainerConfig.fromNoteBytes(configBytes) 
+            : new ContainerConfig();
         boolean autoFocus = autoFocusBytes.getAsBoolean();
         
-        // NEW: Explicit renderer ID (optional)
         String explicitRendererId = rendererIdBytes != null ? 
             rendererIdBytes.getAsString() : null;
         
@@ -406,65 +404,87 @@ public class ContainerService extends FlowProcess {
             ownerPath,
             config,
             selection.renderer,
-            selection.rendererId,  // NEW: Pass renderer ID
+            selection.rendererId, 
             contextPath
         );
         
         // Initialize container
         return container.initialize()
-            .thenCompose(v -> {
-                // Register container
-                containers.put(containerId, container);
-                
-                // Track by owner
-                ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
-                    .add(containerId);
-                
-                // Update states
-                if (containers.size() == 1) {
-                    state.addState(ContainerServiceStates.HAS_CONTAINERS);
+        .thenCompose(v -> {
+            // Register container
+            containers.put(containerId, container);
+            
+            // Track by owner
+            ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
+                .add(containerId);
+            
+            // Update states
+            if (containers.size() == 1) {
+                state.addState(ContainerServiceStates.HAS_CONTAINERS);
+            }
+            
+            if (container.isVisible()) {
+                updateVisibilityState();
+            }
+            
+            state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+            
+            Log.logMsg("[ContainerService] Container created: " + containerId);
+            
+            // Handle auto-focus WITHOUT using the reply pattern
+            if (autoFocus) {
+                ContainerId previousFocus = focusedContainer;
+                focusedContainer = containerId;
+                state.addState(ContainerServiceStates.HAS_FOCUSED_CONTAINER);
+
+                if (previousFocus != null && !previousFocus.equals(containerId)) {
+                    Container prevContainer = containers.get(previousFocus);
+                    if (prevContainer != null) {
+                        prevContainer.unfocus();
+                    }
                 }
                 
-                if (container.isVisible()) {
-                    updateVisibilityState();
-                }
+                state.addState(ContainerServiceStates.RENDERING);
                 
-                state.removeState(ContainerServiceStates.CREATING_CONTAINER);
-                
-                Log.logMsg("[ContainerService] Container created: " + containerId);
-                
-                return autoFocus 
-                    ? autoFocusContainer(container)
-                    : CompletableFuture.completedFuture(false);
-            })
-            .thenAccept(isAutoFocus -> {
-                // Build response with renderer info
-                if (isAutoFocus) {
-                    reply(packet,  
-                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
-                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
-                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId),  
-                        new NoteBytesPair(ContainerCommands.AUTO_FOCUS, true)
-                    );
-                }else{
-                    reply(packet,                  
-                        new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-                        new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
-                        new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
-                        new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId)  
-                    );
-                }
-                
-                
-            })
-            .exceptionally(ex -> {
-                state.removeState(ContainerServiceStates.CREATING_CONTAINER);
-                String errorMsg = ex.getMessage();
-                Log.logError("[ContainerService] Failed to create container: " + errorMsg);
-                reply(packet, ProtocolObjects.getErrorObject(errorMsg));
-                return null;
-            });
+                return container.focus()
+                    .thenRun(() -> {
+                        updateVisibilityState();
+                        state.removeState(ContainerServiceStates.RENDERING);
+                    });
+            }
+            
+            return CompletableFuture.completedFuture(null);
+        })
+        .thenRun(() -> {
+            // Build response with renderer info
+            Log.logMsg("[ContainerService] About to reply");
+            Log.logMsg("[FlowProcess.request] metadata map size: " + packet.getAllMetadata().getHashMap().size());
+            Log.logMsg("[FlowProcess.request] metadata keys: " + packet.getAllMetadata().getHashMap().keySet());
+            
+            if (autoFocus) {
+                reply(packet,  
+                    new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                    new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                    new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                    new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId),  
+                    new NoteBytesPair(ContainerCommands.AUTO_FOCUS, true)
+                );
+            } else {
+                reply(packet,                  
+                    new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                    new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+                    new NoteBytesPair(Keys.PATH, container.getPath().getSegments()),
+                    new NoteBytesPair(ContainerCommands.RENDERER_ID, selection.rendererId)  
+                );
+            }
+        })
+        .exceptionally(ex -> {
+            state.removeState(ContainerServiceStates.CREATING_CONTAINER);
+            String errorMsg = ex.getMessage();
+            Log.logError("[ContainerService] Failed to create container: " + errorMsg);
+            reply(packet, ProtocolObjects.getErrorObject(errorMsg));
+            return null;
+        });
     }
     
     private CompletableFuture<Void> handleDestroyContainer(NoteBytesMap msg, RoutedPacket packet) {
@@ -567,26 +587,7 @@ public class ContainerService extends FlowProcess {
             });
     }
     
-    private CompletableFuture<Boolean> autoFocusContainer(Container container){
-        ContainerId containerId = container.getId();
-        ContainerId previousFocus = focusedContainer;
-        focusedContainer = containerId;
-        state.addState(ContainerServiceStates.HAS_FOCUSED_CONTAINER);
-
-        if (previousFocus != null && !previousFocus.equals(containerId)) {
-            Container prevContainer = containers.get(previousFocus);
-            if (prevContainer != null) {
-                prevContainer.unfocus();
-            }
-        }
-
-        return container.focus()
-            .thenApply((v) -> {
-                updateVisibilityState();
-                state.removeState(ContainerServiceStates.RENDERING);
-                return true;
-            });
-    }
+    
     
 
     private CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) {

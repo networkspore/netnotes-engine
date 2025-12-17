@@ -12,6 +12,7 @@ import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.TextStyle;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
+import io.netnotes.engine.io.input.Keyboard;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
@@ -20,6 +21,7 @@ import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * MenuNavigator - Keyboard-driven terminal menu navigation
@@ -130,7 +132,13 @@ public class MenuNavigator {
         if (!state.hasState(DISPLAYING_MENU)) {
             return;
         }
-        
+        System.err.println("[MenuNavigator] recieved event");
+        System.err.flush();
+        if(event instanceof KeyDownEvent keyDownEvent){
+            System.err.println("[MenuNavigator] keyDown:" + keyDownEvent.getKeyCodeBytes() + " " + Keyboard.getCharBytes(keyDownEvent.getKeyCodeBytes()));
+            System.err.flush();
+        }
+        Log.logMsg("[MenuNavigator] recieved event");
         // Handle ephemeral events (from secure input devices)
         if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
             try (ephemeralEvent) {

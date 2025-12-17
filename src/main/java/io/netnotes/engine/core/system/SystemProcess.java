@@ -161,8 +161,8 @@ public class SystemProcess extends FlowProcess {
     CompletableFuture<Void> initialize() {
         state.addState(INITIALIZING);
 
-        return startDefaultKeyboard()
-            .thenCompose(v -> initializeUIRenderer())
+        return initializeUIRenderer()
+            .thenCompose(v -> startDefaultKeyboard())
             .thenCompose(v -> startContainerService())
             .thenCompose(v -> checkBootstrapNeeded())
             .thenCompose(wizardNeeded -> {
@@ -310,13 +310,14 @@ public class SystemProcess extends FlowProcess {
     }
     
     private CompletableFuture<TerminalContainerHandle> createWizardContainer() {
-        NoteBytesReadOnly createMsg = ContainerCommands.createAndFocusContainer(
+        NoteBytesReadOnly createMsg = ContainerCommands.createContainer(
             "Bootstrap Wizard",
             ContainerType.TERMINAL,
             contextPath,
             new ContainerConfig()
                 .withClosable(false)
-                .withResizable(true)
+                .withResizable(true),
+            true
         ).toNoteBytesReadOnly();
         
         Log.logMsg("[SystemProcess.createWizardContainer] creating container");
@@ -431,7 +432,8 @@ public class SystemProcess extends FlowProcess {
             contextPath,
             new ContainerConfig()
                 .withClosable(true)
-                .withResizable(true)
+                .withResizable(true),
+            true
         );
         
         return request(containerService.getContextPath(),
@@ -502,7 +504,7 @@ public class SystemProcess extends FlowProcess {
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         try {
-            Log.logNoteBytes("[SystemProcess.handleMessage] from:"+ packet.getSourcePath() +"\n", packet.getPayload());
+
             NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
             NoteBytes cmdBytes = msg.get(Keys.CMD);
             
