@@ -1,15 +1,12 @@
 package io.netnotes.engine.noteFiles;
 
 import java.io.File;
-
 import java.io.PipedOutputStream;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -22,138 +19,145 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 
+/**
+ * ManagedNoteFileInterface - Manages exclusive access to an encrypted file
+ * 
+ * REFACTORED ARCHITECTURE:
+ * - Uses SerializedVirtualExecutor instead of Semaphore for file access
+ * - No more manual lock management (acquireLock/releaseLock)
+ * - All file operations are serialized automatically
+ * - Caller-controlled cancellation for all operations
+ * - No deadlock risk from unreleased locks
+ * - Emergency shutdown support via executor methods
+ */
 public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     private final File m_file;
-    private final Semaphore m_semaphore = new Semaphore(1, true);
-    private final AtomicBoolean m_locked = new AtomicBoolean(false);
-
+    private final SerializedVirtualExecutor m_fileExecutor;
+    
     private final Map<NoteUUID, NoteFile> m_activeReferences = new ConcurrentHashMap<>();
     private final NoteFileService m_noteFileService;
     private final NoteStringArrayReadOnly m_pathKey;
     private final String path;
-    private AtomicBoolean m_isClosed = new AtomicBoolean(false);
+    private final AtomicBoolean m_isClosed = new AtomicBoolean(false);
     
-   public ManagedNoteFileInterface(NoteStringArrayReadOnly pathKey, NoteBytes noteFilePath, NoteFileService noteFileService ) {
+    public ManagedNoteFileInterface(
+            NoteStringArrayReadOnly pathKey, 
+            NoteBytes noteFilePath, 
+            NoteFileService noteFileService) {
         this.m_file = new File(noteFilePath.getAsString());
         this.m_noteFileService = noteFileService;
         this.m_pathKey = pathKey;
-        this.path = pathKey.getAsString();   
+        this.path = pathKey.getAsString();
+        this.m_fileExecutor = new SerializedVirtualExecutor();
     }
 
-    public NoteStringArrayReadOnly getId(){
+    public NoteStringArrayReadOnly getId() {
         return m_pathKey;
     }
 
+
     public void addReference(NoteFile noteFile) throws IllegalStateException {
-      
-        if(m_isClosed.get()){
-            throw  new IllegalStateException("Interface is cloased");
+        if(m_isClosed.get()) {
+            throw new IllegalStateException("Interface is closed");
         }
-        m_activeReferences.putIfAbsent(noteFile.getId(), noteFile);    
-
+        m_activeReferences.putIfAbsent(noteFile.getId(), noteFile);
     }
-    
-
 
     public void removeReference(NoteUUID uuid) {
         m_activeReferences.remove(uuid);
         
-        // If no more references and not locked, schedule cleanup
-        if (m_activeReferences.isEmpty() && !isLocked()) {
+        // If no more references and not processing operations, schedule cleanup
+        if (m_activeReferences.isEmpty() && m_fileExecutor.getQueueSize() == 0) {
             scheduleCleanup();
         }
     }
     
+
     public int getReferenceCount() {
         return m_activeReferences.size();
     }
 
-
-    
     private void scheduleCleanup() {
-        if(!m_isClosed.get()){
+        if(!m_isClosed.get()) {
             CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS, getExecService())
-            .execute(() -> {
-                // Double-check cleanup conditions
-                if (m_activeReferences.isEmpty() && !isLocked()) {
-                    m_noteFileService.cleanupInterface(m_pathKey, this);
-                }
-            });
+                .execute(() -> {
+                    // Double-check cleanup conditions
+                    if (m_activeReferences.isEmpty() && 
+                        m_fileExecutor.getQueueSize() == 0 &&
+                        !m_isClosed.get()) {
+                        m_noteFileService.cleanupInterface(m_pathKey, this);
+                    }
+                });
         }
     }
-    
+
+    /**
+     * Execute an operation with exclusive file access.
+     * The operation is queued and executed serially with all other file operations.
+     * 
+     * @param operation the operation to perform
+     * @return CompletableFuture that can be cancelled by the caller
+     */
+    <T> CompletableFuture<T> executeWithFileAccess(
+            java.util.concurrent.Callable<T> operation) {
+        if (m_isClosed.get()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Interface is closed"));
+        }
+        return m_fileExecutor.submit(operation);
+    }
+
+    /**
+     * Execute a runnable operation with exclusive file access.
+     */
+    CompletableFuture<Void> executeWithFileAccess(Runnable operation) {
+        if (m_isClosed.get()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Interface is closed"));
+        }
+        return m_fileExecutor.execute(operation);
+    }
 
     @Override
-    public void releaseLock() {
-        if (m_locked.getAndSet(false)) {
-            m_semaphore.release();
-            
-            // ADD: Check for cleanup after releasing lock
-            if (m_activeReferences.isEmpty() && !m_isClosed.get()) {
-                scheduleCleanup();
-            }
-        }
-    }
-    
-    @Override
-    public CompletableFuture<NoteBytesObject> readWriteFile(PipedOutputStream inParseStream, PipedOutputStream modifiedInParseStream) {
-        if (!isLocked()) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called without holding lock"));
-        }
-        if(m_isClosed.get()){
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called while interface is cloased"));
-        }
+    public CompletableFuture<NoteBytesObject> readWriteFile(
+            PipedOutputStream inParseStream, 
+            PipedOutputStream modifiedInParseStream) {
         
-        // Start both operations concurrently
-        // Read operation: decrypt file content into inParseStream
-        //CompletableFuture<NoteBytesObject> readFuture = 
-        decryptFile(inParseStream);
-        // Write operation: encrypt from modifiedInParseStream to temp file, then swap
-        CompletableFuture<NoteBytesObject> writeFuture =  this.m_noteFileService.saveEncryptedFileSwap(m_file, modifiedInParseStream);
-        
-        // Both operations run concurrently through the piped streams
-        // The write will naturally wait for read data to be available through the pipes
-        // Return the write future since it represents the completion of the entire operation
-        return writeFuture;
+        return executeWithFileAccess(() -> null)
+            .thenCompose(v -> {
+                // Start decrypt operation
+                CompletableFuture<NoteBytesObject> decryptFuture = 
+                    m_noteFileService.performDecryption(m_file, inParseStream);
+                
+                // Start encrypt operation
+                CompletableFuture<NoteBytesObject> encryptFuture = 
+                    m_noteFileService.saveEncryptedFileSwap(m_file, modifiedInParseStream);
+                
+                // Return the encrypt future as it represents completion
+                return CompletableFuture.allOf(decryptFuture, encryptFuture)
+                    .thenCompose(x -> encryptFuture);
+            });
     }
     
     @Override
     public ExecutorService getExecService() {
-        return  this.m_noteFileService.getExecService();
+        return m_noteFileService.getExecService();
     }
     
     @Override
     public CompletableFuture<NoteBytesObject> decryptFile(PipedOutputStream pipedOutput) {
-        if (!isLocked()) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called without holding lock"));
-        }
-        if(m_isClosed.get()){
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called while interface is cloased"));
-        }
-        
-       
-        
-        return  this.m_noteFileService.performDecryption(m_file, pipedOutput);
+        return executeWithFileAccess(() -> null)
+            .thenCompose(v -> m_noteFileService.performDecryption(m_file, pipedOutput));
     }
-    
 
     @Override
-    public CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(PipedOutputStream pipedOutputStream) {
-        if (!isLocked()) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called without holding lock"));
-        }
-        if(m_isClosed.get()){
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("readWriteEncryptedFile called while interface is cloased"));
-        }
-        
-        return this.m_noteFileService.saveEncryptedFileSwap(m_file, pipedOutputStream);
+    public CompletableFuture<NoteBytesObject> saveEncryptedFileSwap(
+            PipedOutputStream pipedOutputStream) {
+        return executeWithFileAccess(() -> null)
+            .thenCompose(v -> 
+                m_noteFileService.saveEncryptedFileSwap(m_file, pipedOutputStream));
     }
     
     @Override
@@ -166,75 +170,156 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
         return m_file.length();
     }
     
+    /**
+     * @deprecated Use executeWithFileAccess pattern instead.
+     * This method is kept for backward compatibility but operations
+     * are now automatically serialized.
+     */
+    @Deprecated
     @Override
     public CompletableFuture<Void> acquireLock() {
-        return CompletableFuture.runAsync(() -> {
-            if(!m_isClosed.get()){
-                try {
-                    m_semaphore.acquire();
-                    m_locked.set(true);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new CompletionException("aquire lock interrupted", e);
-                }
-            }else{
-                 throw new CompletionException("Inteface has been closed", new IllegalStateException(""));
-            }
-        }, getExecService());
+        // For backward compatibility, just return completed future
+        // The actual serialization happens in executeWithFileAccess
+        if (m_isClosed.get()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Interface is closed"));
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    /**
+     * @deprecated Use executeWithFileAccess pattern instead.
+     * This method is kept for backward compatibility.
+     */
+    @Deprecated
+    @Override
+    public void releaseLock() {
+        // No-op - locks are managed by executor now
+        // Check for cleanup after operation completes
+        if (m_activeReferences.isEmpty() && 
+            m_fileExecutor.getQueueSize() == 0 && 
+            !m_isClosed.get()) {
+            scheduleCleanup();
+        }
     }
     
     @Override
-    public boolean isClosed(){
+    public boolean isClosed() {
         return m_isClosed.get();
     }
     
+    /**
+     * @deprecated Locks are now managed automatically.
+     * Check getQueueSize() > 0 to see if operations are pending.
+     */
+    @Deprecated
     @Override
     public boolean isLocked() {
-        return m_locked.get();
+        return m_fileExecutor.getQueueSize() > 0 || !m_fileExecutor.isTerminated();
     }
     
     @Override
     public CompletableFuture<Void> prepareForKeyUpdate() {
-        return acquireLock(); // For key updates, we need exclusive access
+        // Queue a marker operation to ensure all previous operations complete
+        return executeWithFileAccess(() -> null);
     }
 
-    public CompletableFuture<Void> perpareForShutdown(){
+    public CompletableFuture<Void> perpareForShutdown() {
         return perpareForShutdown(null);
     }
 
-    @Override
-    public CompletableFuture<Void> perpareForShutdown(AsyncNoteBytesWriter writer){
 
-        return acquireLock()
-            .exceptionally(ex -> {
-                String msg = "Aquiring a lock failed";
-                if(writer != null){
-                    TaskMessages.writeErrorAsync(path, msg, ex, writer);
-                }
-                Log.logError(msg + " for " + path);
-                ex.printStackTrace();
-                return null;
-            }).thenApply((v)->{
+    public CompletableFuture<Void> perpareForShutdown(AsyncNoteBytesWriter writer) {
+        // Queue shutdown operation to execute after all pending operations
+        return executeWithFileAccess(() -> {
             m_isClosed.set(true);
-          
-            Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = m_activeReferences.entrySet().iterator();
+            
+            // Close all active references
+            Iterator<Map.Entry<NoteUUID, NoteFile>> iterator = 
+                m_activeReferences.entrySet().iterator();
             while(iterator.hasNext()) {
                 Map.Entry<NoteUUID, NoteFile> entry = iterator.next();
                 entry.getValue().forceClose();
-                iterator.remove(); 
+                iterator.remove();
             }
-            if(writer != null){
-                writer.writeAsync(TaskMessages.createSuccessResult(path, NoteMessaging.Status.CLOSED));
+            
+            return null;
+        }).thenRun(()->{
+            if(writer != null) {
+                writer.writeAsync(TaskMessages.createSuccessResult(
+                    path, NoteMessaging.Status.CLOSED));
             }
+        })
+        .exceptionally(ex -> {
+            String msg = "Preparing for shutdown failed";
+            if(writer != null) {
+                TaskMessages.writeErrorAsync(path, msg, ex, writer);
+            }
+            Log.logError(msg + " for " + path);
+            ex.printStackTrace();
             return null;
         });
-
     }
-    
     
     @Override
     public void completeKeyUpdate() {
-        releaseLock();
+        // No-op - operations complete automatically
+        // Check for cleanup
+        if (m_activeReferences.isEmpty() && 
+            m_fileExecutor.getQueueSize() == 0 && 
+            !m_isClosed.get()) {
+            scheduleCleanup();
+        }
+    }
+
+    /**
+     * Get the number of pending file operations.
+     * Useful for monitoring and deciding whether to cancel long operations.
+     */
+    public int getQueueSize() {
+        return m_fileExecutor.getQueueSize();
+    }
+
+    /**
+     * Initiates graceful shutdown of file operations.
+     * Queued operations will complete, but new operations will be rejected.
+     */
+    public void shutdownFileAccess() {
+        m_fileExecutor.shutdown();
+    }
+
+    /**
+     * Immediately cancels all pending file operations.
+     * 
+     * @return list of operations that were cancelled before execution
+     */
+    public java.util.List<Runnable> shutdownFileAccessNow() {
+        return m_fileExecutor.shutdownNow();
+    }
+
+    /**
+     * Waits for all file operations to complete after shutdown.
+     * 
+     * @param timeout maximum time to wait
+     * @param unit time unit
+     * @return true if completed, false if timeout
+     */
+    public boolean awaitFileTermination(long timeout, TimeUnit unit) 
+            throws InterruptedException {
+        return m_fileExecutor.awaitTermination(timeout, unit);
+    }
+
+    /**
+     * Check if file executor is shut down.
+     */
+    public boolean isFileExecutorShutdown() {
+        return m_fileExecutor.isShutdown();
+    }
+
+    /**
+     * Check if all file operations have completed after shutdown.
+     */
+    public boolean isFileExecutorTerminated() {
+        return m_fileExecutor.isTerminated();
     }
 }
-

@@ -10,8 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 
 import javax.crypto.SecretKey;
 
@@ -32,22 +31,25 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteFiles.DiskSpaceValidation;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
+/**
+ * Factory for managing NoteFile operations with serialized access to the ledger file.
+ * Uses SerializedVirtualExecutor to ensure exclusive, ordered access to the ledger
+ * while supporting caller-controlled cancellation for long-running operations.
+ */
 public class NotePathFactory {
    
-
     private final ExecutorService m_execService;
-    private final Semaphore m_dataSemaphore;
     private final ScheduledExecutorService m_schedualedExecutor;
+    private final SerializedVirtualExecutor m_ledgerExecutor;
     private final SettingsData m_settingsData;
-    private final AtomicBoolean m_locked = new AtomicBoolean(false);
 
     public NotePathFactory(SettingsData settingsData){
-
         m_execService = Executors.newVirtualThreadPerTaskExecutor();
         m_schedualedExecutor = Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
-        m_dataSemaphore = new Semaphore(1, true);
+        m_ledgerExecutor = new SerializedVirtualExecutor();
         m_settingsData = settingsData;
     }
 
@@ -55,50 +57,95 @@ public class NotePathFactory {
         return m_schedualedExecutor;
     }
 
-
-
-    protected Semaphore getDataSemaphore(){
-        return m_dataSemaphore;
-    }
-
-
-    protected CompletableFuture<File> acquireLock() {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                m_dataSemaphore.acquire();
-                m_locked.set(true);
-                return getFilePathLedger();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
-        }, getExecService());
-    }
-
-    protected boolean isLocked() {
-        return m_locked.get();
-    }
-
-    protected void releaseLock() {
-        if (m_locked.getAndSet(false)) {
-            m_dataSemaphore.release();
-        
-        }
-    }
-
     public ExecutorService getExecService(){
         return m_execService;
     }
 
-    
+    /**
+     * Returns the ledger executor for monitoring or advanced control.
+     * Callers can check queue size or setup custom cancellation logic.
+     */
+    public SerializedVirtualExecutor getLedgerExecutor() {
+        return m_ledgerExecutor;
+    }
 
+    /**
+     * Execute an operation with exclusive access to the ledger.
+     * The operation runs serially with all other ledger operations.
+     * 
+     * @param operation the operation to perform with ledger access
+     * @return CompletableFuture that can be cancelled by the caller
+     */
+    public <T> CompletableFuture<T> executeWithLedgerAccess(java.util.concurrent.Callable<T> operation) {
+        return m_ledgerExecutor.submit(operation);
+    }
+
+    /**
+     * Execute a runnable operation with exclusive access to the ledger.
+     * 
+     * @param operation the operation to perform with ledger access
+     * @return CompletableFuture that can be cancelled by the caller
+     */
+    public CompletableFuture<Void> executeWithLedgerAccess(Runnable operation) {
+        return m_ledgerExecutor.execute(operation);
+    }
+
+    /**
+     * Initiates graceful shutdown of ledger operations.
+     * Queued operations will complete, but new operations will be rejected.
+     */
+    public void shutdownLedgerAccess() {
+        m_ledgerExecutor.shutdown();
+    }
+
+    /**
+     * Immediately cancels all pending ledger operations and attempts to
+     * interrupt the currently executing operation.
+     * 
+     * @return list of operations that were cancelled before execution
+     */
+    public List<Runnable> shutdownLedgerAccessNow() {
+        return m_ledgerExecutor.shutdownNow();
+    }
+
+    /**
+     * Waits for all ledger operations to complete after shutdown.
+     * 
+     * @param timeout maximum time to wait
+     * @param unit time unit
+     * @return true if completed, false if timeout
+     */
+    public boolean awaitLedgerTermination(long timeout, TimeUnit unit) throws InterruptedException {
+        return m_ledgerExecutor.awaitTermination(timeout, unit);
+    }
+
+    /**
+     * Returns the number of operations waiting for ledger access.
+     * Useful for monitoring and deciding whether to cancel long operations.
+     */
+    public int getLedgerQueueSize() {
+        return m_ledgerExecutor.getQueueSize();
+    }
+
+    /**
+     * Check if ledger executor is shut down.
+     */
+    public boolean isLedgerShutdown() {
+        return m_ledgerExecutor.isShutdown();
+    }
+
+    /**
+     * Check if all ledger operations have completed after shutdown.
+     */
+    public boolean isLedgerTerminated() {
+        return m_ledgerExecutor.isTerminated();
+    }
 
     public static File generateNewDataFile(File dataDir) {     
         String encodedUUID = NoteUUID.createSafeUUID128();
         File dataFile = new File(dataDir.getAbsolutePath() + "/" + encodedUUID + ".dat");
         return dataFile;
     }
-    
 
     public File getFilePathLedger() {
         return SettingsData.getIdDataFile();
@@ -112,7 +159,7 @@ public class NotePathFactory {
         return getSettingsData().getSecretKey();
     }
 
-   public CompletableFuture<NoteBytesObject> performDecryption(
+    public CompletableFuture<NoteBytesObject> performDecryption(
         File file, 
         PipedOutputStream pipedOutput
     ){
@@ -130,54 +177,57 @@ public class NotePathFactory {
         }
     }
 
-
-    protected CompletableFuture<NoteBytes> getNoteFilePath(File notePathLedger, NoteStringArrayReadOnly path) {
-       
-        return CompletableFuture.supplyAsync(()->{
-            if(!m_locked.get()){
-                throw new IllegalStateException("Lock required");
+    /**
+     * Get or create a note file path with serialized ledger access.
+     * Returns a CompletableFuture that the caller can cancel if needed.
+     */
+    protected CompletableFuture<NoteBytes> getNoteFilePath(NoteStringArrayReadOnly path) {
+        return executeWithLedgerAccess(() -> {
+            if (path == null) {
+                throw new IllegalArgumentException("Path cannot be null");
             }
-            if (
-                path == null || 
-                notePathLedger == null
-            ) {
-                throw new IllegalArgumentException("Required parameters cannot be null");
-            }
+            
+            File notePathLedger = getFilePathLedger();
             NotePath notePath = new NotePath(notePathLedger, path);
-
             notePath.checkDataDir();
-
+            
             return notePath;
-        }, getExecService()).thenCompose(notePath-> NotePathGet.getOrCreateNoteFilePath(notePath, 
-            getSecretKey(), getExecService()));
+        }).thenCompose(notePath -> 
+            NotePathGet.getOrCreateNoteFilePath(notePath, getSecretKey(), getExecService())
+        );
     }
 
-
-     protected CompletableFuture<Boolean> updateFilePathLedgerEncryption(
-        File filePathLedger,
+    /**
+     * Update file path ledger encryption with serialized access.
+     * The caller can cancel this operation if it takes too long.
+     */
+    protected CompletableFuture<Boolean> updateFilePathLedgerEncryption(
         AsyncNoteBytesWriter progressWriter,
         NoteBytesEphemeral oldPassword,
         NoteBytesEphemeral newPassword,
         int batchSize
-     ) { 
-        return CompletableFuture
-            .runAsync(() -> {
-                if(!m_locked.get()){
-                    throw new IllegalStateException("Lock required");
-                }
-                try {
-                    getSettingsData().updatePassword(oldPassword, newPassword);
-                    ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 3, 4, 
-                        "Created new key",progressWriter);
-                 } catch (IOException | InvalidPasswordException | InvalidKeySpecException | NoSuchAlgorithmException e) {
-                     throw new RuntimeException("Failed to update password", e);
-                } 
-            }, getExecService())
-            .thenCompose(v -> {
-                ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 4, 4, 
-                        "Opening file path ledger",progressWriter);
-                return NotePathReEncryption.updatePathLedgerEncryption(filePathLedger, getSettingsData(). getOldKey(), getSecretKey(), batchSize, progressWriter, getExecService());
-            });
+    ) { 
+        return executeWithLedgerAccess(() -> {
+            try {
+                getSettingsData().updatePassword(oldPassword, newPassword);
+                ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 3, 4, 
+                    "Created new key", progressWriter);
+                return getFilePathLedger();
+            } catch (IOException | InvalidPasswordException | InvalidKeySpecException | NoSuchAlgorithmException e) {
+                throw new RuntimeException("Failed to update password", e);
+            } 
+        }).thenCompose(filePathLedger -> {
+            ProgressMessage.writeAsync(ProtocolMesssages.STARTING, 4, 4, 
+                "Opening file path ledger", progressWriter);
+            return NotePathReEncryption.updatePathLedgerEncryption(
+                filePathLedger, 
+                getSettingsData().getOldKey(), 
+                getSecretKey(), 
+                batchSize, 
+                progressWriter, 
+                getExecService()
+            );
+        });
     }
 
     public CompletableFuture<Void> verifyPassword(NoteBytesEphemeral password){
@@ -186,39 +236,42 @@ public class NotePathFactory {
         });
     }
     
+    /**
+     * Delete a note file path with serialized ledger access.
+     * The caller can cancel this operation through the returned CompletableFuture.
+     */
     protected CompletableFuture<NotePath> deleteNoteFilePath(NotePath notePath){
+        return executeWithLedgerAccess(() -> {
+            notePath.progressMsg(ProtocolMesssages.STARTING, 3, 4, "Initializing pipeline");
+            
+            File ledger = notePath.getPathLedger();
+            SecretKey secretKey = getSecretKey();
+            ExecutorService execService = getExecService();
+            PipedOutputStream decryptedOutput = new PipedOutputStream();
+            PipedOutputStream parsedOutput = new PipedOutputStream();
 
-        notePath.progressMsg(ProtocolMesssages.STARTING,3, 4, "Initializing pipeline");
-        
-        File ledger = notePath.getPathLedger();
-        SecretKey secretKey = getSecretKey();
-        ExecutorService execService = getExecService();
-        PipedOutputStream decryptedOutput = new PipedOutputStream();
-        PipedOutputStream parsedOutput = new PipedOutputStream();
-
-        CompletableFuture<NoteBytesObject> decryptFuture = 
-            FileStreamUtils.performDecryption(ledger, decryptedOutput, secretKey, execService);
-        
-        CompletableFuture<Void> parseFuture = 
-            NotePathDelete.deleteFromPath(notePath, secretKey, decryptedOutput, parsedOutput, execService);
-        
-        CompletableFuture<NoteBytesObject> saveFuture = 
-            FileStreamUtils.saveEncryptedFileSwap(ledger, secretKey, parsedOutput, execService);
-        
-        return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
-            .whenComplete((v, ex) -> {
-                StreamUtils.safeClose(decryptedOutput);
-                StreamUtils.safeClose(parsedOutput);
-
-            }).thenCompose(v-> 
-                CompletableFuture.allOf(notePath.getCompletableList().toArray(new CompletableFuture[0]))
-            .thenCompose(nv->
-                CompletableFuture.completedFuture(notePath)
-            ));
-    
+            CompletableFuture<NoteBytesObject> decryptFuture = 
+                FileStreamUtils.performDecryption(ledger, decryptedOutput, secretKey, execService);
+            
+            CompletableFuture<Void> parseFuture = 
+                NotePathDelete.deleteFromPath(notePath, secretKey, decryptedOutput, parsedOutput, execService);
+            
+            CompletableFuture<NoteBytesObject> saveFuture = 
+                FileStreamUtils.saveEncryptedFileSwap(ledger, secretKey, parsedOutput, execService);
+            
+            return CompletableFuture.allOf(decryptFuture, parseFuture, saveFuture)
+                .whenComplete((v, ex) -> {
+                    StreamUtils.safeClose(decryptedOutput);
+                    StreamUtils.safeClose(parsedOutput);
+                })
+                .thenCompose(v -> 
+                    CompletableFuture.allOf(notePath.getCompletableList().toArray(new CompletableFuture[0]))
+                )
+                .thenApply(nv -> notePath);
+        }).thenCompose(future -> future);
     }
 
-     /**
+    /**
      * Parse bucket (nested structure) to collect file paths
      */
     public static void parseBucketForFiles(
@@ -263,7 +316,6 @@ public class NotePathFactory {
             }
         }
     }
-
 
     /**
      * Calculate disk space requirements based on collected files

@@ -149,15 +149,15 @@ public class BootstrapWizardProcess extends FlowProcess {
     private CompletableFuture<Void> showWelcomeScreen() {
         Log.logMsg("[BootstrapWizardProcess] **Showing Welcome Screen**");
         return terminal.clear()
-            .thenCompose(v -> terminal.println("=".repeat(60)))
+            .thenCompose(v -> terminal.println("=".repeat(80)))
             .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("    Welcome to Netnotes!", TerminalContainerHandle.TextStyle.BOLD))
+            .thenCompose(v -> terminal.println("                   Netnotes", TerminalContainerHandle.TextStyle.BOLD))
             .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("=".repeat(60)))
+            .thenCompose(v -> terminal.println("=".repeat(80)))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("This wizard will help you configure your system."))
             .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("First, we'll check if you have secure input (NoteDaemon) installed."))
+        
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("Press any key to continue...", TerminalContainerHandle.TextStyle.INFO))
             .thenCompose(v -> waitForKeyPress());

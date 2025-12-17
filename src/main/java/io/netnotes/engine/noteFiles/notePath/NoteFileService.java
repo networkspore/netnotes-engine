@@ -50,10 +50,11 @@ import javax.crypto.SecretKey;
  * NoteFileService - Encrypted file registry and operations
  * 
  * REFACTORED ARCHITECTURE:
- * - Works with SettingsData through NotePathFactory
+ * - Uses SerializedVirtualExecutor through NotePathFactory for ledger access
+ * - No more manual lock management (acquireLock/releaseLock)
+ * - All ledger operations are serialized automatically
+ * - Caller-controlled cancellation for all operations
  * - Provides recovery operations for AppData
- * - Does NOT expose SettingsData to external callers
- * - Coordinates file operations with password/key management
  */
 public class NoteFileService extends NotePathFactory {
     private final Map<NoteStringArrayReadOnly, ManagedNoteFileInterface> m_registry = new ConcurrentHashMap<>();
@@ -74,14 +75,13 @@ public class NoteFileService extends NotePathFactory {
             return CompletableFuture.completedFuture(new NoteFile(notePath, existing));
         }
 
-        return acquireLock()
-            .thenCompose(filePathLedger ->super.getNoteFilePath(filePathLedger, notePath))
+        // Execute synchronous registry check with ledger access, then chain async operations
+        return executeWithLedgerAccess(() -> notePath)
+            .thenCompose(path -> getNoteFilePath(path))
             .thenApply(filePath -> {
                 ManagedNoteFileInterface noteFileInterface = m_registry.computeIfAbsent(notePath,
                     k -> new ManagedNoteFileInterface(k, filePath, this));
                 return new NoteFile(notePath, noteFileInterface);
-            }).whenComplete((result, failure)->{
-                releaseLock();
             });
     }
     
@@ -93,14 +93,14 @@ public class NoteFileService extends NotePathFactory {
     // ===== KEY UPDATE COORDINATION =====
     
     public CompletableFuture<File> prepareAllForKeyUpdate() {
-        return acquireLock()
-            .thenCompose(filePathLedger -> {
+        return executeWithLedgerAccess(() -> getFilePathLedger())
+            .thenCompose(ledgerFile -> {
                 List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
                     .map(ManagedNoteFileInterface::prepareForKeyUpdate)
                     .collect(Collectors.toList());
                 
                 return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]))
-                    .thenApply(v -> filePathLedger);
+                    .thenApply(v -> ledgerFile);
             });
     }
 
@@ -110,24 +110,23 @@ public class NoteFileService extends NotePathFactory {
 
     public CompletableFuture<File> prepareAllForShutdown(AsyncNoteBytesWriter progressWriter) {
         if(progressWriter != null){
-
             ProgressMessage.writeAsync("[NoteFileService]", 0, -1, "Preparing for shutdown", 
                 progressWriter);
         }
-        return acquireLock()
-            .thenCompose(filePathLedger -> {
+        
+        return executeWithLedgerAccess(() -> getFilePathLedger())
+            .thenCompose(ledgerFile -> {
                 List<CompletableFuture<Void>> lockFutures = m_registry.values().stream()
-                    .map(managedInterface -> managedInterface.perpareForShutdown(progressWriter) )
+                    .map(managedInterface -> managedInterface.perpareForShutdown(progressWriter))
                     .collect(Collectors.toList());
                 
                 return CompletableFuture.allOf(lockFutures.toArray(new CompletableFuture[0]))
-                    .thenApply(v-> filePathLedger);
+                    .thenApply(v -> ledgerFile);
             });
     }
     
     public void completeKeyUpdateForAll() {
         m_registry.values().forEach(ManagedNoteFileInterface::completeKeyUpdate);
-        releaseLock();
     }
     
     // ===== PASSWORD CHANGE OPERATIONS =====
@@ -152,8 +151,8 @@ public class NoteFileService extends NotePathFactory {
             "Acquiring file locks", progressWriter);
 
         return prepareAllForKeyUpdate()
-            .thenCompose(filePathLedger->
-                super.updateFilePathLedgerEncryption(filePathLedger, progressWriter, 
+            .thenCompose(filePathLedger ->
+                super.updateFilePathLedgerEncryption(progressWriter, 
                     oldPassword, newPassword, batchSize))
             .whenComplete((result, throwable) -> {
                 ProgressMessage.writeAsync(ProtocolMesssages.STOPPING, 0, -1, 
@@ -164,97 +163,11 @@ public class NoteFileService extends NotePathFactory {
     }
 
     // ===== RECOVERY OPERATIONS =====
-   /*
-    public CompletableFuture<RecoveryAnalysis> analyzeEncryptionState(
-        SecretKey currentKey,
-        SecretKey oldKey) {
-    
-    return collectAllFilePaths()  // From ledger
-        .thenCompose(filePaths -> {
-            List<CompletableFuture<FileEncryptionState>> checks = filePaths.stream()
-                .map(path -> determineFileState(path, currentKey, oldKey))
-                .collect(Collectors.toList());
-            
-            return CompletableFuture.allOf(checks.toArray(new CompletableFuture[0]))
-                .thenApply(v -> {
-                    RecoveryAnalysis analysis = new RecoveryAnalysis();
-                    for (CompletableFuture<FileEncryptionState> check : checks) {
-                        FileEncryptionState state = check.join();
-                        switch (state.state) {
-                            case ACCESSIBLE_WITH_CURRENT_KEY:
-                                analysis.alreadyUpdated.add(state);
-                                break;
-                            case ACCESSIBLE_WITH_OLD_KEY:
-                                analysis.needsReEncryption.add(state);
-                                break;
-                            case INACCESSIBLE:
-                                analysis.corrupted.add(state);
-                                break;
-                        }
-                    }
-                    return analysis;
-                });
-        });
-}
 
-private CompletableFuture<FileEncryptionState> determineFileState(
-        String filePath,
-        SecretKey currentKey,
-        SecretKey oldKey) {
-    
-    return CompletableFuture.supplyAsync(() -> {
-        File file = new File(filePath);
-        
-        if (!file.exists()) {
-            return new FileEncryptionState(file, State.INACCESSIBLE, null);
-        }
-        
-        // Try current key first
-        if (canDecryptFile(file, currentKey)) {
-            return new FileEncryptionState(file, State.ACCESSIBLE_WITH_CURRENT_KEY, currentKey);
-        }
-        
-        // Try old key if available
-        if (oldKey != null && canDecryptFile(file, oldKey)) {
-            return new FileEncryptionState(file, State.ACCESSIBLE_WITH_OLD_KEY, oldKey);
-        }
-        
-        // Neither works
-        return new FileEncryptionState(file, State.INACCESSIBLE, null);
-        
-    }, getExecService());
-}
-
-private boolean canDecryptFile(File file, SecretKey key) {
-    try {
-        // Read just enough to verify decryption
-        // Don't need to read entire file
-        byte[] header = new byte[CryptoService.AES_IV_SIZE + 1024]; // IV + small chunk
-        
-        try (FileInputStream fis = new FileInputStream(file)) {
-            int read = fis.read(header);
-            if (read < CryptoService.AES_IV_SIZE) {
-                return false; // File too small
-            }
-        }
-        
-        // Try to decrypt header
-        byte[] iv = Arrays.copyOfRange(header, 0, CryptoService.AES_IV_SIZE);
-        byte[] encryptedChunk = Arrays.copyOfRange(header, CryptoService.AES_IV_SIZE, header.length);
-        
-        Cipher cipher = CryptoService.createDecryptCipher(key, iv);
-        cipher.doFinal(encryptedChunk); // Will throw if wrong key
-        
-        return true;
-        
-    } catch (Exception e) {
-        return false;
-    }
-}*/
-
-    // NoteFileService.investigateFileEncryptionState()
+    /**
+     * Investigate file encryption state with automatic ledger access management
+     */
     public CompletableFuture<FileEncryptionAnalysis> investigateFileEncryptionState() {
-        
         SecretKey currentKey = getSettingsData().getSecretKey();
         SecretKey oldKey = getSettingsData().getOldKey();
         
@@ -263,14 +176,9 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 new IllegalStateException("Old key not available for investigation"));
         }
         
-        return acquireLock()
-            .thenCompose(ledgerFile -> {
-                return collectFilePathsFromLedger(ledgerFile)
-                    .thenCompose(filePaths -> analyzeFiles(filePaths, currentKey, oldKey))
-                    .whenComplete((analysis, ex) -> {
-                        releaseLock();
-                    });
-            });
+        return executeWithLedgerAccess(() -> getFilePathLedger())
+            .thenCompose(ledgerFile -> collectFilePathsFromLedger(ledgerFile))
+            .thenCompose(filePaths -> analyzeFiles(filePaths, currentKey, oldKey));
     }
 
     private CompletableFuture<FileEncryptionAnalysis> analyzeFiles(
@@ -362,11 +270,11 @@ private boolean canDecryptFile(File file, SecretKey key) {
         
         try {
             int headerSize = CryptoService.AES_IV_SIZE + 1024;
-            headerSize =  headerSize > file.length() ? (int) file.length() : headerSize;
+            headerSize = headerSize > file.length() ? (int) file.length() : headerSize;
             // Read just enough to verify decryption
             byte[] header = new byte[headerSize];
             int read = 0;
-            try (NoteBytesReader reader = new NoteBytesReader(new FileInputStream(file));) {
+            try (NoteBytesReader reader = new NoteBytesReader(new FileInputStream(file))) {
                 read = reader.read(header, 0, headerSize);
                 if (read < CryptoService.AES_IV_SIZE) {
                     return false;
@@ -423,31 +331,18 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return Collections.unmodifiableMap(fileStates);
         }
         
-        /**
-         * Mark a single file as completed
-         * Thread-safe for concurrent updates
-         */
         public synchronized void markFileCompleted(String path) {
             completedFiles.add(path);
         }
         
-        /**
-         * Mark multiple files as completed
-         */
         public synchronized void markFilesCompleted(List<String> paths) {
             completedFiles.addAll(paths);
         }
         
-        /**
-         * Check if a file has been completed
-         */
         public boolean isFileCompleted(String path) {
             return completedFiles.contains(path);
         }
         
-        /**
-         * Get files that still need updating (excluding completed)
-         */
         public List<String> getFilesNeedingUpdate() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.OLD_KEY_NEEDS_UPDATE)
@@ -456,9 +351,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get all files that originally needed updating (before completion tracking)
-         */
         public List<String> getAllFilesNeedingUpdate() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.OLD_KEY_NEEDS_UPDATE)
@@ -466,9 +358,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get files that need swap (excluding completed)
-         */
         public List<String> getFilesNeedingSwap() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.OLD_KEY_WITH_CURRENT_TMP ||
@@ -478,9 +367,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get all files that originally needed swap
-         */
         public List<String> getAllFilesNeedingSwap() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.OLD_KEY_WITH_CURRENT_TMP ||
@@ -489,9 +375,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get files that need cleanup (excluding completed)
-         */
         public List<String> getFilesNeedingCleanup() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.CURRENT_KEY_WITH_TMP)
@@ -500,9 +383,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get all files that originally needed cleanup
-         */
         public List<String> getAllFilesNeedingCleanup() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.CURRENT_KEY_WITH_TMP)
@@ -510,9 +390,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Get corrupted files
-         */
         public List<String> getCorruptedFiles() {
             return fileStates.entrySet().stream()
                 .filter(e -> e.getValue() == FileState.CORRUPT ||
@@ -522,18 +399,12 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 .collect(Collectors.toList());
         }
         
-        /**
-         * Check if recovery is needed (accounting for completed files)
-         */
         public boolean needsRecovery() {
             return !getFilesNeedingUpdate().isEmpty() ||
                 !getFilesNeedingSwap().isEmpty() ||
                 !getFilesNeedingCleanup().isEmpty();
         }
         
-        /**
-         * Get progress summary
-         */
         public String getProgressSummary() {
             int totalUpdate = getAllFilesNeedingUpdate().size();
             int completedUpdate = (int) getAllFilesNeedingUpdate().stream()
@@ -563,9 +434,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
             );
         }
         
-        /**
-         * Get current state summary
-         */
         public String getSummary() {
             long ok = fileStates.values().stream()
                 .filter(s -> s == FileState.CURRENT_KEY_OK).count();
@@ -605,9 +473,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return summary.toString();
         }
         
-        /**
-         * Get detailed report with completion status
-         */
         public String getDetailedReport() {
             StringBuilder report = new StringBuilder();
             
@@ -618,7 +483,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
             report.append(getSummary()).append("\n");
             
             if (completedFiles.size() > 0) {
-                report.append("─────────────────────────────────────\n");
+                report.append("───────────────────────────────────────\n");
                 report.append(getProgressSummary()).append("\n");
             }
             
@@ -627,16 +492,10 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return report.toString();
         }
         
-        /**
-         * Reset completion tracking (for re-analysis)
-         */
         public void resetCompletionTracking() {
             completedFiles.clear();
         }
         
-        /**
-         * Get completion percentage
-         */
         public double getCompletionPercentage() {
             int totalIssues = getAllFilesNeedingUpdate().size() +
                             getAllFilesNeedingSwap().size() +
@@ -650,9 +509,8 @@ private boolean canDecryptFile(File file, SecretKey key) {
         }
     }
 
-
-    public CompletableFuture<Boolean> cleanupFiles(List<String> files){
-        return CompletableFuture.supplyAsync(()->{
+    public CompletableFuture<Boolean> cleanupFiles(List<String> files) {
+        return CompletableFuture.supplyAsync(() -> {
             boolean succeeded = true;
             for (String pathStr : files) {
                 File tmpFile = new File(pathStr + ".tmp");
@@ -666,16 +524,10 @@ private boolean canDecryptFile(File file, SecretKey key) {
                     succeeded = false;
                 }
             }
-        
             return succeeded;
         });
     }
 
-    /**
-     * Generic re-encryption operation (PRIVATE)
-     * 
-     * @param operation Label for logging ("COMPLETE" or "ROLLBACK")
-     */
     public CompletableFuture<Boolean> reEncryptFiles(
         List<String> filePaths,
         SecretKey decryptKey,
@@ -684,18 +536,13 @@ private boolean canDecryptFile(File file, SecretKey key) {
         int batchSize,
         AsyncNoteBytesWriter progressWriter
     ) {
-        
-        // Delegate to adaptive version without analysis tracking
         return reEncryptFilesAdaptive(
             filePaths, decryptKey, encryptKey, operation, 
             batchSize, progressWriter, null);
     }
 
     public CompletableFuture<Boolean> performFinishSwaps(List<String> files) {
-        
         return CompletableFuture.supplyAsync(() -> {
-
-           // List<String> failed = new ArrayList<>();
             boolean isSuccess = true;
             for (String pathStr : files) {
                 File file = new File(pathStr);
@@ -703,61 +550,39 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 
                 try {
                     if (!file.exists() && tmpFile.exists()) {
-                        // Tmp ready, just rename
                         Files.move(tmpFile.toPath(), file.toPath(), 
                             StandardCopyOption.REPLACE_EXISTING);
                     } else if (file.exists() && tmpFile.exists()) {
-                        // Both exist - verify tmp is newer/correct
                         SecretKey currentKey = getSettingsData().getSecretKey();
                         if (canDecryptFile(tmpFile, currentKey)) {
-                            // Tmp is correct, replace file
                             Files.move(tmpFile.toPath(), file.toPath(), 
                                 StandardCopyOption.REPLACE_EXISTING);
-    
                         } else {
-                          // failed.add(pathStr);
-                          isSuccess = false;
+                            isSuccess = false;
                         }
                     }
                 } catch (IOException e) {
-                   // failed.add(pathStr);
                     isSuccess = false;
                     Log.logError("Perform finish swaps failed: " + e.toString());
                 }
-                
             }
             return isSuccess;
         });
-    
     }
 
     // ===== DISK SPACE VALIDATION =====
     
     /**
-     * Validate disk space for re-encryption operation
-     * 
-     * Checks if there's enough space to create temporary files for all
-     * encrypted files during password change operation.
+     * Validate disk space for re-encryption with automatic ledger access
      */
     public CompletableFuture<DiskSpaceValidation> validateDiskSpaceForReEncryption() {
-        return acquireLock()
-            .thenCompose(ledgerFile -> {
-                try {
-                    return collectFilePathsFromLedger(ledgerFile)
-                        .thenApply(files -> calculateDiskSpaceRequirements(files, ledgerFile))
-                        .whenComplete((validation, ex) -> {
-                            releaseLock();
-                        });
-                } catch (Exception e) {
-                    releaseLock();
-                    throw new RuntimeException("Failed to validate disk space", e);
-                }
-            });
+        return executeWithLedgerAccess(() -> getFilePathLedger())
+            .thenCompose(ledgerFile -> collectFilePathsFromLedger(ledgerFile)
+                .thenApply(files -> calculateDiskSpaceRequirements(files, ledgerFile)));
     }
         
     /**
      * Collect all file paths from the encrypted ledger
-     * Uses the established pattern: decrypt -> parse -> collect
      */
     private CompletableFuture<List<File>> collectFilePathsFromLedger(File ledgerFile) {
         if (!ledgerFile.exists() || !ledgerFile.isFile()) {
@@ -769,19 +594,15 @@ private boolean canDecryptFile(File file, SecretKey key) {
             PipedOutputStream decryptedOutput = new PipedOutputStream();
             
             try {
-                // Start decryption using factory's method (handles secret key internally)
                 CompletableFuture<NoteBytesObject> decryptFuture = 
                     performDecryption(ledgerFile, decryptedOutput);
                 
-                // Parse in parallel
                 PipedInputStream decryptedInput = new PipedInputStream(decryptedOutput);
                 
                 try (NoteBytesReader reader = new NoteBytesReader(decryptedInput)) {
-                    // Parse root level - don't need to track bytes for collection
                     parseRootLevelForFiles(reader, files);
                 }
                 
-                // Wait for decryption to complete
                 decryptFuture.join();
                 
             } catch (IOException e) {
@@ -794,9 +615,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
             
         }, getExecService());
     }
-        
 
-   
     // ===== FILE DELETION =====
     
     public CompletableFuture<Void> deleteNoteFilePath(
@@ -805,63 +624,58 @@ private boolean canDecryptFile(File file, SecretKey key) {
         AsyncNoteBytesWriter progressWriter
     ) {
         NoteStringArrayReadOnly path = contextPath.getSegments();
-        if(path == null){
+        if(path == null || path.byteLength() == 0 || path.size() == 0) {
             StreamUtils.safeClose(progressWriter);
             return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Null path provided"));
+                new IllegalArgumentException("Null or empty path provided"));
         }
 
-        if(path.byteLength() == 0 || path.size() == 0){
-            StreamUtils.safeClose(progressWriter);
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Null path provided"));
-        }
-
-        if(progressWriter != null){
+        if(progressWriter != null) {
             ProgressMessage.writeAsync(ProtocolMesssages.STARTING,
                 0, 4, "Acquiring lock", progressWriter);
         }
         
         List<ManagedNoteFileInterface> interfaceList = new ArrayList<>();
 
-        return acquireLock().thenCompose((filePathLedger)->{
+        return executeWithLedgerAccess(() -> {
+            File filePathLedger = getFilePathLedger();
             
             if(!filePathLedger.exists() || !filePathLedger.isFile() || 
-                filePathLedger.length() <= CryptoService.AES_IV_SIZE){
+                filePathLedger.length() <= CryptoService.AES_IV_SIZE) {
                 throw new IllegalArgumentException(
                     "Invalid ledger, inaccessible or insufficient size provided");
             }
 
-            NotePath notePath = new NotePath(filePathLedger, path, recursive, progressWriter);
-
+            return new NotePath(filePathLedger, path, recursive, progressWriter);
+        }).thenCompose(notePath -> {
             notePath.progressMsg(ProtocolMesssages.STARTING, 2, 4,
                 "Initial lock acquired, preparing registry interfaces");
             
             return prepareForShutdown(path, recursive, interfaceList)
-                .thenCompose(v->deleteNoteFilePath(notePath));
-                
-        }).whenComplete((notePath, ex)->{
-            int toRemoveSize = interfaceList.size();
-            for(int i = 0; i < toRemoveSize; i++){
-                ManagedNoteFileInterface managedInterface = interfaceList.get(i);
-                boolean isDeleted = !managedInterface.isFile();
-                
-                if(managedInterface.isLocked()){
-                    managedInterface.releaseLock();
-                }
-                
-                notePath.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, 
-                    managedInterface.getId().getAsString(), new NoteBytesPair[]{
-                        new NoteBytesPair(Keys.STATUS, 
-                            !managedInterface.isLocked() && isDeleted ? 
-                                ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
-                        )
-                    });
-            }
-            
-            StreamUtils.safeClose(progressWriter);
-            releaseLock();
-        }).thenApply(notePath->null);
+                .thenCompose(v -> super.deleteNoteFilePath(notePath))
+                .whenComplete((result, ex) -> {
+                    int toRemoveSize = interfaceList.size();
+                    for(int i = 0; i < toRemoveSize; i++) {
+                        ManagedNoteFileInterface managedInterface = interfaceList.get(i);
+                        boolean isDeleted = !managedInterface.isFile();
+                        
+                        if(managedInterface.isLocked()) {
+                            managedInterface.releaseLock();
+                        }
+                        
+                        result.progressMsg(ProtocolMesssages.STOPPING, i, toRemoveSize, 
+                            managedInterface.getId().getAsString(), new NoteBytesPair[]{
+                                new NoteBytesPair(Keys.STATUS, 
+                                    !managedInterface.isLocked() && isDeleted ? 
+                                        ProtocolMesssages.SUCCESS : ProtocolMesssages.FAILED
+                                )
+                            });
+                    }
+                    
+                    StreamUtils.safeClose(progressWriter);
+                })
+                .thenApply(notePath2 -> null);
+        });
     }
     
     private CompletableFuture<Void> prepareForShutdown(
@@ -869,7 +683,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
             boolean recursive,
             List<ManagedNoteFileInterface> interfaceList) {
    
-        if(recursive){
+        if(recursive) {
             List<CompletableFuture<Void>> list = new ArrayList<>();
             
             Iterator<Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface>> iterator = 
@@ -879,7 +693,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 Map.Entry<NoteStringArrayReadOnly,ManagedNoteFileInterface> entry = 
                     iterator.next();
                 list.add(entry.getValue().perpareForShutdown());
-                if(interfaceList != null){
+                if(interfaceList != null) {
                     interfaceList.add(entry.getValue());
                 }
                 iterator.remove(); 
@@ -888,8 +702,8 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return CompletableFuture.allOf(list.toArray(new CompletableFuture[0]));
         } else {
             ManagedNoteFileInterface managedInterface = m_registry.remove(path);
-            if(managedInterface != null){
-                if(interfaceList != null){
+            if(managedInterface != null) {
+                if(interfaceList != null) {
                     interfaceList.add(managedInterface);
                 }
                 return managedInterface.perpareForShutdown();
@@ -938,22 +752,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
 
     /**
      * Adaptive re-encryption with resource monitoring
-     * 
-     * Features:
-     * - Monitors disk space before each batch
-     * - Monitors memory availability
-     * - Adjusts batch size dynamically
-     * - Tracks completed files in analysis
-     * - Can pause/resume if resources become scarce
-     * 
-     * @param filePaths Files to re-encrypt
-     * @param decryptKey Key to decrypt with
-     * @param encryptKey Key to encrypt with
-     * @param operation Label for logging
-     * @param initialBatchSize Starting batch size
-     * @param progressWriter Progress feedback
-     * @param analysis Optional analysis to update (can be null)
-     * @return true if all files succeeded
      */
     public CompletableFuture<Boolean> reEncryptFilesAdaptive(
             List<String> filePaths,
@@ -980,12 +778,9 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 AtomicInteger currentBatchSize = new AtomicInteger(initialBatchSize);
                 
                 File dataDir = SettingsData.getDataDir();
-                
-                // Process in adaptive batches
                 List<String> remainingFiles = new ArrayList<>(filePaths);
                 
                 while (!remainingFiles.isEmpty()) {
-                    // Check resources before each batch
                     ResourceCheck resourceCheck = checkResourceAvailability(
                         dataDir, remainingFiles, currentBatchSize.get());
                     
@@ -1000,11 +795,9 @@ private boolean canDecryptFile(File file, SecretKey key) {
                                 progressWriter);
                         }
                         
-                        // Return partial success if we completed some files
                         return completed.get() > 0;
                     }
                     
-                    // Adjust batch size if recommended
                     if (resourceCheck.recommendedBatchSize < currentBatchSize.get()) {
                         Log.logMsg(String.format(
                             "[NoteFileService] Adjusting batch size: %d -> %d",
@@ -1012,13 +805,11 @@ private boolean canDecryptFile(File file, SecretKey key) {
                         currentBatchSize.set(resourceCheck.recommendedBatchSize);
                     }
                     
-                    // Take next batch
                     int batchSize = Math.min(currentBatchSize.get(), remainingFiles.size());
                     List<String> currentBatch = remainingFiles.subList(0, batchSize);
                     List<String> batchCopy = new ArrayList<>(currentBatch);
-                    currentBatch.clear(); // Remove from remaining
+                    currentBatch.clear();
                     
-                    // Process batch
                     Semaphore semaphore = new Semaphore(batchSize, true);
                     List<CompletableFuture<Boolean>> batchFutures = new ArrayList<>();
                     
@@ -1044,13 +835,11 @@ private boolean canDecryptFile(File file, SecretKey key) {
                                             progressWriter);
                                     }
                                     
-                                    // Re-encrypt
                                     FileStreamUtils.updateFileEncryption(
                                         decryptKey, encryptKey, file, tmpFile, progressWriter);
                                     
                                     completed.incrementAndGet();
                                     
-                                    // Update analysis if provided
                                     if (analysis != null) {
                                         analysis.markFileCompleted(filePath);
                                     }
@@ -1084,10 +873,8 @@ private boolean canDecryptFile(File file, SecretKey key) {
                         batchFutures.add(fileFuture);
                     }
                     
-                    // Wait for batch to complete
                     CompletableFuture.allOf(batchFutures.toArray(new CompletableFuture[0])).join();
                     
-                    // Log batch completion
                     Log.logMsg(String.format(
                         "[NoteFileService] Batch complete: %d/%d files remaining",
                         remainingFiles.size(), filePaths.size()));
@@ -1109,10 +896,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
         }, VirtualExecutors.getVirtualExecutor());
     }
 
-
-    /**
-     * Check resource availability before processing batch
-     */
     private ResourceCheck checkResourceAvailability(
             File dataDir,
             List<String> remainingFiles,
@@ -1120,7 +903,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
         
         ResourceCheck check = new ResourceCheck();
         
-        // Check disk space
         long availableDisk = dataDir.getUsableSpace();
         long bufferSpace = 100 * 1024 * 1024; // 100MB buffer
         long safeDiskSpace = availableDisk - bufferSpace;
@@ -1131,7 +913,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return check;
         }
         
-        // Calculate space needed for proposed batch
         long batchSpaceNeeded = 0;
         int filesInBatch = Math.min(proposedBatchSize, remainingFiles.size());
         
@@ -1142,9 +923,7 @@ private boolean canDecryptFile(File file, SecretKey key) {
             }
         }
         
-        // Check if we have enough space for this batch
         if (batchSpaceNeeded > safeDiskSpace) {
-            // Calculate how many files we CAN process
             long spaceAccumulator = 0;
             int maxFiles = 0;
             
@@ -1170,7 +949,6 @@ private boolean canDecryptFile(File file, SecretKey key) {
                 return check;
             }
             
-            // Reduce batch size
             check.canProceed = true;
             check.recommendedBatchSize = maxFiles;
             check.reason = String.format(
@@ -1181,23 +959,19 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return check;
         }
         
-        // Check memory availability (estimate based on JVM)
         Runtime runtime = Runtime.getRuntime();
         long maxMemory = runtime.maxMemory();
         long allocatedMemory = runtime.totalMemory();
         long freeMemory = runtime.freeMemory();
         long availableMemory = maxMemory - allocatedMemory + freeMemory;
         
-        // Rough estimate: need ~10% of file size in memory per concurrent operation
         long memoryNeeded = (long) (batchSpaceNeeded * 0.1);
         
         if (memoryNeeded > availableMemory * 0.5) {
-            // Using more than 50% of available memory - reduce batch
             int memoryBasedBatch = (int) ((availableMemory * 0.5) / 
                 (batchSpaceNeeded / (double) filesInBatch * 0.1));
             
             if (memoryBasedBatch < 1) {
-                // Try garbage collection and check again
                 System.gc();
                 
                 long newAvailable = runtime.maxMemory() - runtime.totalMemory() + 
@@ -1223,25 +997,18 @@ private boolean canDecryptFile(File file, SecretKey key) {
             return check;
         }
         
-        // All checks passed
         check.canProceed = true;
         check.recommendedBatchSize = proposedBatchSize;
         check.reason = "Resources OK";
         return check;
     }
 
-    /**
-     * Resource check result
-     */
     private static class ResourceCheck {
         boolean canProceed = true;
         int recommendedBatchSize = 1;
         String reason = "";
     }
 
-    /**
-     * Delete corrupted files from disk
-     */
     public CompletableFuture<Boolean> deleteCorruptedFiles(List<String> corruptedFiles) {
         if (corruptedFiles == null || corruptedFiles.isEmpty()) {
             return CompletableFuture.completedFuture(true);
@@ -1277,19 +1044,18 @@ private boolean canDecryptFile(File file, SecretKey key) {
         }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter){
-        return prepareAllForShutdown().whenComplete((v, ex)->{
-                if(ex != null){
-                    Throwable cause = ex.getCause();
-                    String msg = "Error shutting down note file service: " + 
-                        (cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString());
-                    Log.logError(msg);
-                    ex.printStackTrace();
-                    if(progressWriter != null){
-                        TaskMessages.writeErrorAsync("AppData", msg, ex, progressWriter);
-                    }
+    public CompletableFuture<Void> shutdown(AsyncNoteBytesWriter progressWriter) {
+        return prepareAllForShutdown().whenComplete((v, ex) -> {
+            if(ex != null) {
+                Throwable cause = ex.getCause();
+                String msg = "Error shutting down note file service: " + 
+                    (cause == null ? ex.getMessage() : ex.getMessage() + ": " + cause.toString());
+                Log.logError(msg);
+                ex.printStackTrace();
+                if(progressWriter != null) {
+                    TaskMessages.writeErrorAsync("AppData", msg, ex, progressWriter);
                 }
-                //return null;
-            }).thenApply((v)->null);
+            }
+        }).thenApply((v) -> null);
     }
 }

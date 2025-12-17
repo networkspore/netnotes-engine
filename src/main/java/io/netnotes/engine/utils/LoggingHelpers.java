@@ -5,11 +5,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -21,6 +17,7 @@ import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 
 public class LoggingHelpers {
     public enum LogLevel{
@@ -49,13 +46,11 @@ public class LoggingHelpers {
         
         private static File logFile = createTimedLogFile();
         
-        // Single-threaded executor for all log writes
-        private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r);
-            t.setDaemon(true);
-            t.setName("LogWriter");
-            return t;
-        });
+        // Serialized virtual thread executor for all log writes
+        private static final SerializedVirtualExecutor logExecutor = new SerializedVirtualExecutor();
+        
+        // Timeout for individual log operations
+        private static final long LOG_TIMEOUT_MS = 2000;
         
         private static volatile int logLevel = LogLevel.ALL.getValue();
 
@@ -77,15 +72,15 @@ public class LoggingHelpers {
         }
        
         public static CompletableFuture<Void> setLogLevel(int level){
-            return CompletableFuture.runAsync(() -> {
+            return logExecutor.execute(() -> {
                 Log.logLevel = level;
-            }, logExecutor);
+            });
         }
 
         public static CompletableFuture<Void> setLogFile(File file){
-            return CompletableFuture.runAsync(() -> {
+            return logExecutor.execute(() -> {
                 Log.logFile = file;
-            }, logExecutor);
+            });
         }
 
         public static CompletableFuture<Void> log(String scope, String msg, LogLevel level) {
@@ -139,7 +134,6 @@ public class LoggingHelpers {
             }
    
             return enqueue(LogLevel.ALL.getValue(), () -> {
-                
                 writeLogNoteBytes(logFile, map);
             });
         }
@@ -150,29 +144,33 @@ public class LoggingHelpers {
             });
         }
 
-        // Core executor with timeout
+        /**
+         * Enqueues a log action with priority checking and timeout handling.
+         * Returns a CompletableFuture that completes when the log is written,
+         * times out, or fails.
+         */
         private static CompletableFuture<Void> enqueue(int priority, Runnable action) {
+            // Skip if priority too low
             if (priority > logLevel) {
                 return CompletableFuture.completedFuture(null);
             }
             
-            // Emergency fallback - if submit fails, write to stderr immediately
-            try {
-                return CompletableFuture.runAsync(() -> {
-                    Future<?> future = logExecutor.submit(action);
-                    try {
-                        future.get(2, TimeUnit.SECONDS);
-                    } catch (TimeoutException e) {
-                        future.cancel(true);
-                        System.err.println("[LOG TIMEOUT] Write hung");
-                    } catch (Exception e) {
-                        System.err.println("[LOG ERROR] " + e.toString());
+            // Submit to executor with timeout handling
+            CompletableFuture<Void> future = logExecutor.execute(action);
+            
+            // Apply timeout with fallback to stderr
+            return future
+                .orTimeout(LOG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .whenComplete((v, ex) -> {
+                    // Log timeout or error to stderr as fallback
+                    if(ex != null){
+                        if (ex instanceof java.util.concurrent.TimeoutException) {
+                            System.err.println("[LOG TIMEOUT] Write hung after " + LOG_TIMEOUT_MS + "ms");
+                        } else {
+                            System.err.println("[LOG ERROR] " + ex.toString());
+                        }
                     }
-                }, Executors.newVirtualThreadPerTaskExecutor());
-            } catch (Exception e) {
-                System.err.println("[LOG SUBMIT FAILED] " + e.toString());
-                return CompletableFuture.completedFuture(null);
-            }
+                });
         }
 
         private static void write(String text) {
@@ -194,6 +192,32 @@ public class LoggingHelpers {
 
         boolean shouldLog(LogLevel priority) {
             return priority.getValue() <= logLevel;
+        }
+        
+        /**
+         * Initiates graceful shutdown of the logging executor.
+         * Queued logs will complete, but new logs will be rejected.
+         */
+        public static void shutdown() {
+            logExecutor.shutdown();
+        }
+        
+        /**
+         * Immediately shuts down the logging executor and cancels queued logs.
+         */
+        public static void shutdownNow() {
+            logExecutor.shutdownNow();
+        }
+        
+        /**
+         * Waits for all queued logs to complete after shutdown.
+         * 
+         * @param timeout maximum time to wait
+         * @param unit time unit
+         * @return true if terminated, false if timeout
+         */
+        public static boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return logExecutor.awaitTermination(timeout, unit);
         }
     }
 
