@@ -1,14 +1,14 @@
-package io.netnotes.engine.io.input.events;
+package io.netnotes.engine.utils.exec;
 
-import java.util.concurrent.Executor;
+
 import java.util.function.Consumer;
 
 public final class ExecutorConsumer<T> implements Consumer<T> {
 
-    private final Executor executor;
+    private final SerializedVirtualExecutor executor;
     private final Consumer<T> delegate;
 
-    public ExecutorConsumer(Executor executor, Consumer<T> delegate) {
+    public ExecutorConsumer(SerializedVirtualExecutor executor, Consumer<T> delegate) {
         this.executor = executor;
         this.delegate = delegate;
     }

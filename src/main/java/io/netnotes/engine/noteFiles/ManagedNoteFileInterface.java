@@ -209,10 +209,8 @@ public class ManagedNoteFileInterface implements NoteFile.NoteFileInterface {
     }
     
     /**
-     * @deprecated Locks are now managed automatically.
-     * Check getQueueSize() > 0 to see if operations are pending.
+     * Convenience method to see if operations are pending.
      */
-    @Deprecated
     @Override
     public boolean isLocked() {
         return m_fileExecutor.getQueueSize() > 0 || !m_fileExecutor.isTerminated();

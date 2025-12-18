@@ -8,8 +8,9 @@ public final class KeyCharEvent implements RoutedEvent {
     private final ContextPath sourcePath;
     private final NoteBytes codepointBytes;
     private final int stateFlags;
-    private int codepointCache = -1;
+    private int[] codepointCache = null;
     private String strCache = null;
+    private NoteBytes utf8Cache = null;
     public KeyCharEvent(ContextPath sourcePath, NoteBytes codepoint, int stateFlags) {
         this.sourcePath = sourcePath;
         this.codepointBytes = codepoint;
@@ -19,27 +20,44 @@ public final class KeyCharEvent implements RoutedEvent {
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
     public NoteBytes getCodepointData() { return codepointBytes; }
-    public int getCodepoint(){
-        if(codepointCache != -1){
+    public int stateFlags() { return stateFlags; }
+
+    public int[] getCodepoint(){
+        if(codepointCache != null){
             return codepointCache;
         }
-        codepointCache = codepointBytes.getAsInt();
+        codepointCache = new int[] {codepointBytes.getAsInt()};
         return codepointCache;
     }
+
     public String getString(){
         if(strCache != null){
             return strCache;
         }
-        NoteBytes utf8 = getUTF8();
-        if(utf8 == null){
-            strCache = "";
+        if(codepointCache != null){
+            strCache = new String(codepointCache, 0, 1);
             return strCache;
         }
-        strCache = new String(utf8.getBytes());
+        NoteBytes utf8 = getUTF8();
+        strCache = utf8.getAsString();
         return strCache;
     }
-    public int stateFlags() { return stateFlags; }
-    public NoteBytes getUTF8() { return Keyboard.getCharBytes(codepointBytes); }
+    
+    public NoteBytes getUTF8() { 
+        if(utf8Cache == null){
+            NoteBytes charBytes = Keyboard.codePointToASCII(codepointBytes);
+            if(charBytes != null){
+                utf8Cache = charBytes;
+                return utf8Cache;
+            }else{
+                int[] cp = getCodepoint();
+                utf8Cache = Keyboard.codePointToUtf8(cp[0]);
+                return utf8Cache;
+            }
+        }else{
+            return utf8Cache;
+        }
+    }
 
     @Override
     public String toString(){

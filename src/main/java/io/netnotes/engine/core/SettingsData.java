@@ -27,8 +27,8 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.JarHelpers;
-import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.VirtualExecutors;
 
 public class SettingsData {
     public static final NoteBytes BCRYPT_KEY = new NoteBytes("bcrypt_key");

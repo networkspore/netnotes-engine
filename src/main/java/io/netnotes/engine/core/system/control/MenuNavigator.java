@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
@@ -16,12 +15,14 @@ import io.netnotes.engine.io.input.Keyboard;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
-import io.netnotes.engine.io.input.events.ExecutorConsumer;
+import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.ExecutorConsumer;
+import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 
 /**
  * MenuNavigator - Keyboard-driven terminal menu navigation
@@ -57,7 +58,7 @@ public class MenuNavigator {
     private static final int MAX_VISIBLE_ITEMS = 15;
     
     // Keyboard event consumer
-    private final Consumer<RoutedEvent> keyboardConsumer;
+    private final ExecutorConsumer<RoutedEvent> keyboardConsumer;
     private final KeyRunTable keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
         new NoteBytesRunnablePair(KeyCodeBytes.UP, this::handleNavigateUp),
         new NoteBytesRunnablePair(KeyCodeBytes.DOWN, this::handleNavigateDown),
@@ -86,7 +87,7 @@ public class MenuNavigator {
         
         // Create keyboard event consumer with executor
         this.keyboardConsumer = new ExecutorConsumer<>(
-            Executors.newVirtualThreadPerTaskExecutor(),
+            new SerializedVirtualExecutor(),
             this::handleKeyboardEvent
         );
         
@@ -132,13 +133,9 @@ public class MenuNavigator {
         if (!state.hasState(DISPLAYING_MENU)) {
             return;
         }
-        System.err.println("[MenuNavigator] recieved event");
-        System.err.flush();
-        if(event instanceof KeyDownEvent keyDownEvent){
-            System.err.println("[MenuNavigator] keyDown:" + keyDownEvent.getKeyCodeBytes() + " " + Keyboard.getCharBytes(keyDownEvent.getKeyCodeBytes()));
-            System.err.flush();
-        }
-        Log.logMsg("[MenuNavigator] recieved event");
+
+       
+       
         // Handle ephemeral events (from secure input devices)
         if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
             try (ephemeralEvent) {
@@ -158,6 +155,7 @@ public class MenuNavigator {
     // ===== NAVIGATION HANDLERS =====
     
     private void handleNavigateUp() {
+        Log.logMsg("[MenuNavigator] UP pressed");
         List<MenuContext.MenuItem> selectableItems = getSelectableItems();
         if (selectableItems.isEmpty()) return;
         
@@ -171,6 +169,7 @@ public class MenuNavigator {
     }
     
     private void handleNavigateDown() {
+        Log.logMsg("[MenuNavigator] DOWN pressed");
         List<MenuContext.MenuItem> selectableItems = getSelectableItems();
         if (selectableItems.isEmpty()) return;
         

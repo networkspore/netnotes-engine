@@ -26,8 +26,9 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding.EncodingType;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -561,7 +562,7 @@ public class NoteBytes {
             for (int i = 0; i < m_value.length; i++) {
                 clearanceVerifier ^= m_value[i]; 
                 if (m_value[i] != 0) {
-                    Log.logError("Warning: Memory clear verification failed at index " + i);
+                    System.err.println("Warning: Memory clear verification failed " + m_value[i] + " " + clearanceVerifier);
                 }
             }
             Thread.yield();
@@ -603,6 +604,8 @@ public class NoteBytes {
     public NoteBytesMap getAsMap(){
         return new NoteBytesMap(m_value);
     }
+
+
 
     @SuppressWarnings("unchecked")
     public <K, V> Map<K, V> getAsHashMap() {
@@ -1034,4 +1037,11 @@ public class NoteBytes {
 
     }
 
+    public String toEncodedString(EncodingType type){
+        return ByteEncoding.encodeString(get(), type);
+    }
+
+    public String toHexString(){
+        return ByteEncoding.encodeString(get(), EncodingType.BASE_16);
+    }
 }

@@ -11,7 +11,6 @@ import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
-import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
@@ -19,6 +18,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.ExecutorConsumer;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support

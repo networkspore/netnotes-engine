@@ -13,7 +13,8 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding;
+import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.noteBytes.NoteString;
 
 import oshi.SystemInfo;
@@ -146,6 +147,6 @@ public class HardwareInfo {
     public static CompletableFuture<String> getCPUFingerPrintString(){
         CompletableFuture<NoteBytesReadOnly> future = getCPUFingerPrint();
 
-        return future.thenApply(readOnlyBytes ->EncodingHelpers.encodeB64UrlSafeString(readOnlyBytes.get()));
+        return future.thenApply(readOnlyBytes ->ByteEncoding.encodeB64UrlSafeString(readOnlyBytes.get()));
     }
 }

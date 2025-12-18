@@ -5,9 +5,9 @@ import java.util.Base64;
 import org.bouncycastle.util.encoders.Base32;
 import org.bouncycastle.util.encoders.Hex;
 
-public class EncodingHelpers {
+public class ByteEncoding {
     
-    public enum Encoding{ 
+    public enum EncodingType{ 
         BASE_16("BASE_16"),
         BASE_32("BASE_32"),
         BASE_64("BASE_64"),
@@ -16,13 +16,13 @@ public class EncodingHelpers {
 
         private final String val;
 
-        Encoding(String val){
+        EncodingType(String val){
             this.val = val;
         }
 
-        public static Encoding fromString(String string){
+        public static EncodingType fromString(String string){
             if(string != null){
-                for(Encoding encoding : values()){
+                for(EncodingType encoding : values()){
                     if(encoding.val.equals(string)){
                         return encoding;
                     }
@@ -36,7 +36,7 @@ public class EncodingHelpers {
         }
     }
 
-    public static byte[] encodeBytes(byte[] bytes, Encoding type){
+    public static byte[] encodeBytes(byte[] bytes, EncodingType type){
         switch(type){
             case BASE_16:
                 return encodeHex(bytes);
@@ -68,7 +68,7 @@ public class EncodingHelpers {
     }
 
 
-    public static String encodeString(byte[] bytes, Encoding type){
+    public static String encodeString(byte[] bytes, EncodingType type){
         switch(type){
             case BASE_16:
                 return encodeHexString(bytes);
@@ -103,7 +103,7 @@ public class EncodingHelpers {
   
 
 
-    public static byte[] decodeEncodedString(String string, Encoding type){
+    public static byte[] decodeEncodedString(String string, EncodingType type){
         switch(type){
             case BASE_16:
                 return decodeHex(string);

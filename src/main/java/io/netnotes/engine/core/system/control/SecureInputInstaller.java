@@ -11,8 +11,8 @@ import io.netnotes.engine.utils.github.GitHubAPI;
 import io.netnotes.engine.utils.github.GitHubAsset;
 import io.netnotes.engine.utils.github.GitHubInfo;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
-import io.netnotes.engine.utils.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.exec.VirtualExecutors;
 
 import java.io.*;
 import java.nio.file.Files;

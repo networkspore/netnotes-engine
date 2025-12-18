@@ -19,7 +19,7 @@ import java.util.concurrent.ExecutorService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-import io.netnotes.engine.utils.VirtualExecutors;
+import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils.StreamProgressTracker;
 
 public class UrlStreamHelpers {

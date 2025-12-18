@@ -6,10 +6,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding;
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding.EncodingType;
 import io.netnotes.engine.utils.HardwareInfo;
 
 public class NoteUUID extends NoteBytesReadOnly {
@@ -19,9 +19,6 @@ public class NoteUUID extends NoteBytesReadOnly {
     private NoteUUID(byte[] bytes){
         super(bytes, NoteBytesMetaData.STRING_ISO_8859_1_TYPE);
     }
-
-
-
       
     public static byte[] nanoTimeHash(){
         return ByteDecoding.intToBytesBigEndian(splitMix64(System.nanoTime()));
@@ -103,7 +100,7 @@ public class NoteUUID extends NoteBytesReadOnly {
     }
 
     public static NoteUUID fromUnencodedBytes(byte[] bytes){
-        return new NoteUUID(EncodingHelpers.encodeBytes(bytes, Encoding.BASE_64_URL_SAFE));
+        return new NoteUUID(ByteEncoding.encodeBytes(bytes, EncodingType.BASE_64_URL_SAFE));
 
     }
 

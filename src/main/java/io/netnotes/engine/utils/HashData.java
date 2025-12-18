@@ -11,8 +11,8 @@ import com.google.gson.stream.JsonWriter;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.EncodingHelpers;
-import io.netnotes.engine.noteBytes.processing.EncodingHelpers.Encoding;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding;
+import io.netnotes.engine.noteBytes.processing.ByteEncoding.EncodingType;
 
 public class HashData {
 
@@ -63,17 +63,17 @@ public class HashData {
             m_name = nameElement.getAsString();
         }
         if (hashStringElement != null) {
-           m_hashBytes = EncodingHelpers.decodeHex(hashStringElement.getAsString());
+           m_hashBytes = ByteEncoding.decodeHex(hashStringElement.getAsString());
         }
 
     }
 
     public void setHashHex(String hex){
-        m_hashBytes = EncodingHelpers.decodeEncodedString(hex, Encoding.BASE_16);
+        m_hashBytes = ByteEncoding.decodeEncodedString(hex, EncodingType.BASE_16);
     }
 
     public String getHashStringHex(){
-        return EncodingHelpers.encodeHexString(m_hashBytes);
+        return ByteEncoding.encodeHexString(m_hashBytes);
     }
     
     public HashData(JsonReader reader) throws IOException{

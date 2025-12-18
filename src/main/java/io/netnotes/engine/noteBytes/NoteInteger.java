@@ -16,18 +16,7 @@ public class NoteInteger extends NoteBytes  {
         super(bytes, NoteBytesMetaData.INTEGER_TYPE);
     }
 
-    public static int getInteger(int a, int b, int c, int d, byte type){
 
-        byte[] bytes = new byte[]{(byte)a, (byte) b, (byte) c, (byte) d};
-        return ByteDecoding.isLittleEndian(type) ? ByteDecoding.bytesToIntLittleEndian(bytes) : ByteDecoding.bytesToIntBigEndian(bytes) ; 
-        
-    }
-
- 
-    public static int getInteger(int a, int b, int c, int d){
-        return getInteger(a, b, c, d, NoteBytesMetaData.INTEGER_TYPE);
-    }
-    
 
     public static NoteInteger create(byte a, byte b, byte c, byte d){
         return new NoteInteger(new byte[]{a, b, c , d});
@@ -60,46 +49,72 @@ public class NoteInteger extends NoteBytes  {
         set(islittleEndian ? ByteDecoding.intToBytesLittleEndian(integer) : ByteDecoding.intToBytesBigEndian(integer)); 
     }
 
+    private void setIfNotFourBytes(){
+        if(get().length != 4){
+            set(new byte[4]);
+        }
+    }
+
     public void setA(int a){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         bytes[0] = (byte) a;
         set(bytes);
     }
      public void setB(int b){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         bytes[1] = (byte)b;
         set(bytes);
     }
 
     public void setC(int c){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         bytes[2] = (byte) c;
         set(bytes);
     }
 
     public void setD(int d){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         bytes[3] = (byte) d;
         set(bytes);
     }
 
     public int getA(){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         return bytes[0] & 0xFF;
     }
     public int getB(){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         return bytes[1] & 0xFF;
     }
 
     public int getC(){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         return bytes[2] & 0xFF;
     }
 
     public int getD(){
+        setIfNotFourBytes();
         byte[] bytes = getBytes();
         return bytes[3] & 0xFF;
     }
 
+    public static int getInteger(int a, int b, int c, int d, boolean isBigEndian){
+
+        byte[] bytes = new byte[]{(byte)a, (byte) b, (byte) c, (byte) d};
+        return isBigEndian ? ByteDecoding.bytesToIntBigEndian(bytes) : ByteDecoding.bytesToIntLittleEndian(bytes); 
+        
+    }
+
+ 
+    public static int getInteger(int a, int b, int c, int d){
+        return getInteger(a, b, c, d,true);
+    }
+    
 }

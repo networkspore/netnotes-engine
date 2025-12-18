@@ -195,7 +195,7 @@ public class TerminalInputReader {
      * Handle ephemeral character events
      */
     private void handleEphemeralChar(EphemeralKeyCharModsEvent event) {
-        NoteBytes codepointBytes = event.getCodepointData();
+        NoteBytes codepointBytes = event.getCodepointBytes();
         if (codepointBytes != null) {
             int codepoint = codepointBytes.getAsInt();
             insertCodePoint(codepoint);

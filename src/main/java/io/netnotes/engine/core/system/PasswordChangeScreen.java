@@ -4,15 +4,12 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
 import io.netnotes.engine.core.system.control.containers.TerminalProgressBar;
 import io.netnotes.engine.io.input.InputDevice;
-import io.netnotes.engine.io.input.events.ExecutorConsumer;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -20,6 +17,8 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.TimeHelpers;
+import io.netnotes.engine.utils.exec.ExecutorConsumer;
+import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -193,7 +192,7 @@ class PasswordChangeScreen extends TerminalScreen {
     }
 
     private StreamReader streamReader;
-    private ExecutorService msgExecutor;
+    private SerializedVirtualExecutor msgExecutor;
     
     /**
      * Performs the password change operation with progress tracking
@@ -230,7 +229,7 @@ class PasswordChangeScreen extends TerminalScreen {
                 
                 // CRITICAL: Use single-threaded executor for thread-safe UI updates
                 // All terminal operations must be serialized to prevent race conditions
-                msgExecutor = Executors.newSingleThreadExecutor();
+                msgExecutor = new SerializedVirtualExecutor();
                 
                 ExecutorConsumer<NoteBytes> progressConsumer = new ExecutorConsumer<>(
                     msgExecutor,
@@ -461,8 +460,8 @@ class PasswordChangeScreen extends TerminalScreen {
     
     private Void handlePasswordChangeError(Throwable ex) {
         // Shutdown executor
-        if (msgExecutor != null && msgExecutor instanceof java.util.concurrent.ExecutorService) {
-            ((java.util.concurrent.ExecutorService) msgExecutor).shutdownNow();
+        if (msgExecutor != null) {
+            msgExecutor.shutdownNow();
         }
         
         cleanupPasswords();
@@ -532,8 +531,8 @@ class PasswordChangeScreen extends TerminalScreen {
             streamReader = null;
         }
         
-        if (msgExecutor != null && msgExecutor instanceof java.util.concurrent.ExecutorService) {
-            ((java.util.concurrent.ExecutorService) msgExecutor).shutdownNow();
+        if (msgExecutor != null) {
+            msgExecutor.shutdownNow();
             msgExecutor = null;
         }
         

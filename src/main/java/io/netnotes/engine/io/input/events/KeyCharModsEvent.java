@@ -10,6 +10,7 @@ public final class KeyCharModsEvent implements RoutedEvent {
     private final int stateFlags;
     private int codepointCache = -1;
     private String strCache = null;
+    private NoteBytes utf8Cache = null;
 
     public KeyCharModsEvent(ContextPath sourcePath, NoteBytes codepoint, int stateFlags) {
         this.sourcePath = sourcePath;
@@ -42,8 +43,21 @@ public final class KeyCharModsEvent implements RoutedEvent {
     }
     public int stateFlags() { return stateFlags; }
 
-    public NoteBytes getUTF8() { return Keyboard.getCharBytes(codepointBytes); }
-
+    public NoteBytes getUTF8() { 
+        if(utf8Cache == null){
+            NoteBytes charBytes = Keyboard.codePointToASCII(codepointBytes);
+            if(charBytes != null){
+                utf8Cache = charBytes;
+                return utf8Cache;
+            }else{
+                int cp = getCodepoint();
+                utf8Cache = Keyboard.codePointToUtf8(cp);
+                return utf8Cache;
+            }
+        }else{
+            return utf8Cache;
+        }
+    }
     @Override 
     public String toString(){
         return getString();

@@ -7,7 +7,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 public class KeyRunTable {
     private final Runnable[] CP_TO_RUNNABLE_TABLE = new Runnable[127];
-    private final int[] codepoint = new int[1];
+    private final int[] index = new int[1];
 
     public KeyRunTable(NoteBytesRunnablePair... keyRunnables){
         Arrays.fill(CP_TO_RUNNABLE_TABLE, null);
@@ -15,9 +15,9 @@ public class KeyRunTable {
     }
 
     public Runnable getKeyRunnable(NoteBytes key){
-        codepoint[0] = key.get()[0] & 0xFF;
-        Runnable value = CP_TO_RUNNABLE_TABLE[codepoint[0]];
-        codepoint[0] = 0;
+        index[0] = key.get()[3] & 0xFF;
+        Runnable value = CP_TO_RUNNABLE_TABLE[index[0]];
+        index[0] = 0;
         return value;
     }
 
@@ -31,11 +31,11 @@ public class KeyRunTable {
 
     public void setKeyRunnable(NoteBytes key, Runnable runnable){
         
-        codepoint[0] = key.get()[0] & 0xFF;
-        if(codepoint[0] > -1 && codepoint[0]  < 127){
-            CP_TO_RUNNABLE_TABLE[codepoint[0]] = runnable;
+        index[0] = key.get()[3] & 0xFF;
+        if(index[0] > -1 && index[0]  < 127){
+            CP_TO_RUNNABLE_TABLE[index[0]] = runnable;
         }
-        codepoint[0] = 0;
+        index[0] = 0;
     }
 
     public void run(NoteBytes key){
