@@ -3,6 +3,8 @@ package io.netnotes.engine.core.system.control.terminal;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public class TerminalCommands {
+    public static final String PRESS_ANY_KEY = "Press any key to continue...";
+
     public static final NoteBytesReadOnly START_ROW = 
         new NoteBytesReadOnly("start_row");
     public static final NoteBytesReadOnly START_COL = 
@@ -42,5 +44,8 @@ public class TerminalCommands {
         new NoteBytesReadOnly("terminal_begin_batch");
     public static final NoteBytesReadOnly TERMINAL_END_BATCH = 
         new NoteBytesReadOnly("terminal_end_batch");
+    
+    public static final NoteBytesReadOnly TERMINAL_RESIZE = 
+        new NoteBytesReadOnly("terminal_resize");
 
 }

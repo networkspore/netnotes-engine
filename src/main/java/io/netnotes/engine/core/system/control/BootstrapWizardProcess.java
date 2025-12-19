@@ -2,7 +2,10 @@ package io.netnotes.engine.core.system.control;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.BootstrapConfig;
+import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.BoxStyle;
+import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -90,20 +93,37 @@ public class BootstrapWizardProcess extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
 
-    public CompletableFuture<Void> start(){
-          Log.logMsg("[BootstrapWizardProcess] start called");
-        return showWelcomeScreen()
+    public CompletableFuture<Void> start() {
+        Log.logMsg("[BootstrapWizardProcess] start called");
+        
+        // Ensure terminal is ready and give it a moment to settle
+        return terminal.waitUntilReady()
+            .thenCompose(v -> CompletableFuture.runAsync(() -> {
+                try { Thread.sleep(200); } 
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }))
+            .thenCompose(v -> showWelcomeScreen())
+          //  .thenCompose(v -> terminal.clear())  Clear before detection
             .thenCompose(v -> detectSecureInput())
             .thenCompose(result -> {
                 this.detectionResult = result;
                 state.removeState(DETECTING);
                 state.addState(CONFIGURING);
-                return showSecureInputOptionsMenu();
+                
+                // Give clear a moment to take effect
+                return CompletableFuture.runAsync(() -> {
+                    try { Thread.sleep(100); } 
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                }).thenCompose(v2 -> showSecureInputOptionsMenu());
             })
             .thenRun(() -> {
                 Log.logMsg("[BootstrapWizardProcess] Wizard flow started");
+            })
+            .exceptionally(ex -> {
+                Log.logError("[BootstrapWizardProcess] Start failed: " + ex.getMessage());
+                ex.printStackTrace();
+                return null;
             });
-            
     }
     
     // ===== KEYBOARD EVENT HANDLING =====
@@ -150,18 +170,32 @@ public class BootstrapWizardProcess extends FlowProcess {
     
     private CompletableFuture<Void> showWelcomeScreen() {
         Log.logMsg("[BootstrapWizardProcess] **Showing Welcome Screen**");
-        return terminal.clear()
-            .thenCompose(v -> terminal.println("=".repeat(80)))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("                   Netnotes", TerminalContainerHandle.TextStyle.BOLD))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("=".repeat(80)))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("This wizard will help you configure your system."))
-            .thenCompose(v -> terminal.println(""))
-        
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("Press any key to continue...", TerminalContainerHandle.TextStyle.INFO))
+        return terminal.beginBatch()
+            .thenCompose(v->terminal.clear())
+            .thenCompose(v->
+                TerminalTextBox.builder()
+                .position(0, 1)
+                .size(terminal.getCols(), 5)
+                .title("Welcome to Netnotes", TerminalTextBox.TitlePlacement.INSIDE_CENTER)
+                .style(BoxStyle.DOUBLE)
+                .titleStyle(TerminalContainerHandle.TextStyle.BOLD)
+                .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
+                .build()
+                .render(terminal))
+            .thenCompose(v -> {
+                int width = 60;
+                int startCol = (terminal.getCols() - width) / 2;
+                int startRow = terminal.getRows() > 12 ? (terminal.getRows() - 12) / 2 : 6;
+                
+                // Content inside box
+                return terminal.printAt(startRow + 2, startCol + 4, 
+                    "This wizard will help you configure your system.")
+                    .thenCompose(v2 -> terminal.printAt(startRow + 5, startCol + 4,
+                        TerminalCommands.PRESS_ANY_KEY, 
+                        TerminalContainerHandle.TextStyle.INFO))
+                    .thenCompose(v2 -> 
+                        terminal.moveCursor(startRow + 5, startCol + 4 + TerminalCommands.PRESS_ANY_KEY.length()));
+            })
             .thenCompose(v -> waitForKeyPress());
     }
     
@@ -169,34 +203,41 @@ public class BootstrapWizardProcess extends FlowProcess {
     
     private CompletableFuture<SecureInputDetectionResult> detectSecureInput() {
         Log.logMsg("[BootstrapWizardProcess] detecting secure input");
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Detecting secure input...", 
-                TerminalContainerHandle.TextStyle.INFO))
-            .thenCompose(v -> terminal.println(""));
         
-        return CompletableFuture.supplyAsync(() -> {
-            SecureInputDetectionResult result = new SecureInputDetectionResult();
-            
-            String socketPath = BootstrapConfig.getString(bootstrapConfig, 
-                BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
-                BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.SOCKET_PATH,
-                BootstrapConfig.DEFAULT_SOCKET_PATH);
-            
-            result.socketExists = SecureInputDetector.socketExists(socketPath);
-            
-            if (result.socketExists) {
-                result.canConnect = SecureInputDetector.testConnection(socketPath);
+        return terminal.clear()
+            .thenCompose(v -> terminal.hideCursor())
+            .thenCompose(v -> {
+                // Show detection in progress
+                int row = terminal.getRows() / 2;
+                int col = (terminal.getCols() - 30) / 2;
                 
-                if (result.canConnect) {
-                    result.keyboardCount = SecureInputDetector.detectKeyboards(socketPath);
+                return terminal.printAt(row, col, 
+                    "Detecting secure input...", 
+                    TerminalContainerHandle.TextStyle.INFO);
+            })
+            .thenCompose(v -> CompletableFuture.supplyAsync(() -> {
+                SecureInputDetectionResult result = new SecureInputDetectionResult();
+                
+                String socketPath = BootstrapConfig.getString(bootstrapConfig, 
+                    BootstrapConfig.SYSTEM + "/" + BootstrapConfig.BASE + "/" + 
+                    BootstrapConfig.SECURE_INPUT + "/" + BootstrapConfig.SOCKET_PATH,
+                    BootstrapConfig.DEFAULT_SOCKET_PATH);
+                
+                result.socketExists = SecureInputDetector.socketExists(socketPath);
+                
+                if (result.socketExists) {
+                    result.canConnect = SecureInputDetector.testConnection(socketPath);
+                    
+                    if (result.canConnect) {
+                        result.keyboardCount = SecureInputDetector.detectKeyboards(socketPath);
+                    }
                 }
-            }
-            
-            result.os = System.getProperty("os.name").toLowerCase();
-            result.canInstall = SecureInputDetector.canAutoInstall(result.os);
-            
-            return result;
-        });
+                
+                result.os = System.getProperty("os.name").toLowerCase();
+                result.canInstall = SecureInputDetector.canAutoInstall(result.os);
+                
+                return result;
+            }));
     }
     
     // ===== MENU CONSTRUCTION =====
@@ -214,21 +255,21 @@ public class BootstrapWizardProcess extends FlowProcess {
      */
     private CompletableFuture<Void> showAlreadyInstalledMenu() {
         ContextPath menuPath = contextPath.append("secure-input-detected");
-        MenuContext menu = new MenuContext(menuPath, "Secure Input Detected");
         
-        // Show description
-        terminal.clear()
-            .thenCompose(v -> terminal.println("NoteDaemon is already installed!", 
-                TerminalContainerHandle.TextStyle.SUCCESS))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println(String.format(
-                "Found %d USB keyboard(s) available.", detectionResult.keyboardCount)))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println(
-                "Secure input allows password entry directly from USB keyboards,"))
-            .thenCompose(v -> terminal.println(
-                "providing protection against keyloggers and screen capture."))
-            .thenCompose(v -> terminal.println(""));
+        StringBuilder desc = new StringBuilder();
+        desc.append("✓ NoteDaemon is already installed!\n\n");
+        desc.append(String.format("Found %d USB keyboard(s) available.\n\n", 
+            detectionResult.keyboardCount));
+        desc.append("Secure input provides protection against keyloggers\n");
+        desc.append("and screen capture during password entry.\n");
+        
+        MenuContext menu = new MenuContext(
+            menuPath, 
+            "Secure Input Detected",
+            desc.toString(),
+            null
+        );
+        
         
         menu.addItem("enable", "Enable Secure Input (Recommended)", () -> {
             enableSecureInput();
@@ -237,51 +278,52 @@ public class BootstrapWizardProcess extends FlowProcess {
         menu.addItem("skip", "Skip (Use GUI Keyboard Only)", () -> {
             skipSecureInput();
         });
-        
+  
         menuNavigator.showMenu(menu);
+        
         return CompletableFuture.completedFuture(null);
     }
+
     
     /**
      * Not installed - offer installation options
      */
     private CompletableFuture<Void> showInstallationOptionsMenu() {
         ContextPath menuPath = contextPath.append("installation-options");
-        MenuContext menu = new MenuContext(menuPath, "Secure Input Installation");
+     
         
-        // Show description
-        terminal.clear()
-            .thenCompose(v -> terminal.println("NoteDaemon is not installed.", 
-                TerminalContainerHandle.TextStyle.WARNING))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println(
-                "Secure input provides hardware-level protection for password entry."))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("You can:"))
-            .thenCompose(v -> terminal.println("- Install it now (requires root access)"))
-            .thenCompose(v -> terminal.println("- View manual installation instructions"))
-            .thenCompose(v -> terminal.println("- Skip and use GUI keyboard only"))
-            .thenCompose(v -> terminal.println(""));
+        // Build description that will show ABOVE menu items
+        String desc = "⚠ NoteDaemon is not installed.\n\n" +
+        "Secure input provides hardware-level protection for password entry.\n" +
+        "You can install it now or skip and use GUI keyboard.\n";
         
+        MenuContext menuWithDesc = new MenuContext(
+            menuPath, 
+            "Secure Input Installation",
+            desc,  // This description will show in menu header
+            null
+        );
+       
         if (detectionResult.canInstall) {
-            menu.addItem("auto-install", "Install Now (Recommended)", () -> {
+            menuWithDesc.addItem("auto-install", "Install Now (Recommended)", () -> {
                 startAutomatedInstallation();
             });
         }
         
-        menu.addItem("manual", "Show Manual Installation Instructions", () -> {
+        menuWithDesc.addItem("manual", "Show Manual Installation Instructions", () -> {
             showManualInstructions();
         });
         
-        menu.addItem("skip", "Skip (Use GUI Keyboard Only)", () -> {
+        menuWithDesc.addItem("skip", "Skip (Use GUI Keyboard Only)", () -> {
             skipSecureInput();
         });
         
-        menu.addItem("advanced", "Advanced Configuration", () -> {
+        menuWithDesc.addItem("advanced", "Advanced Configuration", () -> {
             showAdvancedConfigMenu();
         });
-        
-        menuNavigator.showMenu(menu);
+
+        // Just show the menu - it will handle clearing
+        menuNavigator.showMenu(menuWithDesc);
         return CompletableFuture.completedFuture(null);
     }
     

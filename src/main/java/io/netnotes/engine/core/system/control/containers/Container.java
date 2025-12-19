@@ -1,120 +1,160 @@
 package io.netnotes.engine.core.system.control.containers;
 
-import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Container - Represents a single container instance
+ * Container - Abstract base class for all container implementations
  * 
- * Architecture (similar to ClaimedDevice):
- * - Has assigned UIRenderer (injected)
- * - Receives render commands via incoming stream
- * - Writes commands directly to UIRenderer
- * - Tracks abstract state (visible, focused, maximized)
+ * Provides:
+ * - Core identity and lifecycle
+ * - Bidirectional stream handling infrastructure
+ * - Message dispatch framework via msgMap
+ * - Common state management
  * 
- * Stream-based rendering:
- * - ContainerHandle writes commands to stream
- * - Container reads from stream
- * - Container writes to UIRenderer
- * - No message wrapping/unwrapping needed!
+ * Stream Architecture:
+ * - Render stream (FROM ContainerHandle): Commands are read and dispatched via msgMap
+ * - Event stream (TO ContainerHandle): Events are written via emitEvent()
+ * 
+ * Subclasses implement:
+ * - Renderer-specific logic (ConsoleContainer, WebContainer, etc.)
+ * - Command handlers registered in setupMessageMap()
  */
-public class Container {
-    private final String rendererId; 
-    private final ContainerId id;
-    private final ContextPath path;
-    private final ContextPath ownerPath;
-    private final ContextPath servicePath;
+public abstract class Container {
+    // ===== CORE IDENTITY =====
+    protected final ContainerId id;
+    protected final AtomicReference<String> title;
+    protected final AtomicReference<ContainerType> type;
+    protected final AtomicReference<ContainerState> state;
+    protected final AtomicReference<ContainerConfig> config;
+    protected final ContextPath ownerPath;
+    protected final ContextPath path;
+    protected final String rendererId;
+    protected final long createdTime;
+    
+    // ===== STATE FLAGS =====
+    protected volatile boolean isCurrent = false;
+    protected volatile boolean isHidden = false;
+    protected volatile boolean isMaximized = false;
+    protected volatile boolean isVisible = false;
+    protected volatile boolean active = false;
+    
+    // ===== STREAM CHANNELS =====
+    protected StreamChannel renderStream;
+    protected StreamChannel eventStream;
+    protected NoteBytesWriter eventWriter;
+    protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
+    
+    // ===== MESSAGE DISPATCH =====
+    protected final HashMap<NoteBytesReadOnly, RoutedMessageExecutor> msgMap = new HashMap<>();
+    
 
-    private final UIRenderer uiRenderer;
-    
-    // Mutable state
-    private final AtomicReference<String> title;
-    private final AtomicReference<ContainerType> type;
-    private final AtomicReference<ContainerState> state;
-    private final AtomicReference<ContainerConfig> config;
-    
-    private final long createdTime;
-    
-    // Flags (abstract window state)
-    private volatile boolean isCurrent = false;     // Has focus
-    private volatile boolean isHidden = false;      // Minimized/hidden
-    private volatile boolean isMaximized = false;   // Fills screen
-    private volatile boolean isVisible = false;     // Shown (not hidden)
-    
-    private CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
-    
-    // Render stream
-    private StreamChannel renderStream;
-    private volatile boolean active = false;
-
-    
-    public Container(
+    /**
+     * Full constructor
+     */
+    protected Container(
         ContainerId id,
         String title,
         ContainerType type,
         ContextPath ownerPath,
         ContainerConfig config,
-        UIRenderer uiRenderer,
-        String rendererId,  // NEW: Add rendererId parameter
-        ContextPath servicePath
+        String rendererId
     ) {
         this.id = id;
-        this.path = ownerPath.append("container", id.toString());
-        this.ownerPath = ownerPath;
-        this.servicePath = servicePath;
-        this.uiRenderer = uiRenderer;
-        this.rendererId = rendererId;  // NEW: Store rendererId
-        
         this.title = new AtomicReference<>(title);
         this.type = new AtomicReference<>(type);
         this.state = new AtomicReference<>(ContainerState.CREATING);
         this.config = new AtomicReference<>(config);
-        
+        this.ownerPath = ownerPath;
+        this.path = ownerPath != null ? ownerPath.append("container", id.toString()) : null;
+        this.rendererId = rendererId;
         this.createdTime = System.currentTimeMillis();
+        
+        // Setup base message handlers
+        setupBaseMessageMap();
+        
+        // Subclass adds its handlers
+        setupMessageMap();
+    }
+    
+    // ===== ABSTRACT METHODS (Subclass Implementation) =====
+    
+    /**
+     * Setup subclass-specific message handlers
+     * Called after base constructor
+     * 
+     * Example:
+     * msgMap.put(TerminalCommands.TERMINAL_PRINT, this::handlePrint);
+     */
+    protected abstract void setupMessageMap();
+    
+    /**
+     * Initialize renderer-specific resources
+     */
+    protected abstract CompletableFuture<Void> initializeRenderer();
+    
+    /**
+     * Cleanup renderer-specific resources
+     */
+    protected abstract CompletableFuture<Void> destroyRenderer();
+    
+    /**
+     * Handle renderer-specific show logic
+     */
+    protected abstract CompletableFuture<Void> showRenderer();
+    
+    /**
+     * Handle renderer-specific hide logic
+     */
+    protected abstract CompletableFuture<Void> hideRenderer();
+    
+    /**
+     * Handle renderer-specific focus logic
+     */
+    protected abstract CompletableFuture<Void> focusRenderer();
+    
+    // ===== BASE MESSAGE MAP =====
+    
+    /**
+     * Setup base message handlers (common to all containers)
+     */
+    private void setupBaseMessageMap() {
+        msgMap.put(ContainerCommands.UPDATE_CONTAINER, this::handleUpdateContainer);
     }
     
     // ===== LIFECYCLE =====
     
     /**
-     * Initialize container:
-     * 1. Render initial UI
-     * 2. Request stream channel from ContainerHandle (via service path)
-     * 3. Start reading render commands from stream
+     * Initialize container
+     * 1. Initialize renderer
+     * 2. Update state
      */
     public CompletableFuture<Void> initialize() {
         Log.logMsg("[Container] Initializing: " + id + " (" + title.get() + ")");
         
-        // Build initial UI command
-        NoteBytesMap createCommand = new NoteBytesMap();
-        createCommand.put(Keys.CMD, ContainerCommands.CREATE_CONTAINER);
-        createCommand.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        createCommand.put(Keys.TITLE, title.get());
-        createCommand.put(Keys.TYPE, type.get().name());
-        createCommand.put(Keys.CONFIG, config.get().toNoteBytes());
-        
-        // Render to UI
-        return uiRenderer.render(createCommand)
+        return initializeRenderer()
             .thenRun(() -> {
                 state.set(ContainerState.VISIBLE);
                 isVisible = true;
                 active = true;
-                
                 Log.logMsg("[Container] Initialized: " + id);
             })
             .exceptionally(ex -> {
@@ -123,79 +163,9 @@ public class Container {
                 return null;
             });
     }
-    public String getRendererId() { 
-        return rendererId; 
-    }
-   
-    public CompletableFuture<Void> getRenderStreamFuture(){
-        return renderStreamFuture;
-    }
-    /**
-     * Handle incoming render stream FROM ContainerHandle
-     * Similar to ClaimedDevice.handleStreamChannel()
-     */
-   public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("[Container] Render stream received from: " + fromPath);
-        
-        this.renderStream = channel;
-
-        renderStreamFuture = CompletableFuture.runAsync(() -> {
-            PipedOutputStream channelStream = channel.getChannelStream();
-
-            try (
-                NoteBytesReader reader = new NoteBytesReader(
-                    new PipedInputStream(channelStream, StreamUtils.PIPE_BUFFER_SIZE)
-                );
-            ) {
-                channel.getReadyFuture().complete(null);  // Signal ready
-                
-                Log.logMsg("[Container] Render stream reader active, waiting for commands...");
-
-                NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-           
-                while (nextBytes != null && active) {
-                    if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                        NoteBytesMap command = nextBytes.getAsNoteBytesMap();
-                        handleRenderCommand(command);
-                    }
-                    nextBytes = reader.nextNoteBytesReadOnly();
-                }
-            } catch (IOException e) {
-                Log.logError("[Container] Render stream error: " + e.getMessage());
-                active = false;
-            }
-        }, VirtualExecutors.getVirtualExecutor());
-    }
     
     /**
-     * Handle render command from stream
-     * Write directly to UIRenderer
-     */
-    private void handleRenderCommand(NoteBytesMap cmdMap) {
-        NoteBytes cmd = cmdMap.get(Keys.CMD);
-        
-        // Update local state if needed
-        if (cmd.equals(ContainerCommands.UPDATE_CONTAINER)) {
-            NoteBytes updatesBytes = cmdMap.get(Keys.UPDATES);
-            if(updatesBytes != null && updatesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
-                NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
-                NoteBytes titleBytes = updates.get(Keys.TITLE);
-                if (titleBytes != null) {
-                    title.set(titleBytes.getAsString());
-                }
-            }
-        }
-        
-        // Write directly to renderer
-        uiRenderer.render(cmdMap)
-            .exceptionally(ex -> {
-                Log.logError("[Container] Render failed: " + ex.getMessage());
-                return null;
-            });
-    }
-    
-    /**
-     * Destroy container (remove from UI)
+     * Destroy container
      */
     public CompletableFuture<Void> destroy() {
         Log.logMsg("[Container] Destroying: " + id);
@@ -203,27 +173,14 @@ public class Container {
         state.set(ContainerState.DESTROYING);
         active = false;
         
-        // Build destroy command
-        NoteBytesMap destroyCommand = new NoteBytesMap();
-        destroyCommand.put(Keys.CMD, ContainerCommands.DESTROY_CONTAINER);
-        destroyCommand.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(destroyCommand)
+        return destroyRenderer()
             .thenRun(() -> {
                 state.set(ContainerState.DESTROYED);
                 isVisible = false;
                 isCurrent = false;
                 
-                // Close render stream
-                if (renderStream != null) {
-                    try {
-                        renderStream.close();
-                    } catch (IOException e) {
-                        Log.logError("[Container] Error closing render stream: " + 
-                            e.getMessage());
-                    }
-                }
-                
+                // Close streams
+                closeStreams();
                 
                 Log.logMsg("[Container] Destroyed: " + id);
             })
@@ -233,12 +190,111 @@ public class Container {
             });
     }
     
-    // ===== STATE OPERATIONS =====
-    // These are called by ContainerService, NOT from stream
+    // ===== STREAM HANDLING =====
     
     /**
-     * Show container (unhide/restore)
+     * Handle incoming render stream FROM ContainerHandle
+     * Sets up input stream reader and dispatches commands via msgMap
      */
+    public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
+        Log.logMsg("[Container] Render stream received from: " + fromPath);
+        
+        this.renderStream = channel;
+        
+        // Setup reader on virtual thread
+        renderStreamFuture = CompletableFuture.runAsync(() -> {
+            try (
+                NoteBytesReader reader = new NoteBytesReader(
+                    new PipedInputStream(channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE)
+                );
+            ) {
+                // Signal ready
+                channel.getReadyFuture().complete(null);
+                
+                Log.logMsg("[Container] Render stream reader active, waiting for commands...");
+                
+                // Read and dispatch commands
+                NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
+                
+                while (nextBytes != null && active) {
+                    if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                        NoteBytesMap command = nextBytes.getAsNoteBytesMap();
+                        dispatchCommand(command);
+                    }
+                    nextBytes = reader.nextNoteBytesReadOnly();
+                }
+                
+                Log.logMsg("[Container] Render stream reader stopped");
+            } catch (IOException e) {
+                Log.logError("[Container] Render stream error: " + e.getMessage());
+                active = false;
+            }
+        }, VirtualExecutors.getVirtualExecutor());
+    }
+    
+    /**
+     * Handle outgoing event stream TO ContainerHandle
+     * Sets up output stream writer for emitting events
+     */
+    public void handleEventStream(StreamChannel channel, ContextPath fromPath) {
+        Log.logMsg("[Container] Event stream established to: " + fromPath);
+        
+        this.eventStream = channel;
+        this.eventWriter = new NoteBytesWriter(channel.getQueuedOutputStream());
+        
+        // Signal ready
+        channel.getReadyFuture().complete(null);
+    }
+    
+    /**
+     * Dispatch command using message map
+     * Command is routed to registered handler based on 'cmd' field
+     */
+    protected void dispatchCommand(NoteBytesMap command) {
+        NoteBytes cmd = command.get(Keys.CMD);
+        
+        if (cmd == null) {
+            Log.logError("[Container] No cmd in command");
+            return;
+        }
+        
+        // Look up handler in message map
+        RoutedMessageExecutor executor = msgMap.get(cmd);
+        
+        if (executor != null) {
+            try {
+                // Execute handler (no packet for stream commands)
+                executor.execute(command, null);
+            } catch (Exception e) {
+                Log.logError("[Container] Error executing command '" + cmd + "': " + e.getMessage());
+            }
+        } else {
+            Log.logError("[Container] Unknown command: " + cmd);
+        }
+    }
+    
+    /**
+     * Emit event to ContainerHandle via event stream
+     * 
+     * Example usage in subclass:
+     * NoteBytesMap event = ContainerCommands.containerResized(id, width, height);
+     * emitEvent(event);
+     */
+    protected void emitEvent(NoteBytesMap event) {
+        if (eventWriter == null) {
+            Log.logError("[Container] Cannot emit event - no event stream");
+            return;
+        }
+        
+        try {
+            eventWriter.write(event.toNoteBytes());
+        } catch (IOException e) {
+            Log.logError("[Container] Error emitting event: " + e.getMessage());
+        }
+    }
+    
+    // ===== STATE OPERATIONS =====
+    
     public CompletableFuture<Void> show() {
         if (isVisible && !isHidden) {
             return CompletableFuture.completedFuture(null);
@@ -246,11 +302,7 @@ public class Container {
         
         Log.logMsg("[Container] Showing: " + id);
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, ContainerCommands.SHOW_CONTAINER);
-        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(command)
+        return showRenderer()
             .thenRun(() -> {
                 isVisible = true;
                 isHidden = false;
@@ -258,9 +310,6 @@ public class Container {
             });
     }
     
-    /**
-     * Hide container (minimize)
-     */
     public CompletableFuture<Void> hide() {
         if (!isVisible || isHidden) {
             return CompletableFuture.completedFuture(null);
@@ -268,11 +317,7 @@ public class Container {
         
         Log.logMsg("[Container] Hiding: " + id);
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, ContainerCommands.HIDE_CONTAINER);
-        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(command)
+        return hideRenderer()
             .thenRun(() -> {
                 isHidden = true;
                 isCurrent = false;
@@ -280,9 +325,6 @@ public class Container {
             });
     }
     
-    /**
-     * Focus container (bring to front)
-     */
     public CompletableFuture<Void> focus() {
         if (isCurrent) {
             return CompletableFuture.completedFuture(null);
@@ -290,16 +332,11 @@ public class Container {
         
         Log.logMsg("[Container] Focusing: " + id);
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, ContainerCommands.FOCUS_CONTAINER);
-        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(command)
+        return focusRenderer()
             .thenRun(() -> {
                 isCurrent = true;
                 state.set(ContainerState.FOCUSED);
                 
-                // Show if hidden
                 if (isHidden) {
                     isHidden = false;
                     isVisible = true;
@@ -307,9 +344,6 @@ public class Container {
             });
     }
     
-    /**
-     * Unfocus container (lose focus)
-     */
     public void unfocus() {
         isCurrent = false;
         if (state.get() == ContainerState.FOCUSED) {
@@ -317,71 +351,86 @@ public class Container {
         }
     }
     
-    /**
-     * Maximize container
-     */
     public CompletableFuture<Void> maximize() {
         if (isMaximized) {
             return CompletableFuture.completedFuture(null);
         }
         
         Log.logMsg("[Container] Maximizing: " + id);
+        isMaximized = true;
+        state.set(ContainerState.MAXIMIZED);
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, ContainerCommands.MAXIMIZE_CONTAINER);
-        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(command)
-            .thenRun(() -> {
-                isMaximized = true;
-                state.set(ContainerState.MAXIMIZED);
-            });
+        return CompletableFuture.completedFuture(null);
     }
     
-    /**
-     * Restore container (un-maximize)
-     */
     public CompletableFuture<Void> restore() {
         if (!isMaximized) {
             return CompletableFuture.completedFuture(null);
         }
         
         Log.logMsg("[Container] Restoring: " + id);
+        isMaximized = false;
+        state.set(isCurrent ? ContainerState.FOCUSED : ContainerState.VISIBLE);
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, ContainerCommands.RESTORE_CONTAINER);
-        command.put(Keys.CONTAINER_ID, id.toNoteBytes());
-        
-        return uiRenderer.render(command)
-            .thenRun(() -> {
-                isMaximized = false;
-                state.set(isCurrent ? ContainerState.FOCUSED : ContainerState.VISIBLE);
-            });
+        return CompletableFuture.completedFuture(null);
     }
-
+    
+    // ===== COMMON MESSAGE HANDLERS =====
+    
+    protected CompletableFuture<Void> handleUpdateContainer(NoteBytesMap command, RoutedPacket packet) {
+        NoteBytes updatesBytes = command.get(Keys.UPDATES);
+        if (updatesBytes != null && 
+            updatesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+            
+            NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
+            NoteBytes titleBytes = updates.get(Keys.TITLE);
+            if (titleBytes != null) {
+                title.set(titleBytes.getAsString());
+            }
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    // ===== HELPERS =====
+    
+    protected void closeStreams() {
+        if (renderStream != null) {
+            try {
+                renderStream.close();
+            } catch (IOException e) {
+                Log.logError("[Container] Error closing render stream: " + e.getMessage());
+            }
+        }
+        
+        if (eventStream != null) {
+            try {
+                eventStream.close();
+            } catch (IOException e) {
+                Log.logError("[Container] Error closing event stream: " + e.getMessage());
+            }
+        }
+    }
     
     // ===== GETTERS =====
     
     public ContainerId getId() { return id; }
     public ContextPath getPath() { return path; }
     public ContextPath getOwnerPath() { return ownerPath; }
-    public ContextPath getServicePath() { return servicePath; }
     public String getTitle() { return title.get(); }
     public ContainerType getType() { return type.get(); }
     public ContainerState getState() { return state.get(); }
     public ContainerConfig getConfig() { return config.get(); }
     public long getCreatedTime() { return createdTime; }
+    public String getRendererId() { return rendererId; }
     
-    // State flags
     public boolean isCurrent() { return isCurrent; }
     public boolean isHidden() { return isHidden; }
     public boolean isMaximized() { return isMaximized; }
     public boolean isVisible() { return isVisible; }
     public boolean isActive() { return active; }
     
-    /**
-     * Get current container info
-     */
+    public CompletableFuture<Void> getRenderStreamFuture() { return renderStreamFuture; }
+    
     public ContainerInfo getInfo() {
         return new ContainerInfo(
             id,

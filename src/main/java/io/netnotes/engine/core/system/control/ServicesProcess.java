@@ -2,7 +2,7 @@ package io.netnotes.engine.core.system.control;
 
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.BootstrapConfig;
-import io.netnotes.engine.core.system.control.containers.ContainerService;
+import io.netnotes.engine.core.system.control.containers.RenderingService;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -47,10 +47,10 @@ public class ServicesProcess extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // Services
-    private final ContainerService containerService;
+    private final RenderingService containerService;
     private IODaemon ioDaemon;
     
-    public ServicesProcess(ContainerService containerService) {
+    public ServicesProcess(RenderingService containerService) {
         super(NAME, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine("services");
         this.containerService = containerService;
@@ -251,7 +251,7 @@ public class ServicesProcess extends FlowProcess {
         return ServicesStates.describe(state);
     }
     
-    public ContainerService getContainerService() {
+    public RenderingService getContainerService() {
         return containerService;
     }
     

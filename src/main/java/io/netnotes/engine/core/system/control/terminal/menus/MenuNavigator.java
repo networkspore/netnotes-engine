@@ -29,18 +29,7 @@ import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
  */
 public class MenuNavigator {
 
-    // Helper class to hold menu dimensions
-    private static class MenuDimensions {
-        final int boxWidth;
-        final int boxCol;
-        final int itemContentWidth;
-        
-        MenuDimensions(int boxWidth, int boxCol, int itemContentWidth) {
-            this.boxWidth = boxWidth;
-            this.boxCol = boxCol;
-            this.itemContentWidth = itemContentWidth;
-        }
-    }
+
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
@@ -58,7 +47,6 @@ public class MenuNavigator {
     private int scrollOffset = 0;
     
     // Layout parameters
-    private static final int MENU_MARGIN = 2;
     private static final int MAX_VISIBLE_ITEMS = 15;
     
     // Keyboard event consumer
@@ -317,15 +305,15 @@ public class MenuNavigator {
         if (currentMenu == null) {
             return;
         }
-        
+    
         terminal.beginBatch()
             .thenCompose(v -> terminal.clear())
             .thenCompose(v -> terminal.hideCursor())
             .thenCompose(v -> renderHeader())
             .thenCompose(v -> renderBreadcrumb())
+            .thenCompose(v -> renderDescription())  // ADD THIS LINE
             .thenCompose(v -> renderMenuItems())
-            .thenCompose(v -> renderDescription())
-            .thenCompose(v -> renderFooter())
+            .thenCompose(v -> renderFooter())  // Remove renderDescription() call here if exists
             .thenCompose(v -> terminal.endBatch())
             .exceptionally(ex -> {
                 terminal.clear()
@@ -344,8 +332,8 @@ public class MenuNavigator {
         String title = currentMenu.getTitle();
         
         return TerminalTextBox.builder()
-            .position(0, dims.boxCol)
-            .size(dims.boxWidth, 3)
+            .position(0, dims.getBoxCol())
+            .size(dims.getBoxWidth(), 3)
             .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
             .style(BoxStyle.SINGLE)
             .titleStyle(TerminalContainerHandle.TextStyle.BOLD)
@@ -376,7 +364,7 @@ public class MenuNavigator {
         String breadcrumb = String.join(" > ", trail);
         
         // Center the breadcrumb text below the header box (row 3)
-        int textCol = dims.boxCol + (dims.boxWidth - breadcrumb.length()) / 2;
+        int textCol = dims.getBoxCol() + (dims.getBoxWidth() - breadcrumb.length()) / 2;
         
         return terminal.printAt(3, textCol, breadcrumb, TextStyle.INFO);
     }
@@ -401,8 +389,14 @@ public class MenuNavigator {
         
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         
-        // Start below header (row 0-2) and breadcrumb (row 3), with one blank line
-        final int startRow = 5;
+        // Calculate start row - leave space for description if present
+        String description = currentMenu.getDescription();
+        int descriptionLines = 0;
+        if (description != null && !description.isEmpty()) {
+            descriptionLines = Math.min(description.split("\n").length + 1, 9); // +1 for spacing
+        }
+        
+        final int startRow = 5 + descriptionLines; // Below header, breadcrumb, and description
         int selectableIndex = 0;
         
         for (int i = visibleStart; i < visibleEnd; i++) {
@@ -421,9 +415,9 @@ public class MenuNavigator {
             }
         }
         
-        // Scroll indicators (centered)
+        // Scroll indicators
         if (scrollOffset > 0) {
-            int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
+            int indicatorCol = dims.getBoxCol() + dims.getBoxWidth() / 2 - 5;
             future = future.thenCompose(v -> 
                 terminal.printAt(startRow - 1, indicatorCol, "↑ More above", 
                     TextStyle.INFO));
@@ -432,7 +426,7 @@ public class MenuNavigator {
         int moreBelowRow = startRow + (visibleEnd - visibleStart);
         
         if (visibleEnd < totalItems) {
-            int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
+            int indicatorCol = dims.getBoxCol() + dims.getBoxWidth() / 2 - 5;
             future = future.thenCompose(v -> 
                 terminal.printAt(moreBelowRow, indicatorCol, "↓ More below", TextStyle.INFO));
         }
@@ -452,8 +446,8 @@ public class MenuNavigator {
         CompletableFuture<Void> future;
         
         // Calculate content area (inside the box margins)
-        int contentStartCol = dims.boxCol + 2;
-        int contentWidth = dims.itemContentWidth;
+        int contentStartCol = dims.getBoxCol() + 2;
+        int contentWidth = dims.getItemContentWidth();
         
         switch (item.type) {
             case SEPARATOR:
@@ -505,26 +499,33 @@ public class MenuNavigator {
         
         return future;
     }
-    
     private CompletableFuture<Void> renderDescription() {
-        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        String description = currentMenu.getDescription();
         
-        if (selectedIndex >= 0 && selectedIndex < selectableItems.size()) {
-            MenuContext.MenuItem selected = selectableItems.get(selectedIndex);
-            
-            int descRow = terminal.getRows() - 4;
-            
-            String info = "";
-            if (selected.type == MenuContext.MenuItemType.SUBMENU) {
-                info = "→ Opens submenu";
-            }
-            
-            if (!info.isEmpty()) {
-                return terminal.printAt(descRow, MENU_MARGIN, info, TextStyle.INFO);
-            }
+        if (description == null || description.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
         }
         
-        return CompletableFuture.completedFuture(null);
+        MenuDimensions dims = calculateMenuDimensions();
+        
+        // Show description in a box above the menu items
+        String[] lines = description.split("\n");
+        int descRow = 5; // Below header and breadcrumb
+        
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        
+        for (int i = 0; i < lines.length && i < 8; i++) { // Max 8 lines
+            String line = lines[i];
+            final int row = descRow + i;
+            
+            // Center or left-align the description text
+            int col = dims.getBoxCol() + 4; // Left-aligned with padding
+            
+            future = future.thenCompose(v -> 
+                terminal.printAt(row, col, line, TextStyle.NORMAL));
+        }
+        
+        return future;
     }
     
     /**
@@ -539,9 +540,9 @@ public class MenuNavigator {
             : "↑↓: Navigate  ←→: Scroll Text  Enter: Select  Home/End: Jump";
         
         // Center help text
-        int helpCol = dims.boxCol + (dims.boxWidth - help.length()) / 2;
+        int helpCol = dims.getBoxCol() + (dims.getBoxWidth() - help.length()) / 2;
         
-        return terminal.drawHLine(footerRow - 1, dims.boxCol, dims.boxWidth)
+        return terminal.drawHLine(footerRow - 1, dims.getBoxCol(), dims.getBoxWidth())
             .thenCompose(v -> terminal.printAt(footerRow, helpCol, help, TextStyle.INFO));
     }
 

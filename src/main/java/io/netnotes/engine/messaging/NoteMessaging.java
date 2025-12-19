@@ -177,6 +177,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly STYLE         = new NoteBytesReadOnly("style");
         public static final NoteBytesReadOnly ROW           = new NoteBytesReadOnly("row");
         public static final NoteBytesReadOnly COL           = new NoteBytesReadOnly("col");
+        public static final NoteBytesReadOnly ROWS          = new NoteBytesReadOnly("rows");
+        public static final NoteBytesReadOnly COLS          = new NoteBytesReadOnly("cols");
         public static final NoteBytesReadOnly WIDTH         = new NoteBytesReadOnly("width");
         public static final NoteBytesReadOnly HEIGHT        = new NoteBytesReadOnly("height");
         public static final NoteBytesReadOnly LENGTH        = new NoteBytesReadOnly("length");

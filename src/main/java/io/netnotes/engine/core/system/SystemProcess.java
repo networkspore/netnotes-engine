@@ -70,7 +70,7 @@ public class SystemProcess extends FlowProcess {
     // Core components
     private final KeyboardInput defaultKeyboard;
     private final UIRenderer uiRenderer;
-    private ContainerService containerService;
+    private RenderingService containerService;
     private ServicesProcess servicesProcess;
     private ClientSession systemClientSession;
     
@@ -80,6 +80,7 @@ public class SystemProcess extends FlowProcess {
     // Bootstrap wizard (temporary)
     private BootstrapWizardProcess bootstrapWizard;
     
+
     // States
     public static final long INITIALIZING = 1L << 0;
     public static final long BOOTSTRAP_NEEDED = 1L << 1;
@@ -223,7 +224,7 @@ public class SystemProcess extends FlowProcess {
     private CompletableFuture<Void> startContainerService() {
        
 
-        containerService = new ContainerService(
+        containerService = new RenderingService(
             CoreConstants.CONTAINER_SERVICE, 
             uiRenderer
         );

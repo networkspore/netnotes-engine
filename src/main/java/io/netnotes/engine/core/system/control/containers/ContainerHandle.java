@@ -2,6 +2,7 @@ package io.netnotes.engine.core.system.control.containers;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.ServicesProcess;
@@ -12,9 +13,11 @@ import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
+import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -44,6 +47,7 @@ public class ContainerHandle extends FlowProcess {
     private StreamChannel renderStream;
     private NoteBytesWriter renderWriter;
 
+    private final HashMap<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new HashMap<>();
     /**
      * Constructor
      * 
@@ -65,9 +69,21 @@ public class ContainerHandle extends FlowProcess {
         super(name, ProcessType.BIDIRECTIONAL);
         this.containerId = containerId;
         this.containerServicePath = containerServicePath;
+        setupMsgMap();
     }
 
 
+    
+
+    private void setupMsgMap(){
+        m_msgMap.put(ContainerCommands.CONTAINER_CLOSED, this::handleContainerClosed);
+        m_msgMap.put(ContainerCommands.CONTAINER_RESIZED, this::handleContainerResized);
+        m_msgMap.put(ContainerCommands.CONTAINER_FOCUSED, this::handleContainerFocused);
+    }
+    
+    protected HashMap<NoteBytesReadOnly, RoutedMessageExecutor> getRoutedMsgMap(){
+        return m_msgMap;
+    }
     
     @Override
       public CompletableFuture<Void> run() {
@@ -105,6 +121,7 @@ public class ContainerHandle extends FlowProcess {
             }
         }
     }
+
     
     /**
      * Handle incoming messages (container events from ContainerService)
@@ -119,15 +136,12 @@ public class ContainerHandle extends FlowProcess {
             return CompletableFuture.completedFuture(null);
         }
         
-        // Handle container events
-        if (cmd.equals(ContainerCommands.CONTAINER_CLOSED)) {
-            handleContainerClosed(message);
-        } else if (cmd.equals(ContainerCommands.CONTAINER_RESIZED)) {
-            handleContainerResized(message);
-        } else if (cmd.equals(ContainerCommands.CONTAINER_FOCUSED)) {
-            handleContainerFocused(message);
-        }
+        RoutedMessageExecutor msgExec = m_msgMap.get(cmd);
         
+        if(msgExec != null){
+            return msgExec.execute(message, packet);
+        }
+
         return CompletableFuture.completedFuture(null);
     }
     
@@ -272,7 +286,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Handle container closed event (user clicked X)
      */
-    private void handleContainerClosed(NoteBytesMap event) {
+    protected CompletableFuture<Void> handleContainerClosed(NoteBytesMap message, RoutedPacket packet) {
         Log.logMsg("[ContainerHandle] Container closed: " + containerId);
         
         // Emit to all subscribers
@@ -284,27 +298,43 @@ public class ContainerHandle extends FlowProcess {
         
         // Cleanup
         isDestroyed = true;
+
+        return CompletableFuture.completedFuture(null);
     }
     
     /**
      * Handle container resized event
      */
-    private void handleContainerResized(NoteBytesMap event) {
-        int width = event.get("width").getAsInt();
-        int height = event.get("height").getAsInt();
-        
-        Log.logMsg("[ContainerHandle] Container resized: " + 
-            containerId + " (" + width + "x" + height + ")");
-        
-        emit(event);
+    protected CompletableFuture<Void> handleContainerResized(NoteBytesMap message, RoutedPacket packet) {
+        NoteBytes widthBytes = message.get(Keys.WIDTH);
+        NoteBytes heightBytes = message.get(Keys.HEIGHT);
+
+        if(widthBytes != null && heightBytes != null){
+            int width = widthBytes.getAsInt();
+            int height = heightBytes.getAsInt();
+           
+            emit(message);
+            
+            return handleContainerResized(width, height);
+        }
+        return CompletableFuture.failedFuture(new IllegalArgumentException("width and height required"));
     }
+
+    protected CompletableFuture<Void> handleContainerResized(int changedWidth, int changedHeight){
+        Log.logMsg("[ContainerHandle] Container resized: " + 
+            containerId + " (" + changedWidth + "x" + changedHeight + ")");
+        return CompletableFuture.completedFuture(null);
+    }
+
+   
     
     /**
      * Handle container focused event
      */
-    private void handleContainerFocused(NoteBytesMap event) {
+    protected CompletableFuture<Void> handleContainerFocused(NoteBytesMap message, RoutedPacket packet) {
         Log.logMsg("[ContainerHandle] Container focused: " + containerId);
-        emit(event);
+        emit(message);
+        return CompletableFuture.completedFuture(null);
     }
     
     // ===== GETTERS =====

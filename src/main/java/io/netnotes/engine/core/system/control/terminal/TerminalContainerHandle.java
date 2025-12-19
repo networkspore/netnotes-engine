@@ -1,9 +1,11 @@
 package io.netnotes.engine.core.system.control.terminal;
 
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.containers.ContainerHandle;
 import io.netnotes.engine.core.system.control.containers.ContainerId;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.Color;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
@@ -54,6 +56,8 @@ public class TerminalContainerHandle extends ContainerHandle {
     
     // ===== TERMINAL-SPECIFIC OPERATIONS =====
     // All operations now properly wait for ready state first!
+    
+     
     
 
     
@@ -479,6 +483,33 @@ public class TerminalContainerHandle extends ContainerHandle {
             map.put(Keys.UNDERLINE, underline);
             return map;
         }
+ 
+        public TextStyle copy(){
+            TextStyle textStyle = new TextStyle();
+            textStyle.foreground = this.foreground;
+            textStyle.background = this.background;
+            textStyle.bold = this.bold;
+            textStyle.inverse = this.inverse;
+            textStyle.underline = this.underline;
+            return textStyle;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof TextStyle)) return false;
+            TextStyle other = (TextStyle) obj;
+            return foreground == other.foreground &&
+                background == other.background &&
+                bold == other.bold &&
+                inverse == other.inverse &&
+                underline == other.underline;
+        }
+    
+        @Override
+        public int hashCode() {
+            return Objects.hash(foreground, background, bold, inverse, underline);
+        }
     }
     
     /**
@@ -495,10 +526,23 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Box drawing styles
      */
+     
     public enum BoxStyle {
-        SINGLE,   // ─ │ ┌ ┐ └ ┘
-        DOUBLE,   // ═ ║ ╔ ╗ ╚ ╝
-        ROUNDED,  // ─ │ ╭ ╮ ╰ ╯
-        THICK     // ━ ┃ ┏ ┓ ┗ ┛
+        SINGLE(new char[]{'─', '│', '┌', '┐', '└', '┘'}),
+        DOUBLE(new char[]{'═', '║', '╔', '╗', '╚', '╝'}),
+        ROUNDED(new char[]{'─', '│', '╭', '╮', '╰', '╯'}),
+        THICK(new char[]{'━', '┃', '┏', '┓', '┗', '┛'});
+        
+        private final char[] chars;
+        
+        BoxStyle(char[] chars) {
+            this.chars = chars;
+        }
+        
+        char[] getChars() {
+            return chars;
+        }
     }
+
+ 
 }
