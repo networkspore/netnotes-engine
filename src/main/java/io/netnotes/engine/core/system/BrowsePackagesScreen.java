@@ -6,15 +6,15 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigator;
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
+import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;

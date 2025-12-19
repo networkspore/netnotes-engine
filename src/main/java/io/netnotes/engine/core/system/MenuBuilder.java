@@ -1,6 +1,6 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.system.control.MenuContext;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 

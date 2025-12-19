@@ -1,8 +1,8 @@
-package io.netnotes.engine.core.system.control;
+package io.netnotes.engine.core.system.control.terminal.input;
 
 import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;

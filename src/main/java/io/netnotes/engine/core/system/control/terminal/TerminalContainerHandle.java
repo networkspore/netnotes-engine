@@ -1,11 +1,13 @@
-package io.netnotes.engine.core.system.control.containers;
+package io.netnotes.engine.core.system.control.terminal;
 
 import java.util.concurrent.CompletableFuture;
 
+import io.netnotes.engine.core.system.control.containers.ContainerHandle;
+import io.netnotes.engine.core.system.control.containers.ContainerId;
+import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalContainerHandle - Terminal-style container operations
@@ -232,6 +234,18 @@ public class TerminalContainerHandle extends ContainerHandle {
     ) {
         return drawBox(startRow, startCol, width, height, title, BoxStyle.SINGLE);
     }
+
+    /**
+     * Draw a box (border only, no title)
+     * This is the primitive - keeps existing behavior if title is null/empty
+     */
+    public CompletableFuture<Void> drawBox(
+        int startRow, int startCol, 
+        int width, int height,
+        BoxStyle boxStyle
+    ) {
+        return drawBox(startRow, startCol, width, height, null, boxStyle);
+    }
     
     /**
      * Draw styled box
@@ -256,7 +270,52 @@ public class TerminalContainerHandle extends ContainerHandle {
             return sendRenderCommand(command);
         });
     }
+
+    /**
+     * Create a TextBox builder positioned on this terminal
+     * Convenience method for complex text box scenarios
+     */
+    public TerminalTextBox.Builder textBox() {
+        return TerminalTextBox.builder();
+    }
+
+    /**
+     * Quick text box - most common case
+     * Box with title inside, centered
+     */
+    public CompletableFuture<Void> drawTextBox(
+        int row, int col,
+        int width, int height,
+        String title
+    ) {
+        return TerminalTextBox.builder()
+            .position(row, col)
+            .size(width, height)
+            .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
+            .style(BoxStyle.SINGLE)
+            .build()
+            .render(this);
+    }
     
+    /**
+    * Quick text box with content
+    */
+    public CompletableFuture<Void> drawTextBox(
+        int row, int col,
+        int width, int height,
+        String title,
+        String... content
+    ) {
+        return TerminalTextBox.builder()
+            .position(row, col)
+            .size(width, height)
+            .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
+            .content(content)
+            .style(BoxStyle.SINGLE)
+            .build()
+            .render(this);
+    }
+        
     /**
      * Print a horizontal line (separator)
      */

@@ -3,11 +3,11 @@ package io.netnotes.engine.core.system;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.MenuContext;
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.TerminalInputReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
+import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;

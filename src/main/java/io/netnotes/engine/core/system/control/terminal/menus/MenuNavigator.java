@@ -1,23 +1,22 @@
-package io.netnotes.engine.core.system.control;
+package io.netnotes.engine.core.system.control.terminal.menus;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.BoxStyle;
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.BoxStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
-import io.netnotes.engine.io.input.Keyboard;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
-import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
@@ -27,22 +26,28 @@ import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 /**
  * MenuNavigator - Keyboard-driven terminal menu navigation
  * 
- * REFACTORED: Just a helper class, NOT a FlowProcess
- * - Registers with InputDevice via setEventConsumer()
- * - Handles up/down/enter/escape navigation
- * - Renders to TerminalContainerHandle
- * 
- * Usage:
- * ```java
- * MenuNavigator navigator = new MenuNavigator(terminal, keyboard);
- * navigator.showMenu(myMenu);
- * ```
  */
 public class MenuNavigator {
+
+    // Helper class to hold menu dimensions
+    private static class MenuDimensions {
+        final int boxWidth;
+        final int boxCol;
+        final int itemContentWidth;
+        
+        MenuDimensions(int boxWidth, int boxCol, int itemContentWidth) {
+            this.boxWidth = boxWidth;
+            this.boxCol = boxCol;
+            this.itemContentWidth = itemContentWidth;
+        }
+    }
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
     private final InputDevice keyboardInput;
+    private ScrollableMenuItem menuItemRenderer;
+    private int horizontalScrollOffset = 0;  // For currently selected item
+
     
     // Navigation state
     private final Stack<MenuContext> navigationStack = new Stack<>();
@@ -53,15 +58,17 @@ public class MenuNavigator {
     private int scrollOffset = 0;
     
     // Layout parameters
-    private static final int MENU_START_ROW = 3;
     private static final int MENU_MARGIN = 2;
     private static final int MAX_VISIBLE_ITEMS = 15;
     
     // Keyboard event consumer
     private final ExecutorConsumer<RoutedEvent> keyboardConsumer;
+    
     private final KeyRunTable keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
         new NoteBytesRunnablePair(KeyCodeBytes.UP, this::handleNavigateUp),
         new NoteBytesRunnablePair(KeyCodeBytes.DOWN, this::handleNavigateDown),
+        new NoteBytesRunnablePair(KeyCodeBytes.LEFT, this::handleScrollLeft),
+        new NoteBytesRunnablePair(KeyCodeBytes.RIGHT, this::handleScrollRight),
         new NoteBytesRunnablePair(KeyCodeBytes.ENTER, this::handleSelectCurrent),
         new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::handleBack),
         new NoteBytesRunnablePair(KeyCodeBytes.PAGE_UP, this::handlePageUp),
@@ -69,7 +76,7 @@ public class MenuNavigator {
         new NoteBytesRunnablePair(KeyCodeBytes.HOME, this::handleHome),
         new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd),
     });
-    
+        
     // States
     public static final long IDLE = 1L << 0;
     public static final long DISPLAYING_MENU = 1L << 1;
@@ -313,6 +320,7 @@ public class MenuNavigator {
         
         terminal.beginBatch()
             .thenCompose(v -> terminal.clear())
+            .thenCompose(v -> terminal.hideCursor())
             .thenCompose(v -> renderHeader())
             .thenCompose(v -> renderBreadcrumb())
             .thenCompose(v -> renderMenuItems())
@@ -328,16 +336,30 @@ public class MenuNavigator {
             });
     }
     
+    /**
+     * Render header (centered) using TextBox
+     */
     private CompletableFuture<Void> renderHeader() {
+        MenuDimensions dims = calculateMenuDimensions();
         String title = currentMenu.getTitle();
-        int cols = terminal.getCols();
-        int titleLen = title.length();
-        int boxWidth = Math.min(cols - 4, Math.max(titleLen + 4, 40));
         
-        return terminal.drawBox(0, MENU_MARGIN, boxWidth, 3, title, BoxStyle.SINGLE);
+        return TerminalTextBox.builder()
+            .position(0, dims.boxCol)
+            .size(dims.boxWidth, 3)
+            .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
+            .style(BoxStyle.SINGLE)
+            .titleStyle(TerminalContainerHandle.TextStyle.BOLD)
+            .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
+            .build()
+            .render(terminal);
     }
     
+    /**
+     * Render breadcrumb (centered, below the header box)
+     */
     private CompletableFuture<Void> renderBreadcrumb() {
+        MenuDimensions dims = calculateMenuDimensions();
+        
         List<String> trail = new ArrayList<>();
         MenuContext current = currentMenu;
         
@@ -346,11 +368,26 @@ public class MenuNavigator {
             current = current.getParent();
         }
         
+        // Only show breadcrumb if there's a trail (more than just current menu)
+        if (trail.size() <= 1) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
         String breadcrumb = String.join(" > ", trail);
-        return terminal.printAt(2, MENU_MARGIN, breadcrumb, TextStyle.INFO);
+        
+        // Center the breadcrumb text below the header box (row 3)
+        int textCol = dims.boxCol + (dims.boxWidth - breadcrumb.length()) / 2;
+        
+        return terminal.printAt(3, textCol, breadcrumb, TextStyle.INFO);
     }
+
     
+        
+   /**
+     * Render menu items (centered with proper padding)
+     */
     private CompletableFuture<Void> renderMenuItems() {
+        MenuDimensions dims = calculateMenuDimensions();
         List<MenuContext.MenuItem> items = new ArrayList<>(currentMenu.getItems());
         List<MenuContext.MenuItem> selectableItems = getSelectableItems();
         
@@ -363,7 +400,9 @@ public class MenuNavigator {
         int visibleEnd = Math.min(visibleStart + MAX_VISIBLE_ITEMS, totalItems);
         
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        final int startRow = MENU_START_ROW;
+        
+        // Start below header (row 0-2) and breadcrumb (row 3), with one blank line
+        final int startRow = 5;
         int selectableIndex = 0;
         
         for (int i = visibleStart; i < visibleEnd; i++) {
@@ -371,10 +410,10 @@ public class MenuNavigator {
             final int currentRow = startRow + (i - visibleStart);
             
             boolean isSelected = (item.type != MenuContext.MenuItemType.SEPARATOR &&
-                                 item.type != MenuContext.MenuItemType.INFO &&
-                                 selectableIndex == selectedIndex);
+                                item.type != MenuContext.MenuItemType.INFO &&
+                                selectableIndex == selectedIndex);
             
-            future = future.thenCompose(v -> renderMenuItem(item, currentRow, isSelected));
+            future = future.thenCompose(v -> renderMenuItem(item, currentRow, isSelected, dims));
             
             if (item.type != MenuContext.MenuItemType.SEPARATOR &&
                 item.type != MenuContext.MenuItemType.INFO) {
@@ -382,35 +421,51 @@ public class MenuNavigator {
             }
         }
         
+        // Scroll indicators (centered)
         if (scrollOffset > 0) {
+            int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
             future = future.thenCompose(v -> 
-                terminal.printAt(MENU_START_ROW - 1, MENU_MARGIN, "↑ More above", 
+                terminal.printAt(startRow - 1, indicatorCol, "↑ More above", 
                     TextStyle.INFO));
         }
         
         int moreBelowRow = startRow + (visibleEnd - visibleStart);
         
         if (visibleEnd < totalItems) {
+            int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
             future = future.thenCompose(v -> 
-                terminal.printAt(moreBelowRow, MENU_MARGIN, "↓ More below", TextStyle.INFO));
+                terminal.printAt(moreBelowRow, indicatorCol, "↓ More below", TextStyle.INFO));
         }
         
         return future;
     }
-    
+        
+    /**
+     * Render single menu item with improved highlighting and horizontal scroll
+     */
     private CompletableFuture<Void> renderMenuItem(
             MenuContext.MenuItem item, 
             int row, 
-            boolean isSelected) {
+            boolean isSelected,
+            MenuDimensions dims) {
         
         CompletableFuture<Void> future;
         
+        // Calculate content area (inside the box margins)
+        int contentStartCol = dims.boxCol + 2;
+        int contentWidth = dims.itemContentWidth;
+        
         switch (item.type) {
             case SEPARATOR:
-                future = terminal.printAt(row, MENU_MARGIN, "─".repeat(40), TextStyle.NORMAL)
+                // Draw separator line
+                String separatorLine = "─".repeat(contentWidth);
+                future = terminal.printAt(row, contentStartCol, separatorLine, TextStyle.NORMAL)
                     .thenCompose(v -> {
                         if (item.description != null && !item.description.isEmpty()) {
-                            return terminal.printAt(row, MENU_MARGIN + 2, 
+                            // Center separator label
+                            int labelCol = contentStartCol + 
+                                (contentWidth - item.description.length()) / 2;
+                            return terminal.printAt(row, labelCol, 
                                 " " + item.description + " ", TextStyle.BOLD);
                         }
                         return CompletableFuture.completedFuture(null);
@@ -418,22 +473,33 @@ public class MenuNavigator {
                 break;
                 
             case INFO:
-                future = terminal.printAt(row, MENU_MARGIN + 2, 
-                    item.description, TextStyle.INFO);
+                // Center info text
+                int infoCol = contentStartCol + (contentWidth - item.description.length()) / 2;
+                future = terminal.printAt(row, infoCol, item.description, TextStyle.INFO);
                 break;
                 
             default:
-                String prefix = isSelected ? "▶ " : "  ";
+                // Build item text
                 String badge = item.badge != null ? " [" + item.badge + "]" : "";
-                String text = prefix + item.description + badge;
+                String itemText = item.description + badge;
                 
-                TextStyle style = isSelected ? TextStyle.INVERSE : TextStyle.NORMAL;
-                
-                if (!item.enabled) {
-                    style = TextStyle.INFO;
+                if (isSelected) {
+                    // Use scrollable menu item renderer for highlighted items
+                    future = menuItemRenderer.renderHighlighted(
+                        terminal,
+                        row,
+                        contentStartCol,
+                        contentWidth,
+                        itemText,
+                        horizontalScrollOffset
+                    );
+                } else {
+                    // Not selected - left aligned with padding, truncate if needed
+                    String displayText = "  " + menuItemRenderer.truncateText(itemText, contentWidth - 2);
+                    TextStyle style = item.enabled ? TextStyle.NORMAL : TextStyle.INFO;
+                    
+                    future = terminal.printAt(row, contentStartCol, displayText, style);
                 }
-                
-                future = terminal.printAt(row, MENU_MARGIN, text, style);
                 break;
         }
         
@@ -461,18 +527,24 @@ public class MenuNavigator {
         return CompletableFuture.completedFuture(null);
     }
     
+    /**
+     * Render footer (centered)
+     */
     private CompletableFuture<Void> renderFooter() {
+        MenuDimensions dims = calculateMenuDimensions();
         int footerRow = terminal.getRows() - 2;
         
         String help = currentMenu.hasParent() || !navigationStack.isEmpty() 
-            ? "↑↓: Navigate  Enter: Select  ESC: Back  Home/End: Jump  PgUp/PgDn: Scroll"
-            : "↑↓: Navigate  Enter: Select  Home/End: Jump  PgUp/PgDn: Scroll";
+            ? "↑↓: Navigate  ←→: Scroll Text  Enter: Select  ESC: Back  Home/End: Jump"
+            : "↑↓: Navigate  ←→: Scroll Text  Enter: Select  Home/End: Jump";
         
-        return terminal.drawHLine(footerRow - 1, 0, terminal.getCols())
-            .thenCompose(v -> terminal.printAt(footerRow, MENU_MARGIN, help, 
-                TextStyle.INFO));
+        // Center help text
+        int helpCol = dims.boxCol + (dims.boxWidth - help.length()) / 2;
+        
+        return terminal.drawHLine(footerRow - 1, dims.boxCol, dims.boxWidth)
+            .thenCompose(v -> terminal.printAt(footerRow, helpCol, help, TextStyle.INFO));
     }
-    
+
     public void refreshMenu() {
         if (state.hasState(DISPLAYING_MENU) && currentMenu != null) {
             renderMenu();
@@ -523,6 +595,71 @@ public class MenuNavigator {
             keyboardInput.setEventConsumer(null);
         }
     }
+
+    /**
+     * Calculate optimal menu dimensions based on content
+     */
+    private MenuDimensions calculateMenuDimensions() {
+        List<MenuContext.MenuItem> items = new ArrayList<>(currentMenu.getItems());
+        
+        int maxTextLength = currentMenu.getTitle().length();
+        
+        // Find longest item text
+        for (MenuContext.MenuItem item : items) {
+            int itemLength = item.description.length();
+            if (item.badge != null) {
+                itemLength += item.badge.length() + 3; // " [badge]"
+            }
+            maxTextLength = Math.max(maxTextLength, itemLength);
+        }
+        
+        // Add padding (4 chars on each side for margins, plus 2 for box borders)
+        int contentWidth = maxTextLength + 8;
+        
+        // Ensure minimum and maximum bounds
+        int boxWidth = Math.max(40, Math.min(contentWidth, terminal.getCols() - 8));
+        
+        // Center horizontally
+        int boxCol = (terminal.getCols() - boxWidth) / 2;
+        
+        // Initialize menu item renderer with the calculated width
+        int itemContentWidth = boxWidth - 4; // Account for borders and padding
+        this.menuItemRenderer = new ScrollableMenuItem(itemContentWidth, 
+            ScrollableMenuItem.TextOverflowStrategy.SCROLL_ON_SELECT);
+        
+        return new MenuDimensions(boxWidth, boxCol, itemContentWidth);
+    }
+
+    private void handleScrollRight() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
+        
+        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
+        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
+        
+        // Only scroll if text is longer than display width
+        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
+            int maxOffset = menuItemRenderer.getMaxScrollOffset(itemText);
+            horizontalScrollOffset = Math.min(maxOffset, horizontalScrollOffset + 5);
+            renderMenu();
+        }
+    }
+
+
+    private void handleScrollLeft() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
+        
+        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
+        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
+        
+        // Only scroll if text is longer than display width
+        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
+            horizontalScrollOffset = Math.max(0, horizontalScrollOffset - 5);
+            renderMenu();
+        }
+    }
+
     
     // ===== GETTERS =====
     

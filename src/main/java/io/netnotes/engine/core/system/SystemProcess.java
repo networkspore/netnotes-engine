@@ -6,6 +6,7 @@ import io.netnotes.engine.core.system.control.BootstrapWizardProcess;
 import io.netnotes.engine.core.system.control.SecureInputInstaller;
 import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.core.system.control.containers.*;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;

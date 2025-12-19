@@ -11,9 +11,9 @@ import java.util.concurrent.CompletionException;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.TerminalInputReader;
-import io.netnotes.engine.core.system.control.MenuContext;
-import io.netnotes.engine.core.system.control.MenuNavigator;
+import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;

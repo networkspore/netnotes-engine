@@ -2,7 +2,9 @@ package io.netnotes.engine.core.system.control;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.BootstrapConfig;
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
+import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.InputDevice;

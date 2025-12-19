@@ -1,4 +1,4 @@
-package io.netnotes.engine.core.system.control;
+package io.netnotes.engine.core.system.control.terminal.menus;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
