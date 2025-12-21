@@ -8,12 +8,22 @@ import java.util.function.Consumer;
 
 public class VirtualExecutors {
     
+    // Traditional executors (for compatibility)
+    private static final ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private static final ScheduledExecutorService virtualScheduled = 
+        Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
+    
+    // Serialized virtual executors (for ordered execution)
+    private static final SerializedVirtualExecutor serializedVirtual = new SerializedVirtualExecutor();
+    private static final SerializedScheduledVirtualExecutor serializedScheduledVirtual = 
+        new SerializedScheduledVirtualExecutor();
+
     /**
      * Get the shared virtual thread executor.
      * Use getSerializedVirtualExecutor() for ordered execution
      */
     public static ExecutorService getVirtualExecutor() { 
-        return Executors.newVirtualThreadPerTaskExecutor(); 
+        return virtualExecutor; 
     }
 
     /**
@@ -21,7 +31,7 @@ public class VirtualExecutors {
      * Use getSerializedScheduledVirtualExecutor() for ordered execution
      */
     public static ScheduledExecutorService getVirtualScheduledExecutor() { 
-        return Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
+        return virtualScheduled; 
     }
     
     /**
@@ -31,7 +41,7 @@ public class VirtualExecutors {
      * @return the shared SerializedVirtualExecutor
      */
     public static SerializedVirtualExecutor getSerializedVirtualExecutor() {
-        return new SerializedVirtualExecutor();
+        return serializedVirtual;
     }
     
     /**
@@ -41,7 +51,7 @@ public class VirtualExecutors {
      * @return the shared SerializedScheduledVirtualExecutor
      */
     public static SerializedScheduledVirtualExecutor getSerializedScheduledVirtualExecutor() {
-        return new SerializedScheduledVirtualExecutor();
+        return serializedScheduledVirtual;
     }
     
     /**

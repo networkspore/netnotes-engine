@@ -7,8 +7,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -335,7 +333,7 @@ public class ContainerHandle extends FlowProcess {
             this.eventChannel = channel;
             Log.logMsg("[ContainerHandle] Event stream read thread starting");
             // Setup reader on virtual thread
-           Executors.newVirtualThreadPerTaskExecutor().execute(() -> {
+            VirtualExecutors.getVirtualExecutor().execute(() -> {
                 Log.logMsg("[ContainerHandle] Event stream read thread started");
                 try (
                     NoteBytesReader reader = new NoteBytesReader(
