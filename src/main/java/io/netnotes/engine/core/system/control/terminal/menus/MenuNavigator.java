@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.BoxStyle;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.TextStyle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
@@ -20,8 +20,8 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.ExecutorConsumer;
-import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
+import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 /**
  * MenuNavigator - Keyboard-driven terminal menu navigation
@@ -336,7 +336,7 @@ public class MenuNavigator {
             .size(dims.getBoxWidth(), 3)
             .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
             .style(BoxStyle.SINGLE)
-            .titleStyle(TerminalContainerHandle.TextStyle.BOLD)
+            .titleStyle(TextStyle.BOLD)
             .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
             .build()
             .render(terminal);

@@ -4,8 +4,10 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 
 /**
  * ContainerCommands - Command types for container protocol
@@ -88,34 +90,38 @@ public class ContainerCommands {
     /**
      * Create a new container
      */
-    public static NoteBytesMap createContainer(
+    public static NoteBytesReadOnly createContainer(
+        ContainerId containerId,
         String title,
         ContainerType type,
         ContextPath ownerPath,
         ContainerConfig config,
         boolean autoFocus
     ) {
-        NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.CMD, CREATE_CONTAINER);
-        msg.put(Keys.TITLE, new NoteBytes(title));
-        msg.put(Keys.TYPE, new NoteBytes(type.name()));
-        msg.put(Keys.PATH, ownerPath.getSegments());
-        msg.put(AUTO_FOCUS, autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE); // Flag for ContainerService
-        if (config != null) {
-            msg.put(Keys.CONFIG, config.toNoteBytes());
-        }
+        config = config == null ? new ContainerConfig() : config;
+
+        NoteBytesObject msg = new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.CMD, CREATE_CONTAINER),
+            new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+            new NoteBytesPair(Keys.TITLE, new NoteBytes(title)),
+            new NoteBytesPair(Keys.TYPE, new NoteBytes(type.name())),
+            new NoteBytesPair(Keys.PATH, ownerPath.getSegments()),
+            new NoteBytesPair(AUTO_FOCUS, autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE),
+            new NoteBytesPair(Keys.CONFIG, config.toNoteBytes())
+        });
         
-        return msg;
+        return msg.readOnly();
     }
 
    
     /**
      * Destroy a container
      */
-    public static NoteBytesMap destroyContainer(ContainerId containerId) {
+    public static NoteBytesMap destroyContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, DESTROY_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
@@ -124,72 +130,79 @@ public class ContainerCommands {
      */
     public static NoteBytesMap updateContainer(
         ContainerId containerId,
-        NoteBytesMap updates
+        NoteBytesMap updates, NoteBytes rendererId
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, UPDATE_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(Keys.UPDATES, updates);
+         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
     /**
      * Show container (unhide/unminimize)
      */
-    public static NoteBytesMap showContainer(ContainerId containerId) {
+    public static NoteBytesMap showContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, SHOW_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
     /**
      * Hide container (minimize)
      */
-    public static NoteBytesMap hideContainer(ContainerId containerId) {
+    public static NoteBytesMap hideContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, HIDE_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
 
     /**
      * Show container (unhide/unminimize)
      */
-    public static NoteBytesMap maximizeContainer(ContainerId containerId) {
+    public static NoteBytesMap maximizeContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, MAXIMIZE_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
     /**
      * Hide container (minimize)
      */
-    public static NoteBytesMap restoreContainer(ContainerId containerId) {
+    public static NoteBytesMap restoreContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, RESTORE_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
     /**
      * Focus container (bring to front)
      */
-    public static NoteBytesMap focusContainer(ContainerId containerId) {
+    public static NoteBytesMap focusContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, FOCUS_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
     /**
      * Query container state
      */
-    public static NoteBytesMap queryContainer(ContainerId containerId) {
+    public static NoteBytesMap queryContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, QUERY_CONTAINER);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
         return msg;
     }
     
@@ -204,26 +217,13 @@ public class ContainerCommands {
     
     // ===== RESPONSE/EVENT BUILDERS =====
     
-    /**
-     * Container created response
-     */
-    public static NoteBytesMap containerCreated(
-        ContainerId containerId,
-        ContextPath containerPath
-    ) {
-        NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.CMD, CONTAINER_CREATED);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
-        msg.put(Keys.PATH, containerPath.getSegments());
-        return msg;
-    }
     
     /**
      * Container closed event
      */
     public static NoteBytesMap containerClosed(ContainerId containerId) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.CMD, CONTAINER_CLOSED);
+        msg.put(Keys.EVENT, CONTAINER_CLOSED);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
         return msg;
     }
@@ -233,7 +233,7 @@ public class ContainerCommands {
      */
     public static NoteBytesMap containerFocused(ContainerId containerId) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.CMD, CONTAINER_FOCUSED);
+        msg.put(Keys.EVENT, CONTAINER_FOCUSED);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
         return msg;
     }
@@ -247,7 +247,7 @@ public class ContainerCommands {
         int height
     ) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.CMD, CONTAINER_RESIZED);
+        msg.put(Keys.EVENT, CONTAINER_RESIZED);
         msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(Keys.WIDTH, width);
         msg.put(Keys.HEIGHT, height);

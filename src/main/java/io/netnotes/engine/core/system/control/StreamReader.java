@@ -11,7 +11,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.ExecutorConsumer;
+import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 
 /**
  * ProgressTrackingProcess - Consumes progress stream and updates UI

@@ -13,7 +13,7 @@ public class CoreConstants {
     public static final String REPOSITORIES = "repositories";
     public static final String NODE_REGISTRY = "node-registry";
     public static final String NODE_LOADER = "node-loader";
-    public static final String CONTAINER_SERVICE = "container-service";
+    public static final String RENDERING_SERVICE = "rendering-service";
 
     public static final String NODES = "nodes";
     public static final String CONTROLLERS = "controllers";
@@ -30,7 +30,7 @@ public class CoreConstants {
     public static final ContextPath SYSTEM_DEFAULT_KEYBOARD_PATH = SYSTEM_PATH.append(DEFAULT_KEYBOARD_ID);
 
     public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append(SERVICES);
-    public static final ContextPath CONTAINER_SERVICE_PATH = SERVICES_PATH.append(CONTAINER_SERVICE);
+    public static final ContextPath RENDERING_SERVICE_PATH = SERVICES_PATH.append(RENDERING_SERVICE);
     
     public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
     public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);

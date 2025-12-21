@@ -1,111 +1,286 @@
 package io.netnotes.engine.core.system.control.containers;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
 import java.time.Duration;
-import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 
-import io.netnotes.engine.core.system.control.ServicesProcess;
+import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
- * ContainerHandle - FlowProcess-based container control
- * 
- * Architecture (similar to ClaimedDevice):
- * - Has stream TO Container (for sending render commands)
- * - Writes commands directly to stream (no wrapping!)
- * - Receives events from ContainerService
+ * ContainerHandle - FlowProcess-based container control with Builder pattern
  * 
  * Usage:
  * <pre>
- * ContainerHandle handle = new ContainerHandle(containerId, containerServicePath);
+ * ContainerHandle handle = ContainerHandle.builder()
+ *     .name("my-terminal")
+ *     .type(ContainerType.TERMINAL)
+ *     .config(new ContainerConfig().withSize(80, 24))
+ *     .autoFocus(true)
+ *     .build();
+ * 
  * registry.registerChild(ownerPath, handle);
  * registry.startProcess(handle.getContextPath());
  * 
- * handle.show().thenRun(() -> Log.logMsg("Container shown"));
+ * handle.waitUntilReady().thenRun(() -> {
+ *     // Container is ready to use
+ *     handle.show();
+ * });
  * </pre>
  */
 public class ContainerHandle extends FlowProcess {
     
+    // ===== CREATION PARAMETERS (set at construction) =====
     private final ContainerId containerId;
-    private final ContextPath containerServicePath;
+    private final ContainerType containerType;
+    private final ContainerConfig containerConfig;
+    private final ContextPath renderingServicePath;
+    private final String title;
+    private final Builder builder;
+    // ===== RUNTIME STATE =====
     private volatile boolean isDestroyed = false;
     
+    protected NoteBytesReadOnly rendererId = null;
+
     // Stream TO Container (for render commands)
-    private StreamChannel renderStream;
-    private NoteBytesWriter renderWriter;
+    protected StreamChannel renderStream;
+    protected NoteBytesWriter renderWriter;
 
-    private final HashMap<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new HashMap<>();
-    /**
-     * Constructor
-     * 
-     * @param containerId ID of the container to control
-     * @param name name of the container
-     */
-    public ContainerHandle(ContainerId containerId, String name){
-        this(containerId, name, ServicesProcess.CONTAINER_SERVICE_PATH);
-    }
-
-    /**
-     * Constructor
-     * 
-     * @param containerId ID of the container to control
-     * @param name name of the container
-     * @param containerServicePath Path to ContainerService
-     */
-    public ContainerHandle(ContainerId containerId, String name, ContextPath containerServicePath) {
-        super(name, ProcessType.BIDIRECTIONAL);
-        this.containerId = containerId;
-        this.containerServicePath = containerServicePath;
-        setupMsgMap();
-    }
-
-
+    // Stream FROM Container (for events)
+    protected StreamChannel eventChannel = null;
+    protected CompletableFuture<Void> eventStreamReadyFuture = new CompletableFuture<>();
     
+    // MsgMap allows commands to be sent to the container handle
+    protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new ConcurrentHashMap<>();
 
-    private void setupMsgMap(){
-        m_msgMap.put(ContainerCommands.CONTAINER_CLOSED, this::handleContainerClosed);
-        m_msgMap.put(ContainerCommands.CONTAINER_RESIZED, this::handleContainerResized);
-        m_msgMap.put(ContainerCommands.CONTAINER_FOCUSED, this::handleContainerFocused);
+    // Event map allows events from the Container to reach the handle
+    protected final Map<NoteBytesReadOnly, MessageExecutor> m_eventMap = new ConcurrentHashMap<>();
+    protected volatile int width;
+
+	protected volatile int height;
+    /**
+     * Private constructor - use Builder
+     */
+    protected ContainerHandle(Builder builder) {
+        super(builder.name, ProcessType.BIDIRECTIONAL);
+        this.containerId = ContainerId.generate();  // Always generate new ID
+        this.title = builder.title != null ? builder.title : builder.name;
+        this.containerType = builder.containerType;
+        this.containerConfig = builder.containerConfig;
+        this.renderingServicePath = builder.renderingServicePath;
+        this.builder = builder;
+        setupEventMap();
+    }
+
+    /**
+     * Create a builder for ContainerHandle
+     */
+    public static Builder builder(String name, ContainerType containerType) {
+        return new Builder(name, containerType);
     }
     
-    protected HashMap<NoteBytesReadOnly, RoutedMessageExecutor> getRoutedMsgMap(){
+    /**
+     * Quick constructor with defaults (for simple cases)
+     */
+    public static ContainerHandle create(String name, ContainerType type) {
+        return builder(name, type).build();
+    }
+
+    /**
+     * Builder for ContainerHandle
+     */
+    public static class Builder {
+        protected String name;
+        protected String title;
+        protected ContainerType containerType = null;
+        protected NoteBytes rendererId = null;
+        protected ContainerConfig containerConfig = new ContainerConfig();
+        protected ContextPath renderingServicePath = CoreConstants.RENDERING_SERVICE_PATH;
+        protected boolean autoFocus = true;
+        
+     
+        public Builder(String name, ContainerType containerType){
+            this.name = name;
+            this.title = name;
+            this.containerType = containerType;
+        }
+        /**
+         * Set the process name (required)
+         */
+        public Builder name(String name) {
+            this.name = name;
+            return this;
+        }
+        
+        /**
+         * Set the display title (optional, defaults to name)
+         */
+        public Builder title(String title) {
+            this.title = title;
+            return this;
+        }
+        
+        /**
+         * Set the container type
+         */
+        public Builder type(ContainerType type) {
+            this.containerType = type;
+            return this;
+        }
+        
+        /**
+         * Set the container configuration
+         */
+        public Builder config(ContainerConfig config) {
+            this.containerConfig = config;
+            return this;
+        }
+        
+        /**
+         * Set the rendering service path (default: CoreConstants.RENDERING_SERVICE_PATH)
+         */
+        public Builder renderingService(ContextPath path) {
+            this.renderingServicePath = path;
+            return this;
+        }
+
+        public Builder render(NoteBytes rendererId) {
+            this.rendererId = rendererId;
+            return this;
+        }
+        
+        /**
+         * Set auto-focus (default: false)
+         */
+        public Builder autoFocus(boolean autoFocus) {
+            this.autoFocus = autoFocus;
+            return this;
+        }
+        
+        /**
+         * Build the ContainerHandle
+         */
+        public ContainerHandle build() {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalStateException("name is required");
+            }
+            if(containerType == null){
+                throw new IllegalStateException("containerType is required");
+            }
+            return new ContainerHandle(this);
+        }
+    }
+
+    /**
+     * Default event handlers
+     */
+    protected void setupEventMap() {
+        m_eventMap.put(ContainerCommands.CONTAINER_CLOSED, this::handleContainerClosed);
+        m_eventMap.put(ContainerCommands.CONTAINER_RESIZED, this::handleContainerResized);
+        m_eventMap.put(ContainerCommands.CONTAINER_FOCUSED, this::handleContainerFocused);
+    }
+    
+    protected Map<NoteBytesReadOnly, RoutedMessageExecutor> getRoutedMsgMap() {
         return m_msgMap;
+    }
+
+    public NoteBytes getRendererId(){
+        return rendererId;
     }
     
     @Override
-      public CompletableFuture<Void> run() {
-        Log.logMsg("[ContainerHandle] Started for container: " + containerId);
+    public CompletableFuture<Void> run() {
+        Log.logMsg("[ContainerHandle] Started, auto-creating container: " + containerId);
         
-        // Request render stream TO ContainerService (not container path!)
-        requestStreamChannel(containerServicePath)
+        registry.connect(contextPath, renderingServicePath);
+        registry.connect(renderingServicePath, contextPath);
+
+        // Build CREATE_CONTAINER command with all our parameters
+        NoteBytesMap createCmd = new NoteBytesMap();
+        createCmd.put(Keys.CMD, ContainerCommands.CREATE_CONTAINER);
+        createCmd.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        createCmd.put(Keys.TITLE, new NoteBytes(title));
+        createCmd.put(Keys.TYPE, new NoteBytes(containerType.name()));
+        createCmd.put(Keys.PATH, getParentPath().toNoteBytes());
+        createCmd.put(Keys.CONFIG, containerConfig.toNoteBytes());
+        createCmd.put(ContainerCommands.AUTO_FOCUS, builder.autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE);
+        
+        if(builder.rendererId != null){
+            createCmd.put(ContainerCommands.RENDERER_ID, builder.rendererId);
+        }
+        
+        // Send CREATE_CONTAINER to RenderingService
+        return request(renderingServicePath, createCmd.toNoteBytesReadOnly(), Duration.ofMillis(500))
+            .thenCompose(response -> {
+                // Verify creation succeeded
+                NoteBytesMap responseMap = response.getPayload().getAsNoteBytesMap();
+                NoteBytesReadOnly status = responseMap.getReadOnly(Keys.STATUS);
+                
+                if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
+                    String errorMsg = ProtocolObjects.getErrMsg(responseMap);
+                    throw new RuntimeException("Container creation failed: " + errorMsg);
+                }
+                NoteBytes rendererId = responseMap.get(ContainerCommands.RENDERER_ID);
+                NoteBytes widthBytes = responseMap.get(Keys.WIDTH);
+                NoteBytes heightBytes = responseMap.get(Keys.HEIGHT);
+                
+                this.rendererId = rendererId.readOnly();
+                if(widthBytes != null){
+                    width = widthBytes.getAsInt();
+                }
+                if(heightBytes != null){
+                    height = heightBytes.getAsInt();
+                }
+                Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
+                
+                // Request render stream TO RenderingService
+                return requestStreamChannel(renderingServicePath);
+            })
             .thenAccept(channel -> {
-                Log.logMsg("[ContainerHandle] creating writer");
+                Log.logMsg("[ContainerHandle] Render stream established");
                 this.renderStream = channel;
                 this.renderWriter = new NoteBytesWriter(
                     channel.getQueuedOutputStream()
                 );
-                
-                Log.logMsg("[ContainerHandle] Stream channel setup complete");
             })
             .exceptionally(ex -> {
-                Log.logError("[ContainerHandle] Failed to setup render stream: " + ex.getMessage());
+                Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
+                isDestroyed = true;
                 return null;
             });
-        return CompletableFuture.completedFuture(null);
     }
+
+    public int getWidth() {
+		return width;
+	}
+
+	public int getHeight() {
+		return height;
+	}
+
     
     @Override
     public void onStop() {
@@ -122,9 +297,12 @@ public class ContainerHandle extends FlowProcess {
         }
     }
 
-    
+    public CompletableFuture<Void> getEventStreamReadyFuture() { 
+        return eventStreamReadyFuture; 
+    }
+
     /**
-     * Handle incoming messages (container events from ContainerService)
+     * Handle incoming messages (container events from RenderingService)
      */
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
@@ -138,27 +316,85 @@ public class ContainerHandle extends FlowProcess {
         
         RoutedMessageExecutor msgExec = m_msgMap.get(cmd);
         
-        if(msgExec != null){
+        if (msgExec != null) {
             return msgExec.execute(message, packet);
         }
 
         return CompletableFuture.completedFuture(null);
     }
-    
+
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
+        if(fromPath == null){
+            throw new NullPointerException("[ContainerHandle] handleStreamChannel from path is null");
+        }
+        
+        if (fromPath.equals(renderingServicePath)) {
+            Log.logMsg("[ContainerHandle] Event stream received");
+        
+            this.eventChannel = channel;
+            Log.logMsg("[ContainerHandle] Event stream read thread starting");
+            // Setup reader on virtual thread
+           Executors.newVirtualThreadPerTaskExecutor().execute(() -> {
+                Log.logMsg("[ContainerHandle] Event stream read thread started");
+                try (
+                    NoteBytesReader reader = new NoteBytesReader(
+                        new PipedInputStream(channel.getChannelStream(), 
+                            StreamUtils.PIPE_BUFFER_SIZE)
+                    );
+                ) {
+                    // Signal ready
+                    channel.getReadyFuture().complete(null);
+                    eventStreamReadyFuture.complete(null);
+                    Log.logMsg("[ContainerHandle] Event stream reader active");
+                    
+                    // Read and dispatch events
+                    NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
+                    
+                    while (nextBytes != null && isAlive()) {
+                        if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                                Log.logMsg("[ContainerHandle]" + getId() + " event received");
+                            NoteBytesMap event = nextBytes.getAsNoteBytesMap();
+                            dispatchEvent(event);
+                        }
+                        nextBytes = reader.nextNoteBytesReadOnly();
+                    }
+                    
+                    Log.logMsg("[ContainerHandle] Event stream reader stopped");
+                } catch (IOException e) {
+                    Log.logError("[ContainerHandle] Event stream error: " + e.getMessage());
+                    throw new CompletionException(e);
+                }
+            });
+            
+        }
+    }
 
-       throw new IllegalStateException("ContainerHandle doesn't receive streams currently");
+    protected void dispatchEvent(NoteBytesMap event) {
+        NoteBytes eventBytes = event.get(Keys.EVENT);
+
+        if (eventBytes != null) {
+            MessageExecutor eventExec = m_eventMap.get(eventBytes);
+            if (eventExec != null) {
+                eventExec.execute(event);
+            } else {
+                Log.logMsg("[ContainerHandle] Event is not handled: " + eventBytes);
+            }
+        } else {
+            Log.logMsg("[ContainerHandle] Event map does not contain event");
+        }
     }
     
     // ===== CONTAINER OPERATIONS =====
-    // These now send directly through ContainerService (not through stream)
-    
+ 
     /**
      * Show container (unhide/restore)
      */
     public CompletableFuture<Void> show() {
-        NoteBytesMap msg = ContainerCommands.showContainer(containerId);
+        if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.showContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
@@ -166,7 +402,10 @@ public class ContainerHandle extends FlowProcess {
      * Hide container (minimize)
      */
     public CompletableFuture<Void> hide() {
-        NoteBytesMap msg = ContainerCommands.hideContainer(containerId);
+        if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.hideContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
@@ -174,7 +413,10 @@ public class ContainerHandle extends FlowProcess {
      * Focus container (bring to front)
      */
     public CompletableFuture<Void> focus() {
-        NoteBytesMap msg = ContainerCommands.focusContainer(containerId);
+         if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.focusContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
@@ -182,7 +424,10 @@ public class ContainerHandle extends FlowProcess {
      * Maximize container
      */
     public CompletableFuture<Void> maximize() {
-        NoteBytesMap msg = ContainerCommands.maximizeContainer(containerId);
+         if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.maximizeContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
@@ -190,7 +435,10 @@ public class ContainerHandle extends FlowProcess {
      * Restore container (un-maximize)
      */
     public CompletableFuture<Void> restore() {
-        NoteBytesMap msg = ContainerCommands.restoreContainer(containerId);
+         if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.restoreContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
@@ -201,8 +449,10 @@ public class ContainerHandle extends FlowProcess {
         if (isDestroyed) {
             return CompletableFuture.completedFuture(null);
         }
-        
-        NoteBytesMap msg = ContainerCommands.destroyContainer(containerId);
+        if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.destroyContainer(containerId, rendererId);
         return sendToService(msg)
             .thenRun(() -> {
                 // Self-cleanup after destroy
@@ -216,8 +466,12 @@ public class ContainerHandle extends FlowProcess {
      * Query container info
      */
     public CompletableFuture<RoutedPacket> queryContainer() {
-        NoteBytesMap msg = ContainerCommands.queryContainer(containerId);
-        return request(containerServicePath, msg.toNoteBytesReadOnly(), Duration.ofSeconds(1));
+        if(rendererId == null){
+            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+        }
+        NoteBytesMap msg = ContainerCommands.queryContainer(containerId, rendererId);
+        return request(renderingServicePath, msg.toNoteBytesReadOnly(), 
+            Duration.ofSeconds(1));
     }
     
     // ===== RENDER COMMAND SENDING =====
@@ -229,7 +483,6 @@ public class ContainerHandle extends FlowProcess {
      * This is used by subclasses like TerminalContainerHandle
      */
     protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command) {
-
         if (isDestroyed) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Container already destroyed")
@@ -242,23 +495,27 @@ public class ContainerHandle extends FlowProcess {
                 new IllegalStateException("Render stream not initialized")
             );
         }
-        
-        try{
-            renderWriter.write(command.toNoteBytes());
-            return CompletableFuture.completedFuture(null);
-        }catch(IOException ex){
-            return CompletableFuture.failedFuture(ex);
-        }
-    
-    }
 
-   
+        if(renderStream.isActive() && !renderStream.isClosed()){
+        
+            try {
+                NoteBytes noteBytes = command.toNoteBytes();
+                Log.logMsg("[Container]" + getId() + " send render cmd");
+                renderWriter.write(noteBytes);
+                return CompletableFuture.completedFuture(null);
+            } catch (IOException ex) {
+                return CompletableFuture.failedFuture(ex);
+            }
+        }else{
+            Log.logMsg("[ContainerHandle] reader stream is closed");
+            return CompletableFuture.completedFuture(null);
+        }
+    }
     
     // ===== SERVICE COMMUNICATION =====
     
     /**
-     * Send lifecycle command to ContainerService
-     * (show/hide/focus/destroy - not render commands)
+     * Send command to RenderingService
      */
     private CompletableFuture<Void> sendToService(NoteBytesMap command) {
         if (isDestroyed) {
@@ -267,14 +524,13 @@ public class ContainerHandle extends FlowProcess {
             );
         }
         
-        return request(containerServicePath, command.toNoteBytesReadOnly(), 
+        return request(renderingServicePath, command.toNoteBytesReadOnly(), 
                 Duration.ofMillis(500))
             .thenAccept(reply -> {
                 NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
                 NoteBytesReadOnly status = response.getReadOnly(Keys.STATUS);
                 
                 if (status != null && !status.equals(ProtocolMesssages.SUCCESS)) {
-                   
                     String errorMsg = ProtocolObjects.getErrMsg(response);
                     throw new RuntimeException("[ContainerHandle] Command failed: " + errorMsg);
                 }
@@ -284,16 +540,14 @@ public class ContainerHandle extends FlowProcess {
     // ===== EVENT HANDLERS =====
     
     /**
-     * Handle container closed event (user clicked X)
+     * Handle container closed event
      */
-    protected CompletableFuture<Void> handleContainerClosed(NoteBytesMap message, RoutedPacket packet) {
-        Log.logMsg("[ContainerHandle] Container closed: " + containerId);
-        
-        // Emit to all subscribers
+    protected CompletableFuture<Void> handleContainerClosed(NoteBytesMap message) {
         NoteBytesMap notification = new NoteBytesMap();
         notification.put("event", "container_closed");
         notification.put("container_id", containerId.toNoteBytes());
         
+        handleContainerClosed();
         emit(notification);
         
         // Cleanup
@@ -301,40 +555,43 @@ public class ContainerHandle extends FlowProcess {
 
         return CompletableFuture.completedFuture(null);
     }
+
+    protected void handleContainerClosed() {
+        Log.logMsg("[ContainerHandle] Container closed: " + containerId);
+    }
     
     /**
      * Handle container resized event
      */
-    protected CompletableFuture<Void> handleContainerResized(NoteBytesMap message, RoutedPacket packet) {
+    protected void handleContainerResized(NoteBytesMap message) {
         NoteBytes widthBytes = message.get(Keys.WIDTH);
         NoteBytes heightBytes = message.get(Keys.HEIGHT);
 
-        if(widthBytes != null && heightBytes != null){
+        if (widthBytes != null && heightBytes != null) {
             int width = widthBytes.getAsInt();
             int height = heightBytes.getAsInt();
            
+            handleContainerResized(width, height);
             emit(message);
-            
-            return handleContainerResized(width, height);
         }
-        return CompletableFuture.failedFuture(new IllegalArgumentException("width and height required"));
     }
 
-    protected CompletableFuture<Void> handleContainerResized(int changedWidth, int changedHeight){
+    protected void handleContainerResized(int changedWidth, int changedHeight) {
         Log.logMsg("[ContainerHandle] Container resized: " + 
             containerId + " (" + changedWidth + "x" + changedHeight + ")");
-        return CompletableFuture.completedFuture(null);
     }
-
-   
     
     /**
      * Handle container focused event
      */
-    protected CompletableFuture<Void> handleContainerFocused(NoteBytesMap message, RoutedPacket packet) {
-        Log.logMsg("[ContainerHandle] Container focused: " + containerId);
+    protected void handleContainerFocused(NoteBytesMap message) {
+        handleContainerFocused();
         emit(message);
-        return CompletableFuture.completedFuture(null);
+        CompletableFuture.completedFuture(null);
+    }
+
+    protected void handleContainerFocused() {
+        Log.logMsg("[ContainerHandle] Container focused: " + containerId);
     }
     
     // ===== GETTERS =====
@@ -343,15 +600,26 @@ public class ContainerHandle extends FlowProcess {
         return containerId;
     }
     
-    public ContextPath getContainerServicePath() {
-        return containerServicePath;
+    public String getTitle() {
+        return title;
+    }
+    
+    public ContainerType getType() {
+        return containerType;
+    }
+    
+    public ContainerConfig getConfig() {
+        return containerConfig;
+    }
+    
+    public ContextPath getRenderingServicePath() {
+        return renderingServicePath;
     }
     
     public boolean isDestroyed() {
         return isDestroyed;
     }
 
- 
     public boolean isRenderStreamReady() {
         return renderStream != null && 
                renderStream.getReadyFuture().isDone() &&
@@ -361,6 +629,7 @@ public class ContainerHandle extends FlowProcess {
     public CompletableFuture<Void> waitUntilReady() {
         if (renderStream == null) {
             // Stream hasn't been created yet, wait for it
+            Log.logMsg("[ContainerHandle] waiting for ready");
             return CompletableFuture.runAsync(() -> {
                 while (renderStream == null && !isDestroyed) {
                     try {
@@ -373,10 +642,14 @@ public class ContainerHandle extends FlowProcess {
                 if (isDestroyed) {
                     throw new IllegalStateException("Container destroyed before ready");
                 }
-            }).thenCompose(v -> renderStream.getReadyFuture());
+            }, VirtualExecutors.getVirtualExecutor()).thenCompose(v -> {
+                Log.logMsg("[ContainerHandle] remderStrea null waiting finished, returning ready future");
+                return renderStream.getReadyFuture();
+            });
         }
         
         // Stream exists, just return its ready future
+        Log.logMsg("[ContainerHandle] returning ready future");
         return renderStream.getReadyFuture();
     }
 }

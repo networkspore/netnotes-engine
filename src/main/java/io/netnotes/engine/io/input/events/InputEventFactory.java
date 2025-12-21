@@ -96,7 +96,7 @@ public final class InputEventFactory {
 
         NoteBytesMap body = packet.getAsNoteBytesMap();
 
-        NoteBytes typeBytes = body.get(Keys.TYPE);
+        NoteBytes typeBytes = body.get(Keys.EVENT);
         NoteBytes seqBytes = body.get(Keys.SEQUENCE);
 
         if (typeBytes == null || seqBytes == null) {

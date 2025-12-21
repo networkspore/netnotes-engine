@@ -61,7 +61,7 @@ public class DiscoveredDeviceRegistry {
      * 
      * Expected format from C++:
      * {
-     *   "type": TYPE_CMD,
+     *   "event": TYPE_CMD,
      *   "cmd": "item_list",
      *   "items": [
      *     {

@@ -1,6 +1,7 @@
 package io.netnotes.engine.core.system.control;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -13,8 +14,8 @@ import io.netnotes.engine.utils.github.GitHubAPI;
 import io.netnotes.engine.utils.github.GitHubAsset;
 import io.netnotes.engine.utils.github.GitHubInfo;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -140,7 +141,7 @@ public class SecureInputInstaller extends FlowProcess {
     private CompletableFuture<GitHubAsset[]> fetchReleases() {
         terminal.clear()
             .thenCompose(v -> terminal.println("Fetching available releases from GitHub...", 
-                TerminalContainerHandle.TextStyle.INFO))
+                TextStyle.INFO))
             .thenCompose(v -> terminal.println(""));
         
         GitHubAPI api = new GitHubAPI(GITHUB_INFO);
@@ -179,7 +180,7 @@ public class SecureInputInstaller extends FlowProcess {
         // Show description
         terminal.clear()
             .thenCompose(v -> terminal.println("Available Releases:", 
-                TerminalContainerHandle.TextStyle.BOLD))
+                TextStyle.BOLD))
             .thenCompose(v -> terminal.println(""));
         
         // Add menu items for each release
@@ -198,7 +199,7 @@ public class SecureInputInstaller extends FlowProcess {
         menu.addItem("cancel", "Cancel Installation", () -> {
             terminal.clear()
                 .thenCompose(v -> terminal.println("Installation cancelled", 
-                    TerminalContainerHandle.TextStyle.WARNING))
+                    TextStyle.WARNING))
                 .thenRun(() -> complete());
         });
         
@@ -240,7 +241,7 @@ public class SecureInputInstaller extends FlowProcess {
         // Show detailed info
         terminal.clear()
             .thenCompose(v -> terminal.println("Ready to install NoteDaemon " + selectedVersion, 
-                TerminalContainerHandle.TextStyle.BOLD))
+                TextStyle.BOLD))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("File: " + selectedAsset.getName()))
             .thenCompose(v -> terminal.println("Size: " + formatSize(selectedAsset.getSize())))
@@ -253,7 +254,7 @@ public class SecureInputInstaller extends FlowProcess {
             .thenCompose(v -> terminal.println("- Configure udev rules"))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("Root access required.", 
-                TerminalContainerHandle.TextStyle.WARNING))
+                TextStyle.WARNING))
             .thenCompose(v -> terminal.println(""));
         
         menu.addItem("install", "Install Now", () -> {
@@ -279,7 +280,7 @@ public class SecureInputInstaller extends FlowProcess {
         
         terminal.clear()
             .thenCompose(v -> terminal.println("Starting installation...", 
-                TerminalContainerHandle.TextStyle.BOLD))
+                TextStyle.BOLD))
             .thenCompose(v -> terminal.println(""));
         
         performInstallation()
@@ -318,7 +319,7 @@ public class SecureInputInstaller extends FlowProcess {
         if (success) {
             terminal.clear()
                 .thenCompose(v -> terminal.println("NoteDaemon " + selectedVersion + 
-                    " installed successfully!", TerminalContainerHandle.TextStyle.SUCCESS))
+                    " installed successfully!", TextStyle.SUCCESS))
                 .thenCompose(v -> terminal.println(""))
                 .thenCompose(v -> terminal.println("Service Status: Active"))
                 .thenCompose(v -> terminal.println("Socket: /var/run/io-daemon.sock"))
@@ -328,7 +329,7 @@ public class SecureInputInstaller extends FlowProcess {
                 .thenCompose(v -> terminal.println(""))
                 .thenCompose(v -> terminal.println(
                     "You may need to log out and back in for group membership to take effect.",
-                    TerminalContainerHandle.TextStyle.WARNING))
+                    TextStyle.WARNING))
                 .thenCompose(v -> terminal.println("Or run: newgrp netnotes"))
                 .thenCompose(v -> terminal.println(""));
             
@@ -686,7 +687,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 Log.logMsg("  " + line);
-                terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
+                terminal.println("  " + line, TextStyle.INFO);
             }
         }
         
@@ -708,7 +709,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 Log.logMsg("  " + line);
-                terminal.println("  " + line, TerminalContainerHandle.TextStyle.INFO);
+                terminal.println("  " + line, TextStyle.INFO);
             }
         }
         

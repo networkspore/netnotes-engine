@@ -14,6 +14,7 @@ import javax.crypto.SecretKey;
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 
+import io.netnotes.engine.core.system.BootstrapConfig;
 import io.netnotes.engine.crypto.AsymmetricPairs;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
@@ -28,7 +29,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.JarHelpers;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 public class SettingsData {
     public static final NoteBytes BCRYPT_KEY = new NoteBytes("bcrypt_key");
@@ -469,6 +470,18 @@ public class SettingsData {
             }
 
         }, VirtualExecutors.getVirtualExecutor());
+    }
+
+    public static CompletableFuture<NoteBytesMap> getOrDefaultBootstrapConfig(){
+        try{
+            if(SettingsData.isBootstrapData()){
+                return SettingsData.loadBootStrapConfig();
+            }else{
+                return CompletableFuture.completedFuture(BootstrapConfig.createDefault());
+            }
+        }catch(IOException e){
+            return CompletableFuture.failedFuture(new CompletionException("File system unavailable", e));
+        }
     }
 
 

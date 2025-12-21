@@ -18,7 +18,7 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.ExecutorConsumer;
+import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support

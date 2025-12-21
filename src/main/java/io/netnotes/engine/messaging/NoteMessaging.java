@@ -193,6 +193,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly CMD           = new NoteBytesReadOnly("cmd");
         public static final NoteBytesReadOnly STRING_LIST   = new NoteBytesReadOnly("string_list");
         public static final NoteBytesReadOnly SIGNATURE     = new NoteBytesReadOnly("signature");
+        public static final NoteBytesReadOnly EVENT           = new NoteBytesReadOnly("event");
         // Status & Results
         public static final NoteBytesReadOnly INFO          = new NoteBytesReadOnly("info");
         public static final NoteBytesReadOnly STATUS        = new NoteBytesReadOnly("status");

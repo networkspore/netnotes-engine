@@ -25,7 +25,7 @@ import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 public class StreamUtils {
 

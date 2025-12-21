@@ -1,11 +1,13 @@
 package io.netnotes.engine.core.system.control.terminal.elements;
 
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.BoxStyle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 
 /**
  * TextBox - Composable text box primitive for terminal UIs
@@ -47,12 +49,12 @@ public class TerminalTextBox {
     
     // Styling
     private final BoxStyle boxStyle;
-    private final TerminalContainerHandle.TextStyle textStyle;
+    private final TextStyle textStyle;
     
     // Title
     private final String title;
     private final TitlePlacement titlePlacement;
-    private final TerminalContainerHandle.TextStyle titleStyle;
+    private final TextStyle titleStyle;
     
     // Content
     private final List<String> contentLines;
@@ -181,7 +183,7 @@ public class TerminalTextBox {
                 int indicatorCol = col + width - 3;
                 future = future.thenCompose(v -> 
                     terminal.printAt(contentStartRow, indicatorCol, "↑", 
-                        TerminalContainerHandle.TextStyle.INFO));
+                        TextStyle.INFO));
             }
             
             if (endLine < contentLines.size()) {
@@ -189,7 +191,7 @@ public class TerminalTextBox {
                 int indicatorRow = contentStartRow + contentHeight - 1;
                 future = future.thenCompose(v -> 
                     terminal.printAt(indicatorRow, indicatorCol, "↓", 
-                        TerminalContainerHandle.TextStyle.INFO));
+                        TextStyle.INFO));
             }
         }
         
@@ -263,7 +265,7 @@ public class TerminalTextBox {
             int indicatorCol = col + 1;
             future = future.thenCompose(v -> 
                 terminal.printAt(indicatorRow, indicatorCol, "◄", 
-                    TerminalContainerHandle.TextStyle.INFO));
+                    TextStyle.INFO));
         }
         
         // Show right indicator if more content to the right
@@ -275,7 +277,7 @@ public class TerminalTextBox {
             int indicatorCol = col + width - 2;
             future = future.thenCompose(v -> 
                 terminal.printAt(indicatorRow, indicatorCol, "►", 
-                    TerminalContainerHandle.TextStyle.INFO));
+                    TextStyle.INFO));
         }
         
         return future;
@@ -420,10 +422,10 @@ public class TerminalTextBox {
         private int width = 40;
         private int height = 10;
         private BoxStyle boxStyle = BoxStyle.SINGLE;
-        private TerminalContainerHandle.TextStyle textStyle = TerminalContainerHandle.TextStyle.NORMAL;
+        private TextStyle textStyle = TextStyle.NORMAL;
         private String title = null;
         private TitlePlacement titlePlacement = TitlePlacement.INSIDE_TOP;
-        private TerminalContainerHandle.TextStyle titleStyle = TerminalContainerHandle.TextStyle.BOLD;
+        private TextStyle titleStyle = TextStyle.BOLD;
         private List<String> contentLines = new ArrayList<>();
         private ContentAlignment contentAlignment = ContentAlignment.LEFT;
         private int padding = 1;
@@ -461,7 +463,7 @@ public class TerminalTextBox {
         /**
          * Set text style for content
          */
-        public Builder textStyle(TerminalContainerHandle.TextStyle style) {
+        public Builder textStyle(TextStyle style) {
             this.textStyle = style;
             return this;
         }
@@ -485,7 +487,7 @@ public class TerminalTextBox {
         /**
          * Set title style
          */
-        public Builder titleStyle(TerminalContainerHandle.TextStyle style) {
+        public Builder titleStyle(TextStyle style) {
             this.titleStyle = style;
             return this;
         }

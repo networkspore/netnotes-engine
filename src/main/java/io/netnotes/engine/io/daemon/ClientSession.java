@@ -100,7 +100,7 @@ public class ClientSession extends FlowProcess {
             NoteBytesReadOnly payload = packet.getPayload();
             NoteBytesMap message = payload.getAsNoteBytesMap();
             
-            NoteBytesReadOnly type = message.getReadOnly(Keys.TYPE);
+            NoteBytesReadOnly type = message.getReadOnly(Keys.EVENT);
             
             // Handle daemon disconnect notification
             if (type != null && type.equals(EventBytes.TYPE_DISCONNECTED)) {

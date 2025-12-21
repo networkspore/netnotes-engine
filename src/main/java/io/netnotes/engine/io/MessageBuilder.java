@@ -10,7 +10,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 public class MessageBuilder {
     public static NoteBytesObject createCommand(NoteBytesReadOnly command, NoteBytesPair... params) {
         NoteBytesObject msg = new NoteBytesObject();
-        msg.add(Keys.TYPE, EventBytes.TYPE_CMD);
+        msg.add(Keys.EVENT, EventBytes.TYPE_CMD);
         msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         msg.add(Keys.CMD, command);
         
@@ -23,7 +23,7 @@ public class MessageBuilder {
     
     public static NoteBytesObject createError(int errorCode, String message) {
         NoteBytesObject msg = new NoteBytesObject();
-        msg.add(Keys.TYPE, EventBytes.TYPE_ERROR);
+        msg.add(Keys.EVENT, EventBytes.TYPE_ERROR);
         msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         msg.add(Keys.ERROR_CODE, errorCode);
         msg.add(Keys.MSG, message);
@@ -32,7 +32,7 @@ public class MessageBuilder {
     
     public static NoteBytesObject createAccept(String status) {
         NoteBytesObject msg = new NoteBytesObject();
-        msg.add(Keys.TYPE, EventBytes.TYPE_ACCEPT);
+        msg.add(Keys.EVENT, EventBytes.TYPE_ACCEPT);
         msg.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         msg.add(Keys.STATUS, status);
         return msg;

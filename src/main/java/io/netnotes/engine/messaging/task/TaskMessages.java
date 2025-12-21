@@ -25,7 +25,7 @@ public class TaskMessages {
     public static NoteBytesObject getTaskMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(new NoteBytes(Keys.SCOPE), new NoteBytes(scope)),
-            new NoteBytesPair(new NoteBytes(Keys.TYPE), new NoteBytes(type)),
+            new NoteBytesPair(new NoteBytes(Keys.EVENT), new NoteBytes(type)),
             new NoteBytesPair(new NoteBytes(Keys.MSG), message),
             new NoteBytesPair(new NoteBytes(Keys.TIMESTAMP), new NoteBytes(System.currentTimeMillis()))
         });
@@ -38,7 +38,7 @@ public class TaskMessages {
     public static NoteBytesObject getProgressMessage(NoteBytesReadOnly scope, NoteBytesReadOnly type, NoteBytesReadOnly message){
         NoteBytesObject result = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(new NoteBytes(Keys.SCOPE), scope),
-            new NoteBytesPair(new NoteBytes(Keys.TYPE), type),
+            new NoteBytesPair(new NoteBytes(Keys.EVENT), type),
             new NoteBytesPair(new NoteBytes(Keys.MSG), message),
             new NoteBytesPair(new NoteBytes(Keys.TIMESTAMP), new NoteBytes(System.currentTimeMillis()))
         });

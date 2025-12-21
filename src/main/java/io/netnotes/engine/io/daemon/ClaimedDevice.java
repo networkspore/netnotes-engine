@@ -9,8 +9,8 @@ import java.util.function.Consumer;
 
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
@@ -202,7 +202,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         // Check if this is a control message (encryption negotiation)
         if (payload.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
             NoteBytesMap msgMap = payload.getAsNoteBytesMap();
-            NoteBytesReadOnly typeBytes = msgMap.getReadOnly(Keys.TYPE);
+            NoteBytesReadOnly typeBytes = msgMap.getReadOnly(Keys.EVENT);
             
             if (typeBytes != null) {
                 // Check if it's an encryption control message
@@ -285,7 +285,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             
             byte[] clientPublicKey = encryptionSession.getPublicKey();
             NoteBytesObject accept = new NoteBytesObject(new NoteBytesPair[]{
-                new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_ACCEPT),
+                new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_ENCRYPTION_ACCEPT),
                 new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
                 new NoteBytesPair(Keys.PUBLIC_KEY, new NoteBytes(clientPublicKey))
             });
@@ -322,7 +322,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     private void declineEncryption(String reason) {
         NoteBytesObject decline = new NoteBytesObject();
-        decline.add(Keys.TYPE, EventBytes.TYPE_ENCRYPTION_DECLINE);
+        decline.add(Keys.EVENT, EventBytes.TYPE_ENCRYPTION_DECLINE);
         decline.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         decline.add(Keys.MSG, reason);
         
@@ -356,7 +356,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private void sendAck(int count) {
         
         sendDeviceControlMessage(new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_CMD),
+            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
             new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId),
@@ -370,7 +370,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         }
         
         NoteBytesObject notification = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.TYPE, EventBytes.TYPE_CMD),
+            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
             new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.DEVICE_DISCONNECTED),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId)

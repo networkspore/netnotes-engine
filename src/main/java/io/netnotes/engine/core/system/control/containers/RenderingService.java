@@ -1,15 +1,22 @@
 package io.netnotes.engine.core.system.control.containers;
 
+
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -30,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 5. Provide convenience methods for renderer queries
  * 
  * Reply Pattern:
- * - UIRenderer returns CompletableFuture<Void>
+ * - AbstractUIRenderer returns CompletableFuture<Void>
  * - Success: future completes normally → reply SUCCESS
  * - Failure: future completes exceptionally → reply ERROR with message
  */
@@ -39,9 +46,9 @@ public class RenderingService extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // ===== RENDERER MANAGEMENT =====
-    private final Map<String, UIRenderer> renderers = new ConcurrentHashMap<>();
-    private final String systemDefaultRendererId;
-    private final Map<ContainerType, String> typeDefaultRenderers = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, UIRenderer<?>> renderers = new ConcurrentHashMap<>();
+    private final NoteBytesReadOnly systemDefaultRendererId;
+    private final Map<ContainerType, NoteBytesReadOnly> typeDefaultRenderers = new ConcurrentHashMap<>();
     
     // ===== MESSAGE DISPATCH =====
     private final HashMap<NoteBytes, RoutedMessageExecutor> msgExecMap = new HashMap<>();
@@ -49,12 +56,12 @@ public class RenderingService extends FlowProcess {
     /**
      * Constructor with system default renderer
      */
-    public RenderingService(String name, UIRenderer systemDefaultRenderer) {
+    public RenderingService(String name, UIRenderer<?> systemDefaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
-        this.state = new BitFlagStateMachine("rendering-service");
+        this.state = new BitFlagStateMachine(name);
         
         // Register system default
-        this.systemDefaultRendererId = "system-default";
+        this.systemDefaultRendererId = new NoteBytesReadOnly("system-default");
         this.renderers.put(systemDefaultRendererId, systemDefaultRenderer);
         
         
@@ -65,7 +72,7 @@ public class RenderingService extends FlowProcess {
     
     // ===== RENDERER REGISTRATION =====
     
-    public void registerRenderer(String rendererId, UIRenderer renderer) {
+    public void registerRenderer(NoteBytesReadOnly rendererId, UIRenderer<?> renderer) {
         if (rendererId == null || renderer == null) {
             throw new IllegalArgumentException("rendererId and renderer required");
         }
@@ -78,8 +85,8 @@ public class RenderingService extends FlowProcess {
         ));
     }
     
-    public void setDefaultRendererForType(ContainerType type, String rendererId) {
-        UIRenderer renderer = renderers.get(rendererId);
+    public void setDefaultRendererForType(ContainerType type, NoteBytesReadOnly rendererId) {
+        UIRenderer<?> renderer = renderers.get(rendererId);
         if (renderer == null) {
             throw new IllegalArgumentException("Renderer not found: " + rendererId);
         }
@@ -87,7 +94,7 @@ public class RenderingService extends FlowProcess {
         if (!renderer.supports(type)) {
             throw new IllegalArgumentException(String.format(
                 "Renderer '%s' does not support container type %s",
-                rendererId, type
+                rendererId.toString(), type
             ));
         }
         
@@ -99,12 +106,12 @@ public class RenderingService extends FlowProcess {
         ));
     }
     
-    public void unregisterRenderer(String rendererId) {
+    public void unregisterRenderer(NoteBytes rendererId) {
         if (rendererId.equals(systemDefaultRendererId)) {
             throw new IllegalArgumentException("Cannot unregister system default renderer");
         }
         
-        UIRenderer renderer = renderers.get(rendererId);
+        UIRenderer<?> renderer = renderers.get(rendererId);
         if (renderer != null && renderer.getContainerCount() > 0) {
             throw new IllegalStateException(
                 "Cannot unregister renderer with active containers: " + rendererId
@@ -123,10 +130,10 @@ public class RenderingService extends FlowProcess {
      * 2. Type-specific default (if configured)
      * 3. System default (always available)
      */
-    public String selectRendererId(String explicitRendererId, ContainerType containerType) {
+    public NoteBytes selectRendererId(NoteBytes explicitRendererId, ContainerType containerType) {
         // TIER 1: Explicit renderer
         if (explicitRendererId != null && !explicitRendererId.isEmpty()) {
-            UIRenderer renderer = renderers.get(explicitRendererId);
+            UIRenderer<?> renderer = renderers.get(explicitRendererId);
             
             if (renderer == null) {
                 throw new IllegalArgumentException("Renderer not found: " + explicitRendererId);
@@ -135,7 +142,7 @@ public class RenderingService extends FlowProcess {
             if (!renderer.supports(containerType)) {
                 throw new IllegalArgumentException(String.format(
                     "Renderer '%s' does not support container type %s (supports: %s)",
-                    explicitRendererId, containerType, renderer.getSupportedTypes()
+                    explicitRendererId.toString(), containerType, renderer.getSupportedTypes()
                 ));
             }
             
@@ -143,9 +150,9 @@ public class RenderingService extends FlowProcess {
         }
         
         // TIER 2: Type-specific default
-        String typeDefaultId = typeDefaultRenderers.get(containerType);
+        NoteBytesReadOnly typeDefaultId = typeDefaultRenderers.get(containerType);
         if (typeDefaultId != null) {
-            UIRenderer renderer = renderers.get(typeDefaultId);
+            UIRenderer<?> renderer = renderers.get(typeDefaultId);
             if (renderer != null) {
                 return typeDefaultId;
             }
@@ -158,23 +165,23 @@ public class RenderingService extends FlowProcess {
     // ===== STATE MACHINE SETUP =====
     
     private void setupStateTransitions() {
-        state.onStateAdded(ContainerServiceStates.INITIALIZING, (old, now, bit) -> {
+        state.onStateAdded(RendererStates.INITIALIZING, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Initializing...");
         });
         
-        state.onStateAdded(ContainerServiceStates.READY, (old, now, bit) -> {
+        state.onStateAdded(RendererStates.READY, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Ready - accepting requests");
         });
         
-        state.onStateAdded(ContainerServiceStates.SHUTTING_DOWN, (old, now, bit) -> {
+        state.onStateAdded(RendererStates.SHUTTING_DOWN, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Shutting down...");
         });
         
-        state.onStateAdded(ContainerServiceStates.STOPPED, (old, now, bit) -> {
+        state.onStateAdded(RendererStates.STOPPED, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Stopped");
         });
         
-        state.onStateAdded(ContainerServiceStates.ERROR, (old, now, bit) -> {
+        state.onStateAdded(RendererStates.ERROR, (old, now, bit) -> {
             Log.logError("[RenderingService] ERROR");
         });
     }
@@ -183,20 +190,20 @@ public class RenderingService extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> run() {
-        state.addState(ContainerServiceStates.INITIALIZING);
+        state.addState(RendererStates.INITIALIZING);
         
         Log.logMsg("[RenderingService] Started at: " + contextPath);
         
         // Check if default renderer is active
-        UIRenderer defaultRenderer = renderers.get(systemDefaultRendererId);
+        UIRenderer<?> defaultRenderer = renderers.get(systemDefaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
             Log.logMsg("[RenderingService] Default renderer active");
-            state.addState(ContainerServiceStates.UI_RENDERER_ACTIVE);
+            state.addState(RendererStates.UI_RENDERER_ACTIVE);
         }
         
-        state.removeState(ContainerServiceStates.INITIALIZING);
-        state.addState(ContainerServiceStates.READY);
-        state.addState(ContainerServiceStates.ACCEPTING_REQUESTS);
+        state.removeState(RendererStates.INITIALIZING);
+        state.addState(RendererStates.READY);
+        state.addState(RendererStates.ACCEPTING_REQUESTS);
         
         Log.logMsg("[RenderingService] Initialization complete, service running");
         return CompletableFuture.completedFuture(null);
@@ -209,106 +216,64 @@ public class RenderingService extends FlowProcess {
             reply(packet, msg);
         });
         // All commands are forwarded to renderer
-        msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.DESTROY_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.SHOW_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.HIDE_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.FOCUS_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.MAXIMIZE_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.RESTORE_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.QUERY_CONTAINER, this::forwardToRenderer);
-        msgExecMap.put(ContainerCommands.LIST_CONTAINERS, this::forwardToRenderer);
+        msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::handleCreateContainer);
+        msgExecMap.put(ContainerCommands.LIST_CONTAINERS, this::handleListContainers);
     }
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        if (!ContainerServiceStates.canAcceptRequests(state)) {
+        if (!RendererStates.canAcceptRequests(state)) {
             reply(packet, ProtocolObjects.getErrorObject("Service not accepting requests"));
             return CompletableFuture.completedFuture(null);
         }
+
+        NoteBytesReadOnly payload = packet.getPayload();
+        if(payload == null || payload.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+            String msg = "[RenderingService] Invalid payload";
+            Log.logMsg(msg);
+            reply(packet, ProtocolObjects.getErrorObject(msg));
+            return CompletableFuture.completedFuture(null);
+        }
+
+        NoteBytesMap msg = payload.getAsNoteBytesMap();
         
-        try {
-            NoteBytesMap msg = packet.getPayload().getAsNoteBytesMap();
+        NoteBytes rendererId = msg.get(ContainerCommands.RENDERER_ID);
+        
+        if (rendererId == null) {
             NoteBytes cmdBytes = msg.get(Keys.CMD);
-            
-            if (cmdBytes == null) {
-                reply(packet, ProtocolObjects.getErrorObject("'cmd' required"));
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            RoutedMessageExecutor msgExec = msgExecMap.get(cmdBytes);
-            
-            if (msgExec != null) {
+            RoutedMessageExecutor msgExec = cmdBytes  != null ? msgExecMap.get(cmdBytes) : null;
+            if(msgExec != null){
                 return msgExec.execute(msg, packet);
-            } else {
-                Log.logError("[RenderingService] Unknown command: " + cmdBytes);
-                reply(packet, ProtocolObjects.getErrorObject("Unknown command: " + cmdBytes));
+            }else{
+                String msg1 = "[RenderingService] RendererId required, for this type of command";
+                Log.logMsg(msg1);
+                reply(packet, ProtocolObjects.getErrorObject(msg1));
                 return CompletableFuture.completedFuture(null);
             }
+        } else {
             
-        } catch (Exception e) {
-            reply(packet, ProtocolObjects.getErrorObject(e.getMessage()));
-            return CompletableFuture.completedFuture(null);
+            return forwardToRenderer(rendererId, msg, packet);
         }
+        
     }
-    
-    /**
-     * Forward message to appropriate renderer and handle reply
-     * 
-     * Pattern:
-     * 1. Route to correct renderer
-     * 2. Call renderer.handleMessage() → returns CompletableFuture<Void>
-     * 3. On success: reply SUCCESS
-     * 4. On failure: reply ERROR with exception message
-     */
-    private CompletableFuture<Void> forwardToRenderer(NoteBytesMap msg, RoutedPacket packet) {
-        NoteBytes cmdBytes = msg.get(Keys.CMD);
+
+    private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
+        // select renderer based on type and explicit ID
+
+        NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
+        NoteBytes typeBytes = msg.get(Keys.TYPE);
         
-        // Determine target renderer
-        String rendererId;
+      
+        ContainerType type = typeBytes != null ? 
+            ContainerType.valueOf(typeBytes.getAsString()) : 
+            ContainerType.TERMINAL;
         
-        try {
-            if (cmdBytes.equals(ContainerCommands.CREATE_CONTAINER)) {
-                // For CREATE, select renderer based on type and explicit ID
-                NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
-                NoteBytes typeBytes = msg.get(Keys.TYPE);
-                
-                String explicitRendererId = rendererIdBytes != null ? 
-                    rendererIdBytes.getAsString() : null;
-                ContainerType type = typeBytes != null ? 
-                    ContainerType.valueOf(typeBytes.getAsString()) : 
-                    ContainerType.TERMINAL;
-                
-                rendererId = selectRendererId(explicitRendererId, type);
-                
-                // Add selected renderer ID to message
-                msg.put(ContainerCommands.RENDERER_ID, rendererId);
-            } else {
-                // For other commands, extract renderer from container ID
-                NoteBytes containerIdBytes = msg.get(Keys.CONTAINER_ID);
-                
-                if (containerIdBytes == null) {
-                    reply(packet, ProtocolObjects.getErrorObject("container_id required"));
-                    return CompletableFuture.completedFuture(null);
-                }
-                
-                ContainerId containerId = ContainerId.fromNoteBytes(containerIdBytes);
-                
-                // Find which renderer owns this container
-                rendererId = findRendererForContainer(containerId);
-                
-                if (rendererId == null) {
-                    reply(packet, ProtocolObjects.getErrorObject("Container not found: " + containerId));
-                    return CompletableFuture.completedFuture(null);
-                }
-            }
-        } catch (IllegalArgumentException e) {
-            reply(packet, ProtocolObjects.getErrorObject(e.getMessage()));
-            return CompletableFuture.completedFuture(null);
-        }
+         NoteBytes rendererId = selectRendererId(rendererIdBytes, type);
         
-        // Get renderer
-        UIRenderer renderer = renderers.get(rendererId);
+        // Add selected renderer ID to message
+        msg.put(ContainerCommands.RENDERER_ID, rendererId);
+
+        UIRenderer<?> renderer = renderers.get(rendererId);
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
@@ -327,19 +292,68 @@ public class RenderingService extends FlowProcess {
                 
                 return null;
             });
+
+    }
+
+    private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) {
+
+
+        NoteBytes[] containers = getAllContainers().stream()
+            .map(c -> c.getInfo().toNoteBytes())
+            .toArray(NoteBytes[]::new);
+
+        reply(packet, new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+            new NoteBytesPair("containers", new NoteBytesArrayReadOnly(containers))
+        }));
+
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    /**
+     * Forward message to appropriate renderer and handle reply
+     * 
+     * Pattern:
+     * 1. Route to correct renderer
+     * 2. Call renderer.handleMessage() → returns CompletableFuture<Void>
+     * 3. On success: reply SUCCESS
+     * 4. On failure: reply ERROR with exception message
+     */
+    private CompletableFuture<Void> forwardToRenderer(NoteBytes rendererId, NoteBytesMap msg, RoutedPacket packet) {
+     
+        UIRenderer<?> renderer = renderers.get(rendererId);
+        
+        if (renderer == null) {
+            reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        // Forward to renderer and handle result
+        return renderer.handleMessage(msg, packet)
+            .exceptionally(ex -> {
+                // Failure - reply with ERROR
+                String errorMsg = ex.getCause() != null ? 
+                    ex.getCause().getMessage() : ex.getMessage();
+                
+                Log.logError("[RenderingService] Renderer error: " + errorMsg);
+                reply(packet, ProtocolObjects.getErrorObject(errorMsg));
+                
+                return null;
+            });
+       
     }
     
     /**
      * Find which renderer owns a container
-     */
-    private String findRendererForContainer(ContainerId containerId) {
-        for (Map.Entry<String, UIRenderer> entry : renderers.entrySet()) {
+   
+    private NoteBytes findRendererForContainer(ContainerId containerId) {
+        for (Map.Entry<NoteBytesReadOnly, AbstractUIRenderer> entry : renderers.entrySet()) {
             if (entry.getValue().hasContainer(containerId)) {
                 return entry.getKey();
             }
         }
         return null;
-    }
+    }  */
     
     // ===== STREAM CHANNEL HANDLING =====
     
@@ -349,21 +363,17 @@ public class RenderingService extends FlowProcess {
      */
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("[RenderingService] Stream channel received from: " + fromPath);
-        
+
         if (fromPath == null) {
-            channel.getReadyFuture().completeExceptionally(
-                new IllegalStateException("No source path provided")
-            );
-            return;
+            throw new IllegalStateException("No source path provided");
         }
-        
+        Log.logMsg("[RenderingService] Stream channel received from: " + fromPath);
         // Find which renderer should handle this stream
         // Try each renderer until one accepts it
         boolean handled = false;
         
-        for (Map.Entry<String, UIRenderer> entry : renderers.entrySet()) {
-            UIRenderer renderer = entry.getValue();
+        for (Map.Entry<NoteBytesReadOnly, UIRenderer<?>> entry : renderers.entrySet()) {
+            UIRenderer<?> renderer = entry.getValue();
             
             if (renderer.canHandleStreamFrom(fromPath)) {
                 Log.logMsg("[RenderingService] Routing stream to renderer: " + entry.getKey());
@@ -397,29 +407,29 @@ public class RenderingService extends FlowProcess {
     /**
      * Get renderer by ID
      */
-    public UIRenderer getRenderer(String rendererId) {
+    public UIRenderer<?> getRenderer(String rendererId) {
         return renderers.get(rendererId);
     }
     
     /**
      * Get system default renderer
      */
-    public UIRenderer getSystemDefaultRenderer() {
+    public UIRenderer<?> getSystemDefaultRenderer() {
         return renderers.get(systemDefaultRendererId);
     }
     
     /**
      * Get all renderer IDs
      */
-    public List<String> getRendererIds() {
+    public List<NoteBytesReadOnly> getRendererIds() {
         return List.copyOf(renderers.keySet());
     }
     
     /**
      * Get renderer info
      */
-    public Map<String, String> getRendererInfo() {
-        Map<String, String> info = new HashMap<>();
+    public Map<NoteBytesReadOnly, String> getRendererInfo() {
+        Map<NoteBytesReadOnly, String> info = new HashMap<>();
         renderers.forEach((id, renderer) -> 
             info.put(id, renderer.getDescription())
         );
@@ -429,7 +439,7 @@ public class RenderingService extends FlowProcess {
     /**
      * Get default renderer for type
      */
-    public String getDefaultRendererForType(ContainerType type) {
+    public NoteBytesReadOnly getDefaultRendererForType(ContainerType type) {
         return typeDefaultRenderers.getOrDefault(type, systemDefaultRendererId);
     }
     
@@ -437,7 +447,7 @@ public class RenderingService extends FlowProcess {
      * Check if renderer supports type
      */
     public boolean rendererSupportsType(String rendererId, ContainerType type) {
-        UIRenderer renderer = renderers.get(rendererId);
+        UIRenderer<?> renderer = renderers.get(rendererId);
         return renderer != null && renderer.supports(type);
     }
     
@@ -455,7 +465,17 @@ public class RenderingService extends FlowProcess {
      */
     public List<Container> getAllContainers() {
         return renderers.values().stream()
-            .flatMap(renderer -> renderer.getAllContainers().stream())
+            .<Container>flatMap(renderer -> renderer.getAllContainers().stream())
+            .toList();
+    }
+
+    /**
+     * Get visible containers
+     */
+    public List<Container> getVisibleContainers() {
+        return renderers.values().stream()
+            .<Container>flatMap(renderer -> renderer.getAllContainers().stream())
+            .filter(Container::isVisible)
             .toList();
     }
     
@@ -464,7 +484,7 @@ public class RenderingService extends FlowProcess {
      */
     public List<Container> getContainersByOwner(ContextPath ownerPath) {
         return renderers.values().stream()
-            .flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
+            .<Container>flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
             .toList();
     }
     
@@ -472,7 +492,7 @@ public class RenderingService extends FlowProcess {
      * Find container by ID across all renderers
      */
     public Container findContainer(ContainerId containerId) {
-        for (UIRenderer renderer : renderers.values()) {
+        for (UIRenderer<?> renderer : renderers.values()) {
             Container container = renderer.getContainer(containerId);
             if (container != null) {
                 return container;
@@ -484,8 +504,8 @@ public class RenderingService extends FlowProcess {
     // ===== SHUTDOWN =====
     
     public CompletableFuture<Void> shutdown() {
-        state.addState(ContainerServiceStates.SHUTTING_DOWN);
-        state.removeState(ContainerServiceStates.ACCEPTING_REQUESTS);
+        state.addState(RendererStates.SHUTTING_DOWN);
+        state.removeState(RendererStates.ACCEPTING_REQUESTS);
         
         Log.logMsg("[RenderingService] Shutting down all renderers...");
         
@@ -499,16 +519,16 @@ public class RenderingService extends FlowProcess {
                 renderers.clear();
                 typeDefaultRenderers.clear();
                 
-                state.removeState(ContainerServiceStates.SHUTTING_DOWN);
-                state.removeState(ContainerServiceStates.READY);
-                state.addState(ContainerServiceStates.STOPPED);
+                state.removeState(RendererStates.SHUTTING_DOWN);
+                state.removeState(RendererStates.READY);
+                state.addState(RendererStates.STOPPED);
                 
                 Log.logMsg("[RenderingService] Shutdown complete");
             });
     }
     
     public boolean isOperational() {
-        return ContainerServiceStates.isOperational(state);
+        return RendererStates.isOperational(state);
     }
     
     public BitFlagStateMachine getState() {

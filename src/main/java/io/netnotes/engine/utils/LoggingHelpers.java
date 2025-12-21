@@ -17,7 +17,7 @@ import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 public class LoggingHelpers {
     public enum LogLevel{

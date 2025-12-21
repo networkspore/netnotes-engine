@@ -5,8 +5,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.containers.ContainerId;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.InputDevice;
@@ -17,7 +16,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 /**
- * SystemTerminalContainer - THE system terminal
+ * SystemTerminalContainer
  * 
  * Singular, stateful terminal that manages:
  * - Authentication lifecycle
@@ -67,23 +66,17 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     public static final long ERROR = 1L << 8;
     public static final long FAILED_SETTINGS = 1L << 9;
     
-    public SystemTerminalContainer(
-        ContainerId containerId,
-        String name,
-        ContextPath containerServicePath,
-        InputDevice keyboard,
-        ProcessRegistryInterface registry,
-        ContextPath sessionPath
-    ) {
-        super(containerId, name, containerServicePath);
+    public SystemTerminalContainer( InputDevice keyboard, ProcessRegistryInterface registry, ContextPath sessionPath) {
+        super("system-terminal");
         this.keyboard = keyboard;
         this.registry = registry;
         this.sessionPath = sessionPath;
-        this.state = new BitFlagStateMachine("system-terminal");
-        
+        this.state = new BitFlagStateMachine(getName());
+       
         setupStateTransitions();
         registerDefaultScreens();
     }
+
     
     private void setupStateTransitions() {
         state.onStateAdded(CLOSED, (old, now, bit) -> {

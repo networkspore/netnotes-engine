@@ -12,13 +12,14 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -58,8 +59,8 @@ public abstract class Container {
     protected volatile boolean active = false;
     
     // ===== STREAM CHANNELS =====
-    protected StreamChannel renderStream;
-    protected StreamChannel eventStream;
+    protected StreamChannel renderStreamChannel = null;
+    protected StreamChannel eventStream = null;
     protected NoteBytesWriter eventWriter;
     protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
     
@@ -199,37 +200,49 @@ public abstract class Container {
     public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
         Log.logMsg("[Container] Render stream received from: " + fromPath);
         
-        this.renderStream = channel;
-        
-        // Setup reader on virtual thread
-        renderStreamFuture = CompletableFuture.runAsync(() -> {
-            try (
-                NoteBytesReader reader = new NoteBytesReader(
-                    new PipedInputStream(channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE)
-                );
-            ) {
-                // Signal ready
-                channel.getReadyFuture().complete(null);
-                
-                Log.logMsg("[Container] Render stream reader active, waiting for commands...");
-                
-                // Read and dispatch commands
-                NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
-                
-                while (nextBytes != null && active) {
-                    if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                        NoteBytesMap command = nextBytes.getAsNoteBytesMap();
-                        dispatchCommand(command);
+        // Setup reader on virtual thread, one renderStream per lifecycle
+        if(renderStreamChannel == null){
+            this.renderStreamChannel = channel;
+            Log.logMsg("[Container] reader stream read thread starting");
+            CompletableFuture.runAsync(() -> {
+                try (
+                    NoteBytesReader reader = new NoteBytesReader(
+                        new PipedInputStream(channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE)
+                    );
+                ) {
+                    // Signal ready
+                    channel.getReadyFuture().complete(null);
+                    
+                    Log.logMsg("[Container] Render stream reader active, waiting for commands...");
+                    
+                    // Read and dispatch commands
+                    NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
+                 
+                    while (nextBytes != null && active) {
+                        if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                            Log.logMsg("[Container]" + getId() + " render cmd");
+                            NoteBytesMap command = nextBytes.getAsNoteBytesMap();
+                            dispatchCommand(command);
+                        }
+                        nextBytes = reader.nextNoteBytesReadOnly();
                     }
-                    nextBytes = reader.nextNoteBytesReadOnly();
-                }
+                    
+                    
+                } catch (IOException e) {
+                    Log.logError("[Container] Render stream error: " + e.getMessage());
+                    active = false;
+                    throw new CompletionException(e);
                 
-                Log.logMsg("[Container] Render stream reader stopped");
-            } catch (IOException e) {
-                Log.logError("[Container] Render stream error: " + e.getMessage());
-                active = false;
-            }
-        }, VirtualExecutors.getVirtualExecutor());
+                }
+            }, VirtualExecutors.getVirtualExecutor())
+                .thenRun(()->{
+
+                    Log.logMsg("[Container] Render stream completed");
+                    active = false;
+                });
+        }else{
+            Log.logMsg("[Container] renderStreamChannel is not null not handlign stream");
+        }
     }
     
     /**
@@ -242,8 +255,6 @@ public abstract class Container {
         this.eventStream = channel;
         this.eventWriter = new NoteBytesWriter(channel.getQueuedOutputStream());
         
-        // Signal ready
-        channel.getReadyFuture().complete(null);
     }
     
     /**
@@ -285,7 +296,7 @@ public abstract class Container {
             Log.logError("[Container] Cannot emit event - no event stream");
             return;
         }
-        
+         Log.logMsg("[Container] emmitting event");
         try {
             eventWriter.write(event.toNoteBytes());
         } catch (IOException e) {
@@ -394,9 +405,9 @@ public abstract class Container {
     // ===== HELPERS =====
     
     protected void closeStreams() {
-        if (renderStream != null) {
+        if (renderStreamChannel != null) {
             try {
-                renderStream.close();
+                renderStreamChannel.close();
             } catch (IOException e) {
                 Log.logError("[Container] Error closing render stream: " + e.getMessage());
             }

@@ -19,7 +19,7 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.engine.noteFiles.notePath.NoteFileService;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 /**
  * ManagedNoteFileInterface - Manages exclusive access to an encrypted file

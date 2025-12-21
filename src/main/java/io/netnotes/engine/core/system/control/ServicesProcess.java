@@ -3,7 +3,6 @@ package io.netnotes.engine.core.system.control;
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.BootstrapConfig;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
-import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.IODaemon;
@@ -27,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * Lives at: /system/services
  * 
  * Services:
- * - ContainerService: Window/UI container management (core)
+ * - RenderingService: Window/UI container management (core)
  * - IODaemon: Input/output device management (optional, based on config)
  * - Future: NetworkService, StorageService, etc.
  */
@@ -36,24 +35,22 @@ public class ServicesProcess extends FlowProcess {
     public static final String NAME = "services";
     public static final ContextPath SERVICES_PATH = CoreConstants.SYSTEM_PATH.append(NAME);
     
-    // Service names
-    public static final String CONTAINER_SERVICE = "container-service";
+ 
     public static final String IO_DAEMON = "io-daemon";
     
     // Service paths (publicly accessible)
-    public static final ContextPath CONTAINER_SERVICE_PATH = SERVICES_PATH.append(CONTAINER_SERVICE);
     public static final ContextPath IO_DAEMON_PATH = SERVICES_PATH.append(IO_DAEMON);
 
     private final BitFlagStateMachine state;
     
     // Services
-    private final RenderingService containerService;
+    private final RenderingService renderingService;
     private IODaemon ioDaemon;
     
-    public ServicesProcess(RenderingService containerService) {
+    public ServicesProcess(RenderingService renderingService) {
         super(NAME, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine("services");
-        this.containerService = containerService;
+        this.renderingService = renderingService;
         setupStateTransitions();
     }
     
@@ -74,8 +71,8 @@ public class ServicesProcess extends FlowProcess {
             Log.logMsg("[ServicesProcess] " + ServicesStates.describe(state));
         });
         
-        state.onStateAdded(ServicesStates.CONTAINER_SERVICE_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ServicesProcess] ContainerService is active");
+        state.onStateAdded(ServicesStates.RENDERING_SERVICE_ACTIVE, (old, now, bit) -> {
+            Log.logMsg("[ServicesProcess] RenderingService is active");
         });
         
         state.onStateAdded(ServicesStates.IO_DAEMON_ACTIVE, (old, now, bit) -> {
@@ -129,8 +126,8 @@ public class ServicesProcess extends FlowProcess {
         
         List<CompletableFuture<Void>> coreFutures = new ArrayList<>();
         
-        // 1. ContainerService (always needed for UI)
-        coreFutures.add(startContainerService());
+        // 1. RenderingService (always needed for UI)
+        coreFutures.add(startRenderingService());
         
         return CompletableFuture.allOf(
             coreFutures.toArray(new CompletableFuture[0])
@@ -176,23 +173,23 @@ public class ServicesProcess extends FlowProcess {
     }
     
     /**
-     * Start ContainerService
+     * Start RenderingService
      */
-    private CompletableFuture<Void> startContainerService() {
-        Log.logMsg("[ServicesProcess] Starting ContainerService...");
+    private CompletableFuture<Void> startRenderingService() {
+        Log.logMsg("[ServicesProcess] Starting RenderingService...");
         
         
-        return spawnChild(containerService)
+        return spawnChild(renderingService)
             .thenCompose(path -> registry.startProcess(path))
             .thenRun(() -> {
-                state.addState(ServicesStates.CONTAINER_SERVICE_ACTIVE);
-                Log.logMsg("[ServicesProcess] ContainerService started at: " + 
-                    CONTAINER_SERVICE_PATH);
+                state.addState(ServicesStates.RENDERING_SERVICE_ACTIVE);
+                Log.logMsg("[ServicesProcess] RenderingService started at: " + 
+                    CoreConstants.RENDERING_SERVICE);
             })
             .exceptionally(ex -> {
-                Log.logError("[ServicesProcess] FATAL: ContainerService failed to start: " + 
+                Log.logError("[ServicesProcess] FATAL: RenderingService failed to start: " + 
                     ex.getMessage());
-                state.addState(ServicesStates.CONTAINER_SERVICE_FAILED);
+                state.addState(ServicesStates.RENDERING_SERVICE_FAILED);
                 state.addState(ServicesStates.ERROR);
                 throw new RuntimeException("Core service failed", ex);
             });
@@ -251,8 +248,8 @@ public class ServicesProcess extends FlowProcess {
         return ServicesStates.describe(state);
     }
     
-    public RenderingService getContainerService() {
-        return containerService;
+    public RenderingService getRenderingService() {
+        return renderingService;
     }
     
     public IODaemon getIODaemon() {
@@ -301,11 +298,11 @@ public class ServicesProcess extends FlowProcess {
             }));
         }
         
-        if (containerService != null && state.hasState(ServicesStates.CONTAINER_SERVICE_ACTIVE)) {
-            shutdownFutures.add(containerService.shutdown()
+        if (renderingService != null && state.hasState(ServicesStates.RENDERING_SERVICE_ACTIVE)) {
+            shutdownFutures.add(renderingService.shutdown()
                 .thenRun(() -> {
-                    state.removeState(ServicesStates.CONTAINER_SERVICE_ACTIVE);
-                    Log.logMsg("[ServicesProcess] ContainerService stopped");
+                    state.removeState(ServicesStates.RENDERING_SERVICE_ACTIVE);
+                    Log.logMsg("[ServicesProcess] RenderingService stopped");
                 }));
         }
         

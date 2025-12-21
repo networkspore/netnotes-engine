@@ -13,7 +13,7 @@ import io.netnotes.engine.state.BitFlagStateMachine;
  * - HAS_FOCUSED_CONTAINER: At least one container has focus
  * - HAS_VISIBLE_CONTAINERS: At least one container is visible
  */
-public class ContainerServiceStates {
+public class RendererStates {
     
     // ===== LIFECYCLE STATES =====
     

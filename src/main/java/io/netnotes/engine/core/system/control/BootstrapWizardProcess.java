@@ -2,9 +2,10 @@ package io.netnotes.engine.core.system.control;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.BootstrapConfig;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.BoxStyle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -31,6 +32,7 @@ import java.util.function.Consumer;
  * - Uses MenuNavigatorProcess for interactive menus
  * - Keyboard-driven navigation with ExecutorConsumer
  * - Saves config to disk on completion
+ * - Terminal handle auto-registers itself (no manual spawn needed)
  * 
  * Flow:
  * 1. Welcome Screen → wait for key
@@ -43,7 +45,7 @@ import java.util.function.Consumer;
 public class BootstrapWizardProcess extends FlowProcess {
 
     private final BitFlagStateMachine state;
-    private final TerminalContainerHandle terminal;
+    private TerminalContainerHandle terminal;
     private final InputDevice keyboard;
     
     private MenuNavigator menuNavigator;
@@ -65,45 +67,63 @@ public class BootstrapWizardProcess extends FlowProcess {
     
     public BootstrapWizardProcess(
         String name, 
-        TerminalContainerHandle terminal,
         InputDevice keyboard
     ) {
         super(name, ProcessType.BIDIRECTIONAL);
-        this.terminal = terminal;
         this.keyboard = keyboard;
         this.state = new BitFlagStateMachine("bootstrap-wizard");
-    
         // Create keyboard event consumer
-        this.keyboardConsumer =  this::handleKeyboardEvent;
-      
+        this.keyboardConsumer = this::handleKeyboardEvent;
     }
     
     @Override
     public CompletableFuture<Void> run() {
         state.addState(DETECTING);
         Log.logMsg("[BootstrapWizardProcess] running");
-        
-        // Create default config
-        bootstrapConfig = BootstrapConfig.createDefault();
-        
-        // Create menu navigator
-        menuNavigator = new MenuNavigator(terminal, keyboard);
-        
-        Log.logMsg("[BootstrapWizardProcess] run() completing, menuNavigator created");
-        return CompletableFuture.completedFuture(null);
+
+        return SettingsData.getOrDefaultBootstrapConfig()
+            .thenAccept((config) -> {
+                bootstrapConfig = config;
+            })
+            .thenCompose((v) -> {
+                // Create terminal handle - it will auto-register in its run()
+                this.terminal = TerminalContainerHandle.builder("bootstrap-terminal")
+                    .autoFocus(true)
+                    .build();
+                
+                // Register as child - this gives it a path under us
+                return CompletableFuture.completedFuture(registerChild(terminal));
+            })
+            .thenCompose(terminalPath -> {
+                // Start the terminal process
+                Log.logMsg("[BootstrapWizardProcess] Starting terminal at: " + terminalPath);
+                return startProcess(terminalPath);
+            })
+            .thenCompose(v -> {
+                // Create menu navigator after terminal is registered
+                this.menuNavigator = new MenuNavigator(terminal, keyboard);
+                return CompletableFuture.completedFuture(null);
+            })
+            .thenRun(() -> {
+                Log.logMsg("[BootstrapWizardProcess] Terminal started and menu navigator created");
+            });
     }
 
     public CompletableFuture<Void> start() {
         Log.logMsg("[BootstrapWizardProcess] start called");
         
-        // Ensure terminal is ready and give it a moment to settle
+        // Wait for terminal streams to be fully ready before showing anything
         return terminal.waitUntilReady()
+            .thenCompose(v -> {
+                Log.logMsg("[BootstrapWizardProcess] terminal render stream Ready");
+                return terminal.getEventStreamReadyFuture();
+            })
             .thenCompose(v -> CompletableFuture.runAsync(() -> {
-                try { Thread.sleep(200); } 
+                Log.logMsg("[BootstrapWizardProcess] event stream Ready");
+                try { Thread.sleep(100); } 
                 catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }))
             .thenCompose(v -> showWelcomeScreen())
-          //  .thenCompose(v -> terminal.clear())  Clear before detection
             .thenCompose(v -> detectSecureInput())
             .thenCompose(result -> {
                 this.detectionResult = result;
@@ -171,14 +191,14 @@ public class BootstrapWizardProcess extends FlowProcess {
     private CompletableFuture<Void> showWelcomeScreen() {
         Log.logMsg("[BootstrapWizardProcess] **Showing Welcome Screen**");
         return terminal.beginBatch()
-            .thenCompose(v->terminal.clear())
-            .thenCompose(v->
+            .thenCompose(v -> terminal.clear())
+            .thenCompose(v ->
                 TerminalTextBox.builder()
                 .position(0, 1)
                 .size(terminal.getCols(), 5)
                 .title("Welcome to Netnotes", TerminalTextBox.TitlePlacement.INSIDE_CENTER)
                 .style(BoxStyle.DOUBLE)
-                .titleStyle(TerminalContainerHandle.TextStyle.BOLD)
+                .titleStyle(TextStyle.BOLD)
                 .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
                 .build()
                 .render(terminal))
@@ -192,7 +212,7 @@ public class BootstrapWizardProcess extends FlowProcess {
                     "This wizard will help you configure your system.")
                     .thenCompose(v2 -> terminal.printAt(startRow + 5, startCol + 4,
                         TerminalCommands.PRESS_ANY_KEY, 
-                        TerminalContainerHandle.TextStyle.INFO))
+                        TextStyle.INFO))
                     .thenCompose(v2 -> 
                         terminal.moveCursor(startRow + 5, startCol + 4 + TerminalCommands.PRESS_ANY_KEY.length()));
             })
@@ -213,7 +233,7 @@ public class BootstrapWizardProcess extends FlowProcess {
                 
                 return terminal.printAt(row, col, 
                     "Detecting secure input...", 
-                    TerminalContainerHandle.TextStyle.INFO);
+                    TextStyle.INFO);
             })
             .thenCompose(v -> CompletableFuture.supplyAsync(() -> {
                 SecureInputDetectionResult result = new SecureInputDetectionResult();
@@ -270,7 +290,6 @@ public class BootstrapWizardProcess extends FlowProcess {
             null
         );
         
-        
         menu.addItem("enable", "Enable Secure Input (Recommended)", () -> {
             enableSecureInput();
         });
@@ -284,23 +303,20 @@ public class BootstrapWizardProcess extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
 
-    
     /**
      * Not installed - offer installation options
      */
     private CompletableFuture<Void> showInstallationOptionsMenu() {
         ContextPath menuPath = contextPath.append("installation-options");
-     
         
-        // Build description that will show ABOVE menu items
         String desc = "⚠ NoteDaemon is not installed.\n\n" +
-        "Secure input provides hardware-level protection for password entry.\n" +
-        "You can install it now or skip and use GUI keyboard.\n";
+            "Secure input provides hardware-level protection for password entry.\n" +
+            "You can install it now or skip and use GUI keyboard.\n";
         
         MenuContext menuWithDesc = new MenuContext(
             menuPath, 
             "Secure Input Installation",
-            desc,  // This description will show in menu header
+            desc,
             null
         );
        
@@ -322,7 +338,6 @@ public class BootstrapWizardProcess extends FlowProcess {
             showAdvancedConfigMenu();
         });
 
-        // Just show the menu - it will handle clearing
         menuNavigator.showMenu(menuWithDesc);
         return CompletableFuture.completedFuture(null);
     }
@@ -347,7 +362,7 @@ public class BootstrapWizardProcess extends FlowProcess {
             copyToClipboard(getQuickInstallCommand(detectionResult.os));
             terminal.clear()
                 .thenCompose(v -> terminal.println("Command copied to clipboard!", 
-                    TerminalContainerHandle.TextStyle.SUCCESS))
+                    TextStyle.SUCCESS))
                 .thenCompose(v -> terminal.println(""))
                 .thenCompose(v -> terminal.println("Press any key to continue..."))
                 .thenCompose(v -> waitForKeyPress())
@@ -366,10 +381,6 @@ public class BootstrapWizardProcess extends FlowProcess {
         
         menu.addItem("socket-path", "Custom Socket Path", () -> {
             promptForSocketPath();
-        });
-        
-        menu.addItem("network", "Enable Network Services", () -> {
-            toggleNetworkServices();
         });
         
         menu.addItem("back", "Back to Main Options", () -> {
@@ -397,7 +408,7 @@ public class BootstrapWizardProcess extends FlowProcess {
         
         terminal.clear()
             .thenCompose(v -> terminal.println("Secure input enabled!", 
-                TerminalContainerHandle.TextStyle.SUCCESS))
+                TextStyle.SUCCESS))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println(
                 "Your passwords will be captured directly from USB keyboards."))
@@ -423,7 +434,7 @@ public class BootstrapWizardProcess extends FlowProcess {
         
         terminal.clear()
             .thenCompose(v -> terminal.println("Secure input disabled.", 
-                TerminalContainerHandle.TextStyle.INFO))
+                TextStyle.INFO))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println(
                 "You can install NoteDaemon later through system settings."))
@@ -447,8 +458,11 @@ public class BootstrapWizardProcess extends FlowProcess {
             keyboard
         );
         
-        spawnChild(installer)
-            .thenCompose(path -> registry.startProcess(path))
+        // Register and start installer
+        registerChild(installer);
+        ContextPath installerPath = installer.getContextPath();
+        
+        startProcess(installerPath)
             .thenCompose(v -> installer.getCompletionFuture())
             .thenCompose(v -> {
                 state.removeState(INSTALLING);
@@ -475,7 +489,7 @@ public class BootstrapWizardProcess extends FlowProcess {
                     
                     return terminal.clear()
                         .thenCompose(v -> terminal.println("Installation successful!", 
-                            TerminalContainerHandle.TextStyle.SUCCESS))
+                            TextStyle.SUCCESS))
                         .thenCompose(v -> terminal.println(""))
                         .thenCompose(v -> terminal.println("NoteDaemon is now running."))
                         .thenCompose(v -> terminal.println(""))
@@ -514,7 +528,7 @@ public class BootstrapWizardProcess extends FlowProcess {
     private CompletableFuture<Boolean> verifyInstallation() {
         terminal.clear()
             .thenCompose(v -> terminal.println("Verifying installation...", 
-                TerminalContainerHandle.TextStyle.INFO))
+                TextStyle.INFO))
             .thenCompose(v -> terminal.println(""));
         
         return CompletableFuture.supplyAsync(() -> {
@@ -540,30 +554,9 @@ public class BootstrapWizardProcess extends FlowProcess {
     private void promptForSocketPath() {
         terminal.clear()
             .thenCompose(v -> terminal.println("Socket path configuration not yet implemented.", 
-                TerminalContainerHandle.TextStyle.WARNING))
+                TextStyle.WARNING))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("Default: /var/run/io-daemon.sock"))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("Press any key to continue..."))
-            .thenCompose(v -> waitForKeyPress())
-            .thenRun(() -> showAdvancedConfigMenu());
-    }
-    
-    private void toggleNetworkServices() {
-        boolean current = BootstrapConfig.getBoolean(bootstrapConfig,
-            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.NETWORK + "/" + 
-            BootstrapConfig.ENABLED,
-            false);
-        
-        BootstrapConfig.set(bootstrapConfig, 
-            BootstrapConfig.SYSTEM + "/" + BootstrapConfig.NETWORK + "/" + 
-            BootstrapConfig.ENABLED,
-            new NoteBytes(!current)
-        );
-        
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Network services " + (!current ? "enabled" : "disabled"), 
-                TerminalContainerHandle.TextStyle.SUCCESS))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("Press any key to continue..."))
             .thenCompose(v -> waitForKeyPress())
@@ -578,7 +571,7 @@ public class BootstrapWizardProcess extends FlowProcess {
         SettingsData.saveBootstrapConfig(bootstrapConfig)
             .thenCompose(v -> terminal.clear())
             .thenCompose(v -> terminal.println("Configuration saved!", 
-                TerminalContainerHandle.TextStyle.SUCCESS))
+                TextStyle.SUCCESS))
             .thenCompose(v -> terminal.println(""))
             .thenCompose(v -> terminal.println("Your system is now configured."))
             .thenCompose(v -> terminal.println(""))

@@ -52,7 +52,7 @@ public class ServicesStates {
     /**
      * ContainerService is running
      */
-    public static final long CONTAINER_SERVICE_ACTIVE = 1L << 10;
+    public static final long RENDERING_SERVICE_ACTIVE = 1L << 10;
     
     /**
      * IODaemon is running
@@ -62,7 +62,7 @@ public class ServicesStates {
     /**
      * ContainerService failed to start
      */
-    public static final long CONTAINER_SERVICE_FAILED = 1L << 12;
+    public static final long RENDERING_SERVICE_FAILED = 1L << 12;
     
     /**
      * IODaemon failed to start
@@ -76,7 +76,7 @@ public class ServicesStates {
      */
     public static boolean isOperational(BitFlagStateMachine state) {
         return state.hasState(READY) && 
-               state.hasState(CONTAINER_SERVICE_ACTIVE) &&
+               state.hasState(RENDERING_SERVICE_ACTIVE) &&
                !state.hasState(ERROR) &&
                !state.hasState(SHUTTING_DOWN);
     }
@@ -85,7 +85,7 @@ public class ServicesStates {
      * Check if core services are running
      */
     public static boolean hasCoreServices(BitFlagStateMachine state) {
-        return state.hasState(CONTAINER_SERVICE_ACTIVE);
+        return state.hasState(RENDERING_SERVICE_ACTIVE);
     }
     
     /**
@@ -108,7 +108,7 @@ public class ServicesStates {
      */
     public static boolean needsAttention(BitFlagStateMachine state) {
         return state.hasState(ERROR) ||
-               state.hasState(CONTAINER_SERVICE_FAILED);
+               state.hasState(RENDERING_SERVICE_FAILED);
     }
     
     /**
@@ -116,7 +116,7 @@ public class ServicesStates {
      */
     public static int getActiveServiceCount(BitFlagStateMachine state) {
         int count = 0;
-        if (state.hasState(CONTAINER_SERVICE_ACTIVE)) count++;
+        if (state.hasState(RENDERING_SERVICE_ACTIVE)) count++;
         if (state.hasState(IO_DAEMON_ACTIVE)) count++;
         return count;
     }
@@ -164,7 +164,7 @@ public class ServicesStates {
     private static String getErrorDetails(BitFlagStateMachine state) {
         StringBuilder errors = new StringBuilder();
         
-        if (state.hasState(CONTAINER_SERVICE_FAILED)) {
+        if (state.hasState(RENDERING_SERVICE_FAILED)) {
             errors.append("ContainerService failed ");
         }
         

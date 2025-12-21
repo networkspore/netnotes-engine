@@ -3,7 +3,8 @@ package io.netnotes.engine.core.system.control.terminal.menus;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 
 /**
  * ScrollableMenuItem - Handles rendering menu items with horizontal scroll
@@ -68,7 +69,7 @@ public class ScrollableMenuItem {
             String text,
             boolean isSelected,
             int scrollOffset,
-            TerminalContainerHandle.TextStyle style) {
+            TextStyle style) {
         
         boolean needsScroll = text.length() > maxWidth;
         
@@ -130,7 +131,7 @@ public class ScrollableMenuItem {
         String highlightBar = " ".repeat(highlightWidth);
         
         return terminal.printAt(row, col, highlightBar, 
-                TerminalContainerHandle.TextStyle.INVERSE)
+                TextStyle.INVERSE)
             .thenCompose(v -> {
                 // Render text on top of highlight
                 String displayText;
@@ -143,7 +144,7 @@ public class ScrollableMenuItem {
                 }
                 
                 return terminal.printAt(row, col, displayText, 
-                    TerminalContainerHandle.TextStyle.INVERSE);
+                    TextStyle.INVERSE);
             });
     }
     
@@ -231,7 +232,7 @@ public class ScrollableMenuItem {
             int textLength,
             int viewWidth,
             int scrollOffset,
-            TerminalContainerHandle.TextStyle style) {
+            TextStyle style) {
         
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         
@@ -240,7 +241,7 @@ public class ScrollableMenuItem {
             int indicatorCol = col - 2;
             future = future.thenCompose(v -> 
                 terminal.printAt(row, indicatorCol, "◄", 
-                    TerminalContainerHandle.TextStyle.INFO));
+                    TextStyle.INFO));
         }
         
         // Right indicator (if more content to the right)
@@ -248,7 +249,7 @@ public class ScrollableMenuItem {
             int indicatorCol = col + viewWidth + 1;
             future = future.thenCompose(v -> 
                 terminal.printAt(row, indicatorCol, "►", 
-                    TerminalContainerHandle.TextStyle.INFO));
+                    TextStyle.INFO));
         }
         
         return future;

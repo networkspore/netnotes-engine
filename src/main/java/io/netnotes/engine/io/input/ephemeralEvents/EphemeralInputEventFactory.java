@@ -83,7 +83,7 @@ public final class EphemeralInputEventFactory {
         // Deserialize into ephemeral object
         try (
             NoteBytesObjectEphemeral body = new NoteBytesObjectEphemeral(decryptedBytes);
-            NoteBytesPairEphemeral typePair = body.get(Keys.TYPE);
+            NoteBytesPairEphemeral typePair = body.get(Keys.EVENT);
             NoteBytesEphemeral typeBytes = typePair.getValue();
             NoteBytesPairEphemeral seqPair = body.get(Keys.SEQUENCE);
             NoteBytesPairEphemeral flagsPair = body.get(Keys.STATE_FLAGS);

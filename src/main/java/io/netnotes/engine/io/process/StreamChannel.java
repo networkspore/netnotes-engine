@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.streams.StreamUtils;
 
 /**
  * StreamChannel - Unidirectional pipe communication between processes
@@ -65,6 +66,7 @@ public class StreamChannel {
     }
 
     public OutputStream getQueuedOutputStream(){
+        if (queuedOutput != null) return queuedOutput;
         this.writeQueue = new LinkedBlockingQueue<>();
         this.writeExecutor = Executors.newSingleThreadExecutor(
             r -> Thread.ofVirtual().name("StreamChannel-Writer-" + source + "-to-" + target).unstarted(r)
@@ -81,6 +83,7 @@ public class StreamChannel {
      * Get raw input stream for advanced usage
      */
     public PipedOutputStream getChannelStream() {
+        Log.logMsg("[StreamChannel] getStreamChannel called for " + source + " → " + target );
         active = true;
         return pipeOutput;
     }
@@ -89,11 +92,12 @@ public class StreamChannel {
      * Internal write pump - drains queue and writes to pipe on dedicated thread
      */
     private void startWritePump() {
-        Log.logMsg("[StreamChannel] startWritePump called for " + source + " → " + target +"\n\t waiting for ready...");
+        Log.logMsg("[StreamChannel] startWritePump called for " + source + " → " + target +"\n\t waiting for ready... readyFuture: ");
         readyFuture.thenRunAsync(()-> {
-       
+        Log.logMsg("[StreamChannel] readyFuture called for: " + source + " → " + target);
+
             try {
-                while (!closed || !writeQueue.isEmpty()) {
+               while (!closed || (writeQueue != null && !writeQueue.isEmpty())) {
                     byte[] data = writeQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (data != null) {
                         try {
@@ -109,12 +113,8 @@ public class StreamChannel {
                 Thread.currentThread().interrupt();
                 Log.logMsg("[StreamChannel] Write pump interrupted");
             } finally {
-                /*This is a no op
-                try {
-                    pipeOutput.close();
-                } catch (IOException e) {
-                    // Ignore
-                } */
+                StreamUtils.safeClose(pipeOutput);
+             
                 Log.logMsg("[StreamChannel] Write pump stopped for " + source + " → " + target);
             }
         }, writeExecutor);
@@ -189,6 +189,8 @@ public class StreamChannel {
                 writeExecutor.shutdownNow();
             }
         }
+
+   
     }
     
     

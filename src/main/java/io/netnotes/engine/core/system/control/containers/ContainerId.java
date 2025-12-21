@@ -12,7 +12,7 @@ public class ContainerId {
     }
     
     public static ContainerId generate() {
-        return new ContainerId(NoteUUID.createLocalUUID128());
+        return new ContainerId(NoteUUID.createLocalUUID64());
     }
     
     public static ContainerId of(NoteBytesReadOnly id) {

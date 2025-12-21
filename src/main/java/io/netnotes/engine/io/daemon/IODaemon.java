@@ -39,8 +39,8 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.exec.VirtualExecutors;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
  * IODaemon - Socket manager for daemon connection
@@ -274,7 +274,7 @@ public class IODaemon extends FlowProcess {
                         }
                         
                         NoteBytesMap responseMap = response.getAsNoteBytesMap();
-                        NoteBytesReadOnly type = responseMap.getReadOnly(Keys.TYPE);
+                        NoteBytesReadOnly type = responseMap.getReadOnly(Keys.EVENT);
                         
                         if (type == null || !type.equals(EventBytes.TYPE_ACCEPT)) {
                             throw new IOException("Handshake rejected");
@@ -367,7 +367,7 @@ public class IODaemon extends FlowProcess {
     private void handleControlMessage(NoteBytesReadOnly messageBytes) {
         NoteBytesMap map = messageBytes.getAsNoteBytesMap();
         
-        NoteBytes typeBytes = map.get(Keys.TYPE);
+        NoteBytes typeBytes = map.get(Keys.EVENT);
         if (typeBytes == null) {
             Log.logError("No type field in control message");
             return;
@@ -698,7 +698,7 @@ public class IODaemon extends FlowProcess {
         }
 
         NoteBytesObject notification = new NoteBytesObject();
-        notification.add(Keys.TYPE, EventBytes.TYPE_DISCONNECTED);
+        notification.add(Keys.EVENT, EventBytes.TYPE_DISCONNECTED);
         notification.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         notification.add(Keys.MSG, "IODaemon socket disconnected");
 
@@ -714,7 +714,7 @@ public class IODaemon extends FlowProcess {
     public void kill() {
         if (connected) {
             NoteBytesObject shutdown = new NoteBytesObject();
-            shutdown.add(Keys.TYPE, EventBytes.TYPE_SHUTDOWN);
+            shutdown.add(Keys.EVENT, EventBytes.TYPE_SHUTDOWN);
             shutdown.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
             
             try {

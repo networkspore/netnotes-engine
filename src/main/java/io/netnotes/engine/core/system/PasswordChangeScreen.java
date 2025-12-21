@@ -17,9 +17,9 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.TimeHelpers;
-import io.netnotes.engine.utils.exec.ExecutorConsumer;
-import io.netnotes.engine.utils.exec.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 /**
  * PasswordChangeScreen - Change master password
@@ -326,7 +326,7 @@ class PasswordChangeScreen extends TerminalScreen {
         }
         
         NoteBytesMap map = nextNoteBytes.getAsMap();
-        NoteBytes typeBytes = map.get(Keys.TYPE);
+        NoteBytes typeBytes = map.get(Keys.EVENT);
         
         if (typeBytes == null) {
             return;
