@@ -2,19 +2,13 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.utils.TimeHelpers;
-
-
 /**
  * FirstRunPasswordScreen - Create password for new system
- * Uses PasswordReader directly for secure input
+ * Uses PasswordPrompt with confirmation
  */
 class FirstRunPasswordScreen extends TerminalScreen {
     
-    private PasswordReader passwordReader = null;
-    private NoteBytesEphemeral firstPassword = null;
+    private PasswordPrompt passwordPrompt;
     
     public FirstRunPasswordScreen(String name, SystemTerminalContainer terminal) {
         super(name, terminal);
@@ -22,8 +16,16 @@ class FirstRunPasswordScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> onShow() {
-        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
-        return render();
+        passwordPrompt = new PasswordPrompt(terminal)
+            .withTitle("Welcome to Netnotes")
+            .withPrompt("Enter password:")
+            .withConfirmation("Confirm password:")
+            .withTimeout(60)  // Longer timeout for first run
+            .onPassword(this::handlePassword)
+            .onTimeout(this::handleTimeout)
+            .onMismatch(this::handleMismatch);
+        
+        return passwordPrompt.show();
     }
     
     @Override
@@ -33,85 +35,41 @@ class FirstRunPasswordScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> render() {
-        return onStart();
-    }
-
-    private CompletableFuture<Void> onStart(){
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Welcome to Netnotes"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Create a master password"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Enter password:"))
-            .thenCompose(v -> terminal.moveCursor(7, 26))
-            .thenRun(this::startPasswordEntry);
+        // PasswordPrompt handles rendering
+        return CompletableFuture.completedFuture(null);
     }
     
-    private void startPasswordEntry() {
-
-    
-        
-        // Handle password when ready
-        passwordReader.setOnPassword(password -> {
-            // Store first password for confirmation
-            firstPassword = password.copy();
-            password.close();
-            
-            passwordReader.escape();
-            
-            onConfirm();
-        });
-    }
-
-    private void onConfirm(){
+    private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
         terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Welcome to Netnotes"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Create a master password"))   
-            .thenCompose(v->terminal.printAt(9, 10, "Confirm password:"))
-                .thenCompose(v -> terminal.moveCursor(9, 28))
-                .thenRun(this::startConfirmationEntry);
+            .thenCompose(v -> terminal.printSuccess("Creating system..."))
+            .thenCompose(v -> terminal.createNewSystem(password))
+            .thenRun(() -> {
+                password.close();
+                terminal.printSuccess("System created successfully!");
+            })
+            .exceptionally(ex -> {
+                password.close();
+                terminal.printError("Failed to create system: " + ex.getMessage());
+                return null;
+            });
     }
     
-    private void startConfirmationEntry() {
-        // Create confirmation reader
-        // Handle confirmation
-        passwordReader.setOnPassword(password -> {
-            passwordReader.escape();
-            // Compare passwords
-            boolean match = firstPassword.equals(password);
-            firstPassword.close();
-            if (match) {
-                // Passwords match - create system
-                terminal.clear()
-                    .thenCompose(v -> terminal.printSuccess("Creating system..."))
-                    .thenCompose(v -> terminal.createNewSystem(password))
-                    .thenRun(() -> {
-                        password.close();
-                        terminal.printSuccess("System created successfully!");
-                    })
-                    .exceptionally(ex -> {
-                        password.close();
-                        terminal.printError("Failed to create system: " + ex.getMessage());
-                        return null;
-                    });
-            } else {
-                password.close();
-                terminal.clear()
-                    .thenCompose(v->terminal.printError("Passwords do not match. Please try again."))
-                    .thenRunAsync(()->TimeHelpers.timeDelay(2))
-                    .thenCompose(v ->onStart());
-            }
-        });
+    private void handleTimeout() {
+        terminal.clear()
+            .thenCompose(v -> terminal.printError("Setup timeout"))
+            .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
+            .thenRun(() -> terminal.waitForKeyPress(() -> onShow()));
     }
-
- 
+    
+    private void handleMismatch() {
+        // Default handler will show error and restart
+        // We can customize if needed
+    }
+    
     private void cleanup() {
-        if (passwordReader != null) {
-            passwordReader.close();
-            passwordReader = null;
-        }
-        if (firstPassword != null) {
-            firstPassword.close();
-            firstPassword = null;
+        if (passwordPrompt != null && passwordPrompt.isActive()) {
+            passwordPrompt.cancel();
+            passwordPrompt = null;
         }
     }
 }
-

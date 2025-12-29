@@ -50,6 +50,8 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     // Bootstrap configuration - loaded once from disk
     private String passwordKeyboardId = null;  // null = use GUI keyboard
     private String ioDaemonSocketPath = DEFAULT_IO_DAEMON_SOCKET_PATH;
+    private boolean isInRecoveryMode = false;
+    private String recoveryReason = null;
  
     private final IODaemonManager ioDaemonManager;
     private final RenderingService renderingService;
@@ -96,6 +98,8 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     private static class ConfigKeys {
         public static final NoteBytesReadOnly PASSWORD_KEYBOARD_ID = new NoteBytesReadOnly("passwordKeyboardId");
         public static final NoteBytesReadOnly IO_DAEMON_SOCKET_PATH = new NoteBytesReadOnly("ioDaemonSocketPath");
+        public static final NoteBytesReadOnly RECOVERY_MODE = new NoteBytesReadOnly("recoveryMode");
+        public static final NoteBytesReadOnly RECOVERY_REASON = new NoteBytesReadOnly("recoveryReason");
     }
 
     // ===== DATA QUERIES - let the data speak =====
@@ -194,6 +198,15 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         
         state.onStateAdded(CHECKING_SETTINGS, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] CHECKING_SETTINGS");
+            
+            if (isInRecoveryMode) {
+                // In recovery mode - go to recovery screen
+                Log.logMsg("[SystemTerminal] Recovery mode active: " + recoveryReason);
+                state.removeState(CHECKING_SETTINGS);
+                state.addState(FAILED_SETTINGS);
+                return;
+            }
+            
             checkSettingsExist()
                 .thenAccept(exists -> {
                     state.removeState(CHECKING_SETTINGS);
@@ -302,11 +315,19 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
             return SettingsData.loadSettingsMap()
                 .thenAccept(map -> {
                     NoteBytes keyboardBytes = map.get(ConfigKeys.PASSWORD_KEYBOARD_ID);
-                    passwordKeyboardId = keyboardBytes != null ? keyboardBytes.getAsString() : null;
-                    
                     NoteBytes socketBytes = map.get(ConfigKeys.IO_DAEMON_SOCKET_PATH);
+                    NoteBytes recoveryBytes = map.get(ConfigKeys.RECOVERY_MODE);
+                    NoteBytes reasonBytes = map.get(ConfigKeys.RECOVERY_REASON);
+
+                    passwordKeyboardId = keyboardBytes != null ? keyboardBytes.getAsString() : null;
                     ioDaemonSocketPath = socketBytes != null ? socketBytes.getAsString() : DEFAULT_IO_DAEMON_SOCKET_PATH;
-                    
+                    isInRecoveryMode = recoveryBytes != null ? recoveryBytes.getAsBoolean() : false;
+                    recoveryReason = reasonBytes != null ? reasonBytes.getAsString() : null;
+                
+                    if (isInRecoveryMode) {
+                        Log.logMsg("[SystemTerminal] RECOVERY MODE DETECTED: " + recoveryReason);
+                    }
+
                     Log.logMsg("[SystemTerminal] Bootstrap loaded: passwordKeyboard=" + passwordKeyboardId);
                 });
         } else {
@@ -324,9 +345,15 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
             map.put(ConfigKeys.PASSWORD_KEYBOARD_ID, passwordKeyboardId);
         }
         map.put(ConfigKeys.IO_DAEMON_SOCKET_PATH, ioDaemonSocketPath);
+        if(isInRecoveryMode){
+            map.put(ConfigKeys.RECOVERY_MODE, isInRecoveryMode);
+            if (recoveryReason != null) {
+                map.put(ConfigKeys.RECOVERY_REASON, recoveryReason);
+            }
+        }
         
         return SettingsData.saveSystemConfig(map)
-            .thenRun(() -> Log.logMsg("[SystemTerminal] Bootstrap saved"));
+            .thenRun(() -> Log.logMsg("[SystemTerminal] Bootstrap saved (recovery=" + isInRecoveryMode + ")"));
     }
 
     /**
@@ -614,6 +641,45 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                 showScreen("main-menu");  // Continue anyway
                 return null;
             });
+    }
+
+    // ====== Recovery ========
+
+    /**
+     * Enter recovery mode
+     * Called before risky operations like password change
+     */
+    CompletableFuture<Void> enterRecoveryMode(String reason) {
+        this.isInRecoveryMode = true;
+        this.recoveryReason = reason;
+        
+        Log.logMsg("[SystemTerminal] Entering recovery mode: " + reason);
+        
+        return saveBootstrapConfig();
+    }
+
+    /**
+     * Exit recovery mode
+     * Called after successful completion of risky operations
+     */
+    CompletableFuture<Void> exitRecoveryMode() {
+        this.isInRecoveryMode = false;
+        this.recoveryReason = null;
+        
+        Log.logMsg("[SystemTerminal] Exiting recovery mode");
+        
+        return saveBootstrapConfig();
+    }
+
+    /**
+     * Check if in recovery mode
+     */
+    boolean isInRecoveryMode() {
+        return isInRecoveryMode;
+    }
+
+    String getRecoveryReason() {
+        return recoveryReason;
     }
 
     /**

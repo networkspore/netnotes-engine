@@ -324,7 +324,7 @@ public class NoteBytesMap{
     }
 
     public void put(NoteBytes key, boolean b){
-        m_pairs.put(key, new NoteBytes(b));
+        m_pairs.put(key, b ? NoteBoolean.TRUE : NoteBoolean.FALSE);
     }
 
     public void put(String key, NoteBytesMap map){

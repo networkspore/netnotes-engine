@@ -10,28 +10,40 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
- * PasswordPrompt - Reusable secure password entry
+ * PasswordPrompt - Reusable secure password entry with optional confirmation
  * 
- * Responsibilities:
- * - Claim password keyboard if configured
- * - Display prompt
- * - Manage PasswordReader lifecycle
- * - Handle timeout
- * - Release password keyboard when done
- * - Clean error handling
+ * Features:
+ * - Automatic password keyboard claiming/releasing
+ * - Optional confirmation step (for password creation/change)
+ * - Timeout handling
+ * - Keeps keyboard claimed during confirmation (no release between steps)
+ * - Clean error handling and lifecycle management
  * 
- * Usage:
+ * Usage (Simple):
  * <pre>
  * new PasswordPrompt(terminal)
- *     .withTitle("Authentication Required")
+ *     .withTitle("Authentication")
  *     .withPrompt("Enter password:")
- *     .withTimeout(30)
  *     .onPassword(password -> {
  *         // Use password
  *         password.close();
  *     })
- *     .onTimeout(() -> handleTimeout())
- *     .onCancel(() -> handleCancel())
+ *     .show();
+ * </pre>
+ * 
+ * Usage (With Confirmation):
+ * <pre>
+ * new PasswordPrompt(terminal)
+ *     .withTitle("Create Password")
+ *     .withPrompt("Enter password:")
+ *     .withConfirmation("Confirm password:")
+ *     .onPassword(password -> {
+ *         // Password confirmed and matches
+ *         password.close();
+ *     })
+ *     .onMismatch(() -> {
+ *         // Passwords didn't match, user can retry
+ *     })
  *     .show();
  * </pre>
  */
@@ -42,6 +54,7 @@ public class PasswordPrompt {
     // Configuration
     private String title = "Authentication";
     private String prompt = "Enter password:";
+    private String confirmPrompt = null;  // null = no confirmation
     private int timeoutSeconds = 30;
     private int promptRow = 5;
     private int promptCol = 10;
@@ -51,11 +64,14 @@ public class PasswordPrompt {
     private Runnable onTimeout;
     private Runnable onCancel;
     private Runnable onError;
+    private Runnable onMismatch;  // Called when confirmation doesn't match
     
     // Runtime state
     private PasswordReader passwordReader;
     private CompletableFuture<Void> timeoutFuture;
     private boolean isActive = false;
+    private boolean isConfirming = false;
+    private NoteBytesEphemeral firstPassword = null;  // Stored during confirmation
     
     public PasswordPrompt(SystemTerminalContainer terminal) {
         this.terminal = terminal;
@@ -70,6 +86,16 @@ public class PasswordPrompt {
     
     public PasswordPrompt withPrompt(String prompt) {
         this.prompt = prompt;
+        return this;
+    }
+    
+    /**
+     * Enable confirmation mode
+     * When set, user must enter password twice
+     * Password is only passed to onPassword if both match
+     */
+    public PasswordPrompt withConfirmation(String confirmPrompt) {
+        this.confirmPrompt = confirmPrompt;
         return this;
     }
     
@@ -104,6 +130,15 @@ public class PasswordPrompt {
         return this;
     }
     
+    /**
+     * Called when confirmation passwords don't match
+     * If not set, will automatically restart the prompt
+     */
+    public PasswordPrompt onMismatch(Runnable handler) {
+        this.onMismatch = handler;
+        return this;
+    }
+    
     // ===== LIFECYCLE =====
     
     /**
@@ -114,6 +149,11 @@ public class PasswordPrompt {
      * 2. Render prompt
      * 3. Start password reader
      * 4. Start timeout
+     * 5. If confirmation enabled and first password entered:
+     *    - Keep keyboard claimed
+     *    - Show confirmation prompt
+     *    - Compare passwords
+     *    - Call onPassword only if match
      */
     public CompletableFuture<Void> show() {
         if (isActive) {
@@ -122,6 +162,7 @@ public class PasswordPrompt {
         }
         
         isActive = true;
+        isConfirming = false;
         
         return terminal.claimPasswordKeyboard()
             .thenCompose(v -> renderPrompt())
@@ -156,35 +197,125 @@ public class PasswordPrompt {
     // ===== RENDERING =====
     
     private CompletableFuture<Void> renderPrompt() {
+        String currentPrompt = isConfirming ? confirmPrompt : prompt;
+        
         return terminal.clear()
             .thenCompose(v -> terminal.printTitle(title))
-            .thenCompose(v -> terminal.printAt(promptRow, promptCol, prompt))
-            .thenCompose(v -> terminal.moveCursor(promptRow, promptCol + prompt.length() + 1));
+            .thenCompose(v -> terminal.printAt(promptRow, promptCol, currentPrompt))
+            .thenCompose(v -> terminal.moveCursor(promptRow, promptCol + currentPrompt.length() + 1));
     }
     
     // ===== PASSWORD ENTRY =====
     
     private void startPasswordEntry() {
         EventHandlerRegistry registry = terminal.getPasswordEventHandlerRegistry();
-        passwordReader = new PasswordReader(registry);
+        
+        // Reuse existing reader if in confirmation mode
+        if (passwordReader == null) {
+            passwordReader = new PasswordReader(registry);
+        } else {
+            // Reset reader for confirmation
+            passwordReader.escape();
+        }
         
         passwordReader.setOnPassword(password -> {
-            Log.logMsg("[PasswordPrompt] Password received");
+            cancelTimeout();  // Got password, cancel timeout
+            
+            if (confirmPrompt != null && !isConfirming) {
+                // First password entry - need confirmation
+                handleFirstPassword(password);
+            } else if (isConfirming) {
+                // Confirmation entry - compare
+                handleConfirmation(password);
+            } else {
+                // No confirmation needed - done
+                cleanup();
+                if (onPassword != null) {
+                    onPassword.accept(password);
+                } else {
+                    password.close();
+                }
+            }
+        });
+    }
+    
+    private void handleFirstPassword(NoteBytesEphemeral password) {
+        Log.logMsg("[PasswordPrompt] First password entered, requesting confirmation");
+        
+        // Store first password
+        firstPassword = password.copy();
+        password.close();
+        
+        // Switch to confirmation mode
+        isConfirming = true;
+        
+        // Show confirmation prompt (keyboard stays claimed)
+        renderPrompt()
+            .thenRun(() -> {
+                startPasswordEntry();
+                startTimeout();  // Restart timeout for confirmation
+            })
+            .exceptionally(ex -> {
+                Log.logError("[PasswordPrompt] Confirmation prompt failed: " + ex.getMessage());
+                cleanup();
+                if (onError != null) {
+                    onError.run();
+                }
+                return null;
+            });
+    }
+    
+    private void handleConfirmation(NoteBytesEphemeral password) {
+        boolean match = firstPassword.equals(password);
+        
+        if (match) {
+            Log.logMsg("[PasswordPrompt] Passwords match");
+            password.close();
+            
+            // Success - pass first password to callback
+            NoteBytesEphemeral confirmedPassword = firstPassword;
+            firstPassword = null;
+            
             cleanup();
             
             if (onPassword != null) {
-                onPassword.accept(password);
+                onPassword.accept(confirmedPassword);
             } else {
-                // No handler - close password immediately
-                password.close();
-                Log.logError("[PasswordPrompt] No password handler set");
+                confirmedPassword.close();
             }
-        });
+        } else {
+            Log.logMsg("[PasswordPrompt] Passwords don't match");
+            
+            // Clean up both passwords
+            firstPassword.close();
+            firstPassword = null;
+            password.close();
+            
+            cleanup();
+            
+            if (onMismatch != null) {
+                onMismatch.run();
+            } else {
+                // Default: show error and restart
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Passwords do not match"))
+                    .thenRunAsync(() -> {
+                        try {
+                            Thread.sleep(2000);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    })
+                    .thenRun(() -> show());
+            }
+        }
     }
     
     // ===== TIMEOUT =====
     
     private void startTimeout() {
+        cancelTimeout();  // Cancel any existing
+        
         if (timeoutSeconds <= 0) {
             return; // No timeout
         }
@@ -204,6 +335,13 @@ public class PasswordPrompt {
         }, VirtualExecutors.getVirtualExecutor());
     }
     
+    private void cancelTimeout() {
+        if (timeoutFuture != null) {
+            timeoutFuture.cancel(true);
+            timeoutFuture = null;
+        }
+    }
+    
     private void handleTimeout() {
         cleanup();
         
@@ -218,17 +356,21 @@ public class PasswordPrompt {
         if (!isActive) return;
         
         isActive = false;
+        isConfirming = false;
         
         // Cancel timeout
-        if (timeoutFuture != null) {
-            timeoutFuture.cancel(true);
-            timeoutFuture = null;
-        }
+        cancelTimeout();
         
         // Close password reader
         if (passwordReader != null) {
             passwordReader.close();
             passwordReader = null;
+        }
+        
+        // Clean up stored password
+        if (firstPassword != null) {
+            firstPassword.close();
+            firstPassword = null;
         }
         
         // Release password keyboard if needed
@@ -243,5 +385,9 @@ public class PasswordPrompt {
     
     public boolean isActive() {
         return isActive;
+    }
+    
+    public boolean isConfirming() {
+        return isConfirming;
     }
 }

@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
+import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -101,15 +102,7 @@ class PasswordChangeScreen extends TerminalScreen {
     
     private void handleVerifyCurrent(NoteBytesEphemeral password) {
         RuntimeAccess access = terminal.getSystemAccess();
-        if (access == null) {
-            password.close();
-            terminal.clear()
-                .thenCompose(v->terminal.printError("System access not available"))
-                .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
-                .thenRun(() -> terminal.waitForKeyPress(() -> terminal.goBack()));
-            return;
-        }
-        
+   
         terminal.printAt(7, 10, "Verifying current password...")
             .thenCompose(v -> access.verifyPassword(password))
             .thenAccept(valid -> {
@@ -142,7 +135,7 @@ class PasswordChangeScreen extends TerminalScreen {
                             currentPassword = null;
                             terminal.clear()
                                 .thenCompose(v->terminal.printError("Validation failed: " + ex.getMessage()))
-                                .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
+                                .thenCompose(v -> terminal.printAt(15, 10, TerminalCommands.PRESS_ANY_KEY))
                                 .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
                             return null;
                         });
@@ -211,8 +204,8 @@ class PasswordChangeScreen extends TerminalScreen {
      */
     private void performPasswordChange() {
         RuntimeAccess access = terminal.getSystemAccess();
-        
-        terminal.clear()
+        terminal.enterRecoveryMode("password_change_in_progress")
+        .thenCompose(v->terminal.clear())
             .thenCompose(v -> terminal.printTitle("Changing Password"))
             .thenCompose(v -> terminal.printAt(5, 10, "Re-encrypting files..."))
             .thenCompose(v -> terminal.printAt(7, 10, "This may take a while. Please wait."))
@@ -246,27 +239,32 @@ class PasswordChangeScreen extends TerminalScreen {
                 return waitForStreamReaderCompletion()
                     .thenApply(v -> success);
             })
-            .thenAccept(success -> {
+            .thenCompose(success -> {
                 // Executor is already shutdown by waitForStreamReaderCompletion
                 // Just clean up passwords
                 cleanupPasswords();
                 
                 if (success) {
-                    terminal.clear()
-                        .thenCompose(v -> terminal.printSuccess(
-                            "✓ Password changed successfully!\n\n" +
-                            "All files have been re-encrypted."))
-                        .thenCompose(v -> terminal.printAt(10, 10, 
-                            "Press any key to continue..."))
-                        .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                    return terminal.exitRecoveryMode()
+                        .thenCompose((v)->terminal.clear())
+                                .thenCompose(v -> terminal.printSuccess(
+                                    "✓ Password changed successfully!\n\n" +
+                                    "All files have been re-encrypted."))
+                                .thenCompose(v -> terminal.printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
+                                .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                        
                 } else {
-                    terminal.clear()
+                    return terminal.clear()
                         .thenCompose(v -> terminal.printError(
                             "✗ Password change completed with errors\n\n" +
                             "Some files may not have been re-encrypted."))
-                        .thenCompose(v -> terminal.printAt(10, 10, 
-                            "Press any key to continue..."))
-                        .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                        .thenCompose(v -> terminal.printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
+                        .thenCompose(v -> terminal.printAt(12, 10, "Press any key to enter recovery..."))
+                        .thenCompose((v) -> terminal.waitForKeyPress(() -> {
+                            // Transition to recovery screen
+                            terminal.getState().removeState(SystemTerminalContainer.SHOWING_SCREEN);
+                            terminal.getState().addState(SystemTerminalContainer.FAILED_SETTINGS);
+                        }));
                 }
             })
             .exceptionally(ex -> handlePasswordChangeError(ex));
@@ -470,8 +468,12 @@ class PasswordChangeScreen extends TerminalScreen {
                 "Error: " + ex.getMessage() + "\n\n" +
                 "System may require recovery."))
             .thenCompose(v -> terminal.printAt(10, 10, 
-                "Press any key to continue..."))
-            .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                TerminalCommands.PRESS_ANY_KEY))
+            .thenCompose((v) -> terminal.waitForKeyPress(() -> {
+                // Transition to recovery screen
+                terminal.getState().removeState(SystemTerminalContainer.SHOWING_SCREEN);
+                terminal.getState().addState(SystemTerminalContainer.FAILED_SETTINGS);
+            }));
         
         return null;
     }
