@@ -13,18 +13,17 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
  */
 public class EphemeralKeyCharEvent extends EphemeralRoutedEvent {
     private final NoteBytesEphemeral codepointBytes;
-    private final NoteBytesEphemeral stateFlagsBytes;
+
     private NoteBytes utf8Cache = null;
-    private int stateFlagsCache = -1;
     private int[] codepointCache = null;
     private String strCache = null;
     
     public EphemeralKeyCharEvent(ContextPath sourcePath,
-                                 NoteBytesEphemeral codepointData,
-                                 NoteBytesEphemeral stateFlags) {
-        super(sourcePath);
+                                 NoteBytesEphemeral typeBytes,
+                                int stateFlags,
+                                NoteBytesEphemeral codepointData) {
+        super(sourcePath, typeBytes, stateFlags);
         this.codepointBytes = codepointData;
-        this.stateFlagsBytes = stateFlags;
     }
     
     /**
@@ -82,17 +81,8 @@ public class EphemeralKeyCharEvent extends EphemeralRoutedEvent {
         }
     }
     
-    public NoteBytesEphemeral getStateFlagsBytes() {
-        return stateFlagsBytes;
-    }
+ 
 
-    public int getStateFlags(){
-        if(stateFlagsCache != -1){
-            return stateFlagsCache;
-        }
-        stateFlagsCache = stateFlagsBytes.getAsInt();
-        return stateFlagsCache;
-    }
 
     private void clearCodePointCache(){
         if(codepointCache != null){
@@ -106,16 +96,16 @@ public class EphemeralKeyCharEvent extends EphemeralRoutedEvent {
             Thread.yield();
         }
     }
+
     
     @Override
     public void close() {
+        super.close();
         clearCodePointCache();
         if(utf8Cache != null){
             utf8Cache.destroy();
         }
         codepointBytes.close();
-        stateFlagsBytes.close();
-
         Thread.yield();
     }
 }

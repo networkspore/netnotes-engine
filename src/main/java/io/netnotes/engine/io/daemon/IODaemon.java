@@ -60,6 +60,16 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  */
 public class IODaemon extends FlowProcess {
     public final NoteBytesReadOnly DAEMON_VERSION = new NoteBytesReadOnly(1);
+
+    public static final class SESSION_CMDS {
+        public static final NoteBytesReadOnly CREATE_SESSION = 
+            new NoteBytesReadOnly("create_session");
+        public static final NoteBytesReadOnly DESTROY_SESSION = 
+            new NoteBytesReadOnly("destroy_session");
+        public static final NoteBytesReadOnly LIST_SESSIONS = 
+            new NoteBytesReadOnly("list_sessions");
+    }
+
     private final String socketPath;
     private final String m_UUID = NoteUUID.createSafeUUID128();
     
@@ -406,6 +416,11 @@ public class IODaemon extends FlowProcess {
      * Setup routed message handlers (session requests)
      */
     private void setupRoutedMessageMapping() {
+        // Session management commands
+        m_routedMsgMap.put(SESSION_CMDS.CREATE_SESSION, this::handleCreateSessionRequest);
+        m_routedMsgMap.put(SESSION_CMDS.DESTROY_SESSION, this::handleDestroySessionRequest);
+        m_routedMsgMap.put(SESSION_CMDS.LIST_SESSIONS, this::handleListSessionsRequest);
+        
         // Session commands (forwarded to daemon)
         m_routedMsgMap.put(ProtocolMesssages.REQUEST_DISCOVERY, this::handleDiscoveryRequest);
         m_routedMsgMap.put(ProtocolMesssages.CLAIM_ITEM, this::handleClaimRequest);
@@ -414,21 +429,160 @@ public class IODaemon extends FlowProcess {
     
     // ===== SESSION MANAGEMENT =====
     
+
+    // ===== SESSION MANAGEMENT HANDLERS =====
+    
+    /**
+     * Handle create_session request from ContainerHandle
+     * 
+     * Expected message format:
+     * {
+     *   cmd: "create_session",
+     *   session_id: "unique-id",
+     *   pid: 12345
+     * }
+     * 
+     * Reply format:
+     * {
+     *   status: "success",
+     *   path: "/io-daemon/session-id"
+     * }
+     */
+    private CompletableFuture<Void> handleCreateSessionRequest(
+            NoteBytesMap command, RoutedPacket request) {
+        
+        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
+        NoteBytes pidBytes = command.get(Keys.PID);
+        
+        if (sessionIdBytes == null) {
+            NoteBytesMap error = new NoteBytesMap();
+            error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+            error.put(Keys.ERROR_MESSAGE, new NoteBytes("session_id required"));
+            reply(request, error.toNoteBytes());
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        String sessionId = sessionIdBytes.getAsString();
+        int clientPid = pidBytes != null ? pidBytes.getAsInt() : 
+            (int) ProcessHandle.current().pid();
+        
+        // Check if session already exists
+        ContextPath sessionPath = contextPath.append(sessionId);
+        if (registry.exists(sessionPath)) {
+            NoteBytesMap response = new NoteBytesMap();
+            response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+            response.put(Keys.PATH, sessionPath.toNoteBytes());
+            response.put(Keys.MSG, new NoteBytes("Session already exists"));
+            reply(request, response.toNoteBytes());
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        // Create new session
+        return createSession(sessionId, clientPid)
+            .thenAccept(path -> {
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                response.put(Keys.PATH, path.toNoteBytes());
+                reply(request, response.toNoteBytes());
+                
+                Log.logMsg("[IODaemon] Created session: " + sessionId + " at " + path);
+            })
+            .exceptionally(ex -> {
+                NoteBytesMap error = new NoteBytesMap();
+                error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+                error.put(Keys.ERROR_MESSAGE, new NoteBytes(ex.getMessage()));
+                reply(request, error.toNoteBytes());
+                
+                Log.logError("[IODaemon] Failed to create session: " + ex.getMessage());
+                return null;
+            });
+    }
+    
+    /**
+     * Handle destroy_session request
+     */
+    private CompletableFuture<Void> handleDestroySessionRequest(
+            NoteBytesMap command, RoutedPacket request) {
+        
+        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
+        if (sessionIdBytes == null) {
+            return replyError(request, "session_id required");
+        }
+        
+        String sessionId = sessionIdBytes.getAsString();
+        ClientSession session = getSession(sessionId);
+        
+        if (session == null) {
+            return replyError(request, "Session not found: " + sessionId);
+        }
+        
+        // Cleanup session
+        session.state.addState(ClientStateFlags.DISCONNECTING);
+        
+        return session.shutdown()
+            .thenRun(() -> {
+                registry.unregisterProcess(session.getContextPath());
+                
+                NoteBytesMap response = new NoteBytesMap();
+                response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+                reply(request, response.toNoteBytes());
+                
+                Log.logMsg("[IODaemon] Destroyed session: " + sessionId);
+            })
+            .exceptionally(ex -> {
+                replyError(request, ex.getMessage());
+                return null;
+            });
+    }
+    
+   
+    /**
+     * Handle list_sessions request
+     */
+    private CompletableFuture<Void> handleListSessionsRequest(
+            NoteBytesMap command, RoutedPacket request) {
+        
+        List<ClientSession> sessions = getSessions();
+        
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        response.put(Keys.ITEM_COUNT, new NoteBytes(sessions.size()));
+        
+        // Build session info array
+        NoteBytesMap sessionsList = new NoteBytesMap();
+        for (int i = 0; i < sessions.size(); i++) {
+            ClientSession session = sessions.get(i);
+            NoteBytesMap sessionInfo = new NoteBytesMap();
+            sessionInfo.put(Keys.SESSION_ID, new NoteBytes(session.sessionId));
+            sessionInfo.put(Keys.PATH, session.getContextPath().toNoteBytes());
+            sessionInfo.put(Keys.PID, new NoteBytes(session.clientPid));
+            
+            sessionsList.put(String.valueOf(i), sessionInfo);
+        }
+        
+        response.put("sessions", sessionsList);
+        reply(request, response.toNoteBytes());
+        
+        return CompletableFuture.completedFuture(null);
+    }
+
     /**
      * Create a new client session
+     */
+    /**
+     * Create a new client session (internal method)
+     * Now also called by handleCreateSessionRequest
      */
     public CompletableFuture<ContextPath> createSession(String sessionId, int clientPid) {
         ContextPath sessionPath = contextPath.append(sessionId);
         
         if (registry.exists(sessionPath)) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Session already exists: " + sessionId));
+            return CompletableFuture.completedFuture(sessionPath);
         }
         
         ClientSession session = new ClientSession(sessionId, clientPid);
-     
-
-        return spawnChild(session).thenApply(path->{
+        
+        return spawnChild(session).thenApply(path -> {
             session.state.addState(ClientStateFlags.CONNECTED);
             session.state.addState(ClientStateFlags.AUTHENTICATED);
             
@@ -437,10 +591,9 @@ public class IODaemon extends FlowProcess {
             // Bidirectional connection for request-reply
             registry.connect(contextPath, sessionPath);
             registry.connect(sessionPath, contextPath);
+            
             return path;
         });
-      
-       
     }
     
     public ClientSession getSession(String sessionId) {
@@ -475,6 +628,17 @@ public class IODaemon extends FlowProcess {
             return CompletableFuture.failedFuture(ex);
         }
     
+    }
+
+    /**
+     * Helper to reply with error
+     */
+    private CompletableFuture<Void> replyError(RoutedPacket request, String message) {
+        NoteBytesMap error = new NoteBytesMap();
+        error.put(Keys.STATUS, ProtocolMesssages.ERROR);
+        error.put(Keys.ERROR_MESSAGE, new NoteBytes(message));
+        reply(request, error.toNoteBytes());
+        return CompletableFuture.completedFuture(null);
     }
     
    /**
@@ -699,7 +863,6 @@ public class IODaemon extends FlowProcess {
 
         NoteBytesObject notification = new NoteBytesObject();
         notification.add(Keys.EVENT, EventBytes.TYPE_DISCONNECTED);
-        notification.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         notification.add(Keys.MSG, "IODaemon socket disconnected");
 
         try {
@@ -715,7 +878,7 @@ public class IODaemon extends FlowProcess {
         if (connected) {
             NoteBytesObject shutdown = new NoteBytesObject();
             shutdown.add(Keys.EVENT, EventBytes.TYPE_SHUTDOWN);
-            shutdown.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
+     
             
             try {
                 synchronized(daemonWriter) {
@@ -739,6 +902,8 @@ public class IODaemon extends FlowProcess {
         
         super.kill();
     }
+
+    
     
     // ===== QUERIES =====
     

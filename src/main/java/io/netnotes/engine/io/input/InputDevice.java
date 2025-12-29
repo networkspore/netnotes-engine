@@ -2,7 +2,9 @@ package io.netnotes.engine.io.input;
 
 import java.util.function.Consumer;
 
+import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.noteBytes.NoteBytes;
 
 /**
  * InputDevice - Common interface for all input sources
@@ -19,24 +21,8 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
  */
 public interface InputDevice {
     
-    /**
-     * Add event consumer
-     * Consumer will receive all input events from this device
-     * 
-     * @param id Unique consumer ID
-     * @param consumer Event consumer (thread-safe)
-     */
-    void setEventConsumer(Consumer<RoutedEvent> consumer);
-    
- 
-    /**
-     * Get event consumer
-     * 
-     * @param id Consumer ID
-     * @return Consumer, or null if not found
-     */
-    Consumer<RoutedEvent> getEventConsumer();
-    
+
+    EventHandlerRegistry getEventHandlerRegistry();
     /**
      * Check if device is active
      * 

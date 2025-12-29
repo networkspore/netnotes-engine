@@ -3,7 +3,6 @@ package io.netnotes.engine.core.system;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.utils.TimeHelpers;
 
@@ -17,13 +16,13 @@ class FirstRunPasswordScreen extends TerminalScreen {
     private PasswordReader passwordReader = null;
     private NoteBytesEphemeral firstPassword = null;
     
-    public FirstRunPasswordScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public FirstRunPasswordScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
     public CompletableFuture<Void> onShow() {
-        passwordReader = new PasswordReader();
+        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
         return render();
     }
     
@@ -48,14 +47,13 @@ class FirstRunPasswordScreen extends TerminalScreen {
     
     private void startPasswordEntry() {
 
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+    
         
         // Handle password when ready
         passwordReader.setOnPassword(password -> {
             // Store first password for confirmation
             firstPassword = password.copy();
             password.close();
-            keyboard.setEventConsumer(null);
             
             passwordReader.escape();
             
@@ -74,11 +72,9 @@ class FirstRunPasswordScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         // Create confirmation reader
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
         // Handle confirmation
         passwordReader.setOnPassword(password -> {
             passwordReader.escape();
-            keyboard.setEventConsumer(null);
             // Compare passwords
             boolean match = firstPassword.equals(password);
             firstPassword.close();
@@ -109,7 +105,6 @@ class FirstRunPasswordScreen extends TerminalScreen {
  
     private void cleanup() {
         if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
         }

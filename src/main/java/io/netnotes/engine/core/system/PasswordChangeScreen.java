@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -47,8 +46,8 @@ class PasswordChangeScreen extends TerminalScreen {
     private Map<String, Integer> progressBarRows = new HashMap<>();
     private int currentRow = 10;
     
-    public PasswordChangeScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public PasswordChangeScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
@@ -85,11 +84,10 @@ class PasswordChangeScreen extends TerminalScreen {
     }
     
     private void startPasswordEntry() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
+
         
         passwordReader.setOnPassword(password -> {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
             
@@ -108,7 +106,7 @@ class PasswordChangeScreen extends TerminalScreen {
             terminal.clear()
                 .thenCompose(v->terminal.printError("System access not available"))
                 .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
-                .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+                .thenRun(() -> terminal.waitForKeyPress(() -> terminal.goBack()));
             return;
         }
         
@@ -145,7 +143,7 @@ class PasswordChangeScreen extends TerminalScreen {
                             terminal.clear()
                                 .thenCompose(v->terminal.printError("Validation failed: " + ex.getMessage()))
                                 .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
-                                .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+                                .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
                             return null;
                         });
                 } else {
@@ -260,7 +258,7 @@ class PasswordChangeScreen extends TerminalScreen {
                             "All files have been re-encrypted."))
                         .thenCompose(v -> terminal.printAt(10, 10, 
                             "Press any key to continue..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+                        .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
                 } else {
                     terminal.clear()
                         .thenCompose(v -> terminal.printError(
@@ -268,7 +266,7 @@ class PasswordChangeScreen extends TerminalScreen {
                             "Some files may not have been re-encrypted."))
                         .thenCompose(v -> terminal.printAt(10, 10, 
                             "Press any key to continue..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+                        .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
                 }
             })
             .exceptionally(ex -> handlePasswordChangeError(ex));
@@ -326,7 +324,7 @@ class PasswordChangeScreen extends TerminalScreen {
         }
         
         NoteBytesMap map = nextNoteBytes.getAsMap();
-        NoteBytes typeBytes = map.get(Keys.EVENT);
+        NoteBytes typeBytes = map.get(Keys.TYPE);
         
         if (typeBytes == null) {
             return;
@@ -473,7 +471,7 @@ class PasswordChangeScreen extends TerminalScreen {
                 "System may require recovery."))
             .thenCompose(v -> terminal.printAt(10, 10, 
                 "Press any key to continue..."))
-            .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+            .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
         
         return null;
     }
@@ -513,12 +511,11 @@ class PasswordChangeScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printTitle("Insufficient Disk Space"))
             .thenCompose(v -> terminal.printError(error))
             .thenCompose(v -> terminal.printAt(15, 10, "Press any key to go back..."))
-            .thenRun(() -> waitForKeyPress(keyboard, () -> terminal.goBack()));
+            .thenRun(() -> terminal.waitForKeyPress(() -> terminal.goBack()));
     }
     
     private void cleanup() {
         if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
         }

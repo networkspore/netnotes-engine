@@ -1,5 +1,3 @@
-// ===== NEW FILE: ClientSession.java =====
-
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.ContextPath;
@@ -26,14 +24,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+
+
 /**
  * ClientSession - One per authenticated client connection
  * 
- * Responsibilities:
- * - Session lifecycle (auth, heartbeat, backpressure)
- * - Device discovery and claiming
- * - Managing ClaimedDevice children
- * - Forwarding commands to IODaemon socket manager
+ * UPDATED: Proper FlowProcess lifecycle management
+ * - Uses onStart() for initialization
+ * - Uses onStop() for cleanup
+ * - Shutdown via kill() or complete()
+ * - Automatic device release on stop
  * 
  * Hierarchy: IODaemon → ClientSession → ClaimedDevice
  */
@@ -67,23 +67,139 @@ public class ClientSession extends FlowProcess {
         setupRoutedMessageMapping();
     }
     
+    // ===== LIFECYCLE HOOKS =====
+    
+    @Override
+    public void onStart() {
+        Log.logMsg("[ClientSession:" + sessionId + "] Starting session for PID " + clientPid);
+        
+        state.addState(ClientStateFlags.CONNECTED);
+        state.addState(ClientStateFlags.AUTHENTICATED);
+    }
+    
+    @Override
+    public void onStop() {
+        Log.logMsg("[ClientSession:" + sessionId + "] Stopping session");
+        
+        // Mark as disconnecting
+        state.addState(ClientStateFlags.DISCONNECTING);
+        
+        // Release all claimed devices
+        releaseAllDevices();
+        
+        // Clear discovery state
+        discoveredDevices.clear();
+        state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+        state.removeState(ClientStateFlags.DISCOVERING);
+        
+        // Disable features
+        state.removeState(ClientStateFlags.HEARTBEAT_ENABLED);
+        state.removeState(ClientStateFlags.AUTHENTICATED);
+        state.removeState(ClientStateFlags.CONNECTED);
+        
+        Log.logMsg("[ClientSession:" + sessionId + "] Session stopped");
+    }
+    
+    /**
+     * Graceful shutdown - completes cleanly
+     * Releases devices, notifies IODaemon, then completes
+     */
+    public CompletableFuture<Void> shutdown() {
+        if (!isAlive()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        Log.logMsg("[ClientSession:" + sessionId + "] Shutdown requested");
+        
+        state.addState(ClientStateFlags.DISCONNECTING);
+        
+        // Release all devices (sends notifications to IODaemon)
+        List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
+        
+        if (devices.isEmpty()) {
+            // No devices, complete immediately
+            complete();
+            return getCompletionFuture();
+        }
+        
+        // Release each device and wait for all to complete
+        CompletableFuture<Void> releaseAll = CompletableFuture.allOf(
+            devices.stream()
+                .map(device -> releaseDevice(device.getDeviceId())
+                    .exceptionally(ex -> {
+                        Log.logError("[ClientSession:" + sessionId + "] Error releasing " + 
+                            device.getDeviceId() + ": " + ex.getMessage());
+                        return null;
+                    })
+                )
+                .toArray(CompletableFuture[]::new)
+        );
+        
+        return releaseAll.thenRun(() -> {
+            Log.logMsg("[ClientSession:" + sessionId + "] All devices released, completing");
+            complete();
+        });
+    }
+    
+    /**
+     * Emergency shutdown - kills immediately
+     * Use when IODaemon socket is already disconnected
+     */
+    public void emergencyShutdown() {
+        Log.logMsg("[ClientSession:" + sessionId + "] Emergency shutdown");
+        
+        state.addState(ClientStateFlags.DISCONNECTING);
+        state.addState(ClientStateFlags.ERROR_STATE);
+        
+        // Force release without waiting for IODaemon responses
+        List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
+        for (ClaimedDevice device : devices) {
+            try {
+                device.release();
+                registry.unregisterProcess(device.getContextPath());
+            } catch (Exception e) {
+                Log.logError("[ClientSession:" + sessionId + "] Error in emergency release: " + 
+                    e.getMessage());
+            }
+        }
+        
+        discoveredDevices.clear();
+        
+        // Kill the process
+        kill();
+    }
+    
+    // ===== STATE TRANSITIONS =====
+    
     private void setupStateTransitions() {
         state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
             state.addState(ClientStateFlags.HEARTBEAT_ENABLED);
+            Log.logMsg("[ClientSession:" + sessionId + "] Authenticated");
         });
         
         state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
             state.addState(ClientStateFlags.FLOW_CONTROL_PAUSED);
-            Log.logMsg("Backpressure activated for client " + sessionId);
+            Log.logMsg("[ClientSession:" + sessionId + "] Backpressure activated");
         });
         
         state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
             state.addState(ClientStateFlags.ERROR_STATE);
-            Log.logError("Heartbeat timeout for client " + sessionId);
+            Log.logError("[ClientSession:" + sessionId + "] Heartbeat timeout - disconnecting");
+            
+            // Trigger emergency shutdown on heartbeat timeout
+            emergencyShutdown();
         });
         
         state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
-            releaseAllDevices();
+            Log.logMsg("[ClientSession:" + sessionId + "] Disconnecting...");
+            
+            // Disable heartbeat
+            state.removeState(ClientStateFlags.HEARTBEAT_ENABLED);
+            state.removeState(ClientStateFlags.HEARTBEAT_WAITING);
+        });
+        
+        state.onStateAdded(ClientStateFlags.ERROR_STATE, (old, now, bit) -> {
+            Log.logError("[ClientSession:" + sessionId + "] Entered ERROR state");
         });
     }
 
@@ -93,6 +209,8 @@ public class ClientSession extends FlowProcess {
         m_routedMsgMap.put(ProtocolMesssages.RELEASE_ITEM, this::handleReleaseCommand);
         m_routedMsgMap.put(ProtocolMesssages.ITEM_LIST, this::handleListDevicesCommand);
     }
+    
+    // ===== MESSAGE HANDLING =====
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
@@ -111,11 +229,11 @@ public class ClientSession extends FlowProcess {
             NoteBytesReadOnly cmd = message.getReadOnly(Keys.CMD);
             
             RoutedMessageExecutor msgExecutor = m_routedMsgMap.get(cmd);
-            if(msgExecutor != null){
+            if (msgExecutor != null) {
                 return msgExecutor.execute(message, packet);
             } else {
                 return CompletableFuture.failedFuture(
-                    new UnsupportedOperationException("ClientSession does not support this command"));
+                    new UnsupportedOperationException("Unsupported command: " + cmd));
             }
 
         } catch (Exception e) {
@@ -125,15 +243,14 @@ public class ClientSession extends FlowProcess {
 
     /**
      * Handle daemon socket disconnect
+     * IODaemon calls this when the socket connection is lost
      */
     private void handleDaemonDisconnect(NoteBytesMap notification) {
-        Log.logError("Daemon disconnected: " + notification.get(Keys.MSG));
+        Log.logError("[ClientSession:" + sessionId + "] Daemon disconnected: " + 
+            notification.get(Keys.MSG));
         
-        state.addState(ClientStateFlags.DISCONNECTING);
-        state.addState(ClientStateFlags.ERROR_STATE);
-        
-        // Release all devices (they'll notify IODaemon, but it's already disconnected)
-        releaseAllDevices();
+        // Emergency shutdown - can't communicate with daemon anymore
+        emergencyShutdown();
     }
 
     
@@ -161,7 +278,6 @@ public class ClientSession extends FlowProcess {
                 reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
-               
                 reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
                 return null;
             });
@@ -169,27 +285,36 @@ public class ClientSession extends FlowProcess {
     
     public CompletableFuture<List<DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities>> discoverDevices() {
         if (!ClientStateFlags.canDiscover(state)) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Cannot discover in current state"));
+          
+            return CompletableFuture.failedFuture(new IllegalStateException("Cannot discover in current state: " + 
+                    state.getState() ));
         }
         
         state.addState(ClientStateFlags.DISCOVERING);
         
         // Send discovery request to IODaemon (socket manager)
         return request(parentPath, Duration.ofSeconds(5),
-            new NoteBytesPair(Keys.CMD , ProtocolMesssages.REQUEST_DISCOVERY),
+            new NoteBytesPair(Keys.CMD, ProtocolMesssages.REQUEST_DISCOVERY),
             new NoteBytesPair(Keys.SESSION_ID, sessionId)
         ).thenApply(response -> {
             // IODaemon will send device list via handleDeviceList callback
             return discoveredDevices.getAllDevices();
+        })
+        .exceptionally(ex -> {
+            state.removeState(ClientStateFlags.DISCOVERING);
+            Log.logError("[ClientSession:" + sessionId + "] Discovery failed: " + 
+                ex.getMessage());
+            throw new RuntimeException("Discovery failed", ex);
         });
     }
     
     public void handleDeviceList(NoteBytesMap map) {
         discoveredDevices.parseDeviceList(map);
         state.removeState(ClientStateFlags.DISCOVERING);
-        Log.logMsg("Device discovery complete: " + 
-            discoveredDevices.getAllDevices().size() + " devices found");
+        
+        int deviceCount = discoveredDevices.getAllDevices().size();
+        Log.logMsg("[ClientSession:" + sessionId + "] Discovery complete: " + 
+            deviceCount + " devices found");
     }
     
     private CompletableFuture<Void> handleListDevicesCommand(NoteBytesMap message, RoutedPacket request) {
@@ -197,7 +322,7 @@ public class ClientSession extends FlowProcess {
             discoveredDevices.getAllDevices();
         
         NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATE_FLAGS, ProtocolMesssages.SUCCESS);
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
         response.put(Keys.ITEM_COUNT, new NoteBytes(devices.size())); 
         
         NoteBytesArray deviceArray = new NoteBytesArray();
@@ -213,9 +338,9 @@ public class ClientSession extends FlowProcess {
     
     private NoteBytesObject serializeDeviceDescriptor(
             DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo) {
-        // Same implementation as IODaemon's version
         NoteBytesObject obj = new NoteBytesObject();
-        // ... (copy from IODaemon)
+        // Implementation would serialize device info
+        // ... (implementation details)
         return obj;
     }
     
@@ -224,8 +349,10 @@ public class ClientSession extends FlowProcess {
     private CompletableFuture<Void> handleClaimCommand(NoteBytesMap command, RoutedPacket request) {
         NoteBytes deviceIdBytes = command.get(Keys.DEVICE_ID);
         NoteBytes modeBytes = command.getOrDefault(Keys.MODE, DeviceMode.getDefault());
-        if(deviceIdBytes == null){
-            return CompletableFuture.failedFuture(new IllegalArgumentException("Device id requried"));
+        
+        if (deviceIdBytes == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("Device id required"));
         }
 
         String deviceId = deviceIdBytes.getAsString();
@@ -235,7 +362,7 @@ public class ClientSession extends FlowProcess {
             .thenAccept(devicePath -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                response.put(Keys.ITEM_PATH, new NoteBytes(devicePath.toString()));
+                response.put(Keys.ITEM_PATH, devicePath.toNoteBytes());
                 reply(request, response.toNoteBytes());
             })
             .exceptionally(ex -> {
@@ -246,10 +373,11 @@ public class ClientSession extends FlowProcess {
     
     
     public CompletableFuture<ContextPath> claimDevice(String deviceId, String requestedMode) {
-        // --- VALIDATION ---
+        // Validation
         if (!ClientStateFlags.canClaim(state)) {
             return CompletableFuture.failedFuture(
-                new IllegalStateException("Cannot claim in current state"));
+                new IllegalStateException("Cannot claim in current state: " + 
+                    state.getState()));
         }
 
         var deviceInfo = discoveredDevices.getDevice(deviceId);
@@ -272,13 +400,13 @@ public class ClientSession extends FlowProcess {
                     ". Available: " + availableModes));
         }
 
-        // --- SETUP ---
+        // Setup ClaimedDevice
         ContextPath claimedDevicePath = contextPath.append(deviceId);
 
         ClaimedDevice claimedDevice = new ClaimedDevice(
             deviceId,
             claimedDevicePath,
-            deviceInfo.usbDevice().get_device_type(),
+            deviceInfo.usbDevice().getDeviceType(),
             deviceInfo.capabilities(),
             parentPath
         );
@@ -289,9 +417,9 @@ public class ClientSession extends FlowProcess {
         }
 
         registerChild(claimedDevice);
-        registry.startProcess(claimedDevicePath); 
+        registry.startProcess(claimedDevicePath);
 
-       // Send claim request to IODaemon
+        // Send claim request to IODaemon
         return request(parentPath, Duration.ofSeconds(5),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.CLAIM_ITEM),
             new NoteBytesPair(Keys.SESSION_ID, sessionId),
@@ -301,11 +429,16 @@ public class ClientSession extends FlowProcess {
             discoveredDevices.markClaimed(deviceId);
             state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
             
-            Log.logMsg("Claimed device: " + deviceId);
+            Log.logMsg("[ClientSession:" + sessionId + "] Claimed device: " + deviceId);
             return claimedDevicePath;
+        })
+        .exceptionally(ex -> {
+            // Cleanup on failure
+            Log.logError("[ClientSession:" + sessionId + "] Claim failed: " + ex.getMessage());
+            registry.unregisterProcess(claimedDevicePath);
+            throw new RuntimeException("Failed to claim device", ex);
         });
     }
-
 
     // ===== RELEASE =====
     
@@ -317,6 +450,10 @@ public class ClientSession extends FlowProcess {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(request, response.toNoteBytes());
+            })
+            .exceptionally(ex -> {
+                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
+                return null;
             });
     }
     
@@ -339,30 +476,69 @@ public class ClientSession extends FlowProcess {
             new NoteBytesPair(Keys.DEVICE_ID, deviceId)
         ).thenRun(() -> {
             discoveredDevices.markReleased(deviceId);
+            
             if (claimedDevice != null) {
                 registry.unregisterProcess(claimedDevice.getContextPath());
             }
-            Log.logMsg("Released device: " + deviceId);
+            
+            // Check if we still have devices
+            if (findChildrenByType(ClaimedDevice.class).isEmpty()) {
+                state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+            }
+            
+            Log.logMsg("[ClientSession:" + sessionId + "] Released device: " + deviceId);
+        })
+        .exceptionally(ex -> {
+            Log.logError("[ClientSession:" + sessionId + "] Release failed: " + 
+                ex.getMessage());
+            
+            // Try to cleanup locally even if IODaemon fails
+            if (claimedDevice != null) {
+                try {
+                    registry.unregisterProcess(claimedDevice.getContextPath());
+                } catch (Exception e) {
+                    Log.logError("[ClientSession:" + sessionId + "] Cleanup error: " + 
+                        e.getMessage());
+                }
+            }
+            
+            return null;
         });
     }
     
-        
-    private void releaseAllDevices() {
+    /**
+     * Release all devices (called during shutdown)
+     */
+    public void releaseAllDevices() {
         List<ClaimedDevice> devices = findChildrenByType(ClaimedDevice.class);
         
-        Log.logMsg("Releasing " + devices.size() + " devices...");
+        if (devices.isEmpty()) {
+            return;
+        }
+        
+        Log.logMsg("[ClientSession:" + sessionId + "] Releasing " + devices.size() + " devices");
         
         for (ClaimedDevice device : devices) {
             try {
+                String deviceId = device.getDeviceId();
+                
+                // Notify device to release
                 device.release();
+                
+                // Unregister from registry
                 registry.unregisterProcess(device.getContextPath());
+                
+                // Update discovery state
+                discoveredDevices.markReleased(deviceId);
+                
+                Log.logMsg("[ClientSession:" + sessionId + "] Released: " + deviceId);
+                
             } catch (Exception e) {
-                Log.logError("Error releasing device " + 
+                Log.logError("[ClientSession:" + sessionId + "] Error releasing device " + 
                     device.getDeviceId() + ": " + e.getMessage());
             }
         }
         
-        discoveredDevices.clear();
         state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
     }
     
@@ -435,7 +611,7 @@ public class ClientSession extends FlowProcess {
         missedPongs.set(0);
     }
     
-    // ===== HELPERS =====
+    // ===== GETTERS =====
     
     public ClaimedDevice getClaimedDevice(String deviceId) {
         return (ClaimedDevice) getChildProcess(deviceId);
@@ -443,5 +619,46 @@ public class ClientSession extends FlowProcess {
     
     public DiscoveredDeviceRegistry getDiscoveredDevices() {
         return discoveredDevices;
+    }
+    
+    /**
+     * Get count of claimed devices in this session
+     */
+    public int getClaimedDeviceCount() {
+        return findChildrenByType(ClaimedDevice.class).size();
+    }
+
+    /**
+     * Get all claimed devices
+     */
+    public List<ClaimedDevice> getClaimedDevices() {
+        return findChildrenByType(ClaimedDevice.class);
+    }
+
+    /**
+     * Check if device is claimed by this session
+     */
+    public boolean hasDevice(String deviceId) {
+        return getClaimedDevice(deviceId) != null;
+    }
+    
+    /**
+     * Check if session is in a healthy state
+     */
+    public boolean isHealthy() {
+        return isAlive() && 
+               state.hasState(ClientStateFlags.CONNECTED) &&
+               state.hasState(ClientStateFlags.AUTHENTICATED) &&
+               !state.hasState(ClientStateFlags.ERROR_STATE) &&
+               !state.hasState(ClientStateFlags.HEARTBEAT_TIMEOUT);
+    }
+    
+    @Override
+    public String toString() {
+        return String.format(
+            "ClientSession{id=%s, pid=%d, devices=%d, state=%d, alive=%s}",
+            sessionId, clientPid, getClaimedDeviceCount(), 
+            state.getState().longValue(), isAlive()
+        );
     }
 }

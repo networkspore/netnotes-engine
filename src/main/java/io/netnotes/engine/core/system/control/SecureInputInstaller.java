@@ -6,7 +6,6 @@ import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.state.BitFlagStateMachine;
@@ -47,7 +46,6 @@ public class SecureInputInstaller extends FlowProcess {
     
     private final String os;
     private final TerminalContainerHandle terminal;
-    private final InputDevice keyboard;
     private final BitFlagStateMachine state;
     
     private MenuNavigator menuNavigator;
@@ -75,13 +73,11 @@ public class SecureInputInstaller extends FlowProcess {
     public SecureInputInstaller(
         String name, 
         String os, 
-        TerminalContainerHandle terminal,
-        InputDevice keyboard
+        TerminalContainerHandle terminal
     ) {
         super(name, ProcessType.SINK);
         this.os = os;
         this.terminal = terminal;
-        this.keyboard = keyboard;
         this.state = new BitFlagStateMachine(name);
         
         setupStateTransitions();
@@ -122,7 +118,7 @@ public class SecureInputInstaller extends FlowProcess {
         state.addState(IDLE);
         
         // Create menu navigator
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         state.removeState(IDLE);
         state.addState(FETCHING_RELEASES);
 

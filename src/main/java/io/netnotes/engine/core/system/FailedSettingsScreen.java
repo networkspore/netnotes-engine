@@ -18,7 +18,6 @@ import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -73,8 +72,8 @@ class FailedSettingsScreen extends TerminalScreen {
         }
     }
     
-    public FailedSettingsScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public FailedSettingsScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
@@ -169,7 +168,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showCorruptFileMenu() {
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         
         ContextPath menuPath = terminal.getSessionPath().append("menu", "corrupt-file");
         MenuContext menu = new MenuContext(menuPath, "Recovery Options");
@@ -386,7 +385,7 @@ class FailedSettingsScreen extends TerminalScreen {
                     return terminal.printAt(13, 10, "⚠ Critical: Salt not recovered")
                         .thenCompose(x -> terminal.printAt(14, 10, "Cannot decrypt existing data."))
                         .thenCompose(x -> terminal.printAt(16, 10, "Press any key to see options..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                        .thenRun(() -> terminal.waitForKeyPress(() -> {
                             currentState = DiagnosisState.UNRECOVERABLE;
                             render();
                         }));
@@ -395,12 +394,9 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void startPasswordRecovery() {
-        passwordReader = new PasswordReader();
-
-        keyboard.setEventConsumer( passwordReader.getEventConsumer());
+        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
 
         passwordReader.setOnPassword(password -> {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
             
@@ -429,7 +425,7 @@ class FailedSettingsScreen extends TerminalScreen {
             password.close();
             terminal.printError("Recovery failed: " + e.getMessage())
                 .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
-                .thenRun(() -> waitForKeyPress(keyboard, () -> render()));
+                .thenRun(() -> terminal.waitForKeyPress( () -> render()));
             return;
         }
 
@@ -472,7 +468,7 @@ class FailedSettingsScreen extends TerminalScreen {
                     .thenCompose(v-> terminal.printSuccess("Recovery successful!"))
                     .thenCompose(x -> terminal.printAt(20, 10, "The system is now accessible."))
                     .thenCompose(x -> terminal.printAt(21, 10, "Press any key to continue..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, ()->terminal.recoverSystem(sd)));
+                    .thenRun(() -> terminal.waitForKeyPress( ()->terminal.recoverSystem(sd)));
              
             })
             .exceptionallyCompose(ex -> {
@@ -481,7 +477,7 @@ class FailedSettingsScreen extends TerminalScreen {
 
                 return terminal.printError("Recovery failed: " + root.getMessage())
                     .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress( () -> render()));
             });
       
     }
@@ -520,7 +516,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showRecoveryFailedMenu() {
-        menuNavigator = new MenuNavigator( terminal, keyboard );
+        menuNavigator = new MenuNavigator( terminal );
         
         ContextPath menuPath = terminal.getSessionPath().append("menu", "recovery-failed");
         MenuContext menu = new MenuContext(menuPath, "Recovery Failed");
@@ -554,10 +550,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void showMissingFileMenu() {
-        menuNavigator = new MenuNavigator(
-            terminal,
-            keyboard
-        );
+        menuNavigator = new MenuNavigator( terminal);
         
         ContextPath menuPath = terminal.getSessionPath().append("menu", "missing-file");
         MenuContext menu = new MenuContext(menuPath, "Missing Settings");
@@ -582,7 +575,7 @@ class FailedSettingsScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(8, 10, "Critical encryption data cannot be extracted."))
             .thenCompose(v -> terminal.printAt(10, 10, "All encrypted data will be lost."))
             .thenCompose(v -> terminal.printAt(12, 10, "Press any key to delete data and start fresh..."))
-            .thenRun(() -> waitForKeyPress(keyboard, this::deleteDataAndStartFresh));
+            .thenRun(() -> terminal.waitForKeyPress( this::deleteDataAndStartFresh));
     }
     
     private void confirmDeleteAndStartFresh() {
@@ -603,7 +596,7 @@ class FailedSettingsScreen extends TerminalScreen {
         inputReader = new TerminalInputReader(terminal, 16, 37, 10);
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
+          
             inputReader.close();
             inputReader = null;
             
@@ -616,7 +609,6 @@ class FailedSettingsScreen extends TerminalScreen {
             }
         });
         
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
     }
     
     private void deleteDataAndStartFresh() {
@@ -644,7 +636,7 @@ class FailedSettingsScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 terminal.printError("Failed to delete data: " + ex.getMessage())
                     .thenCompose(v -> terminal.printAt(11, 10, "Press any key to exit..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> System.exit(1)));
+                    .thenRun(() -> terminal.waitForKeyPress( () -> System.exit(1)));
                 return null;
             });
     }
@@ -693,13 +685,13 @@ class FailedSettingsScreen extends TerminalScreen {
         cleanupMenuNavigator();
         
         if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
+         
             passwordReader.close();
             passwordReader = null;
         }
         
         if (inputReader != null) {
-            keyboard.setEventConsumer(null);
+        
             inputReader.close();
             inputReader = null;
         }

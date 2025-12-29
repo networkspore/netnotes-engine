@@ -60,11 +60,10 @@ class PackageInstallScreen extends TerminalScreen {
     public PackageInstallScreen(
         String name, 
         SystemTerminalContainer terminal, 
-        InputDevice keyboard,
         PackageInfo packageInfo,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal, keyboard);
+        super(name, terminal);
         this.packageInfo = packageInfo;
         this.basePath = ContextPath.of("install", packageInfo.getName());
         this.nodeCommands = nodeCommands;
@@ -145,13 +144,11 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void proceedToCapabilities() {
-        keyboard.setEventConsumer(null);
         currentStep = Step.REVIEW_CAPABILITIES;
         render();
     }
     
     private void cancelInstallation() {
-        keyboard.setEventConsumer(null);
         if (onCompleteCallback != null) {
             onCompleteCallback.run();
         }
@@ -216,18 +213,16 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void approveCapabilities() {
-        keyboard.setEventConsumer(null);
         capabilitiesApproved = true;
         currentStep = Step.CHOOSE_NAMESPACE;
         render();
     }
     
     private void denyCapabilities() {
-        keyboard.setEventConsumer(null);
         terminal.clear()
             .thenCompose(v -> terminal.printError("Installation cancelled - capabilities denied"))
             .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-            .thenRun(() -> waitForAnyKey(() -> {
+            .thenRun(() -> terminal.waitForKeyPress(() -> {
                 if (onCompleteCallback != null) {
                     onCompleteCallback.run();
                 }
@@ -273,7 +268,6 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void selectNamespace(NoteBytesReadOnly namespace) {
-        keyboard.setEventConsumer(null);
         chosenProcessConfig = ProcessConfig.create(namespace);
         currentStep = Step.PASSWORD_CONFIRM;
         render();
@@ -305,10 +299,8 @@ class PackageInstallScreen extends TerminalScreen {
 
     private void startConfirmationEntry() {
         TerminalInputReader inputReader = new TerminalInputReader(terminal, 10, 36, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
-        
+      
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             
             if ("INSTALL".equals(input)) {
@@ -317,23 +309,20 @@ class PackageInstallScreen extends TerminalScreen {
                 terminal.clear()
                     .thenCompose(v -> terminal.printError("Installation cancelled"))
                     .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
-                    .thenRun(() -> waitForAnyKey(() -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
             }
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             cancelInstallation();
         });
     }
     
     private void startPasswordEntry() {
-        passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
+        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
         
         passwordReader.setOnPassword(password -> {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
             
@@ -347,14 +336,14 @@ class PackageInstallScreen extends TerminalScreen {
                         terminal.clear()
                             .thenCompose(v -> terminal.printError("Invalid password"))
                             .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
-                            .thenRun(() -> waitForAnyKey(() -> render()));
+                            .thenRun(() -> terminal.waitForKeyPress(() -> render()));
                     }
                 })
                 .exceptionally(ex -> {
                     password.close();
                     terminal.printError("Verification failed: " + ex.getMessage())
                         .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-                        .thenRun(() -> waitForAnyKey(() -> {
+                        .thenRun(() -> terminal.waitForKeyPress(() -> {
                             if (onCompleteCallback != null) {
                                 onCompleteCallback.run();
                             }
@@ -396,7 +385,7 @@ class PackageInstallScreen extends TerminalScreen {
                         "✗ Installation failed\n\n" +
                         "Error: " + ex.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() ->terminal.waitForKeyPress(() -> {
                         if (onCompleteCallback != null) {
                             onCompleteCallback.run();
                         }
@@ -425,7 +414,6 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void loadPackageNow() {
-        keyboard.setEventConsumer(null);
         loadImmediately = true;
         
         // Load using the package ID from the installed package
@@ -448,7 +436,6 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void skipLoadPackage() {
-        keyboard.setEventConsumer(null);
         currentStep = Step.COMPLETE;
         render();
     }
@@ -459,7 +446,7 @@ class PackageInstallScreen extends TerminalScreen {
         return terminal.printTitle("Installation Complete")
             .thenCompose(v -> terminal.printSuccess("✓ Installation successful"))
             .thenCompose(v -> terminal.printAt(7, 10, "Press any key to return..."))
-            .thenRun(() -> waitForAnyKey(() -> {
+            .thenRun(() -> terminal.waitForKeyPress(() -> {
                 if (onCompleteCallback != null) {
                     onCompleteCallback.run();
                 }
@@ -493,6 +480,14 @@ class PackageInstallScreen extends TerminalScreen {
             .thenRun(() -> startMenuNavigation(menu));
     }
     
+    private NoteBytesReadOnly keyPressHandlerId = null;
+
+    private void removeKeyPressHandler(){
+        if(keyPressHandlerId != null){
+            terminal.removeKeyDownHandler(keyPressHandlerId);
+            keyPressHandlerId = null;
+        }
+    }
     /**
      * Start menu navigation with arrow keys
      */
@@ -510,17 +505,17 @@ class PackageInstallScreen extends TerminalScreen {
                 highlightSelection(menu, selectedIndex[0]);
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ENTER, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 MenuContext.MenuItem selected = items.get(selectedIndex[0]);
                 menu.navigate(selected.name);
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 cancelInstallation();
             })
         );
         
-        keyboard.setEventConsumer(event -> {
+        keyPressHandlerId = terminal.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -537,22 +532,13 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void highlightSelection(MenuContext menu, int selectedIndex) {
-        // TODO: Implement visual highlighting
+        // TODO: use menu navigator / context
         // For now, just log or update display
     }
     
     // ===== UTILITIES =====
     
-    /**
-     * Wait for any key press using KeyRunTable pattern
-     */
-    private void waitForAnyKey(Runnable callback) {
-        keyboard.setEventConsumer(event -> {
-            keyboard.setEventConsumer(null);
-            callback.run();
-        });
-    }
-    
+   
     private String[] wrapText(String text, int width) {
         if (text == null || text.isEmpty()) {
             return new String[0];
@@ -584,7 +570,7 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private void cleanup() {
-        keyboard.setEventConsumer(null);
+        removeKeyPressHandler();
         
         if (passwordReader != null) {
             passwordReader.close();

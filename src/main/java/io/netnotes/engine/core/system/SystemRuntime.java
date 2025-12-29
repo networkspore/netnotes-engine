@@ -38,7 +38,6 @@ public class SystemRuntime {
      * @param systemAccess
      */
     public SystemRuntime(
-        ContextPath sessionPath,
         SettingsData settingsData,
         ProcessRegistryInterface registryInterface,
         RuntimeAccess systemAccess

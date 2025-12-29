@@ -1,7 +1,6 @@
 package io.netnotes.engine.core.system.control.nodes.security;
 
 import io.netnotes.engine.core.CoreConstants;
-import io.netnotes.engine.core.system.control.ServicesProcess;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
@@ -264,7 +263,7 @@ public class PathCapability {
      */
     public static PathCapability accessIODaemon(Set<Operation> operations) {
         return accessService(
-            ServicesProcess.IO_DAEMON_PATH,
+            CoreConstants.IO_DAEMON_PATH,
             operations,
             "Access IO Service for hardware and system IO"
         );

@@ -6,9 +6,10 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 
 public class ContainerId {
     private final NoteBytesReadOnly id;
-    
+    private final String idString;
     private ContainerId(NoteBytesReadOnly id) {
         this.id = id;
+        this.idString = id.toString();
     }
     
     public static ContainerId generate() {
@@ -26,10 +27,14 @@ public class ContainerId {
     public static ContainerId fromNoteBytes(NoteBytes bytes) {
         return new ContainerId(bytes.readOnly());
     }
+
+    public String idString(){
+        return idString;
+    }
     
     @Override
     public String toString() {
-        return id.toString();
+        return idString;
     }
     
     @Override

@@ -3,24 +3,33 @@ package io.netnotes.engine.io.input.events;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public final class KeyCharEvent implements RoutedEvent {
     private final ContextPath sourcePath;
     private final NoteBytes codepointBytes;
-    private final int stateFlags;
+    private int stateFlags;
+    private final NoteBytesReadOnly typeBytes;
+
     private int[] codepointCache = null;
     private String strCache = null;
     private NoteBytes utf8Cache = null;
-    public KeyCharEvent(ContextPath sourcePath, NoteBytes codepoint, int stateFlags) {
+    public KeyCharEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int stateFlags, NoteBytes codepoint) {
         this.sourcePath = sourcePath;
         this.codepointBytes = codepoint;
         this.stateFlags = stateFlags;
+        this.typeBytes = typeBytes;
     }
 
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
     public NoteBytes getCodepointData() { return codepointBytes; }
-    public int stateFlags() { return stateFlags; }
+    @Override
+    public int getStateFlags() { return stateFlags; }
+
+    public void setStateFlags(int flags) { stateFlags = flags; }
+
+    
 
     public int[] getCodepoint(){
         if(codepointCache != null){
@@ -63,4 +72,11 @@ public final class KeyCharEvent implements RoutedEvent {
     public String toString(){
         return getString();
     }
+
+    @Override
+    public NoteBytesReadOnly getEventTypeBytes() {
+        return typeBytes;
+    }
+
+  
 }

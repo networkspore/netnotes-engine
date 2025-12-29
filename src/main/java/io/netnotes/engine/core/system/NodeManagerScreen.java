@@ -2,15 +2,14 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
@@ -42,9 +41,10 @@ class NodeManagerScreen extends TerminalScreen {
     private BrowsePackagesScreen browseScreen;
     private NodeCommands nodeCommands = null;
     private MenuContext currentMenu;
-    
-    public NodeManagerScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    private PasswordPrompt passwordPrompt;
+
+    public NodeManagerScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
         this.basePath = ContextPath.of("node-manager");
         
     }
@@ -59,39 +59,43 @@ class NodeManagerScreen extends TerminalScreen {
     }
 
     private CompletableFuture<Void> promptForPassword() {
-    return terminal.clear()
-        .thenCompose(v -> terminal.printTitle("Node Manager Authentication"))
-        .thenCompose(v -> terminal.printAt(7, 10, "Enter password:"))
-        .thenCompose(v -> terminal.moveCursor(7, 26))
-        .thenRun(this::startPasswordAuth);
+        passwordPrompt = new PasswordPrompt(terminal)
+            .withTitle("Node Manager Authentication")
+            .withPrompt("Enter password:")
+            .withTimeout(30)
+            .onPassword(this::handlePassword)
+            .onTimeout(this::handleTimeout)
+            .onCancel(() -> terminal.goBack());
+        
+        return passwordPrompt.show();
     }
 
-    private void startPasswordAuth() {
-        PasswordReader passwordReader = new PasswordReader();
-        keyboard.setEventConsumer(passwordReader.getEventConsumer());
-        
-        passwordReader.setOnPassword(password -> {
-            keyboard.setEventConsumer(null);
-            
-            terminal.printAt(9, 10, "Authenticating...")
-                .thenCompose(v -> terminal.getSystemAccess().getAsymmetricPairs(password))
-                .thenAccept(pairs -> {
-                    password.close();
-                    this.nodeCommands = new NodeCommands(terminal, pairs);
-                    currentView = View.MAIN_MENU;
-                    render();
-                })
-                .exceptionally(ex -> {
-                    password.close();
-                    terminal.clear()
-                        .thenCompose(v -> terminal.printError("Authentication failed: " + ex.getMessage()))
-                        .thenCompose(v -> terminal.printAt(11, 10, "Press any key to go back..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> goBack()));
-                    return null;
-                });
-            
-            passwordReader.close();
-        });
+
+
+    private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
+        terminal.printAt(9, 10, "Authenticating...")
+            .thenCompose(v -> terminal.getSystemAccess().getAsymmetricPairs(password))
+            .thenAccept(pairs -> {
+                password.close();
+                this.nodeCommands = new NodeCommands(terminal, pairs);
+                currentView = View.MAIN_MENU;
+                render();
+            })
+            .exceptionally(ex -> {
+                password.close();
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Authentication failed: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.printAt(11, 10, "Press any key to retry..."))
+                    .thenRun(() -> terminal.waitForKeyPress(() -> promptForPassword()));
+                return null;
+            });
+    }
+
+    private void handleTimeout() {
+        terminal.clear()
+            .thenCompose(v -> terminal.printError("Authentication timeout"))
+            .thenCompose(v -> terminal.printAt(11, 10, "Press any key..."))
+            .thenRun(() -> terminal.waitForKeyPress(() -> terminal.goBack()));
     }
     
     @Override
@@ -133,14 +137,13 @@ class NodeManagerScreen extends TerminalScreen {
     }
     
     private void showInstalledPackages() {
-        keyboard.setEventConsumer(null);
+       
         currentView = View.INSTALLED_PACKAGES;
         
         if (installedScreen == null && nodeCommands != null) {
             installedScreen = new InstalledPackagesScreen(
                 "installed-packages",
                 terminal,
-                keyboard,
                 nodeCommands
             );
             installedScreen.setOnBack(() -> {
@@ -154,14 +157,13 @@ class NodeManagerScreen extends TerminalScreen {
     }
     
     private void showRunningInstances() {
-        keyboard.setEventConsumer(null);
+
         currentView = View.RUNNING_INSTANCES;
         
         if (instancesScreen == null) {
             instancesScreen = new RunningInstancesScreen(
                 "running-instances",
                 terminal,
-                keyboard,
                 nodeCommands
             );
             instancesScreen.setOnBack(() -> {
@@ -175,14 +177,12 @@ class NodeManagerScreen extends TerminalScreen {
     }
     
     private void showBrowsePackages() {
-        keyboard.setEventConsumer(null);
         currentView = View.BROWSE_PACKAGES;
         
         if (browseScreen == null) {
             browseScreen = new BrowsePackagesScreen(
                 "browse-packages",
                 terminal,
-                keyboard,
                 nodeCommands
             );
             browseScreen.setOnBack(() -> {
@@ -196,7 +196,6 @@ class NodeManagerScreen extends TerminalScreen {
     }
     
     private void goBack() {
-        keyboard.setEventConsumer(null);
         terminal.goBack();
     }
     
@@ -257,7 +256,17 @@ class NodeManagerScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(selectRow, 10, "Use arrow keys and Enter to select"))
             .thenRun(() -> startMenuNavigation(menu));
     }
-    
+
+    private NoteBytesReadOnly handlerId = null;
+
+    private void removeKeyDownHandler(){
+        if(handlerId != null){
+            terminal.removeKeyDownHandler(handlerId);
+            handlerId = null;
+        }
+    }
+
+    //TODO: use MenuNavigator
     private void startMenuNavigation(MenuContext menu) {
         java.util.List<MenuContext.MenuItem> items = new java.util.ArrayList<>();
         for (MenuContext.MenuItem item : menu.getItems()) {
@@ -276,17 +285,17 @@ class NodeManagerScreen extends TerminalScreen {
                 selectedIndex[0] = (selectedIndex[0] + 1) % items.size();
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ENTER, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyDownHandler();
                 MenuContext.MenuItem selected = items.get(selectedIndex[0]);
                 menu.navigate(selected.name);
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyDownHandler();
                 goBack();
             })
         );
         
-        keyboard.setEventConsumer(event -> {
+        handlerId = terminal.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -302,7 +311,10 @@ class NodeManagerScreen extends TerminalScreen {
     // ===== CLEANUP =====
     
     private void cleanup() {
-        keyboard.setEventConsumer(null);
+        if (passwordPrompt != null && passwordPrompt.isActive()) {
+            passwordPrompt.cancel();
+            passwordPrompt = null;
+        }
         
         if (installedScreen != null) {
             installedScreen.onHide();

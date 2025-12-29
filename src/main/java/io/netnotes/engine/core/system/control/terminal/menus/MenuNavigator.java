@@ -9,31 +9,30 @@ import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+
+import java.util.function.Consumer;
 
 /**
  * MenuNavigator - Keyboard-driven terminal menu navigation
  * 
+ * REFACTORED to receive events through TerminalContainerHandle:
+ * - No direct InputDevice dependency
+ * - Events arrive via terminal's event stream
+ * - Registers/unregisters handlers through terminal's EventHandlerRegistry
  */
 public class MenuNavigator {
 
-
-
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
-    private final InputDevice keyboardInput;
     private ScrollableMenuItem menuItemRenderer;
     private int horizontalScrollOffset = 0;  // For currently selected item
 
@@ -49,9 +48,10 @@ public class MenuNavigator {
     // Layout parameters
     private static final int MAX_VISIBLE_ITEMS = 15;
     
-    // Keyboard event consumer
-    private final ExecutorConsumer<RoutedEvent> keyboardConsumer;
+    // Event consumer for keyboard events
+    private final Consumer<RoutedEvent> keyboardConsumer;
     
+    // Key mapping table
     private final KeyRunTable keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
         new NoteBytesRunnablePair(KeyCodeBytes.UP, this::handleNavigateUp),
         new NoteBytesRunnablePair(KeyCodeBytes.DOWN, this::handleNavigateDown),
@@ -64,6 +64,9 @@ public class MenuNavigator {
         new NoteBytesRunnablePair(KeyCodeBytes.HOME, this::handleHome),
         new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd),
     });
+    
+    // Resize handler
+    private final Consumer<RoutedEvent> resizeConsumer;
         
     // States
     public static final long IDLE = 1L << 0;
@@ -72,19 +75,15 @@ public class MenuNavigator {
     public static final long WAITING_PASSWORD = 1L << 3;
     public static final long EXECUTING_ACTION = 1L << 4;
     
-    public MenuNavigator(
-            TerminalContainerHandle terminal,
-            InputDevice keyboardInput) {
-        
+    public MenuNavigator(TerminalContainerHandle terminal) {
         this.terminal = terminal;
-        this.keyboardInput = keyboardInput;
         this.state = new BitFlagStateMachine("menu-navigator");
         
-        // Create keyboard event consumer with executor
-        this.keyboardConsumer = new ExecutorConsumer<>(
-            new SerializedVirtualExecutor(),
-            this::handleKeyboardEvent
-        );
+        // Create keyboard event consumer
+        this.keyboardConsumer = this::handleKeyboardEvent;
+        
+        // Create resize event consumer
+        this.resizeConsumer = this::handleResizeEvent;
         
         setupStateTransitions();
         state.addState(IDLE);
@@ -92,15 +91,15 @@ public class MenuNavigator {
     
     private void setupStateTransitions() {
         state.onStateAdded(IDLE, (old, now, bit) -> {
-            if (keyboardInput != null) {
-                keyboardInput.setEventConsumer(null);
-            }
+            // Unregister event handlers
+            terminal.removeKeyDownHandler( keyboardConsumer);
+            terminal.removeResizeHandler(resizeConsumer);
         });
         
         state.onStateAdded(DISPLAYING_MENU, (old, now, bit) -> {
-            if (keyboardInput != null) {
-                keyboardInput.setEventConsumer(keyboardConsumer);
-            }
+            // Register event handlers through terminal
+            terminal.addKeyDownHandler(keyboardConsumer);
+            terminal.addResizeHandler(resizeConsumer);
             
             if (currentMenu != null) {
                 renderMenu();
@@ -109,15 +108,13 @@ public class MenuNavigator {
         
         state.onStateAdded(WAITING_PASSWORD, (old, now, bit) -> {
             // Unregister - password reader will handle input
-            if (keyboardInput != null) {
-                keyboardInput.setEventConsumer(null);
-            }
+            terminal.removeKeyDownHandler(keyboardConsumer);
         });
         
         state.onStateRemoved(WAITING_PASSWORD, (old, now, bit) -> {
             // Re-register when password session ends
-            if (state.hasState(DISPLAYING_MENU) && keyboardInput != null) {
-                keyboardInput.setEventConsumer(keyboardConsumer);
+            if (state.hasState(DISPLAYING_MENU)) {
+                terminal.addKeyDownHandler(keyboardConsumer);
             }
         });
     }
@@ -128,9 +125,7 @@ public class MenuNavigator {
         if (!state.hasState(DISPLAYING_MENU)) {
             return;
         }
-
-       
-       
+        
         // Handle ephemeral events (from secure input devices)
         if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
             try (ephemeralEvent) {
@@ -144,6 +139,18 @@ public class MenuNavigator {
         // Handle regular events (from GUI keyboards)
         if (event instanceof KeyDownEvent keyDown) {
             keyRunTable.run(keyDown.getKeyCodeBytes());
+        }
+    }
+    
+    // ===== RESIZE EVENT HANDLING =====
+    
+    private void handleResizeEvent(RoutedEvent event) {
+        if (state.hasState(DISPLAYING_MENU) && currentMenu != null) {
+            // Reset scroll offset if needed
+            horizontalScrollOffset = 0;
+            
+            // Re-render with new dimensions
+            renderMenu();
         }
     }
     
@@ -269,6 +276,35 @@ public class MenuNavigator {
         renderMenu();
     }
     
+    private void handleScrollRight() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
+        
+        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
+        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
+        
+        // Only scroll if text is longer than display width
+        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
+            int maxOffset = menuItemRenderer.getMaxScrollOffset(itemText);
+            horizontalScrollOffset = Math.min(maxOffset, horizontalScrollOffset + 5);
+            renderMenu();
+        }
+    }
+
+    private void handleScrollLeft() {
+        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
+        
+        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
+        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
+        
+        // Only scroll if text is longer than display width
+        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
+            horizontalScrollOffset = Math.max(0, horizontalScrollOffset - 5);
+            renderMenu();
+        }
+    }
+    
     private List<MenuContext.MenuItem> getSelectableItems() {
         if (currentMenu == null) {
             return List.of();
@@ -311,9 +347,9 @@ public class MenuNavigator {
             .thenCompose(v -> terminal.hideCursor())
             .thenCompose(v -> renderHeader())
             .thenCompose(v -> renderBreadcrumb())
-            .thenCompose(v -> renderDescription())  // ADD THIS LINE
+            .thenCompose(v -> renderDescription())
             .thenCompose(v -> renderMenuItems())
-            .thenCompose(v -> renderFooter())  // Remove renderDescription() call here if exists
+            .thenCompose(v -> renderFooter())
             .thenCompose(v -> terminal.endBatch())
             .exceptionally(ex -> {
                 terminal.clear()
@@ -334,7 +370,7 @@ public class MenuNavigator {
         return TerminalTextBox.builder()
             .position(0, dims.getBoxCol())
             .size(dims.getBoxWidth(), 3)
-            .title(title, TerminalTextBox.TitlePlacement.INSIDE_TOP)
+            .title(title, TerminalTextBox.TitlePlacement.INSIDE_CENTER)
             .style(BoxStyle.SINGLE)
             .titleStyle(TextStyle.BOLD)
             .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
@@ -369,7 +405,34 @@ public class MenuNavigator {
         return terminal.printAt(3, textCol, breadcrumb, TextStyle.INFO);
     }
 
-    
+    private CompletableFuture<Void> renderDescription() {
+        String description = currentMenu.getDescription();
+        
+        if (description == null || description.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        MenuDimensions dims = calculateMenuDimensions();
+        
+        // Show description in a box above the menu items
+        String[] lines = description.split("\n");
+        int descRow = 5; // Below header and breadcrumb
+        
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        
+        for (int i = 0; i < lines.length && i < 8; i++) { // Max 8 lines
+            String line = lines[i];
+            final int row = descRow + i;
+            
+            // Center or left-align the description text
+            int col = dims.getBoxCol() + 4; // Left-aligned with padding
+            
+            future = future.thenCompose(v -> 
+                terminal.printAt(row, col, line, TextStyle.NORMAL));
+        }
+        
+        return future;
+    }
         
    /**
      * Render menu items (centered with proper padding)
@@ -499,34 +562,6 @@ public class MenuNavigator {
         
         return future;
     }
-    private CompletableFuture<Void> renderDescription() {
-        String description = currentMenu.getDescription();
-        
-        if (description == null || description.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        MenuDimensions dims = calculateMenuDimensions();
-        
-        // Show description in a box above the menu items
-        String[] lines = description.split("\n");
-        int descRow = 5; // Below header and breadcrumb
-        
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
-        for (int i = 0; i < lines.length && i < 8; i++) { // Max 8 lines
-            String line = lines[i];
-            final int row = descRow + i;
-            
-            // Center or left-align the description text
-            int col = dims.getBoxCol() + 4; // Left-aligned with padding
-            
-            future = future.thenCompose(v -> 
-                terminal.printAt(row, col, line, TextStyle.NORMAL));
-        }
-        
-        return future;
-    }
     
     /**
      * Render footer (centered)
@@ -592,9 +627,8 @@ public class MenuNavigator {
     }
     
     public void cleanup() {
-        if (keyboardInput != null) {
-            keyboardInput.setEventConsumer(null);
-        }
+        terminal.removeKeyDownHandler(keyboardConsumer);
+        terminal.removeResizeHandler(resizeConsumer);
     }
 
     /**
@@ -618,49 +652,21 @@ public class MenuNavigator {
         int contentWidth = maxTextLength + 8;
         
         // Ensure minimum and maximum bounds
-        int boxWidth = Math.max(40, Math.min(contentWidth, terminal.getCols() - 8));
+        // Leave margin of 4 on each side (8 total)
+        int maxAllowedWidth = terminal.getCols() - 8;
+        int boxWidth = Math.max(40, Math.min(contentWidth, maxAllowedWidth));
         
         // Center horizontally
         int boxCol = (terminal.getCols() - boxWidth) / 2;
         
         // Initialize menu item renderer with the calculated width
-        int itemContentWidth = boxWidth - 4; // Account for borders and padding
+        // Subtract 4: 2 for box borders, 2 for internal padding
+        int itemContentWidth = boxWidth - 4;
         this.menuItemRenderer = new ScrollableMenuItem(itemContentWidth, 
             ScrollableMenuItem.TextOverflowStrategy.SCROLL_ON_SELECT);
         
         return new MenuDimensions(boxWidth, boxCol, itemContentWidth);
     }
-
-    private void handleScrollRight() {
-        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
-        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
-        
-        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
-        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
-        
-        // Only scroll if text is longer than display width
-        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
-            int maxOffset = menuItemRenderer.getMaxScrollOffset(itemText);
-            horizontalScrollOffset = Math.min(maxOffset, horizontalScrollOffset + 5);
-            renderMenu();
-        }
-    }
-
-
-    private void handleScrollLeft() {
-        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
-        if (selectableItems.isEmpty() || selectedIndex >= selectableItems.size()) return;
-        
-        MenuContext.MenuItem item = selectableItems.get(selectedIndex);
-        String itemText = item.description + (item.badge != null ? " [" + item.badge + "]" : "");
-        
-        // Only scroll if text is longer than display width
-        if (menuItemRenderer != null && itemText.length() > menuItemRenderer.getMaxWidth()) {
-            horizontalScrollOffset = Math.max(0, horizontalScrollOffset - 5);
-            renderMenu();
-        }
-    }
-
     
     // ===== GETTERS =====
     

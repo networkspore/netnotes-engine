@@ -14,7 +14,6 @@ import javax.crypto.SecretKey;
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 
-import io.netnotes.engine.core.system.BootstrapConfig;
 import io.netnotes.engine.crypto.AsymmetricPairs;
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.HashServices;
@@ -42,7 +41,7 @@ public class SettingsData {
     }
 
     private static final String SETTINGS_FILE_NAME = "settings.dat";
-
+    private static final String SYSTEM_CONFIG_FILE_NAME = "syscfg.dat";
 
      
     private static File m_appDir = null;
@@ -58,9 +57,9 @@ public class SettingsData {
         }
     }
     
-    public static File getBootstrapFile() throws IOException {
+    public static File getSystemConfigFile() {
         File dataDir = getAppDataDir();
-        return new File(dataDir, "bootstrap.dat");
+        return new File(dataDir, SYSTEM_CONFIG_FILE_NAME);
     }
     
     public static File getAppDataDir() {
@@ -390,19 +389,19 @@ public class SettingsData {
         return false;
     }
 
-    public static boolean isBootstrapData() throws IOException{
-        File bootstrapFile = getBootstrapFile();
-        if(bootstrapFile.exists() && bootstrapFile.isFile()){
+    public static boolean isSystemConfigData(){
+        File sysCfgFile = getSystemConfigFile();
+        if(sysCfgFile.exists() && sysCfgFile.isFile()){
             return true;
         }
 
         return false;
     }
 
-    public static CompletableFuture<Void> saveBootstrapConfig( NoteBytesMap map){
+    public static CompletableFuture<Void> saveSystemConfig( NoteBytesMap map){
         return CompletableFuture.runAsync(()->{
             try {
-                saveBootstrapConfig( map.toNoteBytes());
+                saveSystemConfig( map.toNoteBytes());
             } catch (IOException e) {
                 throw new CompletionException("Failed to save", e);
             }
@@ -410,8 +409,8 @@ public class SettingsData {
         }, VirtualExecutors.getVirtualExecutor());
     }
     
-    public static void saveBootstrapConfig( NoteBytesObject nbo) throws IOException{
-        File file = getBootstrapFile();
+    public static void saveSystemConfig( NoteBytesObject nbo) throws IOException{
+        File file = getSystemConfigFile();
 
         FileStreamUtils.writeFileNoteBytes(file, nbo);
     }
@@ -455,12 +454,12 @@ public class SettingsData {
         }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public static CompletableFuture<NoteBytesMap> loadBootStrapConfig(){
+    public static CompletableFuture<NoteBytesMap> loadSystemConfig(){
 
         return CompletableFuture.supplyAsync(()->{
             try{
-                File bootStrapFile = getBootstrapFile();
-                NoteBytes noteBytes = FileStreamUtils.readFileNextNoteBytes(bootStrapFile);
+                File syscfgFile = getSystemConfigFile();
+                NoteBytes noteBytes = FileStreamUtils.readFileNextNoteBytes(syscfgFile);
                 if(noteBytes != null && noteBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
                     return noteBytes.getAsMap();
                 }
@@ -472,17 +471,7 @@ public class SettingsData {
         }, VirtualExecutors.getVirtualExecutor());
     }
 
-    public static CompletableFuture<NoteBytesMap> getOrDefaultBootstrapConfig(){
-        try{
-            if(SettingsData.isBootstrapData()){
-                return SettingsData.loadBootStrapConfig();
-            }else{
-                return CompletableFuture.completedFuture(BootstrapConfig.createDefault());
-            }
-        }catch(IOException e){
-            return CompletableFuture.failedFuture(new CompletionException("File system unavailable", e));
-        }
-    }
+
 
 
     public static CompletableFuture<SettingsData> loadSettingsData(NoteBytesEphemeral pass, NoteBytesMap map){

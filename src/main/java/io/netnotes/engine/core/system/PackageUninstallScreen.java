@@ -9,12 +9,12 @@ import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
  * PackageUninstallScreen - Comprehensive package uninstall
@@ -45,15 +45,15 @@ class PackageUninstallScreen extends TerminalScreen {
     private PasswordReader passwordReader;
     private Runnable onCompleteCallback;
     private final NodeCommands nodeCommands;
+    private NoteBytesReadOnly keyDownHandlerId;
     
     public PackageUninstallScreen(
         String name,
         SystemTerminalContainer terminal,
-        InputDevice keyboard,
         InstalledPackage pkg,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal, keyboard);
+        super(name, terminal);
         this.packageToUninstall = pkg;
         this.nodeCommands = nodeCommands;
     }
@@ -149,8 +149,7 @@ class PackageUninstallScreen extends TerminalScreen {
     }
     
     private void stopAllInstances() {
-        keyboard.setEventConsumer(null);
-        
+     
         terminal.clear()
             .thenCompose(v -> terminal.printTitle("Stopping Instances"))
             .thenCompose(v -> terminal.printAt(5, 10, 
@@ -168,7 +167,7 @@ class PackageUninstallScreen extends TerminalScreen {
                     .thenCompose(v2 -> terminal.printSuccess("✓ All instances stopped"))
                     .thenCompose(v2 -> terminal.printAt(7, 10, 
                         "Press any key to continue..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() -> terminal.waitForKeyPress(() -> {
                         currentStep = Step.SHOW_OPTIONS;
                         render();
                     }));
@@ -179,13 +178,13 @@ class PackageUninstallScreen extends TerminalScreen {
                         "Failed to stop instances: " + ex.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to retry..."))
-                    .thenRun(() -> waitForAnyKey(this::checkRunningInstances));
+                    .thenRun(() -> terminal.waitForKeyPress(this::checkRunningInstances));
                 return null;
             });
     }
     
     private void cancelUninstall() {
-        keyboard.setEventConsumer(null);
+
         if (onCompleteCallback != null) {
             onCompleteCallback.run();
         }
@@ -227,7 +226,6 @@ class PackageUninstallScreen extends TerminalScreen {
     }
     
     private void proceedToPasswordConfirm() {
-        keyboard.setEventConsumer(null);
         currentStep = Step.PASSWORD_CONFIRM;
         render();
     }
@@ -253,10 +251,10 @@ class PackageUninstallScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         TerminalInputReader inputReader = new TerminalInputReader(terminal, 13, 36, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+  
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
+    
             inputReader.close();
             
             if ("CONFIRM".equals(input)) {
@@ -266,12 +264,11 @@ class PackageUninstallScreen extends TerminalScreen {
                     .thenCompose(v -> terminal.printError("Confirmation failed"))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to return..."))
-                    .thenRun(() -> waitForAnyKey(() -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
             }
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             cancelUninstall();
         });
@@ -304,7 +301,7 @@ class PackageUninstallScreen extends TerminalScreen {
                         "Uninstall failed: " + ex.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to return..."))
-                    .thenRun(() -> waitForAnyKey(this::cancelUninstall));
+                    .thenRun(() -> terminal.waitForKeyPress(this::cancelUninstall));
                 return null;
             });
     }
@@ -320,7 +317,7 @@ class PackageUninstallScreen extends TerminalScreen {
                 deleteData ? "Data deleted" : "Data preserved"))
             .thenCompose(v -> terminal.printAt(10, 10, 
                 "Press any key to return..."))
-            .thenRun(() -> waitForAnyKey(() -> {
+            .thenRun(() -> terminal.waitForKeyPress(() -> {
                 if (onCompleteCallback != null) {
                     onCompleteCallback.run();
                 }
@@ -387,7 +384,7 @@ class PackageUninstallScreen extends TerminalScreen {
             navigationKeys.setKeyRunnable(
                 KeyCodeBytes.getNumeric(i, false),
                 () -> {
-                    keyboard.setEventConsumer(null);
+                    removeKeyDownHandler();
                     MenuContext.MenuItem selected = items.get(index);
                     menu.navigate(selected.name);
                 }
@@ -395,7 +392,7 @@ class PackageUninstallScreen extends TerminalScreen {
             navigationKeys.setKeyRunnable(
                 KeyCodeBytes.getNumeric(i, true),
                 () -> {
-                    keyboard.setEventConsumer(null);
+                    removeKeyDownHandler();
                     MenuContext.MenuItem selected = items.get(index);
                     menu.navigate(selected.name);
                 }
@@ -403,11 +400,11 @@ class PackageUninstallScreen extends TerminalScreen {
         }
         
         navigationKeys.setKeyRunnable(KeyCodeBytes.ESCAPE, () -> {
-            keyboard.setEventConsumer(null);
+            removeKeyDownHandler();
             cancelUninstall();
         });
-        
-        keyboard.setEventConsumer(event -> {
+
+        keyDownHandlerId = terminal.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -419,16 +416,18 @@ class PackageUninstallScreen extends TerminalScreen {
             }
         });
     }
-    
-    private void waitForAnyKey(Runnable callback) {
-        keyboard.setEventConsumer(event -> {
-            keyboard.setEventConsumer(null);
-            callback.run();
-        });
+
+    private void removeKeyDownHandler(){
+        if(keyDownHandlerId != null){
+            terminal.removeKeyDownHandler(keyDownHandlerId);
+            keyDownHandlerId = null;
+        }
     }
     
+
+    
     private void cleanup() {
-        keyboard.setEventConsumer(null);
+        removeKeyDownHandler();
         
         if (passwordReader != null) {
             passwordReader.close();

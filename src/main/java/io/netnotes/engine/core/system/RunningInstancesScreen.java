@@ -11,7 +11,6 @@ import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.utils.TimeHelpers;
 
 /**
@@ -43,10 +42,9 @@ class RunningInstancesScreen extends TerminalScreen {
     public RunningInstancesScreen(
         String name, 
         SystemTerminalContainer terminal, 
-        InputDevice keyboard,
         NodeCommands nodeCommands
     ){
-        super(name, terminal, keyboard);
+        super(name, terminal);
         this.nodeCommands = nodeCommands;
     }
     
@@ -91,7 +89,7 @@ class RunningInstancesScreen extends TerminalScreen {
                         if (instances.isEmpty()) {
                             return terminal.printAt(5, 10, "No instances currently running")
                                 .thenCompose(x -> terminal.printAt(7, 10, "Press ESC to go back"))
-                                .thenRun(() -> waitForKeyPress(keyboard, this::goBack));
+                                .thenRun(() -> terminal.waitForKeyPress(this::goBack));
                         } else {
                             return renderInstanceTable(instances, 5)
                                 .thenCompose(x -> showInstanceListMenu(instances));
@@ -101,7 +99,7 @@ class RunningInstancesScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 terminal.printError("Failed to load instances: " + ex.getMessage())
                     .thenCompose(v -> terminal.printAt(7, 10, "Press any key to go back..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, this::goBack));
+                    .thenRun(() -> terminal.waitForKeyPress( this::goBack));
                 return null;
             });
     }
@@ -164,7 +162,7 @@ class RunningInstancesScreen extends TerminalScreen {
         menu.addItem("refresh", "Refresh List", "Reload instance list", this::onShow);
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         
      
         menuNavigator.showMenu(menu);
@@ -227,7 +225,7 @@ class RunningInstancesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         
   
         menuNavigator.showMenu(menu);
@@ -264,10 +262,9 @@ class RunningInstancesScreen extends TerminalScreen {
 
     private void startStopConfirmation() {
         TerminalInputReader inputReader = new TerminalInputReader(terminal, 15, 30, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             
             if ("STOP".equals(input)) {
@@ -275,7 +272,7 @@ class RunningInstancesScreen extends TerminalScreen {
             } else {
                 terminal.printError("Confirmation failed")
                     .thenCompose(x -> terminal.printAt(17, 10, "Press any key to try again..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                    .thenRun(() -> terminal.waitForKeyPress( () -> {
                         currentView = View.CONFIRM_STOP;
                         render();
                     }));
@@ -283,7 +280,6 @@ class RunningInstancesScreen extends TerminalScreen {
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             selectedInstance = null;
             currentView = View.INSTANCE_LIST;
@@ -306,7 +302,7 @@ class RunningInstancesScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 terminal.printError("Failed to stop: " + ex.getMessage())
                 .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
-                .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                .thenRun(() -> terminal.waitForKeyPress( () -> {
                     selectedInstance = null;
                     currentView = View.INSTANCE_LIST;
                     render();
@@ -334,12 +330,9 @@ class RunningInstancesScreen extends TerminalScreen {
         cleanupMenuNavigator();
         
         if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
             passwordReader.close();
             passwordReader = null;
         }
-        
-        keyboard.setEventConsumer(null);
     }
     
     private String formatUptime(long uptimeMs) {

@@ -6,6 +6,7 @@ import java.io.OutputStream;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
 
@@ -62,6 +63,9 @@ public class NoteBytesWriter implements AutoCloseable {
         return count;
     }
 
+    public int write(NoteBytesMap noteBytesMap) throws IOException{
+        return write(noteBytesMap.toNoteBytes());
+    }
 
 
     @Override

@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * Container - Abstract base class for all container implementations
@@ -39,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * - Renderer-specific logic (ConsoleContainer, WebContainer, etc.)
  * - Command handlers registered in setupMessageMap()
  */
-public abstract class Container {
+public abstract class Container<T extends Container<T>>  {
     // ===== CORE IDENTITY =====
     protected final ContainerId id;
     protected final AtomicReference<String> title;
@@ -64,9 +65,13 @@ public abstract class Container {
     protected NoteBytesWriter eventWriter;
     protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
     
+    
+
     // ===== MESSAGE DISPATCH =====
     protected final HashMap<NoteBytesReadOnly, RoutedMessageExecutor> msgMap = new HashMap<>();
     
+    // Rendering
+    protected Consumer<T> renderCallback;
 
     /**
      * Full constructor
@@ -220,7 +225,6 @@ public abstract class Container {
                  
                     while (nextBytes != null && active) {
                         if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            Log.logMsg("[Container]" + getId() + " render cmd");
                             NoteBytesMap command = nextBytes.getAsNoteBytesMap();
                             dispatchCommand(command);
                         }
@@ -291,14 +295,14 @@ public abstract class Container {
      * NoteBytesMap event = ContainerCommands.containerResized(id, width, height);
      * emitEvent(event);
      */
-    protected void emitEvent(NoteBytesMap event) {
+    public void emitEvent(NoteBytesMap event) {
         if (eventWriter == null) {
             Log.logError("[Container] Cannot emit event - no event stream");
             return;
         }
          Log.logMsg("[Container] emmitting event");
         try {
-            eventWriter.write(event.toNoteBytes());
+            eventWriter.write(event);
         } catch (IOException e) {
             Log.logError("[Container] Error emitting event: " + e.getMessage());
         }
@@ -442,6 +446,21 @@ public abstract class Container {
     
     public CompletableFuture<Void> getRenderStreamFuture() { return renderStreamFuture; }
     
+    /**
+     * Set callback to request rendering from the renderer
+     */
+    public void setRenderCallback(Consumer<T> callback) { this.renderCallback = callback; }
+
+    /**
+     * Request rendering from the renderer
+     */
+    @SuppressWarnings("unchecked")
+    protected void requestRender() {
+        if (renderCallback != null) {
+            renderCallback.accept((T) this);
+        }
+    }
+
     public ContainerInfo getInfo() {
         return new ContainerInfo(
             id,
@@ -453,6 +472,7 @@ public abstract class Container {
             createdTime
         );
     }
+
     
     @Override
     public String toString() {

@@ -16,7 +16,6 @@ import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.TimeHelpers;
 
@@ -61,10 +60,9 @@ class BrowsePackagesScreen extends TerminalScreen {
     public BrowsePackagesScreen(
         String name, 
         SystemTerminalContainer terminal, 
-        InputDevice keyboard,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal, keyboard);
+        super(name, terminal);
         this.availablePackages = new ArrayList<>();
         this.installedPackages = new ArrayList<>();
         this.nodeCommands = nodeCommands;
@@ -135,7 +133,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 terminal.printError("Failed to update packages: " + ex.getMessage())
                     .thenCompose(v -> terminal.printAt(11, 10, "Press any key to go back..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, this::goBack));
+                    .thenRun(() -> terminal.waitForKeyPress( this::goBack));
                 return null;
             });
     }
@@ -149,7 +147,7 @@ class BrowsePackagesScreen extends TerminalScreen {
                 .thenCompose(v -> terminal.printAt(5, 10, "No packages available"))
                 .thenCompose(v -> terminal.printAt(7, 10, "Check repository configuration"))
                 .thenCompose(v -> terminal.printAt(9, 10, "Press ESC to go back"))
-                .thenRun(() -> waitForKeyPress(keyboard, this::goBack));
+                .thenRun(() -> terminal.waitForKeyPress( this::goBack));
         }
         
         // Group by category
@@ -182,7 +180,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         menu.addItem("refresh", "Refresh Package List", "Update from repositories", this::onShow);
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         menuNavigator.showMenu(menu);
     }
     
@@ -275,7 +273,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         menuNavigator.showMenu(menu);
     }
     
@@ -343,7 +341,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             render();
         });
         
-        menuNavigator = new MenuNavigator(terminal, keyboard);
+        menuNavigator = new MenuNavigator(terminal);
         menuNavigator.showMenu(menu);
     }
     
@@ -392,7 +390,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         inputReader = new TerminalInputReader(terminal, 11, 46, 20);
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
+       
             inputReader.close();
             inputReader = null;
             
@@ -412,7 +410,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             askAutoload();
         });
         
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+
     }
     
     private void askAutoload() {
@@ -425,7 +423,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         inputReader = new TerminalInputReader(terminal, 13, 54, 1);
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
+           
             inputReader.close();
             inputReader = null;
             
@@ -435,7 +433,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             render();
         });
         
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+       
     }
     
     // ===== CONFIRM INSTALL =====
@@ -472,10 +470,10 @@ class BrowsePackagesScreen extends TerminalScreen {
 
     private void startInstallConfirmation() {
         inputReader = new TerminalInputReader(terminal, 17, 38, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+   
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
+
             inputReader.close();
             inputReader = null;
             
@@ -484,7 +482,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             } else {
                 terminal.printError("Installation cancelled")
                     .thenCompose(x -> terminal.printAt(19, 10, "Press any key..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                    .thenRun(() -> terminal.waitForKeyPress( () -> {
                         currentView = View.CONFIRM_INSTALL;
                         render();
                     }));
@@ -492,7 +490,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
+          
             inputReader.close();
             inputReader = null;
             selectedPackage = null;
@@ -539,7 +537,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 terminal.printError("Installation failed: " + ex.getMessage())
                     .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
-                    .thenRun(() -> waitForKeyPress(keyboard, () -> {
+                    .thenRun(() -> terminal.waitForKeyPress( () -> {
                         selectedPackage = null;
                         installConfig = null;
                         currentView = View.CATEGORY_LIST;
@@ -574,18 +572,18 @@ class BrowsePackagesScreen extends TerminalScreen {
         cleanupMenuNavigator();
         
         if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
+          
             passwordReader.close();
             passwordReader = null;
         }
         
         if (inputReader != null) {
-            keyboard.setEventConsumer(null);
+          
             inputReader.close();
             inputReader = null;
         }
         
-        keyboard.setEventConsumer(null);
+       
     }
     
     private String formatSize(long bytes) {

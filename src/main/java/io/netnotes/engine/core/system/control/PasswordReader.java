@@ -1,58 +1,41 @@
 package io.netnotes.engine.core.system.control;
 
-
-import java.util.concurrent.Executors;
+import java.util.List;
 import java.util.function.Consumer;
 
 import org.bouncycastle.util.Arrays;
 
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
+import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.EventHandlerRegistry.RoutedEventHandler;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 
 /**
  * PasswordReader - Secure password input reader with ephemeral event support
  * 
- * SECURITY CRITICAL:
- * - Uses NoteBytesEphemeral for password storage
- * - Handles both regular and ephemeral events
- * - For encrypted devices: processes EphemeralKeyCharModsEvent directly
- * - For plaintext devices: processes KeyCharEvent normally
- * - Clears password bytes on escape/error
- * - Returns password via callback
- * - Caller MUST close the returned password
- * 
- * Usage:
- *   PasswordReader reader = new PasswordReader();
- *   reader.setOnPassword(password -> {
- *       try {
- *           // Use password
- *       } finally {
- *           password.close(); // ALWAYS close
- *       }
- *   });
- *   
- *   // Register with encrypted input source
- *   inputDevice.addEventConsumer("password-reader", reader.getEventConsumer());
  */
 public class PasswordReader {
     public static final int MAX_PASSWORD_BYTE_LENGTH = 256;
     public static final int MAX_KEYSTROKE_COUNT = 128;
 
+    private final EventHandlerRegistry eventRegistry;
+
     private NoteBytesEphemeral m_passwordBytes = new NoteBytesEphemeral(new byte[MAX_PASSWORD_BYTE_LENGTH]);
     private byte[] m_keystrokeLengths = new byte[MAX_KEYSTROKE_COUNT];
     private int m_currentLength = 0; // Total bytes used
     private int m_keystrokeCount = 0; // Number of keystrokes
+    private List<RoutedEventHandler> keyDownHandlers = null;
+    private List<RoutedEventHandler> keyCharHandlers = null;
     
   
     private final KeyRunTable m_keyRunTable = new KeyRunTable(
@@ -61,24 +44,17 @@ public class PasswordReader {
         new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE ,()->escape())
     );
    
-    
-    // Event consumer for input device
-    private final Consumer<RoutedEvent> eventConsumer;
     private Consumer<NoteBytesEphemeral> onPassword;
     
-    public PasswordReader() {
-        // Create event consumer with virtual thread executor
-        this.eventConsumer = this::handleEvent;
-
+    public PasswordReader(EventHandlerRegistry eventRegistry) {
+        this.eventRegistry = eventRegistry;
+        keyDownHandlers = eventRegistry.unregister(EventBytes.EVENT_KEY_DOWN);
+        keyCharHandlers = eventRegistry.unregister(EventBytes.EVENT_KEY_CHAR);
+        eventRegistry.register(EventBytes.EVENT_KEY_DOWN, this:: handleKeyDown);
+        eventRegistry.register(EventBytes.EVENT_KEY_CHAR, this:: handleKeyChar);
     }
     
-    /**
-     * Get event consumer for registration with input device
-     */
-    public Consumer<RoutedEvent> getEventConsumer() {
-        return eventConsumer;
-    }
-
+   
     public void setOnPassword(Consumer<NoteBytesEphemeral> onPassword){
         this.onPassword = onPassword;
     }
@@ -87,36 +63,25 @@ public class PasswordReader {
      * Handle input events from device
      * Supports both regular and ephemeral events
      */
-    private void handleEvent(RoutedEvent event) {
-  
-        // Handle ephemeral events (from encrypted devices)
-        if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
-            try (ephemeralEvent) { // Auto-close to wipe memory
-                handleEphemeralEvent(ephemeralEvent);
-            }
-            return;
-        }
-
-        // Handle regular events (from plaintext devices)
+    private void handleKeyDown(RoutedEvent event) {
         if (event instanceof KeyDownEvent keyDown) {
             handleKeyDown(keyDown);
-        } else if (event instanceof KeyCharEvent keyChar) {
-            handleKeyChar(keyChar);
-        }
-    }
-    
-    /**
-     * Handle ephemeral events from encrypted device
-     */
-    private void handleEphemeralEvent(EphemeralRoutedEvent event) {
-        if (event instanceof EphemeralKeyDownEvent keyDown) {
+        } else if (event instanceof EphemeralKeyDownEvent keyDown) {
             handleEphemeralKeyDown(keyDown);
-        } else if (event instanceof EphemeralKeyCharModsEvent keyChar) {
+            keyDown.close();
+        }
+    }
+
+    private void handleKeyChar(RoutedEvent event){
+        if(event instanceof KeyCharEvent keyChar){
+            handleKeyChar(keyChar);
+        }if (event instanceof EphemeralKeyCharEvent keyChar) {
             handleEphemeralKeyChar(keyChar);
+            keyChar.close();
         }
     }
     
-  
+
     /**
      * Handle ephemeral key down (for special keys)
      */
@@ -126,13 +91,12 @@ public class PasswordReader {
     }
     
     /**
-     * Handle ephemeral character event (SECURITY CRITICAL)
-     * Never converts to int codepoint - works directly with UTF-8 bytes
+     * Handle ephemeral character event
      */
-    private void handleEphemeralKeyChar(EphemeralKeyCharModsEvent event) {
+    private void handleEphemeralKeyChar(EphemeralKeyCharEvent event) {
         // Get UTF-8 bytes from registry
+        
         NoteBytes keyUTF8 = event.getUTF8();
-    
         
         if(keyUTF8 == null){
             Log.logError("Key is not in lookup table");
@@ -241,6 +205,7 @@ public class PasswordReader {
      * Clear password buffer (SECURITY CRITICAL)
      */
     public void escape() {
+   
         m_passwordBytes.close();
         m_currentLength = 0;
         m_keystrokeCount = 0;
@@ -248,6 +213,15 @@ public class PasswordReader {
     }
     
     public void close() {
+        eventRegistry.unregister(EventBytes.EVENT_KEY_DOWN);
+        eventRegistry.unregister(EventBytes.EVENT_KEY_CHAR);
+        
+        if(!keyDownHandlers.isEmpty()){
+            eventRegistry.register(EventBytes.EVENT_KEY_DOWN, keyDownHandlers);
+        }
+        if(! keyCharHandlers.isEmpty()){
+            eventRegistry.register(EventBytes.EVENT_KEY_CHAR, keyCharHandlers);
+        }
         escape();
     }
     

@@ -3,17 +3,31 @@ package io.netnotes.engine.core.system.control.containers;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.daemon.ClaimedDevice;
+import io.netnotes.engine.io.daemon.ClientSession;
+import io.netnotes.engine.io.daemon.IODaemon.SESSION_CMDS;
+import io.netnotes.engine.io.daemon.IODaemonProtocol.USBDeviceDescriptor;
+import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.io.input.events.EventHandlerRegistry;
+import io.netnotes.engine.io.input.events.EventHandlerRegistry.RoutedEventHandler;
+import io.netnotes.engine.io.input.events.RoutedEventFactory;
+import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.containers.ContainerMoveEvent;
+import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.ItemTypes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
@@ -56,6 +70,7 @@ public class ContainerHandle extends FlowProcess {
     private final ContainerType containerType;
     private final ContainerConfig containerConfig;
     private final ContextPath renderingServicePath;
+    private final ContextPath containerPath;
     private final String title;
     private final Builder builder;
     // ===== RUNTIME STATE =====
@@ -73,11 +88,18 @@ public class ContainerHandle extends FlowProcess {
     
     // MsgMap allows commands to be sent to the container handle
     protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new ConcurrentHashMap<>();
+    protected final EventHandlerRegistry eventHandlerRegistry = new EventHandlerRegistry();
 
+    // Current session (if connected to IODaemon)
+    protected ClientSession ioDaemonSession = null;
+    
+    //<NoteMessaging.ItemTypes, id>
+    private Map<NoteBytesReadOnly, String> defaultEventHandlers = new ConcurrentHashMap<>();
+   
+
+    
     // Event map allows events from the Container to reach the handle
-    protected final Map<NoteBytesReadOnly, MessageExecutor> m_eventMap = new ConcurrentHashMap<>();
     protected volatile int width;
-
 	protected volatile int height;
     /**
      * Private constructor - use Builder
@@ -85,12 +107,15 @@ public class ContainerHandle extends FlowProcess {
     protected ContainerHandle(Builder builder) {
         super(builder.name, ProcessType.BIDIRECTIONAL);
         this.containerId = ContainerId.generate();  // Always generate new ID
+
         this.title = builder.title != null ? builder.title : builder.name;
         this.containerType = builder.containerType;
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
+        this.containerPath = renderingServicePath.append(containerId.toNoteBytes());
         this.builder = builder;
-        setupEventMap();
+
+        setupEventHandlers();
     }
 
     /**
@@ -192,15 +217,7 @@ public class ContainerHandle extends FlowProcess {
         }
     }
 
-    /**
-     * Default event handlers
-     */
-    protected void setupEventMap() {
-        m_eventMap.put(ContainerCommands.CONTAINER_CLOSED, this::handleContainerClosed);
-        m_eventMap.put(ContainerCommands.CONTAINER_RESIZED, this::handleContainerResized);
-        m_eventMap.put(ContainerCommands.CONTAINER_FOCUSED, this::handleContainerFocused);
-    }
-    
+
     protected Map<NoteBytesReadOnly, RoutedMessageExecutor> getRoutedMsgMap() {
         return m_msgMap;
     }
@@ -209,6 +226,17 @@ public class ContainerHandle extends FlowProcess {
         return rendererId;
     }
     
+
+    protected void setupEventHandlers(){
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RESIZE, this::handleContainerResized);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSE, this::handleContainerClosed);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_SHOWN, this::handleContainerShown);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_HIDDEN, this::handleContainerHidden);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, this::handleContainerFocusGained);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_FOCUS_LOST, this::handleContainerFocusLost);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_MOVE, this::handleContainerMove);
+    }
+
     @Override
     public CompletableFuture<Void> run() {
         Log.logMsg("[ContainerHandle] Started, auto-creating container: " + containerId);
@@ -280,19 +308,37 @@ public class ContainerHandle extends FlowProcess {
 	}
 
     
+   
+    /**
+     * Override onStop to cleanup IODaemon connection
+     */
     @Override
     public void onStop() {
-        Log.logMsg("[ContainerHandle] Stopped for container: " + containerId);
+        Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + containerId);
         isDestroyed = true;
         
+        // Close render stream
         if (renderStream != null) {
             try {
                 renderStream.close();
             } catch (IOException e) {
-                Log.logError("[ContainerHandle] Error closing render stream: " + 
-                    e.getMessage());
+                Log.logError("[ContainerHandle:" + getId() + 
+                    "] Error closing render stream: " + e.getMessage());
             }
         }
+
+        defaultEventHandlers.clear();
+        
+        // Disconnect from IODaemon if connected
+        if (ioDaemonSession != null) {
+            disconnectFromIODaemon()
+                .exceptionally(ex -> {
+                    Log.logError("[ContainerHandle] Error disconnecting IODaemon: " + ex.getMessage());
+                    return null;
+                });
+        }
+        
+        super.onStop();
     }
 
     public CompletableFuture<Void> getEventStreamReadyFuture() { 
@@ -347,15 +393,14 @@ public class ContainerHandle extends FlowProcess {
                     Log.logMsg("[ContainerHandle] Event stream reader active");
                     
                     // Read and dispatch events
-                    NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
+                    NoteBytes nextBytes = reader.nextNoteBytes();
                     
                     while (nextBytes != null && isAlive()) {
                         if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                                Log.logMsg("[ContainerHandle]" + getId() + " event received");
-                            NoteBytesMap event = nextBytes.getAsNoteBytesMap();
-                            dispatchEvent(event);
+                            Log.logMsg("[ContainerHandle]" + getId() + " event received");
+                            processRoutedEvent(nextBytes);
                         }
-                        nextBytes = reader.nextNoteBytesReadOnly();
+                        nextBytes = reader.nextNoteBytes();
                     }
                     
                     Log.logMsg("[ContainerHandle] Event stream reader stopped");
@@ -367,20 +412,16 @@ public class ContainerHandle extends FlowProcess {
             
         }
     }
+    /**
+     * Get the event handler registry for registering event handlers
+     */
+    public EventHandlerRegistry getEventHandlerRegistry(){
+        return eventHandlerRegistry;
+    }
 
-    protected void dispatchEvent(NoteBytesMap event) {
-        NoteBytes eventBytes = event.get(Keys.EVENT);
-
-        if (eventBytes != null) {
-            MessageExecutor eventExec = m_eventMap.get(eventBytes);
-            if (eventExec != null) {
-                eventExec.execute(event);
-            } else {
-                Log.logMsg("[ContainerHandle] Event is not handled: " + eventBytes);
-            }
-        } else {
-            Log.logMsg("[ContainerHandle] Event map does not contain event");
-        }
+    protected void processRoutedEvent(NoteBytes eventBytes) {
+        RoutedEvent event = RoutedEventFactory.from(containerPath, eventBytes);
+        eventHandlerRegistry.dispatch(event);
     }
     
     // ===== CONTAINER OPERATIONS =====
@@ -498,7 +539,6 @@ public class ContainerHandle extends FlowProcess {
         
             try {
                 NoteBytes noteBytes = command.toNoteBytes();
-                Log.logMsg("[Container]" + getId() + " send render cmd");
                 renderWriter.write(noteBytes);
                 return CompletableFuture.completedFuture(null);
             } catch (IOException ex) {
@@ -535,61 +575,476 @@ public class ContainerHandle extends FlowProcess {
             });
     }
     
-    // ===== EVENT HANDLERS =====
-    
-    /**
-     * Handle container closed event
-     */
-    protected CompletableFuture<Void> handleContainerClosed(NoteBytesMap message) {
-        NoteBytesMap notification = new NoteBytesMap();
-        notification.put("event", "container_closed");
-        notification.put("container_id", containerId.toNoteBytes());
-        
-        handleContainerClosed();
-        emit(notification);
-        
-        // Cleanup
-        isDestroyed = true;
 
-        return CompletableFuture.completedFuture(null);
+
+
+    public  NoteBytesReadOnly addKeyCharHandler( Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_CHAR, handler);
     }
 
-    protected void handleContainerClosed() {
-        Log.logMsg("[ContainerHandle] Container closed: " + containerId);
+    public  List<RoutedEventHandler> removeKeyCharHandler(Consumer<RoutedEvent> handler){
+       return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handler);
+    }
+
+    public  List<RoutedEventHandler> removeKeyCharHandler(NoteBytesReadOnly handlerId){
+       return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handlerId);
+    }
+
+    public  NoteBytesReadOnly addKeyDownHandler( Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
+    }
+
+    public  NoteBytesReadOnly addKeyDownHandler( RoutedEventHandler handler){
+        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
+    }
+    
+
+    public  List<RoutedEventHandler> removeKeyDownHandler(Consumer<RoutedEvent> consumer){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_DOWN, consumer);
+    }
+
+    public  List<RoutedEventHandler> removeKeyDownHandler(NoteBytesReadOnly id){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_DOWN, id);
+    }
+
+    public  NoteBytesReadOnly  addKeyUpHandler( Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_UP, handler);
+    }
+
+    public List<RoutedEventHandler> removeKeyUpHandler(Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_UP, handler);
+    }
+
+    public List<RoutedEventHandler> removeKeyUpHandler(NoteBytesReadOnly handlerId){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_UP, handlerId);
+    }
+
+    public  NoteBytesReadOnly addResizeHandler( Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().register(EventBytes.EVENT_CONTAINER_RESIZE, handler);
+    }
+
+    public  List<RoutedEventHandler> removeResizeHandler(Consumer<RoutedEvent> handler){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZE, handler);
+    }
+    
+    public  List<RoutedEventHandler> removeResizeHandler(NoteBytesReadOnly handlerId){
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZE, handlerId);
+    }
+
+
+
+    // ===== IODaemon =====
+
+     /**
+     * Connect to IODaemon and create a session
+     * 
+     * @param ioDaemonPath Path to IODaemon process
+     * @return CompletableFuture with ClientSession
+     */
+    protected CompletableFuture<ClientSession> connectToIODaemon(ContextPath ioDaemonPath) {
+        if (ioDaemonSession != null) {
+            Log.logMsg("[ContainerHandle] Already connected to IODaemon");
+            return CompletableFuture.completedFuture(ioDaemonSession);
+        }
+        
+        Log.logMsg("[ContainerHandle] Connecting to IODaemon at: " + ioDaemonPath);
+        
+        // Generate unique session ID for this container
+        String sessionId = containerId.toString() + "-session";
+        int pid = (int) ProcessHandle.current().pid();
+        
+        // Send create_session request
+        NoteBytesMap createSessionCmd = new NoteBytesMap();
+        createSessionCmd.put(Keys.CMD, "create_session");
+        createSessionCmd.put(Keys.SESSION_ID, sessionId);
+        createSessionCmd.put(Keys.PID, pid);
+        
+        return request(ioDaemonPath, createSessionCmd.toNoteBytesReadOnly(), Duration.ofSeconds(2))
+            .thenCompose(reply -> {
+                NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
+                NoteBytesReadOnly status = response.getReadOnly(Keys.STATUS);
+                
+                if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
+                    String errorMsg = ProtocolObjects.getErrMsg(response);
+                    throw new RuntimeException("Failed to create session: " + errorMsg);
+                }
+                
+                // Get session path
+                NoteBytes pathBytes = response.get(Keys.PATH);
+                if (pathBytes == null) {
+                    throw new RuntimeException("No session path in response");
+                }
+                
+                ContextPath sessionPath = ContextPath.fromNoteBytes(pathBytes);
+                
+                // Get session from registry
+                ClientSession session = (ClientSession) registry.getProcess(sessionPath);
+                if (session == null) {
+                    throw new RuntimeException("Session not found in registry: " + sessionPath);
+                }
+                
+                this.ioDaemonSession = session;
+                
+                Log.logMsg("[ContainerHandle] Connected to IODaemon session: " + sessionPath);
+                
+                return CompletableFuture.completedFuture(session);
+            });
+    }
+
+
+    /**
+     * Simplified method that uses default IODaemon path
+     */
+    public CompletableFuture<ClientSession> connectToIODaemon() {
+        return connectToIODaemon(CoreConstants.IO_DAEMON_PATH);
+    }
+
+    /**
+     * Check if connected to IODaemon
+     */
+    public boolean hasIODaemonSession() {
+        return ioDaemonSession != null && ioDaemonSession.isAlive();
+    }
+
+   
+    /**
+     * Disconnect from IODaemon session
+     * Releases all claimed devices and destroys session
+     */
+    protected CompletableFuture<Void> disconnectFromIODaemon() {
+        if (ioDaemonSession == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        Log.logMsg("[ContainerHandle] Disconnecting from IODaemon session");
+        
+        ClientSession session = ioDaemonSession;
+        this.ioDaemonSession = null;
+        
+        // Clear default event handlers
+        defaultEventHandlers.clear();
+        // Release all claimed devices
+  
+        ContextPath ioDaemonPath = session.getParentPath();
+        
+        NoteBytesMap destroyCmd = new NoteBytesMap();
+        destroyCmd.put(Keys.CMD, SESSION_CMDS.DESTROY_SESSION);
+        destroyCmd.put(Keys.SESSION_ID, session.sessionId);
+        
+        return request(ioDaemonPath, destroyCmd.toNoteBytesReadOnly(),  Duration.ofSeconds(1))
+            .thenAccept(packet->{
+                
+                if(packet.getPayload().getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE ){
+                    NoteBytesMap map = packet.getPayload().getAsMap();
+                    NoteBytes statusBytes = map.get(Keys.STATUS);
+                    if(statusBytes != null && statusBytes.equals(ProtocolMesssages.SUCCESS)){
+                        Log.logMsg("[ContainerHandle] Disconnected from IODaemon");
+                    }else{
+                        String msg = ProtocolObjects.getErrMsg(map);
+                        Log.logError("[ContainerHandle] Disconnection from IODaemon failed: " + msg);
+                    }
+
+                }else{
+                    throw new CompletionException(new IllegalArgumentException("NoteBytesObject required"));
+                }
+
+            })
+            .exceptionally(ex -> {
+                Log.logError("[ContainerHandle] Error during disconnect: " + ex.getMessage());
+                return null;
+            });
+    }
+
+     
+    /**
+     * Get current IODaemon session (if any)
+     */
+    protected ClientSession getIODaemonSession() {
+        return ioDaemonSession;
+    }
+    
+    // ===== DEVICE CLAIMING =====
+    
+    /**
+     * Claim a device from the IODaemon session
+     * Device events will be sent to this container
+     * 
+     * @param deviceId Device ID to claim
+     * @param mode "parsed" or "raw"
+     * @return CompletableFuture that completes when device is claimed
+     */
+    protected CompletableFuture<ContextPath> claimDevice(String deviceId, String mode) {
+        if (ioDaemonSession == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not connected to IODaemon"));
+        }
+        
+        Log.logMsg("[ContainerHandle] Claiming device: " + deviceId);
+        
+        return ioDaemonSession.claimDevice(deviceId, mode)
+            .thenApply(path -> {
+                Log.logMsg("[ContainerHandle] Device claimed: " + path);
+                return path;
+            });
     }
     
     /**
-     * Handle container resized event
+     * Release a claimed device
      */
-    protected void handleContainerResized(NoteBytesMap message) {
-        NoteBytes widthBytes = message.get(Keys.WIDTH);
-        NoteBytes heightBytes = message.get(Keys.HEIGHT);
+    protected CompletableFuture<Void> releaseDevice(String deviceId) {
+        if (ioDaemonSession == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        Log.logMsg("[ContainerHandle] Releasing device: " + deviceId);
+        
+        // Remove from default handlers
+        defaultEventHandlers.remove(deviceId);
 
-        if (widthBytes != null && heightBytes != null) {
-            int width = widthBytes.getAsInt();
-            int height = heightBytes.getAsInt();
-           
-            handleContainerResized(width, height);
-            emit(message);
+        defaultEventHandlers.values().remove(deviceId);
+        
+        return ioDaemonSession.releaseDevice(deviceId)
+            .thenRun(() -> {
+                Log.logMsg("[ContainerHandle] Device released: " + deviceId);
+            });
+    }
+
+
+
+
+    /**
+     * Discover available input devices through this container's session
+     */
+    public CompletableFuture<List<USBDeviceDescriptor>> discoverUSBInputDevices() {
+        if (ioDaemonSession == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not connected to IODaemon"));
+        }
+        
+        return ioDaemonSession.discoverDevices()
+            .thenApply(devicesList -> devicesList
+                .stream()
+                    .map(d -> d.usbDevice())
+                    .toList());
+    }
+    
+
+
+    
+    /**
+     * Check if connected to IODaemon session
+     */
+    protected boolean hasActiveIODaemonSession() {
+        return ioDaemonSession != null && ioDaemonSession.isAlive();
+    }
+
+    protected EventHandlerRegistry getClaimedDeviceRegistry(String deviceId){
+        ClaimedDevice device = ioDaemonSession.getClaimedDevice(deviceId);
+        if(device != null){
+            return device.getEventHandlerRegistry();
+        }else{
+            return null;
+        }
+    }
+    
+    /**
+     * Set default device for an item type
+     * 
+     * Example:
+     *   setDefaultDevice(ItemTypes.KEYBOARD, "keyboard-123")
+     *   
+     * Now getDefaultEventRegistry(ItemTypes.KEYBOARD) will return
+     * the event registry for that specific keyboard device
+     */
+    protected void setDefaultDevice(NoteBytesReadOnly itemType, String deviceId) {
+        if (ioDaemonSession == null) {
+            throw new IllegalStateException("Not connected to IODaemon");
+        }
+        
+        ClaimedDevice device = ioDaemonSession.getClaimedDevice(deviceId);
+        if (device == null) {
+            throw new IllegalArgumentException("Device not claimed: " + deviceId);
+        }
+        
+        defaultEventHandlers.put(itemType, deviceId);
+        Log.logMsg("[ContainerHandle] Set default " + itemType + " to: " + deviceId);
+    }
+
+    /**
+     * Remove default device for an item type
+     */
+    protected void clearDefaultDevice(NoteBytesReadOnly itemType) {
+        String removed = defaultEventHandlers.remove(itemType);
+        if (removed != null) {
+            Log.logMsg("[ContainerHandle] Cleared default " + itemType + ": " + removed);
         }
     }
 
-    protected void handleContainerResized(int changedWidth, int changedHeight) {
-        Log.logMsg("[ContainerHandle] Container resized: " + 
-            containerId + " (" + changedWidth + "x" + changedHeight + ")");
-    }
-    
     /**
-     * Handle container focused event
+     * Get the default device ID for an item type
      */
-    protected void handleContainerFocused(NoteBytesMap message) {
-        handleContainerFocused();
-        emit(message);
-        CompletableFuture.completedFuture(null);
+    protected String getDefaultDevice(NoteBytesReadOnly itemType) {
+        return defaultEventHandlers.get(itemType);
     }
 
-    protected void handleContainerFocused() {
-        Log.logMsg("[ContainerHandle] Container focused: " + containerId);
+    /**
+     * Get the primary keyboard event registry
+     */
+    public EventHandlerRegistry getDefaultKeyboardEventRegistry() {
+        return getDefaultEventRegistry(ItemTypes.KEYBOARD);
+    }
+
+    /**
+     * Set default keyboard device
+     * Convenience wrapper for setDefaultDevice(ItemTypes.KEYBOARD, deviceId)
+     */
+    protected boolean setDefaultKeyboard(String deviceId) {
+        try {
+            setDefaultDevice(ItemTypes.KEYBOARD, deviceId);
+            return true;
+        } catch (Exception e) {
+            Log.logError("[ContainerHandle] Failed to set default keyboard: " + 
+                e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Clear default keyboard
+     */
+    protected void clearDefaultKeyboard() {
+        clearDefaultDevice(ItemTypes.KEYBOARD);
+    }
+
+    /**
+     * Get default keyboard device ID
+     */
+    protected String getDefaultKeyboardId() {
+        return getDefaultDevice(ItemTypes.KEYBOARD);
+    }
+
+
+
+    /**
+     * Get event registry for a specific item type
+     * 
+     * If a default device is set for this type, returns that device's registry
+     * Otherwise, returns the native event registry
+     */
+    public EventHandlerRegistry getDefaultEventRegistry(NoteBytesReadOnly itemType) {
+        String defaultDeviceId = defaultEventHandlers.get(itemType);
+        
+        if (defaultDeviceId == null) {
+            // No default set, use native registry
+            return eventHandlerRegistry;
+        }
+        
+        // Get device from session
+        if (ioDaemonSession == null) {
+            Log.logError("[ContainerHandle] Session lost, clearing default " + itemType);
+            defaultEventHandlers.remove(itemType);
+            return eventHandlerRegistry;
+        }
+        
+        ClaimedDevice device = ioDaemonSession.getClaimedDevice(defaultDeviceId);
+        if (device != null) {
+            return device.getEventHandlerRegistry();
+        } else {
+            Log.logError("[ContainerHandle] Device " + defaultDeviceId + " not available, removing from defaults");
+            defaultEventHandlers.remove(itemType);
+            return eventHandlerRegistry;
+        }
+    }
+
+
+    /**
+     * Set default mouse device
+     */
+    protected boolean setDefaultMouse(String deviceId) {
+        try {
+            setDefaultDevice(ItemTypes.MOUSE, deviceId);
+            return true;
+        } catch (Exception e) {
+            Log.logError("[ContainerHandle] Failed to set default mouse: " + 
+                e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get mouse event registry
+     */
+    public EventHandlerRegistry getMouseEventRegistry() {
+        return getDefaultEventRegistry(ItemTypes.MOUSE);
+    }
+
+
+
+    public List<RoutedEventHandler> getKeyDownHandlers(){
+        EventHandlerRegistry defaultRegistry = getDefaultKeyboardEventRegistry();
+        return defaultRegistry.getEventHandlers(EventBytes.EVENT_KEY_DOWN);
+    }
+
+    public List<RoutedEventHandler> clearKeyDownHandlers(){
+        EventHandlerRegistry defaultRegistry = getDefaultKeyboardEventRegistry();
+        return defaultRegistry.unregister(EventBytes.EVENT_KEY_DOWN);
+    }
+    
+    protected void handleContainerResized(RoutedEvent event){
+        if(event instanceof ContainerResizeEvent resizeEvent){
+            onContainerResized(resizeEvent);
+        }
+    }
+
+    protected void handleContainerClosed(RoutedEvent event){
+        onContainerClosed();
+    }
+
+    protected void handleContainerShown(RoutedEvent event){
+        onContainerShown();
+    }
+    protected void handleContainerHidden(RoutedEvent event){
+        onContainerHidden();
+    }
+    protected void handleContainerFocusGained(RoutedEvent event){
+        onContainerFocusGained();
+    }
+    protected void handleContainerFocusLost(RoutedEvent event){
+        onContainerFocusLost();
+    }
+    protected void handleContainerMove(RoutedEvent event){
+        if(event instanceof ContainerMoveEvent moveEvent){
+            onContainerMove(moveEvent);
+        }
+    }
+    /**
+     * Handle container resized event
+     */
+    protected void setDimensions(int width, int hight) {
+        this.height = height;
+        this.width = width;
+    }
+
+
+
+    protected void onContainerResized(ContainerResizeEvent event) {
+        setDimensions(event.getWidth(), event.getHeight());
+    }
+
+    protected void onContainerClosed(){
+    }
+
+    protected void onContainerShown(){
+    }
+    protected void onContainerHidden(){
+    }
+    protected void onContainerFocusGained(){
+
+    }
+    protected void onContainerFocusLost(){
+    }
+    protected void onContainerMove(ContainerMoveEvent moveEvent){
+
     }
     
     // ===== GETTERS =====
@@ -650,4 +1105,6 @@ public class ContainerHandle extends FlowProcess {
         Log.logMsg("[ContainerHandle] returning ready future");
         return renderStream.getReadyFuture();
     }
+
+ 
 }

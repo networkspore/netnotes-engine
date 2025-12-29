@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
@@ -347,7 +348,7 @@ public class NoteBytesMap{
     }
 
     public void put(String key, boolean b){
-        m_pairs.put(new NoteBytes( key), new NoteBytes(b));
+        m_pairs.put(new NoteBytes( key), b ? NoteBoolean.TRUE : NoteBoolean.FALSE);
     }
 
     public void put(String key, NoteBytes[] n){

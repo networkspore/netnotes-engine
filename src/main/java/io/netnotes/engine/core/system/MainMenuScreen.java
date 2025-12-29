@@ -5,7 +5,6 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 
 
 /**
@@ -16,16 +15,15 @@ class MainMenuScreen extends TerminalScreen {
     
     private MenuNavigator menuNavigator;
     
-    public MainMenuScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public MainMenuScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
     public CompletableFuture<Void> onShow() {
         // Create menu navigator
         menuNavigator = new MenuNavigator(
-            terminal,
-            keyboard
+            terminal
         );
         
         // Build main menu

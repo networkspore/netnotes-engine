@@ -6,16 +6,13 @@ import io.netnotes.engine.messaging.NoteMessaging.Modes;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-
-import java.io.*;
 import java.util.*;
-import java.util.concurrent.*;
 
 /**
  * IODaemon Protocol - Updated with string-based device types
  */
 public class IODaemonProtocol {
-    private static final String UNKNOWN = ItemTypes.UNKNOWN.getAsString();
+   
     // ===== PROTOCOL PHASES =====
     
     public enum Phase {
@@ -156,7 +153,7 @@ public class IODaemonProtocol {
         public String deviceId;
         
         // Device type (string-based)
-        private String deviceType;
+        private NoteBytesReadOnly deviceType;
         
         // Device state
         public boolean available;
@@ -165,7 +162,7 @@ public class IODaemonProtocol {
         /**
          * Get device type (auto-detect if not set)
          */
-        public String get_device_type() {
+        public NoteBytesReadOnly getDeviceType() {
             if (deviceType != null) {
                 return deviceType;
             }
@@ -175,30 +172,30 @@ public class IODaemonProtocol {
             return deviceType;
         }
 
-        public String get_device_id(){
+        public String getDeviceId(){
             return deviceId;
         }
        
         /**
          * Set device type explicitly
          */
-        public void set_device_type(NoteBytesReadOnly type) {
+        public void setDeviceType(NoteBytesReadOnly type) {
             if (DeviceType.isValid(type)) {
-                this.deviceType = type.getAsString();
+                this.deviceType = type;
             } else {
-                this.deviceType = UNKNOWN;
+                this.deviceType = ItemTypes.UNKNOWN;
             }
         }
         
         /**
          * Detect device type from USB descriptors
-         */
+         
         private String detectDeviceType() {
             // Check interfaces for HID devices
             return detectDeviceTypeBytes().getAsString();
         }
-
-         private NoteBytesReadOnly detectDeviceTypeBytes() {
+        */
+         private NoteBytesReadOnly detectDeviceType() {
             // Check interfaces for HID devices
             for (USBInterface iface : interfaces) {
                 if (iface.interfaceClass == 3) { // HID class
@@ -230,7 +227,7 @@ public class IODaemonProtocol {
             obj.add("device_class", deviceClass);
             obj.add("device_subclass", deviceSubClass);
             obj.add("device_protocol", deviceProtocol);
-            obj.add("device_type", get_device_type()); // String type
+            obj.add("device_type", getDeviceType()); // String type
             
             obj.add("bus_number", busNumber);
             obj.add("device_address", deviceAddress);
@@ -272,7 +269,7 @@ public class IODaemonProtocol {
             // Get device type as string
             NoteBytesReadOnly typeBytes = map.getReadOnly(ProtocolMesssages.ITEM_TYPE);
             if (typeBytes != null) {
-                desc.set_device_type(typeBytes);
+                desc.setDeviceType(typeBytes);
             }
             
             desc.busNumber = map.get("bus_number").getAsInt();

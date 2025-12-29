@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - doCreateContainer() - actual container creation
  * - handleRenderCommand() - renderer-specific rendering
  */
-public abstract class UIRenderer <T extends Container> {
+public abstract class UIRenderer <T extends Container<?>> {
     
     // ===== STATE MANAGEMENT =====
     protected final BitFlagStateMachine state;

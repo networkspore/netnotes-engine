@@ -9,7 +9,6 @@ import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
@@ -49,11 +48,10 @@ class PackageConfigurationScreen extends TerminalScreen {
     public PackageConfigurationScreen(
         String name,
         SystemTerminalContainer terminal,
-        InputDevice keyboard,
         InstalledPackage pkg,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal, keyboard);
+        super(name, terminal);
         this.originalPackage = pkg;
         this.newProcessConfig = pkg.getProcessConfig();
         this.nodeCommands = nodeCommands;
@@ -127,13 +125,11 @@ class PackageConfigurationScreen extends TerminalScreen {
     }
     
     private void startProcessIdConfig() {
-        keyboard.setEventConsumer(null);
         currentStep = Step.CONFIGURE_PROCESS_ID;
         render();
     }
     
     private void capabilitiesNotImplemented() {
-        keyboard.setEventConsumer(null);
         terminal.clear()
             .thenCompose(v -> terminal.printTitle("Feature Not Available"))
             .thenCompose(v -> terminal.printAt(5, 10, 
@@ -142,11 +138,10 @@ class PackageConfigurationScreen extends TerminalScreen {
                 "This feature will be available in a future update"))
             .thenCompose(v -> terminal.printAt(9, 10, 
                 "Press any key to continue..."))
-            .thenRun(() -> waitForAnyKey(() -> render()));
+            .thenRun(() -> terminal.waitForKeyPress(() -> render()));
     }
     
     private void cancelConfiguration() {
-        keyboard.setEventConsumer(null);
         if (onCompleteCallback != null) {
             onCompleteCallback.run();
         }
@@ -167,11 +162,10 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startProcessIdInput() {
         inputReader = new TerminalInputReader(terminal, 10, 25, 64);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+       
         
         inputReader.setOnComplete(newProcessId -> {
-            keyboard.setEventConsumer(null);
-            
+         
             if (newProcessId == null || newProcessId.trim().isEmpty()) {
                 // Cancelled
                 inputReader.close();
@@ -199,12 +193,11 @@ class PackageConfigurationScreen extends TerminalScreen {
                         "Invalid ProcessId: " + e.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to try again..."))
-                    .thenRun(() -> waitForAnyKey(() -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
             }
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             inputReader = null;
             render();
@@ -233,10 +226,9 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         inputReader = new TerminalInputReader(terminal, 15, 36, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+     
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             inputReader = null;
             
@@ -247,12 +239,12 @@ class PackageConfigurationScreen extends TerminalScreen {
                     .thenCompose(v -> terminal.printError("Confirmation failed"))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to try again..."))
-                    .thenRun(() -> waitForAnyKey(() -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
             }
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
+            
             inputReader.close();
             inputReader = null;
             cancelConfiguration();
@@ -285,7 +277,7 @@ class PackageConfigurationScreen extends TerminalScreen {
                         "Failed to save configuration: " + ex.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to return..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() -> terminal.waitForKeyPress(() -> {
                         if (onCompleteCallback != null) {
                             onCompleteCallback.run();
                         }
@@ -306,7 +298,7 @@ class PackageConfigurationScreen extends TerminalScreen {
                 "Note: Reload the package for changes to take effect"))
             .thenCompose(v -> terminal.printAt(11, 10, 
                 "Press any key to return..."))
-            .thenRun(() -> waitForAnyKey(() -> {
+            .thenRun(() -> terminal.waitForKeyPress(() -> {
                 if (onCompleteCallback != null) {
                     onCompleteCallback.run();
                 }
@@ -339,6 +331,15 @@ class PackageConfigurationScreen extends TerminalScreen {
             .thenRun(() -> startMenuNavigation(menu));
     }
     
+    private NoteBytesReadOnly handlerId = null;
+
+    private void removeKeyDownHandler(){
+        if(handlerId != null){
+            terminal.removeKeyDownHandler(handlerId);
+            handlerId = null;
+        }
+    }
+    // TODO: use MenuNavigator!
     private void startMenuNavigation(MenuContext menu) {
         List<MenuContext.MenuItem> items = new java.util.ArrayList<>(menu.getItems());
         
@@ -350,7 +351,7 @@ class PackageConfigurationScreen extends TerminalScreen {
             navigationKeys.setKeyRunnable(
                 KeyCodeBytes.getNumeric(index, true),
                 () -> {
-                    keyboard.setEventConsumer(null);
+                    removeKeyDownHandler();
                     MenuContext.MenuItem selected = items.get(index);
                     menu.navigate(selected.name);
                 }
@@ -358,7 +359,7 @@ class PackageConfigurationScreen extends TerminalScreen {
             navigationKeys.setKeyRunnable(
                 KeyCodeBytes.getNumeric(index, false),
                 () -> {
-                    keyboard.setEventConsumer(null);
+                    removeKeyDownHandler();
                     MenuContext.MenuItem selected = items.get(index);
                     menu.navigate(selected.name);
                 }
@@ -366,11 +367,11 @@ class PackageConfigurationScreen extends TerminalScreen {
         }
         
         navigationKeys.setKeyRunnable(KeyCodeBytes.ESCAPE, () -> {
-            keyboard.setEventConsumer(null);
+            removeKeyDownHandler();
             cancelConfiguration();
         });
         
-        keyboard.setEventConsumer(event -> {
+        handlerId = terminal.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -383,15 +384,9 @@ class PackageConfigurationScreen extends TerminalScreen {
         });
     }
     
-    private void waitForAnyKey(Runnable callback) {
-        keyboard.setEventConsumer(event -> {
-            keyboard.setEventConsumer(null);
-            callback.run();
-        });
-    }
-    
+ 
     private void cleanup() {
-        keyboard.setEventConsumer(null);
+    
         
         if (passwordReader != null) {
             passwordReader.close();

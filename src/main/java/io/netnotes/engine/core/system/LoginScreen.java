@@ -1,29 +1,32 @@
 package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
-
-import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.utils.TimeHelpers;
 
-
 /**
- * LoginScreen - Authenticate to existing system
- * Uses PasswordReader for secure password verification
+ * LoginScreen - System authentication using PasswordPrompt
  */
 class LoginScreen extends TerminalScreen {
     
-    private PasswordReader passwordReader;
+    private PasswordPrompt passwordPrompt;
 
-    public LoginScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public LoginScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
     public CompletableFuture<Void> onShow() {
-        passwordReader = new PasswordReader();
-        return render();
-           
+        String title = terminal.isAuthenticated() ? "System Locked" : "Netnotes";
+        
+        passwordPrompt = new PasswordPrompt(terminal)
+            .withTitle(title)
+            .withPrompt("Enter password:")
+            .withTimeout(30)
+            .onPassword(this::handlePassword)
+            .onTimeout(this::handleTimeout)
+            .onCancel(this::handleCancel);
+        
+        return passwordPrompt.show();
     }
     
     @Override
@@ -33,56 +36,56 @@ class LoginScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Netnotes Login"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Enter password:"))
-            .thenCompose(v -> terminal.moveCursor(5, 26))
-            .thenRun(this::startPasswordEntry);
+        // PasswordPrompt handles rendering
+        return CompletableFuture.completedFuture(null);
     }
     
-    private void startPasswordEntry() {
-        // Create password reader
-        
-        
-        
-        // Register with keyboard
-        keyboard.setEventConsumer( passwordReader.getEventConsumer());
-        
-        // Handle password when ready
-        passwordReader.setOnPassword(password -> {
-            // Unregister and close reader
-            keyboard.setEventConsumer(null);
-            passwordReader.escape();
-    
-            
-            // Verify and load system
-            terminal.verifyPasswordInternal(password)
-                .thenAccept(valid -> {
-                    password.close();
-                    
-                    if (!valid) {
-                        terminal.clear()
-                            .thenCompose(v->terminal.printError("Invalid password. Please try again."))
-                            .thenRunAsync(()->TimeHelpers.timeDelay(2))
-                            .thenCompose(v -> render());
-                    }
-                })
-                .exceptionally(ex -> {
-                    password.close();
+    private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
+        terminal.authenticate(password)
+            .thenAccept(valid -> {
+                password.close();
+                
+                if (!valid) {
                     terminal.clear()
-                        .thenCompose(v->terminal.printError("Login failed: " + ex.getMessage()))
-                        .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
-                        .thenRun(() -> waitForKeyPress(keyboard, () -> render()));
-                    return null;
-                });
-        });
+                        .thenCompose(v -> terminal.printError("Invalid password"))
+                        .thenRunAsync(() -> TimeHelpers.timeDelay(2))
+                        .thenCompose(v -> onShow());
+                }
+                // On success, terminal.authenticate() handles navigation
+            })
+            .exceptionally(ex -> {
+                password.close();
+                terminal.clear()
+                    .thenCompose(v -> terminal.printError("Login failed: " + ex.getMessage()))
+                    .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
+                    .thenRun(() -> terminal.waitForKeyPress(() -> onShow()));
+                return null;
+            });
+    }
+    
+    private void handleTimeout() {
+        terminal.clear()
+            .thenCompose(v -> terminal.printError("Authentication timeout"))
+            .thenCompose(v -> terminal.printAt(15, 10, "Press any key..."))
+            .thenRun(() -> terminal.waitForKeyPress(() -> {
+                if (terminal.isAuthenticated()) {
+                    // Was unlocking → back to locked screen
+                    terminal.showScreen("locked");
+                } else {
+                    // Was logging in → show locked screen
+                    terminal.showScreen("locked");
+                }
+            }));
+    }
+    
+    private void handleCancel() {
+        terminal.goBack();
     }
     
     private void cleanup() {
-        if (passwordReader != null) {
-            keyboard.setEventConsumer(null);
-            passwordReader.close();
-            passwordReader = null;
+        if (passwordPrompt != null && passwordPrompt.isActive()) {
+            passwordPrompt.cancel();
+            passwordPrompt = null;
         }
     }
 }

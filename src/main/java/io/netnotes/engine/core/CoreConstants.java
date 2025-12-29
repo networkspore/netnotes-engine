@@ -6,7 +6,7 @@ public class CoreConstants {
 
     public static final String SYSTEM = "system";
     
-
+    public static final String IO_DAEMON = "io-daemon";
     public static final String SERVICES = "services";
     public static final String RUNTIME = "runtime";
     public static final String NODE_CONTROLLER = "node-controller";
@@ -31,6 +31,8 @@ public class CoreConstants {
 
     public static final ContextPath SERVICES_PATH = SYSTEM_PATH.append(SERVICES);
     public static final ContextPath RENDERING_SERVICE_PATH = SERVICES_PATH.append(RENDERING_SERVICE);
+    public static final ContextPath IO_DAEMON_PATH = SERVICES_PATH.append(IO_DAEMON);
+    
     
     public static final ContextPath RUNTIME_PATH = SYSTEM_PATH.append(RUNTIME);
     public static final ContextPath NODES_PATH = RUNTIME_PATH.append(NODES);

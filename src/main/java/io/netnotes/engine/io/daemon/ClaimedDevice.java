@@ -5,13 +5,13 @@ import java.io.PipedInputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteUUID;
@@ -29,9 +29,12 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
 import io.netnotes.engine.io.input.InputDevice;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralInputEventFactory;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.EventBytes;
-import io.netnotes.engine.io.input.events.InputEventFactory;
+import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.RoutedEventFactory;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 
@@ -53,11 +56,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     private final String deviceId;
     private final ContextPath devicePath;
-    private final String deviceType;
+    private final NoteBytesReadOnly deviceType;
     private final ContextPath ioDaemonPath;
     private DeviceState deviceState;
   
-    private Consumer<RoutedEvent> m_onRoutedEvent = null;
 
     // TWO channels: incoming events + outgoing control
     private StreamChannel incomingEventStream;
@@ -72,7 +74,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private static final int ACK_BATCH_SIZE = 32;
     
     private volatile boolean active = false;
-    
+    private final EventHandlerRegistry eventHandlerRegistry;
+
     /**
      * Constructor with dependency injection
      * 
@@ -85,7 +88,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     public ClaimedDevice(
         String deviceId, 
         ContextPath devicePath, 
-        String deviceType, 
+        NoteBytesReadOnly deviceType, 
         DeviceCapabilitySet capabilities,
         ContextPath ioDaemonPath
     ) {
@@ -96,16 +99,20 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         this.devicePath = devicePath;
         this.deviceType = deviceType;
         this.ioDaemonPath = ioDaemonPath;
+        this.eventHandlerRegistry = new EventHandlerRegistry();
         
         this.deviceState = new DeviceState(
             deviceId, 
             (int) ProcessHandle.current().pid(), 
-            deviceType, 
+            deviceType.getAsString(), 
             capabilities
         );
 
         setupMessageMapping();
     }
+
+   
+
     
     @Override
     public void onStart() {
@@ -137,7 +144,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         return deviceState;
     }
 
-    public String getDeviceType(){
+    public NoteBytesReadOnly getDeviceType(){
         return deviceType;
     }
 
@@ -193,12 +200,42 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             }
         });
     }
+    @FunctionalInterface
+    public interface EventCreator{
+        RoutedEvent createEvent(NoteBytes noteBytes);
+    }
+
+    private EventCreator m_onCreateEvent = null;
+
+    public void setOnCreateEvent(EventCreator onCreateEvent){
+        m_onCreateEvent = onCreateEvent;
+    }
     
+    private void createEvent(NoteBytes event)
+    {
+        if(m_onCreateEvent == null){
+            if(event instanceof NoteBytesEphemeral ephemeralEvent){
+                EphemeralRoutedEvent ephemeralRoutedEvent = EphemeralInputEventFactory.from(getContextPath(), ephemeralEvent);
+                this.eventHandlerRegistry.dispatch(ephemeralRoutedEvent);
+            }else{
+                RoutedEvent routedEvent = RoutedEventFactory.from(getContextPath(), event);
+                this.eventHandlerRegistry.dispatch(routedEvent);
+            }
+        }else{
+            RoutedEvent routedEvent = m_onCreateEvent.createEvent(event);
+            this.eventHandlerRegistry.dispatch(routedEvent);
+        }
+    }
+
+    public EventHandlerRegistry getEventHandlerRegistry(){
+        return eventHandlerRegistry;
+    }
     
     /**
      * Handle incoming payload - control message or event data
      */
     private void handleIncomingPayload(NoteBytesReadOnly payload) {
+   
         // Check if this is a control message (encryption negotiation)
         if (payload.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
             NoteBytesMap msgMap = payload.getAsNoteBytesMap();
@@ -225,8 +262,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             if (encryptionSession != null && encryptionSession.isActive()) {
                 try {
                     byte[] decrypted = encryptionSession.decrypt(payload.getBytes());
-                    NoteBytesReadOnly decryptedPayload = new NoteBytesReadOnly(decrypted);
-                    emitEvent(InputEventFactory.from(contextPath, decryptedPayload));
+                    NoteBytesEphemeral decryptedPayload = new NoteBytesEphemeral(decrypted);
+                    createEvent(decryptedPayload);
                 } catch (Exception e) {
                     Log.logError("Decryption failed: " + e.getMessage());
                 }
@@ -235,7 +272,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             }
         } else {
             // Plaintext event
-            emitEvent(InputEventFactory.from(contextPath, payload));
+            createEvent(payload);
         }
         
         // Track for backpressure ACK
@@ -247,23 +284,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
 
 
 
-
-    
-    private void emitEvent(RoutedEvent event){
-        if(m_onRoutedEvent != null){
-            m_onRoutedEvent.accept(event);
-        }
-    }
-    
-    public void setEventConsumer(Consumer<RoutedEvent> eventConsumer){
-        m_onRoutedEvent = eventConsumer;
-    }
-    
-
-
-    public Consumer<RoutedEvent> getEventConsumer(){
-        return m_onRoutedEvent;
-    }
 
     // ===== ENCRYPTION NEGOTIATION =====
     
@@ -286,7 +306,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             byte[] clientPublicKey = encryptionSession.getPublicKey();
             NoteBytesObject accept = new NoteBytesObject(new NoteBytesPair[]{
                 new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_ENCRYPTION_ACCEPT),
-                new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
                 new NoteBytesPair(Keys.PUBLIC_KEY, new NoteBytes(clientPublicKey))
             });
             sendDeviceControlMessage(accept);
@@ -323,7 +342,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private void declineEncryption(String reason) {
         NoteBytesObject decline = new NoteBytesObject();
         decline.add(Keys.EVENT, EventBytes.TYPE_ENCRYPTION_DECLINE);
-        decline.add(Keys.SEQUENCE, NoteUUID.getNextUUID64());
         decline.add(Keys.MSG, reason);
         
         sendDeviceControlMessage(decline);
@@ -357,7 +375,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         
         sendDeviceControlMessage(new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
-            new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId),
             new NoteBytesPair(Keys.PROCESSED_COUNT, count)
@@ -371,7 +388,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         
         NoteBytesObject notification = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
-            new NoteBytesPair(Keys.SEQUENCE, NoteUUID.getNextUUID64()),
             new NoteBytesPair(Keys.CMD, ProtocolMesssages.DEVICE_DISCONNECTED),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId)
         });
@@ -421,7 +437,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             encryptionSession = null;
         }
         
-        m_onRoutedEvent = null;
         
         // Release device state
         if (deviceState != null) {

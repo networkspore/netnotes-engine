@@ -143,7 +143,7 @@ public class DiscoveredDeviceRegistry {
         // Device type
         NoteBytesReadOnly typeBytes = deviceMap.getReadOnly(Keys.ITEM_TYPE);
         if (typeBytes != null) {
-            desc.set_device_type(typeBytes);
+            desc.setDeviceType(typeBytes);
         }
         
         // Optional string fields
@@ -175,9 +175,9 @@ public class DiscoveredDeviceRegistry {
         
         String deviceName = usbDevice.product != null ? 
             usbDevice.product : "USB Device " + usbDevice.deviceId;
-        String deviceType = usbDevice.get_device_type();
+        NoteBytesReadOnly deviceType = usbDevice.getDeviceType();
         
-        DeviceCapabilitySet caps = new DeviceCapabilitySet(deviceName, deviceType);
+        DeviceCapabilitySet caps = new DeviceCapabilitySet(deviceName, deviceType.getAsString());
         
         // Get capability bits from daemon
         NoteBytes capsBytes = deviceMap.getOrDefault(AVAILABLE_CAPABILITIES, null);
@@ -406,7 +406,7 @@ public class DiscoveredDeviceRegistry {
             System.out.printf("  %s: %s (type=%s, claimed=%s)%n",
                 usb.deviceId,
                 usb.product != null ? usb.product : "Unknown",
-                usb.get_device_type(),
+                usb.getDeviceType(),
                 device.claimed);
             Log.logMsg("    Available modes: " + device.capabilities.getAvailableModes());
             Log.logMsg("    Capabilities: " + device.capabilities.getAvailableCapabilities());

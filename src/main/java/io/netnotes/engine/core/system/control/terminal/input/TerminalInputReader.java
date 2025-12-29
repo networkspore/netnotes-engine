@@ -5,13 +5,13 @@ import java.util.function.Consumer;
 import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharModsEvent;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyCharEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteIntegerArray;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
@@ -46,17 +46,18 @@ public class TerminalInputReader {
     
     private final NoteIntegerArray buffer = new NoteIntegerArray();
     private int cursorPos = 0; // codepoint index
-    
     private final KeyRunTable keyRunTable;
-    private final Consumer<RoutedEvent> eventConsumer;
     private Consumer<String> onComplete;
     private Consumer<String> onEscape;
+    private NoteBytesReadOnly keyDownHandlerId = null;
+    private NoteBytesReadOnly KeyCharHandlerId = null;
     
     /**
      * Create input reader with default max length
      */
     public TerminalInputReader(TerminalContainerHandle terminal, int row, int col) {
         this(terminal, row, col, DEFAULT_MAX_LENGTH);
+
     }
     
     /**
@@ -84,17 +85,12 @@ public class TerminalInputReader {
             new NoteBytesRunnablePair(KeyCodeBytes.HOME, this::handleHome),
             new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd)
         );
-        
-        this.eventConsumer = this::handleEvent;
+
+        keyDownHandlerId = terminal.addKeyDownHandler(this::handleKeyDown);
+        KeyCharHandlerId = terminal.addKeyCharHandler(this::handleKeyChar);
     }
     
-    /**
-     * Get event consumer for keyboard registration
-     */
-    public Consumer<RoutedEvent> getEventConsumer() {
-        return eventConsumer;
-    }
-    
+
     /**
      * Set callback for when user presses Enter
      */
@@ -142,37 +138,37 @@ public class TerminalInputReader {
         redraw();
     }
     
-    /**
-     * Handle input events from keyboard
+     /**
+     * Handle input events from device
+     * Supports both regular and ephemeral events
      */
-    private void handleEvent(RoutedEvent event) {
-        // Handle ephemeral events (from encrypted devices)
-        if (event instanceof EphemeralRoutedEvent ephemeralEvent) {
-            try (ephemeralEvent) {
-                handleEphemeralEvent(ephemeralEvent);
-            }
-            return;
-        }
-        
-        // Handle regular events
+    private void handleKeyDown(RoutedEvent event) {
         if (event instanceof KeyDownEvent keyDown) {
             handleKeyDown(keyDown);
-        } else if (event instanceof KeyCharEvent keyChar) {
+        } else if (event instanceof EphemeralKeyDownEvent keyDown) {
+            handleEphemeralKeyDown(keyDown);
+            keyDown.close();
+        }
+    }
+
+    private void handleKeyChar(RoutedEvent event){
+        if(event instanceof KeyCharEvent keyChar){
             handleKeyChar(keyChar);
-        }
-    }
-    
-    /**
-     * Handle ephemeral events from encrypted device
-     */
-    private void handleEphemeralEvent(EphemeralRoutedEvent event) {
-        if (event instanceof EphemeralKeyDownEvent keyDown) {
-            keyRunTable.run(keyDown.getKeyCodeBytes());
-        } else if (event instanceof EphemeralKeyCharModsEvent keyChar) {
+        }if (event instanceof EphemeralKeyCharEvent keyChar) {
             handleEphemeralChar(keyChar);
+            keyChar.close();
         }
     }
+
+     /**
+     * Handle ephemeral key down (for special keys)
+     */
+    private void handleEphemeralKeyDown(EphemeralKeyDownEvent event) {
+        // lookup keycode and run
+        keyRunTable.run(event.getKeyCodeBytes());
+    }
     
+
     /**
      * Handle regular key down events
      */
@@ -194,7 +190,7 @@ public class TerminalInputReader {
     /**
      * Handle ephemeral character events
      */
-    private void handleEphemeralChar(EphemeralKeyCharModsEvent event) {
+    private void handleEphemeralChar(EphemeralKeyCharEvent event) {
         NoteBytes codepointBytes = event.getCodepointBytes();
         if (codepointBytes != null) {
             int codepoint = codepointBytes.getAsInt();
@@ -324,5 +320,7 @@ public class TerminalInputReader {
     public void close() {
         buffer.clear();
         cursorPos = 0;
+        terminal.removeKeyCharHandler(KeyCharHandlerId);
+        terminal.removeKeyDownHandler(keyDownHandlerId);
     }
 }

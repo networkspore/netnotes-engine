@@ -5,35 +5,26 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
-
 
 /**
  * SettingsScreen - System settings
- * Uses MenuNavigatorProcess for keyboard navigation
+ * Uses MenuNavigator for keyboard navigation
  */
 class SettingsScreen extends TerminalScreen {
     
     private MenuNavigator menuNavigator;
     
-    public SettingsScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard) {
-        super(name, terminal, keyboard);
+    public SettingsScreen(String name, SystemTerminalContainer terminal) {
+        super(name, terminal);
     }
     
     @Override
     public CompletableFuture<Void> onShow() {
-        // Create menu navigator
-        menuNavigator = new MenuNavigator(
-            terminal,
-            keyboard
-        );
+        menuNavigator = new MenuNavigator(terminal);
         
-        // Build settings menu
         MenuContext menu = buildSettingsMenu();
-        
-        // Register and start navigator
-   
         menuNavigator.showMenu(menu);
+        
         return CompletableFuture.completedFuture(null);
     }
     
@@ -55,9 +46,29 @@ class SettingsScreen extends TerminalScreen {
                 terminal.showScreen("change-password");
             });
         
-        menu.addItem("bootstrap", "Bootstrap Configuration",
-            "View and manage system bootstrap settings",
-            () -> terminal.showScreen("bootstrap"));
+        menu.addItem("system-setup", "System Setup",
+            "Configure IODaemon and keyboard devices",
+            () -> terminal.showScreen("system-setup"));
+        
+       /* menu.addItem("appearance", "Appearance",
+            "Terminal colors and themes",
+            () -> {
+                terminal.println("Appearance settings not yet implemented");
+            });
+        
+        menu.addSeparator("Advanced");
+        
+        menu.addItem("export-backup", "Export Backup",
+            "Export encrypted backup",
+            () -> {
+                terminal.println("Backup export not yet implemented");
+            });
+        
+        menu.addItem("import-backup", "Import Backup",
+            "Restore from backup",
+            () -> {
+                terminal.println("Backup import not yet implemented");
+            });*/
         
         menu.addSeparator("Navigation");
         
@@ -70,8 +81,10 @@ class SettingsScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> render() {
-        // MenuNavigator handles all rendering
+        // MenuNavigator handles rendering and resize
+        if (menuNavigator != null && menuNavigator.hasMenu()) {
+            menuNavigator.refreshMenu();
+        }
         return CompletableFuture.completedFuture(null);
     }
 }
-

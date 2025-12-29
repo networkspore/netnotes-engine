@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public final class ScrollEvent implements RoutedEvent {
     private final ContextPath sourcePath;
@@ -8,15 +9,17 @@ public final class ScrollEvent implements RoutedEvent {
     private final double yOffset;
     private final double mouseX;
     private final double mouseY;
-    private final int stateFlags;
+    private int stateFlags;
+    private final NoteBytesReadOnly typeBytes;
 
-    public ScrollEvent(ContextPath sourcePath, double xOffset, double yOffset, double mouseX, double mouseY, int stateFlags) {
+    public ScrollEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int stateFlags,  double xOffset, double yOffset, double mouseX, double mouseY) {
         this.sourcePath = sourcePath;
         this.xOffset = xOffset;
         this.yOffset = yOffset;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         this.stateFlags = stateFlags;
+        this.typeBytes = typeBytes;
     }
 
     @Override
@@ -26,5 +29,12 @@ public final class ScrollEvent implements RoutedEvent {
     public double yOffset() { return yOffset; }
     public double mouseX() { return mouseX; }
     public double mouseY() { return mouseY; }
-    public int stateFlags() { return stateFlags; }
+    @Override
+    public int getStateFlags() { return stateFlags; }
+
+    public void setStateFlags(int flags) { stateFlags = flags; }
+    @Override
+    public NoteBytesReadOnly getEventTypeBytes(){
+        return typeBytes;
+    }
 }

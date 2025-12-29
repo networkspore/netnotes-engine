@@ -9,12 +9,12 @@ import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
@@ -51,8 +51,8 @@ class InstalledPackagesScreen extends TerminalScreen {
     private List<NodeInstance> runningInstances;
     private final NodeCommands nodeCommands;
     
-    public InstalledPackagesScreen(String name, SystemTerminalContainer terminal, InputDevice keyboard, NodeCommands nodeCommands) {
-        super(name, terminal, keyboard);
+    public InstalledPackagesScreen(String name, SystemTerminalContainer terminal, NodeCommands nodeCommands) {
+        super(name, terminal);
         this.menuBasePath = ContextPath.of("installed-packages");
         this.nodeCommands = nodeCommands;
     }
@@ -117,7 +117,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 if (packages == null || packages.isEmpty()) {
                     return terminal.printAt(5, 10, "No packages installed")
                         .thenCompose(v2 -> terminal.printAt(7, 10, "Press any key to go back..."))
-                        .thenRun(() -> waitForAnyKey(() -> goBack()));
+                        .thenRun(() ->terminal.waitForKeyPress(() -> goBack()));
                 }
                 
                 CompletableFuture<Void> future = terminal.printAt(5, 10, 
@@ -150,7 +150,15 @@ class InstalledPackagesScreen extends TerminalScreen {
         return runningInstances.stream()
             .anyMatch(inst -> inst.getPackageId().equals(pkg.getPackageId()));
     }
-    
+
+    private NoteBytesReadOnly handlerId = null;
+
+    private void removeKeyPressHandler(){
+        if(handlerId != null){
+            terminal.removeKeyDownHandler(handlerId);
+        }
+    }
+    // TODO: use MenuNavigator
     private void startListNavigation() {
         KeyRunTable navKeys = new KeyRunTable(
             new NoteBytesRunnablePair(KeyCodeBytes.UP, () -> {
@@ -162,18 +170,18 @@ class InstalledPackagesScreen extends TerminalScreen {
                 render();
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ENTER, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 selectedPackage = packages.get(selectedIndex);
                 currentView = View.PACKAGE_DETAILS;
                 render();
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 goBack();
             })
         );
         
-        keyboard.setEventConsumer(event -> handleKeyEvent(event, navKeys));
+        handlerId = terminal.addKeyDownHandler(event -> handleKeyEvent(event, navKeys));
     }
     
     // ===== PACKAGE DETAILS =====
@@ -215,7 +223,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== LOAD INSTANCE =====
     
     private void loadInstance() {
-        keyboard.setEventConsumer(null);
+    
         currentView = View.LOADING_INSTANCE;
         render();
         
@@ -231,7 +239,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                         "State: " + instance.getState()))
                     .thenCompose(v -> terminal.printAt(11, 10, 
                         "Press any key to continue..."))
-                    .thenRun(() -> waitForAnyKey(() -> loadPackages()));
+                    .thenRun(() ->terminal.waitForKeyPress(() -> loadPackages()));
             })
             .exceptionally(ex -> {
                 terminal.clear()
@@ -239,7 +247,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                     .thenCompose(v -> terminal.printAt(7, 10, "Error: " + ex.getMessage()))
                     .thenCompose(v -> terminal.printAt(10, 10, 
                         "Press any key to continue..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() ->terminal.waitForKeyPress(() -> {
                         currentView = View.PACKAGE_DETAILS;
                         render();
                     }));
@@ -258,13 +266,12 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== CONFIGURE PACKAGE =====
     
     private void configurePackage() {
-        keyboard.setEventConsumer(null);
+     
         
         // Launch PackageConfigurationScreen
         PackageConfigurationScreen configScreen = new PackageConfigurationScreen(
             "package-config",
             terminal,
-            keyboard,
             selectedPackage,
             nodeCommands
         );
@@ -281,7 +288,6 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== DETAILED VIEW =====
     
     private void showDetailedView() {
-        keyboard.setEventConsumer(null);
         
         terminal.clear()
             .thenCompose(v -> terminal.printTitle("Package Details"))
@@ -306,7 +312,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 " capabilities granted"))
             .thenCompose(v -> terminal.printAt(22, 10, 
                 "Press any key to return..."))
-            .thenRun(() -> waitForAnyKey(() -> {
+            .thenRun(() ->terminal.waitForKeyPress(() -> {
                 currentView = View.PACKAGE_DETAILS;
                 render();
             }));
@@ -315,8 +321,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== UNINSTALL =====
     
     private void launchUninstallScreen() {
-        keyboard.setEventConsumer(null);
-        
+  
         // Check if package has running instances
         if (isPackageRunning(selectedPackage)) {
             terminal.clear()
@@ -329,7 +334,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                     "Use 'Running Instances' screen to stop them"))
                 .thenCompose(v -> terminal.printAt(12, 10, 
                     "Press any key to return..."))
-                .thenRun(() -> waitForAnyKey(() -> {
+                .thenRun(() ->terminal.waitForKeyPress(() -> {
                     currentView = View.PACKAGE_DETAILS;
                     render();
                 }));
@@ -340,7 +345,6 @@ class InstalledPackagesScreen extends TerminalScreen {
         PackageUninstallScreen uninstallScreen = new PackageUninstallScreen(
             "package-uninstall",
             terminal,
-            keyboard,
             selectedPackage,
             nodeCommands
         );
@@ -355,7 +359,6 @@ class InstalledPackagesScreen extends TerminalScreen {
     }
     
     private void backToList() {
-        keyboard.setEventConsumer(null);
         currentView = View.PACKAGE_LIST;
         render();
     }
@@ -374,10 +377,9 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private void startConfirmation() {
         TerminalInputReader inputReader = new TerminalInputReader(terminal, 12, 40, 20);
-        keyboard.setEventConsumer(inputReader.getEventConsumer());
+ 
         
         inputReader.setOnComplete(input -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             
             if ("CONFIRM".equals(input)) {
@@ -386,7 +388,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 terminal.clear()
                     .thenCompose(v -> terminal.printError("Confirmation failed"))
                     .thenCompose(v -> terminal.printAt(10, 10, "Press any key..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() ->terminal.waitForKeyPress(() -> {
                         currentView = View.PACKAGE_DETAILS;
                         render();
                     }));
@@ -394,7 +396,6 @@ class InstalledPackagesScreen extends TerminalScreen {
         });
         
         inputReader.setOnEscape(text -> {
-            keyboard.setEventConsumer(null);
             inputReader.close();
             currentView = View.PACKAGE_DETAILS;
             render();
@@ -411,7 +412,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 terminal.clear()
                     .thenCompose(v2 -> terminal.printSuccess("✓ Package uninstalled"))
                     .thenCompose(v2 -> terminal.printAt(7, 10, "Press any key..."))
-                    .thenRun(() -> waitForAnyKey(() -> {
+                    .thenRun(() ->terminal.waitForKeyPress(() -> {
                         selectedPackage = null;
                         currentView = View.PACKAGE_LIST;
                         loadPackages();
@@ -476,16 +477,16 @@ class InstalledPackagesScreen extends TerminalScreen {
             new NoteBytesRunnablePair(KeyCodeBytes.DOWN, () -> 
                 selectedIndex[0] = (selectedIndex[0] + 1) % items.size()),
             new NoteBytesRunnablePair(KeyCodeBytes.ENTER, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 menu.navigate(items.get(selectedIndex[0]).name);
             }),
             new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, () -> {
-                keyboard.setEventConsumer(null);
+                removeKeyPressHandler();
                 backToList();
             })
         );
         
-        keyboard.setEventConsumer(event -> handleKeyEvent(event, navKeys));
+         handlerId = terminal.addKeyDownHandler(event -> handleKeyEvent(event, navKeys));
     }
     
     private void handleKeyEvent(Object event, KeyRunTable keys) {
@@ -500,18 +501,13 @@ class InstalledPackagesScreen extends TerminalScreen {
         }
     }
     
-    private void waitForAnyKey(Runnable callback) {
-        keyboard.setEventConsumer(event -> {
-            keyboard.setEventConsumer(null);
-            callback.run();
-        });
-    }
+    
     
     private CompletableFuture<Void> showError(String message) {
         return terminal.clear()
             .thenCompose(v -> terminal.printError(message))
             .thenCompose(v -> terminal.printAt(10, 10, "Press any key..."))
-            .thenRun(() -> waitForAnyKey(() -> goBack()));
+            .thenRun(() -> terminal.waitForKeyPress(() -> goBack()));
     }
     
     private void goBack() {
@@ -526,7 +522,6 @@ class InstalledPackagesScreen extends TerminalScreen {
     }
     
     private void cleanup() {
-        keyboard.setEventConsumer(null);
         
         if (passwordReader != null) {
             passwordReader.close();

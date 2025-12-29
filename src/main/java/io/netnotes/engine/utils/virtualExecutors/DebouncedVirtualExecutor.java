@@ -7,69 +7,100 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * A debounced executor that ensures only the final task in a series of rapid
- * submissions is executed, after a quiet period.
+ * A debounced executor with configurable execution strategies.
  * 
- * Pattern:
- * - Multiple rapid submissions cancel previous pending tasks
- * - Only the last submission executes after the debounce delay
- * - All submissions return the same future that completes with the final result
+ * Strategies:
+ * - TRAILING: Execute only the last task after quiet period (default)
+ * - LEADING: Execute first task immediately, suppress subsequent until quiet period
+ * - HYBRID: Execute first immediately AND last after quiet period
  * 
  * Example:
  * <pre>
- * DebouncedVirtualExecutor&lt;Void&gt; resizer = new DebouncedVirtualExecutor&lt;&gt;(100, TimeUnit.MILLISECONDS);
+ * // Trailing (default): only last call executes after delay
+ * var trailing = new DebouncedVirtualExecutor&lt;&gt;(100, TimeUnit.MILLISECONDS);
  * 
- * // Rapid calls - only last one executes
- * resizer.submit(() -&gt; resize(80, 24));   // Canceled
- * resizer.submit(() -&gt; resize(90, 30));   // Canceled
- * resizer.submit(() -&gt; resize(100, 40));  // Executes after 100ms
+ * // Leading: first call executes immediately, others suppressed
+ * var leading = new DebouncedVirtualExecutor&lt;&gt;(
+ *     100, TimeUnit.MILLISECONDS, 
+ *     DebounceStrategy.LEADING
+ * );
+ * 
+ * // Hybrid: first executes immediately, last executes after delay
+ * var hybrid = new DebouncedVirtualExecutor&lt;&gt;(
+ *     100, TimeUnit.MILLISECONDS,
+ *     DebounceStrategy.HYBRID
+ * );
  * </pre>
  */
 public final class DebouncedVirtualExecutor<T> {
 
+    public enum DebounceStrategy {
+        /** Execute only the last task after quiet period */
+        TRAILING,
+        /** Execute first task immediately, suppress subsequent until quiet period */
+        LEADING,
+        /** Execute first task immediately AND last task after quiet period */
+        HYBRID
+    }
+
     private final SerializedScheduledVirtualExecutor executor;
     private final long debounceDelay;
     private final TimeUnit debounceUnit;
+    private final DebounceStrategy strategy;
     private final AtomicReference<PendingTask<T>> pendingTask = new AtomicReference<>();
     private final Consumer<Throwable> errorHandler;
+    
+    // For LEADING and HYBRID: track if we're in cooldown period
+    private volatile long lastExecutionTime = 0;
 
     /**
-     * Create a debounced executor with specified delay.
-     * 
-     * @param debounceDelay the delay after last submission before execution
-     * @param debounceUnit the time unit of the delay
+     * Create a debounced executor with TRAILING strategy.
      */
     public DebouncedVirtualExecutor(long debounceDelay, TimeUnit debounceUnit) {
-        this(debounceDelay, debounceUnit, null);
+        this(debounceDelay, debounceUnit, DebounceStrategy.TRAILING, null);
     }
 
     /**
-     * Create a debounced executor with specified delay and error handler.
-     * 
-     * @param debounceDelay the delay after last submission before execution
-     * @param debounceUnit the time unit of the delay
-     * @param errorHandler optional handler for task errors (null = propagate to future)
+     * Create a debounced executor with specified strategy.
      */
     public DebouncedVirtualExecutor(long debounceDelay, TimeUnit debounceUnit, 
+                                   DebounceStrategy strategy) {
+        this(debounceDelay, debounceUnit, strategy, null);
+    }
+
+    /**
+     * Create a debounced executor with specified strategy and error handler.
+     */
+    public DebouncedVirtualExecutor(long debounceDelay, TimeUnit debounceUnit, 
+                                   DebounceStrategy strategy,
                                    Consumer<Throwable> errorHandler) {
         this.executor = new SerializedScheduledVirtualExecutor();
         this.debounceDelay = debounceDelay;
         this.debounceUnit = debounceUnit;
+        this.strategy = strategy;
         this.errorHandler = errorHandler;
     }
 
     /**
-     * Submit a task for debounced execution.
-     * 
-     * Behavior:
-     * - Cancels any previously pending task
-     * - Schedules new task to execute after debounce delay
-     * - Returns a future that completes when task executes (or is canceled)
-     * 
-     * @param task the task to execute
-     * @return a CompletableFuture that completes with the result
+     * Submit a task for debounced execution according to the configured strategy.
      */
     public CompletableFuture<T> submit(Callable<T> task) {
+        long now = System.nanoTime();
+        long debounceNanos = debounceUnit.toNanos(debounceDelay);
+        boolean inCooldown = (now - lastExecutionTime) < debounceNanos;
+
+        switch (strategy) {
+            case LEADING:
+                return submitLeading(task, inCooldown, now, debounceNanos);
+            case HYBRID:
+                return submitHybrid(task, inCooldown, now, debounceNanos);
+            case TRAILING:
+            default:
+                return submitTrailing(task);
+        }
+    }
+
+    private CompletableFuture<T> submitTrailing(Callable<T> task) {
         CompletableFuture<T> future = new CompletableFuture<>();
 
         CompletableFuture<Void> scheduled = executor.schedule(() -> {
@@ -96,6 +127,91 @@ public final class DebouncedVirtualExecutor<T> {
         return future;
     }
 
+    private CompletableFuture<T> submitLeading(Callable<T> task, boolean inCooldown, 
+                                               long now, long debounceNanos) {
+        if (!inCooldown) {
+            // Execute immediately - we're not in cooldown
+            lastExecutionTime = now;
+            CompletableFuture<T> future = new CompletableFuture<>();
+            
+            executor.execute(() -> {
+                try {
+                    future.complete(task.call());
+                } catch (Throwable t) {
+                    if (errorHandler != null) errorHandler.accept(t);
+                    future.completeExceptionally(t);
+                }
+            });
+            
+            // Schedule cooldown reset
+            executor.schedule(() -> {
+                // Cooldown period ended
+            }, debounceDelay, debounceUnit);
+            
+            return future;
+        } else {
+            // In cooldown - suppress this call
+            // Return a cancelled future to indicate suppression
+            CompletableFuture<T> future = new CompletableFuture<>();
+            future.cancel(false);
+            return future;
+        }
+    }
+
+    private CompletableFuture<T> submitHybrid(Callable<T> task, boolean inCooldown,
+                                             long now, long debounceNanos) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+
+        if (!inCooldown) {
+            // Execute immediately - this is the first in a burst
+            lastExecutionTime = now;
+            
+            executor.execute(() -> {
+                try {
+                    future.complete(task.call());
+                } catch (Throwable t) {
+                    if (errorHandler != null) errorHandler.accept(t);
+                    future.completeExceptionally(t);
+                }
+            });
+        }
+
+        // Always schedule the trailing execution (cancel previous if exists)
+        CompletableFuture<Void> scheduled = executor.schedule(() -> {
+            PendingTask<T> current = pendingTask.getAndSet(null);
+            if (current == null) return;
+
+            // Only execute if this wasn't the leading edge execution
+            if (inCooldown) {
+                try {
+                    T result = current.task.call();
+                    current.future.complete(result);
+                } catch (Throwable t) {
+                    if (errorHandler != null) errorHandler.accept(t);
+                    current.future.completeExceptionally(t);
+                }
+            }
+        }, debounceDelay, debounceUnit);
+
+        // For hybrid: if we executed immediately, return that future
+        // Otherwise, set up trailing execution
+        if (inCooldown) {
+            PendingTask<T> next = new PendingTask<>(task, future, scheduled);
+            PendingTask<T> previous = pendingTask.getAndSet(next);
+
+            if (previous != null) {
+                previous.scheduledFuture.cancel(false);
+                previous.future.cancel(false);
+            }
+        } else {
+            // Leading edge executed, but still track for potential trailing
+            PendingTask<T> next = new PendingTask<>(task, new CompletableFuture<>(), scheduled);
+            pendingTask.set(next);
+        }
+
+        return future;
+    }
+
     public CompletableFuture<T> submit(Runnable task) {
         return submit(() -> {
             task.run();
@@ -106,18 +222,17 @@ public final class DebouncedVirtualExecutor<T> {
     /**
      * Execute a task immediately, bypassing debounce.
      * Cancels any pending debounced task.
-     * 
-     * @param task the task to execute
-     * @return a CompletableFuture that completes when task finishes
      */
-   public CompletableFuture<T> executeNow(Callable<T> task) {
+    public CompletableFuture<T> executeNow(Callable<T> task) {
         PendingTask<T> previous = pendingTask.getAndSet(null);
         if (previous != null) {
             previous.scheduledFuture.cancel(false);
             previous.future.cancel(false);
         }
 
+        lastExecutionTime = System.nanoTime();
         CompletableFuture<T> future = new CompletableFuture<>();
+        
         executor.execute(() -> {
             try {
                 future.complete(task.call());
@@ -130,11 +245,8 @@ public final class DebouncedVirtualExecutor<T> {
         return future;
     }
 
-
     /**
      * Cancel any pending task.
-     * 
-     * @return true if a task was canceled, false if no task was pending
      */
     public boolean cancel() {
         PendingTask<T> task = pendingTask.getAndSet(null);
@@ -148,8 +260,6 @@ public final class DebouncedVirtualExecutor<T> {
 
     /**
      * Check if there is a pending task waiting to execute.
-     * 
-     * @return true if a task is pending
      */
     public boolean hasPending() {
         PendingTask<T> task = pendingTask.get();
@@ -158,8 +268,6 @@ public final class DebouncedVirtualExecutor<T> {
 
     /**
      * Get the current pending task's future (if any).
-     * 
-     * @return the pending future, or null if no task is pending
      */
     public CompletableFuture<T> getPendingFuture() {
         PendingTask<T> task = pendingTask.get();
@@ -167,47 +275,44 @@ public final class DebouncedVirtualExecutor<T> {
     }
 
     /**
-     * Shutdown the executor gracefully.
-     * Any pending task will still execute.
+     * Get the configured strategy.
      */
+    public DebounceStrategy getStrategy() {
+        return strategy;
+    }
+
     public void shutdown() {
         executor.shutdown();
     }
 
-    /**
-     * Shutdown the executor immediately.
-     * Cancels any pending task.
-     * 
-     * @return true if a task was canceled
-     */
     public boolean shutdownNow() {
         boolean hadPending = cancel();
         executor.shutdownNow();
         return hadPending;
     }
 
-    /**
-     * Wait for executor to terminate.
-     * 
-     * @param timeout the maximum time to wait
-     * @param unit the time unit of the timeout
-     * @return true if terminated, false if timeout elapsed
-     */
     public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
         return executor.awaitTermination(timeout, unit);
     }
 
-    /**
-     * Check if executor is shut down.
-     */
     public boolean isShutdown() {
         return executor.isShutdown();
     }
 
-    /**
-     * Check if executor is terminated.
-     */
     public boolean isTerminated() {
         return executor.isTerminated();
+    }
+
+    private static class PendingTask<T> {
+        final Callable<T> task;
+        final CompletableFuture<T> future;
+        final CompletableFuture<Void> scheduledFuture;
+
+        PendingTask(Callable<T> task, CompletableFuture<T> future, 
+                   CompletableFuture<Void> scheduledFuture) {
+            this.task = task;
+            this.future = future;
+            this.scheduledFuture = scheduledFuture;
+        }
     }
 }

@@ -1,20 +1,23 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 public final class MouseButtonUpEvent implements RoutedEvent {
     private final ContextPath sourcePath;
     private final int button;
     private final double x;
     private final double y;
-    private final int stateFlags;
+    private int stateFlags;
+    private final NoteBytesReadOnly typeBytes;
 
-    public MouseButtonUpEvent(ContextPath sourcePath, int button, double x, double y, int stateFlags) {
+    public MouseButtonUpEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes , int stateFlags, int button, double x, double y) {
         this.sourcePath = sourcePath;
         this.button = button;
         this.x = x;
         this.y = y;
         this.stateFlags = stateFlags;
+        this.typeBytes = typeBytes;
     }
 
     @Override
@@ -22,6 +25,11 @@ public final class MouseButtonUpEvent implements RoutedEvent {
     public int button() { return button; }
     public double x() { return x; }
     public double y() { return y; }
-    public int stateFlags() { return stateFlags; }
+    @Override
+    public int getStateFlags() { return stateFlags; }
+
+    public void setStateFlags(int flags) { stateFlags = flags; }
+    @Override
+    public NoteBytesReadOnly getEventTypeBytes() { return typeBytes; }
 }
 

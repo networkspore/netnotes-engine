@@ -6,6 +6,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
+
 public class VirtualExecutors {
     
     // Traditional executors (for compatibility)
@@ -53,9 +55,9 @@ public class VirtualExecutors {
     public static SerializedScheduledVirtualExecutor getSerializedScheduledVirtualExecutor() {
         return serializedScheduledVirtual;
     }
-    
+
     /**
-     * Create a new DebouncedVirtualExecutor with specified delay.
+     *  Create a debounced executor with TRAILING strategy with specified delay.
      * Each instance maintains its own debounce state.
      * 
      * @param <T> the result type
@@ -75,11 +77,13 @@ public class VirtualExecutors {
      * @return a new DebouncedVirtualExecutor
      */
     public static <T> DebouncedVirtualExecutor<T> createDebouncedExecutor(
-            long delayMs, 
+            long delayMs,
+            DebounceStrategy debounceStrategy,
             Consumer<Throwable> errorHandler) {
         return new DebouncedVirtualExecutor<>(
             delayMs, 
-            TimeUnit.MILLISECONDS, 
+            TimeUnit.MILLISECONDS,
+            debounceStrategy, 
             errorHandler
         );
     }
