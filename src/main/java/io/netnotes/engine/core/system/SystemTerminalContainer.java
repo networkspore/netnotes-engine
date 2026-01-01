@@ -8,11 +8,10 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.ClaimedDevice;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
-import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
@@ -307,6 +306,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }
     }
 
+    
     /**
      * Load bootstrap config from disk
      */
@@ -731,14 +731,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return currentScreen;
     }
     
-    @Override
-    protected void onContainerResized(ContainerResizeEvent event) {
-        setDimensions(event.getWidth(), event.getHeight());
-        
-        if (currentScreen != null) {
-            currentScreen.render();
-        }
-    }
 
     @Override
     protected void onContainerClosed() {

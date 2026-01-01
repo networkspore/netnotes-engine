@@ -156,14 +156,14 @@ public class JarHelpers {
     }
 
 
-    public static URL getLocation(final Class<?> c) throws URISyntaxException {
+    public static URL getLocation(final Class<?> locationClass) throws URISyntaxException {
 
-        if (c == null) {
+        if (locationClass == null) {
             return null; // could not load the class
         }
         // try the easy way first
         try {
-            final URL codeSourceLocation = c.getProtectionDomain().getCodeSource().getLocation();
+            final URL codeSourceLocation = locationClass.getProtectionDomain().getCodeSource().getLocation();
             if (codeSourceLocation != null) {
                 return codeSourceLocation;
             }
@@ -177,12 +177,12 @@ public class JarHelpers {
         // itself as a resource, then strip the class's path from the URL string,
         // leaving the base path.
         // get the class's raw resource path
-        final URL classResource = c.getResource(c.getSimpleName() + ".class");
+        final URL classResource = locationClass.getResource(locationClass.getSimpleName() + ".class");
         if (classResource == null) {
             return null; // cannot find class resource
         }
         final String url = classResource.toString();
-        final String suffix = c.getCanonicalName().replace('.', '/') + ".class";
+        final String suffix = locationClass.getCanonicalName().replace('.', '/') + ".class";
         if (!url.endsWith(suffix)) {
             return null; // weird URL
         }

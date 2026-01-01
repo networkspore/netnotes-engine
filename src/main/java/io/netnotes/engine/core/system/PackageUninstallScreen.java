@@ -1,31 +1,25 @@
 package io.netnotes.engine.core.system;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
-import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
-import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.engine.noteBytes.processing.IntCounter;
 
 /**
- * PackageUninstallScreen - Comprehensive package uninstall
- * 
- * Features:
- * - Check and stop running instances
- * - Option to keep or delete data
- * - Password confirmation
- * - Progress indication
- * 
- * Note: Data browsing is a future feature
+ * PackageUninstallScreen - REFACTORED for pull-based rendering
  */
 class PackageUninstallScreen extends TerminalScreen {
     
@@ -38,14 +32,17 @@ class PackageUninstallScreen extends TerminalScreen {
     }
     
     private final InstalledPackage packageToUninstall;
-    
-    private Step currentStep = Step.CHECK_INSTANCES;
-    private List<NodeInstance> runningInstances;
-    private boolean deleteData = false;
-    private PasswordReader passwordReader;
-    private Runnable onCompleteCallback;
     private final NodeCommands nodeCommands;
+    
+    // Mutable state
+    private Step currentStep = Step.CHECK_INSTANCES;
+    private List<NodeInstance> runningInstances = new ArrayList<>();
+    private boolean deleteData = false;
     private NoteBytesReadOnly keyDownHandlerId;
+    private TerminalInputReader inputReader;
+    private Runnable onCompleteCallback;
+    private String errorMessage = null;
+    private String statusMessage = null;
     
     public PackageUninstallScreen(
         String name,
@@ -65,7 +62,8 @@ class PackageUninstallScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         currentStep = Step.CHECK_INSTANCES;
-        return render();
+        checkRunningInstances();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
@@ -73,365 +71,407 @@ class PackageUninstallScreen extends TerminalScreen {
         cleanup();
     }
     
+    // ===== PULL-BASED RENDERING =====
+    
     @Override
-    public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> {
-                switch (currentStep) {
-                    case CHECK_INSTANCES:
-                        return checkRunningInstances();
-                    case SHOW_OPTIONS:
-                        return renderUninstallOptions();
-                    case PASSWORD_CONFIRM:
-                        return renderConfirm();
-                    case UNINSTALLING:
-                        return renderUninstalling();
-                    case COMPLETE:
-                        return renderComplete();
-                    default:
-                        return CompletableFuture.completedFuture(null);
-                }
-            });
+    public RenderState getRenderState() {
+        return switch (currentStep) {
+            case CHECK_INSTANCES -> buildCheckInstancesState();
+            case SHOW_OPTIONS -> buildShowOptionsState();
+            case PASSWORD_CONFIRM -> buildPasswordConfirmState();
+            case UNINSTALLING -> buildUninstallingState();
+            case COMPLETE -> buildCompleteState();
+        };
     }
     
-    // ===== STEP 1: CHECK RUNNING INSTANCES =====
+    // ===== STATE BUILDERS =====
     
-    private CompletableFuture<Void> checkRunningInstances() {
-        return terminal.printTitle("Uninstall Package")
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Checking for running instances..."))
-            .thenCompose(v -> nodeCommands.getInstancesByPackage(
-                packageToUninstall.getPackageId()))
-            .thenCompose(instances -> {
+    private RenderState buildCheckInstancesState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        if (runningInstances.isEmpty() && statusMessage == null) {
+            // Still checking
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 17) / 2, "Uninstall Package", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "Checking for running instances...", gen));
+        } else if (runningInstances.isEmpty()) {
+            // No instances, ready to proceed
+            return buildShowOptionsState();
+        } else {
+            // Has instances - show warning
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 17) / 2, "Cannot Uninstall", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "⚠️ Package has running instances", 
+                    TextStyle.WARNING, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(7, 10, "Package: " + packageToUninstall.getName(), gen));
+            builder.add((term, gen) -> 
+                term.printAt(8, 10, "Running instances: " + runningInstances.size(), gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(10, 10, "The following instances must be stopped first:", 
+                    TextStyle.BOLD, gen));
+            
+            IntCounter row = new IntCounter(12);
+            for (NodeInstance instance : runningInstances) {
+                row.increment();
+                final int currentRow = row.get();
+                builder.add((term, gen) -> 
+                    term.printAt(currentRow, 12, "• " + instance.getInstanceId() + 
+                        " [" + instance.getProcessId() + "]", gen));
+            }
+            
+            // Menu
+            builder.add((term, gen) -> 
+                term.printAt(row.get() + 2, 10, "1. Stop All Instances", gen));
+            builder.add((term, gen) -> 
+                term.printAt(row.get() + 3, 10, "2. Cancel Uninstall", gen));
+            builder.add((term, gen) -> 
+                term.printAt(row.get() + 5, 10, "Select option (or ESC to cancel):", 
+                    TextStyle.INFO, gen));
+        }
+        
+        return builder.build();
+    }
+    
+    private RenderState buildShowOptionsState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 17) / 2, "Uninstall Options", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Package: " + packageToUninstall.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(6, 10, "Version: " + packageToUninstall.getVersion(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "Data path: " + 
+                packageToUninstall.getProcessConfig().getDataRootPath(), 
+                TextStyle.INFO, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "Choose uninstall option:", TextStyle.BOLD, gen));
+        
+        // Menu
+        builder.add((term, gen) -> 
+            term.printAt(12, 10, "1. Uninstall but keep data", gen));
+        builder.add((term, gen) -> 
+            term.printAt(13, 10, "2. Uninstall and delete all data", gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(15, 10, "─".repeat(40), gen));
+        builder.add((term, gen) -> 
+            term.printAt(16, 10, "Future Features", TextStyle.INFO, gen));
+        builder.add((term, gen) -> 
+            term.printAt(17, 12, "(Browse data - Coming Soon)", TextStyle.INFO, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(19, 10, "─".repeat(40), gen));
+        builder.add((term, gen) -> 
+            term.printAt(20, 10, "3. Cancel Uninstall", gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(22, 10, "Select option (or ESC to cancel):", 
+                TextStyle.INFO, gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildPasswordConfirmState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 17) / 2, "Confirm Uninstall", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "⚠️ WARNING", TextStyle.WARNING, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "You are about to uninstall:", gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 12, "Package: " + packageToUninstall.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(9, 12, "Version: " + packageToUninstall.getVersion(), gen));
+        
+        String dataMsg = deleteData ? "Data will be DELETED" : "Data will be KEPT";
+        TextStyle dataStyle = deleteData ? TextStyle.WARNING : TextStyle.SUCCESS;
+        builder.add((term, gen) -> 
+            term.printAt(11, 10, dataMsg, dataStyle, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(13, 10, "Type 'CONFIRM' to proceed:", gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildUninstallingState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 20) / 2, "Uninstalling Package", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Uninstalling...", gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Please wait...", TextStyle.INFO, gen));
+        
+        if (statusMessage != null) {
+            builder.add((term, gen) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+        }
+        
+        return builder.build();
+    }
+    
+    private RenderState buildCompleteState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        if (errorMessage != null) {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 18) / 2, "Uninstall Failed", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "✗ Uninstall failed", TextStyle.ERROR, gen));
+            builder.add((term, gen) -> 
+                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR, gen));
+        } else {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 18) / 2, "Uninstall Complete", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "✓ Package uninstalled successfully", 
+                    TextStyle.SUCCESS, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(7, 10, "Package: " + packageToUninstall.getName(), gen));
+            
+            String dataMsg = deleteData ? "Data deleted" : "Data preserved";
+            builder.add((term, gen) -> 
+                term.printAt(8, 10, dataMsg, TextStyle.INFO, gen));
+        }
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "Press any key to return...", gen));
+        
+        return builder.build();
+    }
+    
+    // ===== STATE TRANSITIONS =====
+    
+    private void transitionTo(Step newStep) {
+        currentStep = newStep;
+        invalidate();
+        
+        switch (newStep) {
+            case CHECK_INSTANCES -> checkRunningInstances();
+            case SHOW_OPTIONS -> setupOptionsInput();
+            case PASSWORD_CONFIRM -> startConfirmationEntry();
+            case UNINSTALLING -> performUninstall();
+            case COMPLETE -> setupCompleteInput();
+        }
+    }
+    
+    // ===== ACTIONS =====
+    
+    private void checkRunningInstances() {
+        statusMessage = "Checking...";
+        invalidate();
+        
+        nodeCommands.getInstancesByPackage(packageToUninstall.getPackageId())
+            .thenAccept(instances -> {
                 this.runningInstances = instances;
+                statusMessage = null;
                 
                 if (instances.isEmpty()) {
-                    currentStep = Step.SHOW_OPTIONS;
-                    return render();
+                    transitionTo(Step.SHOW_OPTIONS);
                 } else {
-                    return showRunningInstancesWarning();
+                    setupInstanceStopInput();
+                    invalidate();
                 }
-            });
-    }
-    
-    private CompletableFuture<Void> showRunningInstancesWarning() {
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Cannot Uninstall"))
-            .thenCompose(v -> terminal.printError(
-                "⚠️  Package has running instances"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "Package: " + packageToUninstall.getName()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                "Running instances: " + runningInstances.size()))
-            .thenCompose(v -> terminal.printAt(10, 10, 
-                "The following instances must be stopped first:"))
-            .thenCompose(v -> {
-                CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-                int row = 12;
-                for (NodeInstance instance : runningInstances) {
-                    final int currentRow = row++;
-                    future = future.thenCompose(v2 -> terminal.printAt(currentRow, 12, 
-                        "• " + instance.getInstanceId() + " [" + 
-                        instance.getProcessId() + "]"));
-                }
-                return future;
-            })
-            .thenCompose(v -> showInstanceStopMenu());
-    }
-    
-    private CompletableFuture<Void> showInstanceStopMenu() {
-        ContextPath basePath = ContextPath.of("uninstall", "stop-instances");
-        MenuContext menu = new MenuContext(basePath, "Options")
-            .addItem("stop-all", "Stop All Instances", this::stopAllInstances)
-            .addItem("cancel", "Cancel Uninstall", this::cancelUninstall);
-        
-        return renderMenu(menu, 18);
-    }
-    
-    private void stopAllInstances() {
-     
-        terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Stopping Instances"))
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Stopping " + runningInstances.size() + " instances..."))
-            .thenCompose(v -> {
-                List<CompletableFuture<Void>> stopFutures = runningInstances.stream()
-                    .map(inst -> nodeCommands.unloadNode(inst.getInstanceId()))
-                    .toList();
-                
-                return CompletableFuture.allOf(
-                    stopFutures.toArray(new CompletableFuture[0]));
-            })
-            .thenAccept(v -> {
-                terminal.clear()
-                    .thenCompose(v2 -> terminal.printSuccess("✓ All instances stopped"))
-                    .thenCompose(v2 -> terminal.printAt(7, 10, 
-                        "Press any key to continue..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> {
-                        currentStep = Step.SHOW_OPTIONS;
-                        render();
-                    }));
             })
             .exceptionally(ex -> {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
-                        "Failed to stop instances: " + ex.getMessage()))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to retry..."))
-                    .thenRun(() -> terminal.waitForKeyPress(this::checkRunningInstances));
+                errorMessage = "Failed to check instances: " + ex.getMessage();
+                transitionTo(Step.COMPLETE);
                 return null;
             });
     }
     
-    private void cancelUninstall() {
-
-        if (onCompleteCallback != null) {
-            onCompleteCallback.run();
-        }
-    }
-    
-    // ===== STEP 2: SHOW UNINSTALL OPTIONS =====
-    
-    private CompletableFuture<Void> renderUninstallOptions() {
-        return terminal.printTitle("Uninstall Options")
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Package: " + packageToUninstall.getName()))
-            .thenCompose(v -> terminal.printAt(6, 10, 
-                "Version: " + packageToUninstall.getVersion()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                "Data path: " + packageToUninstall.getProcessConfig().getDataRootPath()))
-            .thenCompose(v -> terminal.printAt(10, 10, 
-                "Choose uninstall option:"))
-            .thenCompose(v -> showDataOptionsMenu());
-    }
-    
-    private CompletableFuture<Void> showDataOptionsMenu() {
-        ContextPath basePath = ContextPath.of("uninstall", "data-options");
-        MenuContext menu = new MenuContext(basePath, "Data Handling")
-            .addItem("keep-data", "Uninstall but keep data", () -> {
-                deleteData = false;
-                proceedToPasswordConfirm();
-            })
-            .addItem("delete-data", "Uninstall and delete all data", () -> {
-                deleteData = true;
-                proceedToPasswordConfirm();
-            })
-            .addSeparator("Future Features")
-            .addInfoItem("browse-placeholder", 
-                "Browse data (Coming Soon)")
-            .addSeparator("Navigation")
-            .addItem("cancel", "Cancel Uninstall", this::cancelUninstall);
+    private void setupInstanceStopInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                this::stopAllInstances),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                this::stopAllInstances),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::cancelUninstall),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::cancelUninstall),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::cancelUninstall)
+        );
         
-        return renderMenu(menu, 12);
+        setupKeyHandler(keys);
     }
     
-    private void proceedToPasswordConfirm() {
-        currentStep = Step.PASSWORD_CONFIRM;
-        render();
+    private void stopAllInstances() {
+        statusMessage = "Stopping " + runningInstances.size() + " instances...";
+        invalidate();
+        
+        List<CompletableFuture<Void>> stopFutures = runningInstances.stream()
+            .map(inst -> nodeCommands.unloadNode(inst.getInstanceId()))
+            .toList();
+        
+        CompletableFuture.allOf(stopFutures.toArray(new CompletableFuture[0]))
+            .thenAccept(v -> {
+                statusMessage = "✓ All instances stopped";
+                invalidate();
+                
+                terminal.waitForKeyPress(() -> transitionTo(Step.SHOW_OPTIONS));
+            })
+            .exceptionally(ex -> {
+                errorMessage = "Failed to stop instances: " + ex.getMessage();
+                invalidate();
+                
+                terminal.waitForKeyPress(() -> transitionTo(Step.CHECK_INSTANCES));
+                return null;
+            });
     }
     
-    // ===== STEP 3: PASSWORD CONFIRM =====
-    
-    private CompletableFuture<Void> renderConfirm() {
-        return terminal.printTitle("Confirm Uninstall")
-            .thenCompose(v -> terminal.printAt(5, 10, "⚠️ WARNING"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "You are about to uninstall:"))
-            .thenCompose(v -> terminal.printAt(8, 12, 
-                "Package: " + packageToUninstall.getName()))
-            .thenCompose(v -> terminal.printAt(9, 12, 
-                "Version: " + packageToUninstall.getVersion()))
-            .thenCompose(v -> terminal.printAt(11, 10, 
-                deleteData ? "Data will be DELETED" : "Data will be KEPT"))
-            .thenCompose(v -> terminal.printAt(13, 10, 
-                "Type 'CONFIRM' to proceed:"))
-            .thenCompose(v -> terminal.moveCursor(13, 36))
-            .thenRun(this::startConfirmationEntry);
+    private void setupOptionsInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), () -> {
+                deleteData = false;
+                transitionTo(Step.PASSWORD_CONFIRM);
+            }),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), () -> {
+                deleteData = false;
+                transitionTo(Step.PASSWORD_CONFIRM);
+            }),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), () -> {
+                deleteData = true;
+                transitionTo(Step.PASSWORD_CONFIRM);
+            }),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), () -> {
+                deleteData = true;
+                transitionTo(Step.PASSWORD_CONFIRM);
+            }),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(3, false), 
+                this::cancelUninstall),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(3, true), 
+                this::cancelUninstall),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::cancelUninstall)
+        );
+        
+        setupKeyHandler(keys);
     }
     
     private void startConfirmationEntry() {
-        TerminalInputReader inputReader = new TerminalInputReader(terminal, 13, 36, 20);
-  
+        removeKeyDownHandler();
+        inputReader = new TerminalInputReader(terminal, 13, 36, 20);
         
         inputReader.setOnComplete(input -> {
-    
             inputReader.close();
+            inputReader = null;
             
             if ("CONFIRM".equals(input)) {
-                performUninstall();
+                transitionTo(Step.UNINSTALLING);
             } else {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError("Confirmation failed"))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to return..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
+                errorMessage = "Confirmation failed";
+                invalidate();
+                terminal.waitForKeyPress(() -> {
+                    errorMessage = null;
+                    transitionTo(Step.PASSWORD_CONFIRM);
+                });
             }
         });
         
         inputReader.setOnEscape(text -> {
             inputReader.close();
+            inputReader = null;
             cancelUninstall();
         });
     }
     
-    // ===== STEP 4: UNINSTALLING =====
-    
-    private CompletableFuture<Void> renderUninstalling() {
-        return terminal.printTitle("Uninstalling Package")
-            .thenCompose(v -> terminal.printAt(5, 10, "Uninstalling..."))
-            .thenCompose(v -> terminal.printAt(7, 10, "Please wait..."));
-            // TODO: Add progress bar here when progress API is ready
-        }
-        
-        private void performUninstall() {
-        currentStep = Step.UNINSTALLING;
-        render();
+    private void performUninstall() {
+        statusMessage = "Uninstalling...";
+        invalidate();
         
         nodeCommands.uninstallPackage(
                 packageToUninstall.getPackageId(),
                 deleteData
             )
             .thenAccept(v -> {
-                currentStep = Step.COMPLETE;
-                render();
+                errorMessage = null;
+                statusMessage = null;
+                transitionTo(Step.COMPLETE);
             })
             .exceptionally(ex -> {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
-                        "Uninstall failed: " + ex.getMessage()))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to return..."))
-                    .thenRun(() -> terminal.waitForKeyPress(this::cancelUninstall));
+                errorMessage = ex.getMessage();
+                statusMessage = null;
+                transitionTo(Step.COMPLETE);
                 return null;
             });
     }
     
-    // ===== STEP 5: COMPLETE =====
-    
-    private CompletableFuture<Void> renderComplete() {
-        return terminal.printTitle("Uninstall Complete")
-            .thenCompose(v -> terminal.printSuccess("✓ Package uninstalled successfully"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "Package: " + packageToUninstall.getName()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                deleteData ? "Data deleted" : "Data preserved"))
-            .thenCompose(v -> terminal.printAt(10, 10, 
-                "Press any key to return..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> {
-                if (onCompleteCallback != null) {
-                    onCompleteCallback.run();
-                }
-            }));
-    }
-    
-    // ===== UTILITIES =====
-    
-    private CompletableFuture<Void> renderMenu(MenuContext menu, int startRow) {
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
-        int row = startRow;
-        int index = 1;
-        
-        for (MenuContext.MenuItem item : menu.getItems()) {
-            if (item.type == MenuContext.MenuItemType.SEPARATOR) {
-                final int currentRow = row;
-                final String label = item.description != null ? 
-                    " " + item.description + " " : "";
-                future = future.thenCompose(v -> terminal.printAt(currentRow, 10, 
-                    "─".repeat(20) + label + "─".repeat(20)));
-                row++;
-                continue;
+    private void setupCompleteInput() {
+        removeKeyDownHandler();
+        terminal.waitForKeyPress(() -> {
+            if (onCompleteCallback != null) {
+                onCompleteCallback.run();
             }
-            
-            if (item.type == MenuContext.MenuItemType.INFO) {
-                final int currentRow = row;
-                future = future.thenCompose(v -> terminal.printAt(currentRow, 12, 
-                    "(" + item.description + ")"));
-                row++;
-                continue;
-            }
-            
-            final int currentRow = row;
-            final String itemText = String.format("%d. %s", index, item.description);
-            
-            future = future.thenCompose(v -> terminal.printAt(currentRow, 10, itemText));
-            
-            row++;
-            index++;
-        }
-        
-        final int selectRow = row + 1;
-        return future
-            .thenCompose(v -> terminal.printAt(selectRow, 10, 
-                "Select option (or ESC to cancel):"))
-            .thenRun(() -> startMenuNavigation(menu));
-    }
-    
-    private void startMenuNavigation(MenuContext menu) {
-        List<MenuContext.MenuItem> items = new java.util.ArrayList<>();
-        for (MenuContext.MenuItem item : menu.getItems()) {
-            if (item.type != MenuContext.MenuItemType.SEPARATOR &&
-                item.type != MenuContext.MenuItemType.INFO) {
-                items.add(item);
-            }
-        }
-        
-        KeyRunTable navigationKeys = new KeyRunTable();
-        
-        // Add number keys for direct selection
-        for (int i = 0; i < Math.min(items.size(), 9); i++) {
-            final int index = i;
-            navigationKeys.setKeyRunnable(
-                KeyCodeBytes.getNumeric(i, false),
-                () -> {
-                    removeKeyDownHandler();
-                    MenuContext.MenuItem selected = items.get(index);
-                    menu.navigate(selected.name);
-                }
-            );
-            navigationKeys.setKeyRunnable(
-                KeyCodeBytes.getNumeric(i, true),
-                () -> {
-                    removeKeyDownHandler();
-                    MenuContext.MenuItem selected = items.get(index);
-                    menu.navigate(selected.name);
-                }
-            );
-        }
-        
-        navigationKeys.setKeyRunnable(KeyCodeBytes.ESCAPE, () -> {
-            removeKeyDownHandler();
-            cancelUninstall();
         });
-
+    }
+    
+    private void cancelUninstall() {
+        if (onCompleteCallback != null) {
+            onCompleteCallback.run();
+        }
+    }
+    
+    // ===== INPUT MANAGEMENT =====
+    
+    private void setupKeyHandler(KeyRunTable keys) {
+        removeKeyDownHandler();
         keyDownHandlerId = terminal.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
-                        navigationKeys.run(ekd.getKeyCodeBytes());
+                        keys.run(ekd.getKeyCodeBytes());
                     }
                 }
             } else if (event instanceof KeyDownEvent keyDown) {
-                navigationKeys.run(keyDown.getKeyCodeBytes());
+                keys.run(keyDown.getKeyCodeBytes());
             }
         });
     }
-
-    private void removeKeyDownHandler(){
-        if(keyDownHandlerId != null){
+    
+    private void removeKeyDownHandler() {
+        if (keyDownHandlerId != null) {
             terminal.removeKeyDownHandler(keyDownHandlerId);
             keyDownHandlerId = null;
         }
     }
     
-
+    // ===== CLEANUP =====
     
     private void cleanup() {
         removeKeyDownHandler();
         
-        if (passwordReader != null) {
-            passwordReader.close();
-            passwordReader = null;
+        if (inputReader != null) {
+            inputReader.close();
+            inputReader = null;
         }
     }
 }

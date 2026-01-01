@@ -341,42 +341,42 @@ public class NoteIntegerArray extends NoteBytes {
         char quoteChar = 0;
 
         for (int i = 0; i < str.length(); i++) {
-            char c = str.charAt(i);
+            char strChar = str.charAt(i);
 
             if (escape) {
-                current.append(c);
+                current.append(strChar);
                 escape = false;
                 continue;
             }
 
-            if (c == '\\') {
+            if (strChar == '\\') {
                 if (!preserveQuotes || inQuotes) {
                     escape = true;
                 } else {
-                    current.append(c);
+                    current.append(strChar);
                 }
                 continue;
             }
 
-            if ((c == '"' || c == '\'') && !inQuotes) {
+            if ((strChar == '"' || strChar == '\'') && !inQuotes) {
                 inQuotes = true;
-                quoteChar = c;
+                quoteChar = strChar;
                 if (preserveQuotes) {
-                    current.append(c);
+                    current.append(strChar);
                 }
                 continue;
             }
 
-            if (inQuotes && c == quoteChar) {
+            if (inQuotes && strChar == quoteChar) {
                 inQuotes = false;
                 if (preserveQuotes) {
-                    current.append(c);
+                    current.append(strChar);
                 }
                 quoteChar = 0;
                 continue;
             }
 
-            if (Character.isWhitespace(c) && !inQuotes) {
+            if (Character.isWhitespace(strChar) && !inQuotes) {
                 if (current.length() > 0) {
                     tokens.add(current.toString());
                     current.setLength(0);
@@ -384,7 +384,7 @@ public class NoteIntegerArray extends NoteBytes {
                 continue;
             }
 
-            current.append(c);
+            current.append(strChar);
         }
 
         if (current.length() > 0) {

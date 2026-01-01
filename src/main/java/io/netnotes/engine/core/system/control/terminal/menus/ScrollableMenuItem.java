@@ -3,7 +3,7 @@ package io.netnotes.engine.core.system.control.terminal.menus;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 
 /**

@@ -4,24 +4,27 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
+import io.netnotes.engine.core.system.control.terminal.RenderManager;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
+import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
- * PasswordPrompt - Reusable secure password entry with optional confirmation
+ * PasswordPrompt - REFACTORED for pull-based rendering
  * 
- * Features:
- * - Automatic password keyboard claiming/releasing
- * - Optional confirmation step (for password creation/change)
- * - Timeout handling
- * - Keeps keyboard claimed during confirmation (no release between steps)
- * - Clean error handling and lifecycle management
+ * Now implements Renderable and works with RenderManager.
+ * Can be used as the active screen during password entry.
  * 
- * Usage (Simple):
+ * Usage:
  * <pre>
- * new PasswordPrompt(terminal)
+ * PasswordPrompt prompt = new PasswordPrompt(terminal)
  *     .withTitle("Authentication")
  *     .withPrompt("Enter password:")
  *     .onPassword(password -> {
@@ -30,51 +33,143 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  *     })
  *     .show();
  * </pre>
- * 
- * Usage (With Confirmation):
- * <pre>
- * new PasswordPrompt(terminal)
- *     .withTitle("Create Password")
- *     .withPrompt("Enter password:")
- *     .withConfirmation("Confirm password:")
- *     .onPassword(password -> {
- *         // Password confirmed and matches
- *         password.close();
- *     })
- *     .onMismatch(() -> {
- *         // Passwords didn't match, user can retry
- *     })
- *     .show();
- * </pre>
  */
-public class PasswordPrompt {
+public class PasswordPrompt implements Renderable {
     
     private final SystemTerminalContainer terminal;
+    private final RenderManager renderManager;
     
     // Configuration
     private String title = "Authentication";
     private String prompt = "Enter password:";
-    private String confirmPrompt = null;  // null = no confirmation
+    private String confirmPrompt = null;
     private int timeoutSeconds = 30;
-    private int promptRow = 5;
-    private int promptCol = 10;
+    private int promptRow = -1;
+    private int promptCol = -1;
     
     // Callbacks
     private java.util.function.Consumer<NoteBytesEphemeral> onPassword;
     private Runnable onTimeout;
     private Runnable onCancel;
     private Runnable onError;
-    private Runnable onMismatch;  // Called when confirmation doesn't match
+    private Runnable onMismatch;
     
-    // Runtime state
+    // Runtime state (mutable)
+    private enum State {
+        INACTIVE,           // Not shown
+        PROMPTING,          // Showing first password prompt
+        CONFIRMING,         // Showing confirmation prompt
+        PROCESSING          // Processing password (verifying, etc.)
+    }
+    
+    private volatile State currentState = State.INACTIVE;
+    private volatile String currentPromptText = null;
+    private volatile String statusMessage = null;  // For error/info messages
+    
+    // Internal components
     private PasswordReader passwordReader;
     private CompletableFuture<Void> timeoutFuture;
-    private boolean isActive = false;
-    private boolean isConfirming = false;
-    private NoteBytesEphemeral firstPassword = null;  // Stored during confirmation
+    private NoteBytesEphemeral firstPassword = null;
     
     public PasswordPrompt(SystemTerminalContainer terminal) {
         this.terminal = terminal;
+        this.renderManager = terminal.getRenderManager();
+    }
+    
+    // ===== RENDERABLE INTERFACE =====
+    
+    @Override
+    public RenderState getRenderState() {
+        return switch (currentState) {
+            case INACTIVE -> buildInactiveState();
+            case PROMPTING, CONFIRMING -> buildPromptState();
+            case PROCESSING -> buildProcessingState();
+        };
+    }
+    
+    /**
+     * Build inactive state (shouldn't be rendered)
+     */
+    private RenderState buildInactiveState() {
+        return RenderState.builder().build();
+    }
+    
+    /**
+     * Build password prompt state
+     */
+    private RenderState buildPromptState() {
+        // Calculate box position - if position specified, use as top-left; otherwise center
+        int boxRow = promptRow >= 0 ? promptRow : terminal.getRows() / 2 - 5;
+        int boxCol = promptCol >= 0 ? promptCol : terminal.getCols() / 2 - 25;
+        
+        // Build text box for prompt
+        TerminalTextBox promptBox = TerminalTextBox.builder()
+            .position(boxRow, boxCol)
+            .size(50, 10)
+            .title(title, TerminalTextBox.TitlePlacement.BORDER_TOP)
+            .style(BoxStyle.DOUBLE)
+            .titleStyle(TextStyle.BOLD)
+            .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
+            .addLine("")
+            .addLine(currentPromptText != null ? currentPromptText : prompt)
+            .addLine("")
+            .build();
+        
+        RenderState.Builder builder = RenderState.builder();
+        builder.add(promptBox.asRenderElement());
+        
+        // Add status message if present
+        if (statusMessage != null && !statusMessage.isEmpty()) {
+            int statusRow = boxRow + 11;  // Below the box
+            int statusCol = boxCol + 25 - statusMessage.length() / 2;  // Center relative to box
+            
+            builder.add((term, gen) -> {
+                term.printAt(statusRow, statusCol, statusMessage, 
+                    TextStyle.WARNING, gen);
+            });
+        }
+        
+        // Add footer
+        builder.add(buildFooter("ESC: Cancel"));
+        
+        // PasswordReader renders at its configured position
+        // We show the prompt prefix here
+        int inputRow = boxRow + 5;  // Center of box vertically
+        int inputCol = boxCol + 25 - 10;  // Center of box horizontally, offset for "> "
+        
+        builder.add((term, gen) -> {
+            term.printAt(inputRow, inputCol, "> ", TextStyle.NORMAL, gen);
+            // PasswordReader renders masked input after this
+        });
+        
+        return builder.build();
+    }
+    
+    /**
+     * Build processing state
+     */
+    private RenderState buildProcessingState() {
+        int row = terminal.getRows() / 2;
+        int col = terminal.getCols() / 2 - 15;
+        
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(row, col, "Processing...", TextStyle.INFO, gen);
+            })
+            .build();
+    }
+    
+    /**
+     * Build footer element
+     */
+    private RenderElement buildFooter(String text) {
+        int row = terminal.getRows() - 2;
+        int col = terminal.getCols() / 2 - text.length() / 2;
+        
+        return (term, gen) -> {
+            term.drawHLine(row - 1, 0, terminal.getCols(), gen);
+            term.printAt(row, col, text, TextStyle.INFO, gen);
+        };
     }
     
     // ===== CONFIGURATION (Builder pattern) =====
@@ -89,11 +184,6 @@ public class PasswordPrompt {
         return this;
     }
     
-    /**
-     * Enable confirmation mode
-     * When set, user must enter password twice
-     * Password is only passed to onPassword if both match
-     */
     public PasswordPrompt withConfirmation(String confirmPrompt) {
         this.confirmPrompt = confirmPrompt;
         return this;
@@ -130,10 +220,6 @@ public class PasswordPrompt {
         return this;
     }
     
-    /**
-     * Called when confirmation passwords don't match
-     * If not set, will automatically restart the prompt
-     */
     public PasswordPrompt onMismatch(Runnable handler) {
         this.onMismatch = handler;
         return this;
@@ -143,29 +229,23 @@ public class PasswordPrompt {
     
     /**
      * Show password prompt
-     * 
-     * Flow:
-     * 1. Claim password keyboard if needed
-     * 2. Render prompt
-     * 3. Start password reader
-     * 4. Start timeout
-     * 5. If confirmation enabled and first password entered:
-     *    - Keep keyboard claimed
-     *    - Show confirmation prompt
-     *    - Compare passwords
-     *    - Call onPassword only if match
+     * Makes this the active renderable
      */
     public CompletableFuture<Void> show() {
-        if (isActive) {
+        if (currentState != State.INACTIVE) {
             Log.logError("[PasswordPrompt] Already active");
             return CompletableFuture.completedFuture(null);
         }
         
-        isActive = true;
-        isConfirming = false;
+        // Update state
+        currentState = State.PROMPTING;
+        currentPromptText = prompt;
+        statusMessage = null;
+        
+        // Make this the active renderable
+        renderManager.setActive(this);
         
         return terminal.claimPasswordKeyboard()
-            .thenCompose(v -> renderPrompt())
             .thenRun(() -> {
                 startPasswordEntry();
                 startTimeout();
@@ -184,7 +264,7 @@ public class PasswordPrompt {
      * Cancel prompt (user initiated)
      */
     public void cancel() {
-        if (!isActive) return;
+        if (currentState == State.INACTIVE) return;
         
         Log.logMsg("[PasswordPrompt] Cancelled");
         cleanup();
@@ -194,41 +274,26 @@ public class PasswordPrompt {
         }
     }
     
-    // ===== RENDERING =====
-    
-    private CompletableFuture<Void> renderPrompt() {
-        String currentPrompt = isConfirming ? confirmPrompt : prompt;
-        
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle(title))
-            .thenCompose(v -> terminal.printAt(promptRow, promptCol, currentPrompt))
-            .thenCompose(v -> terminal.moveCursor(promptRow, promptCol + currentPrompt.length() + 1));
-    }
-    
     // ===== PASSWORD ENTRY =====
     
     private void startPasswordEntry() {
         EventHandlerRegistry registry = terminal.getPasswordEventHandlerRegistry();
         
-        // Reuse existing reader if in confirmation mode
         if (passwordReader == null) {
             passwordReader = new PasswordReader(registry);
         } else {
-            // Reset reader for confirmation
             passwordReader.escape();
         }
         
         passwordReader.setOnPassword(password -> {
-            cancelTimeout();  // Got password, cancel timeout
+            cancelTimeout();
             
-            if (confirmPrompt != null && !isConfirming) {
-                // First password entry - need confirmation
+            if (confirmPrompt != null && currentState == State.PROMPTING) {
                 handleFirstPassword(password);
-            } else if (isConfirming) {
-                // Confirmation entry - compare
+            } else if (currentState == State.CONFIRMING) {
                 handleConfirmation(password);
             } else {
-                // No confirmation needed - done
+                // No confirmation needed
                 cleanup();
                 if (onPassword != null) {
                     onPassword.accept(password);
@@ -237,6 +302,8 @@ public class PasswordPrompt {
                 }
             }
         });
+        
+        renderManager.invalidate();
     }
     
     private void handleFirstPassword(NoteBytesEphemeral password) {
@@ -247,22 +314,14 @@ public class PasswordPrompt {
         password.close();
         
         // Switch to confirmation mode
-        isConfirming = true;
+        currentState = State.CONFIRMING;
+        currentPromptText = confirmPrompt;
+        statusMessage = null;
+        renderManager.invalidate();
         
-        // Show confirmation prompt (keyboard stays claimed)
-        renderPrompt()
-            .thenRun(() -> {
-                startPasswordEntry();
-                startTimeout();  // Restart timeout for confirmation
-            })
-            .exceptionally(ex -> {
-                Log.logError("[PasswordPrompt] Confirmation prompt failed: " + ex.getMessage());
-                cleanup();
-                if (onError != null) {
-                    onError.run();
-                }
-                return null;
-            });
+        // Restart input
+        startPasswordEntry();
+        startTimeout();
     }
     
     private void handleConfirmation(NoteBytesEphemeral password) {
@@ -272,7 +331,6 @@ public class PasswordPrompt {
             Log.logMsg("[PasswordPrompt] Passwords match");
             password.close();
             
-            // Success - pass first password to callback
             NoteBytesEphemeral confirmedPassword = firstPassword;
             firstPassword = null;
             
@@ -291,22 +349,29 @@ public class PasswordPrompt {
             firstPassword = null;
             password.close();
             
-            cleanup();
-            
             if (onMismatch != null) {
+                cleanup();
                 onMismatch.run();
             } else {
                 // Default: show error and restart
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError("Passwords do not match"))
-                    .thenRunAsync(() -> {
-                        try {
-                            Thread.sleep(2000);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                    })
-                    .thenRun(() -> show());
+                currentState = State.PROMPTING;
+                currentPromptText = prompt;
+                statusMessage = "Passwords do not match - try again";
+                renderManager.invalidate();
+                
+                // Brief delay, then restart
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).thenRun(() -> {
+                    statusMessage = null;
+                    renderManager.invalidate();
+                    startPasswordEntry();
+                    startTimeout();
+                });
             }
         }
     }
@@ -314,23 +379,22 @@ public class PasswordPrompt {
     // ===== TIMEOUT =====
     
     private void startTimeout() {
-        cancelTimeout();  // Cancel any existing
+        cancelTimeout();
         
         if (timeoutSeconds <= 0) {
-            return; // No timeout
+            return;
         }
         
         timeoutFuture = CompletableFuture.runAsync(() -> {
             try {
                 TimeUnit.SECONDS.sleep(timeoutSeconds);
                 
-                if (isActive) {
+                if (currentState != State.INACTIVE) {
                     Log.logMsg("[PasswordPrompt] Timeout after " + timeoutSeconds + "s");
                     handleTimeout();
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                // Cancelled - normal
             }
         }, VirtualExecutors.getVirtualExecutor());
     }
@@ -353,27 +417,22 @@ public class PasswordPrompt {
     // ===== CLEANUP =====
     
     private void cleanup() {
-        if (!isActive) return;
+        if (currentState == State.INACTIVE) return;
         
-        isActive = false;
-        isConfirming = false;
+        currentState = State.INACTIVE;
         
-        // Cancel timeout
         cancelTimeout();
         
-        // Close password reader
         if (passwordReader != null) {
             passwordReader.close();
             passwordReader = null;
         }
         
-        // Clean up stored password
         if (firstPassword != null) {
             firstPassword.close();
             firstPassword = null;
         }
         
-        // Release password keyboard if needed
         terminal.releasePasswordKeyboard()
             .exceptionally(ex -> {
                 Log.logError("[PasswordPrompt] Cleanup error: " + ex.getMessage());
@@ -384,10 +443,10 @@ public class PasswordPrompt {
     // ===== GETTERS =====
     
     public boolean isActive() {
-        return isActive;
+        return currentState != State.INACTIVE;
     }
     
     public boolean isConfirming() {
-        return isConfirming;
+        return currentState == State.CONFIRMING;
     }
 }

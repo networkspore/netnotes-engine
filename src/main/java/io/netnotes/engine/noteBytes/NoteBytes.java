@@ -29,6 +29,7 @@ import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.ByteEncoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.ByteEncoding.EncodingType;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -38,7 +39,7 @@ public class NoteBytes {
 
     public final static int MAX_SHORT_INDEX_VALUE = NoteShort.UNSIGNED_MAX;
     public static volatile int clearanceVerifier = 0;
-    private byte[] m_value = null;
+    private byte[] m_value = new byte[0];
     private byte m_type = NoteBytesMetaData.RAW_BYTES_TYPE;
 
     public NoteBytes( byte[] value, byte type){
@@ -102,6 +103,9 @@ public class NoteBytes {
     }
 
     public void set(byte[] value, byte type) {
+        if(isRuined()){
+            throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");
+        }
         m_value = value != null ? value : new byte[0];
         m_type = type;
         dataUpdated();
@@ -173,6 +177,13 @@ public class NoteBytes {
         return new NoteBytes(dst, type);
     }
     
+    protected void setInternal(byte[] value){
+        if(isRuined()){
+            throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");
+        }
+        m_value = value != null ? value : new byte[0];
+        dataUpdated();
+    }
 
     protected byte[] getBytesInternal(){
         if(isRuined()){
@@ -337,7 +348,13 @@ public class NoteBytes {
             System.arraycopy(src, 0, dst, dstOffset, srcLength);
             return dstOffset + srcLength;
         }else{
-            throw new IndexOutOfBoundsException("insufficient destination length");
+            String errMsg = "insufficient destination length";
+            Log.logError("[NoteBytes.writeNote] " + errMsg +
+                " dstLength=" + dstLength +
+                " dstOffset=" + dstOffset +
+                " required=" + (dstOffset + metaDataSize + srcLength)
+            );
+            throw new IndexOutOfBoundsException(errMsg);
         }
     }
 

@@ -1,8 +1,20 @@
 package io.netnotes.engine.utils.strings;
 
+import java.util.concurrent.CompletionException;
+
 public class FormattingHelpers {
     
-    
+    public static String getMessageFromError(Throwable ex){
+        Throwable cause = ex;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        
+        String errorMsg = cause.getMessage();
+        
+        return errorMsg == null || errorMsg.isEmpty() 
+            ? cause.getClass().getSimpleName() : errorMsg;
+    }
 
 
     public static String formatStringLineLength(String str, int len){
@@ -14,8 +26,8 @@ public class FormattingHelpers {
     public static boolean onlyZero(String str) {
         
         for (int i = 0 ; i < str.length() ; i++){
-            String c = str.substring(i, i+1);
-            if(!(c.equals("0") || c.equals("."))){
+            String substringC = str.substring(i, i+1);
+            if(!(substringC.equals("0") || substringC.equals("."))){
                 return false;
             }
         }
@@ -36,15 +48,15 @@ public class FormattingHelpers {
         String rightSide = index != -1 ? str.substring(index + 1) : "";
         
         for (int i = 0 ; i < leftSide.length() ; i++){
-            String c = leftSide.substring(i, i+1);
-            if(!c.equals("0")){
+            String chr = leftSide.substring(i, i+1);
+            if(!chr.equals("0")){
                 return false;
             }
         }
 
         for (int i = 0 ; i < rightSide.length() ; i++){
-            String c = rightSide.substring(i, i+1);
-            if(!c.equals("0")){
+            String chr = rightSide.substring(i, i+1);
+            if(!chr.equals("0")){
                 return false;
             }
         }

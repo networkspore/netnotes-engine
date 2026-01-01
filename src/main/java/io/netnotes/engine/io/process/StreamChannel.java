@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.io.PipedOutputStream;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -13,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
  * StreamChannel - Unidirectional pipe communication between processes
@@ -65,6 +67,14 @@ public class StreamChannel {
         Log.logMsg("[StreamChannel] Created: " + source + " → " + target);
     }
 
+    public ExecutorService getWriteExecutor() {
+        if (writeExecutor != null) return writeExecutor;
+        this.writeExecutor = Executors.newSingleThreadExecutor(
+            r -> Thread.ofVirtual().name("StreamChannel-Writer-" + source + "-to-" + target).unstarted(r)
+        );
+        return writeExecutor;
+    }
+
     public OutputStream getQueuedOutputStream(){
         if (queuedOutput != null) return queuedOutput;
         this.writeQueue = new LinkedBlockingQueue<>();
@@ -87,6 +97,8 @@ public class StreamChannel {
         active = true;
         return pipeOutput;
     }
+
+    
     
     /**
      * Internal write pump - drains queue and writes to pipe on dedicated thread

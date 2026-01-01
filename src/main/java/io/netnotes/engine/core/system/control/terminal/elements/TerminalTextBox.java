@@ -1,45 +1,48 @@
 package io.netnotes.engine.core.system.control.terminal.elements;
 
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.containers.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 
 /**
  * TextBox - Composable text box primitive for terminal UIs
  * 
- * A TextBox is a bordered region containing text content. It's the fundamental
- * building block for terminal interfaces:
- * - Title boxes (headers, section labels)
- * - Content boxes (multi-line text display)
- * - Input boxes (user input fields)
- * - Message boxes (dialogs, confirmations)
- * - List boxes (menus, selections)
+ * DUAL INTERFACE:
+ * 1. As Renderable - can be active screen in RenderManager
+ * 2. As RenderElement - can be part of another component's RenderState
  * 
- * Design Philosophy:
- * - Immutable (builder pattern for construction)
- * - Composable (can nest or arrange multiple boxes)
- * - Flexible (extensive configuration options)
- * - Efficient (batches rendering operations)
- * 
- * Example:
+ * Usage as Renderable:
  * <pre>
- * TextBox.builder()
+ * TerminalTextBox textBox = TerminalTextBox.builder()
  *     .position(5, 20)
  *     .size(40, 10)
- *     .title("User Profile", TitlePlacement.INSIDE_TOP)
+ *     .title("User Profile")
  *     .content("Name: John Doe", "Email: john@example.com")
- *     .style(BoxStyle.DOUBLE)
- *     .padding(2)
- *     .build()
- *     .render(terminal);
+ *     .build();
+ * 
+ * renderManager.setActive(textBox);  // Pull-based rendering
+ * </pre>
+ * 
+ * Usage as RenderElement:
+ * <pre>
+ * RenderState.builder()
+ *     .add(textBox.asRenderElement())  // Part of larger UI
+ *     .build();
+ * </pre>
+ * 
+ * Legacy push-based rendering still supported:
+ * <pre>
+ * textBox.render(terminal);  // Direct rendering
  * </pre>
  */
-public class TerminalTextBox {
+public class TerminalTextBox implements Renderable {
     
     // Position and dimensions
     private final int row;
@@ -63,11 +66,11 @@ public class TerminalTextBox {
     
     // Behavior
     private final boolean scrollable;
-    private final int scrollOffset;
+    private int scrollOffset;  // Mutable for scrolling
     
     // Text overflow handling
     private final TextOverflow textOverflow;
-    private final int horizontalScrollOffset;
+    private int horizontalScrollOffset;  // Mutable for scrolling
     
     private TerminalTextBox(Builder builder) {
         this.row = builder.row;
@@ -88,184 +91,196 @@ public class TerminalTextBox {
         this.horizontalScrollOffset = builder.horizontalScrollOffset;
     }
     
+    // ===== RENDERABLE INTERFACE =====
+    
     /**
-     * Render this text box to the terminal
+     * Get render state for pull-based rendering
+     * Thread-safe read-only state capture
      */
-    public CompletableFuture<Void> render(TerminalContainerHandle terminal) {
-        return terminal.beginBatch()
-            .thenCompose(v -> renderBox(terminal))
-            .thenCompose(v -> renderTitle(terminal))
-            .thenCompose(v -> renderContent(terminal))
-            .thenCompose(v -> terminal.endBatch());
+    @Override
+    public RenderState getRenderState() {
+        return RenderState.builder()
+            .add(asRenderElement())
+            .build();
     }
     
-    private CompletableFuture<Void> renderBox(TerminalContainerHandle terminal) {
-        // Draw border based on title placement
-        if (titlePlacement == TitlePlacement.BORDER_TOP && title != null) {
-            // Title in border (traditional style)
-            return terminal.drawBox(row, col, width, height, title, boxStyle);
-        } else {
-   
-            // Just draw the box
-            return terminal.drawBox(row, col, width, height, "", boxStyle);
-        }
-    }
-    
-    private CompletableFuture<Void> renderTitle(TerminalContainerHandle terminal) {
-        if (title == null || title.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
+    /**
+     * Convert this TextBox to a RenderElement
+     * Allows using TextBox as part of another component's RenderState
+     */
+    public RenderElement asRenderElement() {
+        // Capture current state for rendering
+        final int currentRow = this.row;
+        final int currentCol = this.col;
+        final int currentWidth = this.width;
+        final int currentHeight = this.height;
+        final BoxStyle currentBoxStyle = this.boxStyle;
+        final TextStyle currentTextStyle = this.textStyle;
+        final String currentTitle = this.title;
+        final TitlePlacement currentTitlePlacement = this.titlePlacement;
+        final TextStyle currentTitleStyle = this.titleStyle;
+        final List<String> currentContentLines = new ArrayList<>(this.contentLines);
+        final ContentAlignment currentContentAlignment = this.contentAlignment;
+        final int currentPadding = this.padding;
+        final boolean currentScrollable = this.scrollable;
+        final int currentScrollOffset = this.scrollOffset;
+        final TextOverflow currentTextOverflow = this.textOverflow;
+        final int currentHorizontalScrollOffset = this.horizontalScrollOffset;
         
-        return switch (titlePlacement) {
-            case INSIDE_TOP -> {
-                int titleRow = row + 1;
-                int titleCol = calculateAlignment(title.length(), contentAlignment);
-                yield terminal.printAt(titleRow, titleCol, title, titleStyle);
-            }
-            case INSIDE_CENTER -> {
-                int titleRow = row + height / 2;
-                int titleCol = calculateAlignment(title.length(), ContentAlignment.CENTER);
-                yield terminal.printAt(titleRow, titleCol, title, titleStyle);
-            }
-            case INSIDE_BOTTOM -> {
-                int titleRow = row + height - 2;
-                int titleCol = calculateAlignment(title.length(), contentAlignment);
-                yield terminal.printAt(titleRow, titleCol, title, titleStyle);
-            }
-            case BORDER_TOP -> {
-                // Already handled in renderBox
-                yield CompletableFuture.completedFuture(null);
-            }
-            case ABOVE_BOX -> {
-                int titleRow = row - 1;
-                int titleCol = calculateAlignment(title.length(), ContentAlignment.CENTER);
-                yield terminal.printAt(titleRow, titleCol, title, titleStyle);
-            }
-            case BELOW_BOX -> {
-                int titleRow = row + height;
-                int titleCol = calculateAlignment(title.length(), ContentAlignment.CENTER);
-                yield terminal.printAt(titleRow, titleCol, title, titleStyle);
-            }
+        return (terminal, gen) -> {
+            renderWithGeneration(
+                terminal, gen,
+                currentRow, currentCol, currentWidth, currentHeight,
+                currentBoxStyle, currentTextStyle,
+                currentTitle, currentTitlePlacement, currentTitleStyle,
+                currentContentLines, currentContentAlignment, currentPadding,
+                currentScrollable, currentScrollOffset,
+                currentTextOverflow, currentHorizontalScrollOffset
+            );
         };
     }
     
-    private CompletableFuture<Void> renderContent(TerminalContainerHandle terminal) {
-        if (contentLines.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
+    /**
+     * Internal rendering method used by both pull and push modes
+     */
+    private void renderWithGeneration(
+            TerminalContainerHandle terminal, long gen,
+            int row, int col, int width, int height,
+            BoxStyle boxStyle, TextStyle textStyle,
+            String title, TitlePlacement titlePlacement, TextStyle titleStyle,
+            List<String> contentLines, ContentAlignment contentAlignment, int padding,
+            boolean scrollable, int scrollOffset,
+            TextOverflow textOverflow, int horizontalScrollOffset) {
+        
+        // Draw box border
+        if (titlePlacement == TitlePlacement.BORDER_TOP && title != null) {
+            terminal.drawBox(row, col, width, height, title, boxStyle, gen);
+        } else {
+            terminal.drawBox(row, col, width, height, "", boxStyle, gen);
         }
         
+        // Draw title (if not in border)
+        if (title != null && !title.isEmpty() && titlePlacement != TitlePlacement.BORDER_TOP) {
+            renderTitleAtPosition(terminal, gen, row, col, width, height, 
+                title, titlePlacement, titleStyle, contentAlignment);
+        }
+        
+        // Draw content
+        if (!contentLines.isEmpty()) {
+            renderContentLines(terminal, gen, row, col, width, height,
+                contentLines, contentAlignment, padding, textStyle,
+                scrollable, scrollOffset, textOverflow, horizontalScrollOffset,
+                titlePlacement, title);
+        }
+    }
+    
+    private void renderTitleAtPosition(
+            TerminalContainerHandle terminal, long gen,
+            int row, int col, int width, int height,
+            String title, TitlePlacement placement, TextStyle style,
+            ContentAlignment contentAlignment) {
+        
+        switch (placement) {
+            case INSIDE_TOP -> {
+                int titleRow = row + 1;
+                int titleCol = calculateAlignment(col, width, title.length(), contentAlignment);
+                terminal.printAt(titleRow, titleCol, title, style, gen);
+            }
+            case INSIDE_CENTER -> {
+                int titleRow = row + height / 2;
+                int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
+                terminal.printAt(titleRow, titleCol, title, style, gen);
+            }
+            case INSIDE_BOTTOM -> {
+                int titleRow = row + height - 2;
+                int titleCol = calculateAlignment(col, width, title.length(), contentAlignment);
+                terminal.printAt(titleRow, titleCol, title, style, gen);
+            }
+            case ABOVE_BOX -> {
+                int titleRow = row - 1;
+                int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
+                terminal.printAt(titleRow, titleCol, title, style, gen);
+            }
+            case BELOW_BOX -> {
+                int titleRow = row + height;
+                int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
+                terminal.printAt(titleRow, titleCol, title, style, gen);
+            }
+            case BORDER_TOP -> {
+                // Already handled in renderBox
+            }
+        }
+    }
+    
+    private void renderContentLines(
+            TerminalContainerHandle terminal, long gen,
+            int row, int col, int width, int height,
+            List<String> contentLines, ContentAlignment alignment, int padding,
+            TextStyle textStyle, boolean scrollable, int scrollOffset,
+            TextOverflow textOverflow, int horizontalScrollOffset,
+            TitlePlacement titlePlacement, String title) {
+        
         // Calculate content area
-        int contentStartRow = calculateContentStartRow();
-        int contentHeight = calculateContentHeight();
+        int contentStartRow = calculateContentStartRow(row, padding, titlePlacement, title);
+        int contentHeight = calculateContentHeight(height, padding, titlePlacement, title);
         int contentWidth = width - (2 * padding) - 2; // -2 for borders
         
         // Determine which lines to show (with scrolling)
         int startLine = scrollable ? scrollOffset : 0;
         int endLine = Math.min(contentLines.size(), startLine + contentHeight);
         
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
+        // Render each visible line
         for (int i = startLine; i < endLine; i++) {
             String line = contentLines.get(i);
-            String displayLine = processLineOverflow(line, contentWidth);
+            String displayLine = processLineOverflow(line, contentWidth, textOverflow, horizontalScrollOffset);
             
             int lineRow = contentStartRow + (i - startLine);
-            int lineCol = calculateAlignment(displayLine.length(), contentAlignment);
+            int lineCol = calculateAlignment(col, width, displayLine.length(), alignment);
             
-            final String finalLine = displayLine;
-            future = future.thenCompose(v -> 
-                terminal.printAt(lineRow, lineCol, finalLine, textStyle));
+            terminal.printAt(lineRow, lineCol, displayLine, textStyle, gen);
         }
         
         // Render scroll indicators if scrollable
         if (scrollable && contentLines.size() > contentHeight) {
             if (scrollOffset > 0) {
                 int indicatorCol = col + width - 3;
-                future = future.thenCompose(v -> 
-                    terminal.printAt(contentStartRow, indicatorCol, "↑", 
-                        TextStyle.INFO));
+                terminal.printAt(contentStartRow, indicatorCol, "↑", TextStyle.INFO, gen);
             }
             
             if (endLine < contentLines.size()) {
                 int indicatorCol = col + width - 3;
                 int indicatorRow = contentStartRow + contentHeight - 1;
-                future = future.thenCompose(v -> 
-                    terminal.printAt(indicatorRow, indicatorCol, "↓", 
-                        TextStyle.INFO));
+                terminal.printAt(indicatorRow, indicatorCol, "↓", TextStyle.INFO, gen);
             }
         }
         
         // Render horizontal scroll indicators if needed
         if (textOverflow == TextOverflow.SCROLL) {
-            future = future.thenCompose(v -> renderHorizontalScrollIndicators(
-                terminal, contentStartRow, contentHeight, contentWidth));
+            renderHorizontalScrollIndicators(terminal, gen, row, col, width,
+                contentStartRow, contentHeight, contentWidth, 
+                contentLines, horizontalScrollOffset);
         }
-        
-        return future;
     }
     
-    /**
-     * Process line based on overflow strategy
-     */
-    private String processLineOverflow(String line, int availableWidth) {
-        if (line.length() <= availableWidth) {
-            return line;
-        }
-        
-        return switch (textOverflow) {
-            case WRAP -> {
-                // Wrapping is handled by breaking into multiple lines
-                // For now, just truncate (proper wrap needs line splitting)
-                yield line.substring(0, availableWidth);
-            }
-            case TRUNCATE -> {
-                // Cut off with ellipsis
-                yield line.substring(0, Math.max(0, availableWidth - 3)) + "...";
-            }
-            case SCROLL -> {
-                // Show a window into the text based on horizontal offset
-                int start = Math.min(horizontalScrollOffset, 
-                    Math.max(0, line.length() - availableWidth));
-                int end = Math.min(line.length(), start + availableWidth);
-                yield line.substring(start, end);
-            }
-            case TRUNCATE_START -> {
-                // Show end of text with leading ellipsis
-                yield "..." + line.substring(Math.max(0, line.length() - availableWidth + 3));
-            }
-            case FADE -> {
-                // Truncate but without ellipsis (fade effect in rich terminals)
-                yield line.substring(0, availableWidth);
-            }
-        };
-    }
-    
-    /**
-     * Render horizontal scroll indicators (◄ ►)
-     */
-    private CompletableFuture<Void> renderHorizontalScrollIndicators(
-            TerminalContainerHandle terminal,
-            int contentStartRow,
-            int contentHeight,
-            int contentWidth) {
-        
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+    private void renderHorizontalScrollIndicators(
+            TerminalContainerHandle terminal, long gen,
+            int row, int col, int width,
+            int contentStartRow, int contentHeight, int contentWidth,
+            List<String> contentLines, int horizontalScrollOffset) {
         
         // Check if any line needs horizontal scrolling
         boolean hasLongLines = contentLines.stream()
             .anyMatch(line -> line.length() > contentWidth);
         
         if (!hasLongLines) {
-            return future;
+            return;
         }
         
         // Show left indicator if scrolled right
         if (horizontalScrollOffset > 0) {
             int indicatorRow = contentStartRow + contentHeight / 2;
             int indicatorCol = col + 1;
-            future = future.thenCompose(v -> 
-                terminal.printAt(indicatorRow, indicatorCol, "◄", 
-                    TextStyle.INFO));
+            terminal.printAt(indicatorRow, indicatorCol, "◄", TextStyle.INFO, gen);
         }
         
         // Show right indicator if more content to the right
@@ -275,18 +290,37 @@ public class TerminalTextBox {
         if (hasMoreRight) {
             int indicatorRow = contentStartRow + contentHeight / 2;
             int indicatorCol = col + width - 2;
-            future = future.thenCompose(v -> 
-                terminal.printAt(indicatorRow, indicatorCol, "►", 
-                    TextStyle.INFO));
+            terminal.printAt(indicatorRow, indicatorCol, "►", TextStyle.INFO, gen);
         }
-        
-        return future;
     }
     
-    private int calculateContentStartRow() {
+    /**
+     * Process line based on overflow strategy
+     */
+    private String processLineOverflow(String line, int availableWidth, 
+                                      TextOverflow overflow, int horizontalOffset) {
+        if (line.length() <= availableWidth) {
+            return line;
+        }
+        
+        return switch (overflow) {
+            case WRAP -> line.substring(0, availableWidth);
+            case TRUNCATE -> line.substring(0, Math.max(0, availableWidth - 3)) + "...";
+            case SCROLL -> {
+                int start = Math.min(horizontalOffset, 
+                    Math.max(0, line.length() - availableWidth));
+                int end = Math.min(line.length(), start + availableWidth);
+                yield line.substring(start, end);
+            }
+            case TRUNCATE_START -> "..." + line.substring(Math.max(0, line.length() - availableWidth + 3));
+            case FADE -> line.substring(0, availableWidth);
+        };
+    }
+    
+    private int calculateContentStartRow(int row, int padding, 
+                                        TitlePlacement titlePlacement, String title) {
         int startRow = row + 1 + padding; // +1 for top border
         
-        // Adjust for title if inside
         if (titlePlacement == TitlePlacement.INSIDE_TOP && title != null) {
             startRow += 1; // Title takes one line
         }
@@ -294,10 +328,10 @@ public class TerminalTextBox {
         return startRow;
     }
     
-    private int calculateContentHeight() {
+    private int calculateContentHeight(int height, int padding,
+                                       TitlePlacement titlePlacement, String title) {
         int availableHeight = height - 2 - (2 * padding); // -2 for borders
         
-        // Adjust for title if inside
         if ((titlePlacement == TitlePlacement.INSIDE_TOP || 
              titlePlacement == TitlePlacement.INSIDE_BOTTOM) && title != null) {
             availableHeight -= 1;
@@ -306,7 +340,7 @@ public class TerminalTextBox {
         return Math.max(1, availableHeight);
     }
     
-    private int calculateAlignment(int textLength, ContentAlignment alignment) {
+    private int calculateAlignment(int col, int width, int textLength, ContentAlignment alignment) {
         int availableWidth = width - 2; // Exclude borders
         
         return switch (alignment) {
@@ -316,16 +350,87 @@ public class TerminalTextBox {
         };
     }
     
+    // ===== LEGACY PUSH-BASED RENDERING =====
+    
     /**
-     * Create a new builder
+     * Legacy render method for backward compatibility
+     * Uses push-based rendering with automatic generation
      */
+    public CompletableFuture<Void> render(TerminalContainerHandle terminal) {
+        long gen = terminal.getCurrentRenderGeneration();
+        
+        return terminal.batchWithGeneration(gen, () -> {
+            renderWithGeneration(
+                terminal, gen,
+                this.row, this.col, this.width, this.height,
+                this.boxStyle, this.textStyle,
+                this.title, this.titlePlacement, this.titleStyle,
+                this.contentLines, this.contentAlignment, this.padding,
+                this.scrollable, this.scrollOffset,
+                this.textOverflow, this.horizontalScrollOffset
+            );
+        });
+    }
+    
+    // ===== SCROLLING METHODS =====
+    
+    /**
+     * Scroll vertically (if scrollable)
+     * Returns new offset, or -1 if can't scroll
+     */
+    public synchronized int scrollVertical(int delta) {
+        if (!scrollable) {
+            return -1;
+        }
+        
+        int contentHeight = calculateContentHeight(height, padding, titlePlacement, title);
+        int maxOffset = Math.max(0, contentLines.size() - contentHeight);
+        
+        int newOffset = Math.max(0, Math.min(maxOffset, scrollOffset + delta));
+        
+        if (newOffset != scrollOffset) {
+            scrollOffset = newOffset;
+            return scrollOffset;
+        }
+        
+        return -1; // No change
+    }
+    
+    /**
+     * Scroll horizontally
+     * Returns new offset, or -1 if can't scroll
+     */
+    public synchronized int scrollHorizontal(int delta) {
+        if (textOverflow != TextOverflow.SCROLL) {
+            return -1;
+        }
+        
+        int contentWidth = width - (2 * padding) - 2;
+        
+        // Find longest line
+        int maxLineLength = contentLines.stream()
+            .mapToInt(String::length)
+            .max()
+            .orElse(0);
+        
+        int maxOffset = Math.max(0, maxLineLength - contentWidth);
+        
+        int newOffset = Math.max(0, Math.min(maxOffset, horizontalScrollOffset + delta));
+        
+        if (newOffset != horizontalScrollOffset) {
+            horizontalScrollOffset = newOffset;
+            return horizontalScrollOffset;
+        }
+        
+        return -1; // No change
+    }
+    
+    // ===== BUILDER =====
+    
     public static Builder builder() {
         return new Builder();
     }
     
-    /**
-     * Create a builder from this box (for modifications)
-     */
     public Builder toBuilder() {
         return new Builder()
             .position(row, col)
@@ -344,7 +449,6 @@ public class TerminalTextBox {
     
     /**
      * Create a copy with horizontal scroll adjusted
-     * Useful for handling left/right navigation
      */
     public TerminalTextBox withHorizontalScroll(int offset) {
         return toBuilder()
@@ -363,58 +467,20 @@ public class TerminalTextBox {
     
     // ===== ENUMS =====
     
-    /**
-     * How to handle text that exceeds the box width
-     */
     public enum TextOverflow {
-        /** Wrap text to next line (increases vertical space usage) */
-        WRAP,
-        
-        /** Truncate with ellipsis "Long text beco..." */
-        TRUNCATE,
-        
-        /** Horizontal scroll - show a sliding window into the text */
-        SCROLL,
-        
-        /** Show end of text "...omes too long" */
-        TRUNCATE_START,
-        
-        /** Truncate without ellipsis (for fade effects) */
-        FADE
+        WRAP, TRUNCATE, SCROLL, TRUNCATE_START, FADE
     }
     
-    /**
-     * Where to place the title
-     */
     public enum TitlePlacement {
-        INSIDE_TOP,      // Inside box, top row, respects alignment
-        INSIDE_CENTER,   // Inside box, vertically centered
-        INSIDE_BOTTOM,   // Inside box, bottom row
-        BORDER_TOP,      // Embedded in top border (classic style)
-        ABOVE_BOX,       // Above the box (separate line)
-        BELOW_BOX        // Below the box (separate line)
+        INSIDE_TOP, INSIDE_CENTER, INSIDE_BOTTOM, 
+        BORDER_TOP, ABOVE_BOX, BELOW_BOX
     }
     
-    /**
-     * How to align content
-     */
     public enum ContentAlignment {
-        LEFT,
-        CENTER,
-        RIGHT
+        LEFT, CENTER, RIGHT
     }
     
-    /**
-     * Box drawing style
-     
-    public enum BoxStyle {
-        SINGLE,
-        DOUBLE,
-        ROUNDED,
-        THICK
-    }*/
-    
-    // ===== BUILDER =====
+    // ===== BUILDER CLASS =====
     
     public static class Builder {
         private int row = 0;
@@ -434,67 +500,43 @@ public class TerminalTextBox {
         private TextOverflow textOverflow = TextOverflow.TRUNCATE;
         private int horizontalScrollOffset = 0;
         
-        /**
-         * Set position (row, col)
-         */
         public Builder position(int row, int col) {
             this.row = row;
             this.col = col;
             return this;
         }
         
-        /**
-         * Set size (width, height)
-         */
         public Builder size(int width, int height) {
             this.width = width;
             this.height = height;
             return this;
         }
         
-        /**
-         * Set box drawing style
-         */
         public Builder style(BoxStyle style) {
             this.boxStyle = style;
             return this;
         }
         
-        /**
-         * Set text style for content
-         */
         public Builder textStyle(TextStyle style) {
             this.textStyle = style;
             return this;
         }
         
-        /**
-         * Set title with default placement (INSIDE_TOP)
-         */
         public Builder title(String title) {
             return title(title, TitlePlacement.INSIDE_TOP);
         }
         
-        /**
-         * Set title with specific placement
-         */
         public Builder title(String title, TitlePlacement placement) {
             this.title = title;
             this.titlePlacement = placement;
             return this;
         }
         
-        /**
-         * Set title style
-         */
         public Builder titleStyle(TextStyle style) {
             this.titleStyle = style;
             return this;
         }
         
-        /**
-         * Add content lines
-         */
         public Builder content(String... lines) {
             for (String line : lines) {
                 this.contentLines.add(line);
@@ -502,90 +544,57 @@ public class TerminalTextBox {
             return this;
         }
         
-        /**
-         * Add content line
-         */
         public Builder addLine(String line) {
             this.contentLines.add(line);
             return this;
         }
         
-        /**
-         * Set content from list
-         */
         public Builder contentLines(List<String> lines) {
             this.contentLines.clear();
             this.contentLines.addAll(lines);
             return this;
         }
         
-        /**
-         * Clear content
-         */
         public Builder clearContent() {
             this.contentLines.clear();
             return this;
         }
         
-        /**
-         * Set content alignment
-         */
         public Builder contentAlignment(ContentAlignment alignment) {
             this.contentAlignment = alignment;
             return this;
         }
         
-        /**
-         * Set padding (space between border and content)
-         */
         public Builder padding(int padding) {
             this.padding = padding;
             return this;
         }
         
-        /**
-         * Enable/disable scrolling
-         */
         public Builder scrollable(boolean scrollable) {
             return scrollable(scrollable, 0);
         }
         
-        /**
-         * Enable scrolling with offset
-         */
         public Builder scrollable(boolean scrollable, int scrollOffset) {
             this.scrollable = scrollable;
             this.scrollOffset = scrollOffset;
             return this;
         }
         
-        /**
-         * Set scroll offset (for scrollable boxes)
-         */
         public Builder scrollOffset(int offset) {
             this.scrollOffset = offset;
             return this;
         }
         
-        /**
-         * Set text overflow strategy
-         */
         public Builder textOverflow(TextOverflow overflow) {
             this.textOverflow = overflow;
             return this;
         }
         
-        /**
-         * Set horizontal scroll offset (for SCROLL overflow)
-         */
         public Builder horizontalScrollOffset(int offset) {
             this.horizontalScrollOffset = offset;
             return this;
         }
         
-        /**
-         * Build the TextBox
-         */
         public TerminalTextBox build() {
             return new TerminalTextBox(this);
         }

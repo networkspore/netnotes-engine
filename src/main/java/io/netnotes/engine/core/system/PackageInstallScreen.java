@@ -1,36 +1,27 @@
 package io.netnotes.engine.core.system;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.nodes.InstallationRequest;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PathCapability;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
-import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
-import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
- * PackageInstallScreen - Menu-driven package installation flow
- * 
- * REFACTORED: Uses MenuContext for navigation instead of number selection
- * - Clean menu-based interface
- * - KeyRunTable for confirmations
- * - TerminalInputReader for text input
- * - PasswordReader for secure input
+ * PackageInstallScreen - REFACTORED for pull-based rendering
  */
 class PackageInstallScreen extends TerminalScreen {
     
@@ -45,18 +36,19 @@ class PackageInstallScreen extends TerminalScreen {
     }
     
     private final PackageInfo packageInfo;
-    private final ContextPath basePath;
+    private final NodeCommands nodeCommands;
     
+    // Mutable state
     private Step currentStep = Step.PACKAGE_OVERVIEW;
     private ProcessConfig chosenProcessConfig;
     private boolean capabilitiesApproved = false;
     private boolean loadImmediately = false;
-    
-    private MenuContext currentMenu;
-    private PasswordReader passwordReader;
+    private NoteBytesReadOnly keyPressHandlerId = null;
+    private TerminalInputReader inputReader;
     private Runnable onCompleteCallback;
-    private final NodeCommands nodeCommands;
-
+    private String errorMessage = null;
+    private String statusMessage = null;
+    
     public PackageInstallScreen(
         String name, 
         SystemTerminalContainer terminal, 
@@ -65,7 +57,6 @@ class PackageInstallScreen extends TerminalScreen {
     ) {
         super(name, terminal);
         this.packageInfo = packageInfo;
-        this.basePath = ContextPath.of("install", packageInfo.getName());
         this.nodeCommands = nodeCommands;
     }
     
@@ -76,7 +67,8 @@ class PackageInstallScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         currentStep = Step.PACKAGE_OVERVIEW;
-        return render();
+        invalidate();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
@@ -84,290 +76,358 @@ class PackageInstallScreen extends TerminalScreen {
         cleanup();
     }
     
+    // ===== PULL-BASED RENDERING =====
+    
     @Override
-    public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> {
-                switch (currentStep) {
-                    case PACKAGE_OVERVIEW:
-                        return renderPackageOverview();
-                    case REVIEW_CAPABILITIES:
-                        return renderCapabilityReview();
-                    case CHOOSE_NAMESPACE:
-                        return renderNamespaceChoice();
-                    case PASSWORD_CONFIRM:
-                        return renderPasswordConfirm();
-                    case INSTALLING:
-                        return renderInstalling();
-                    case ASK_LOAD_IMMEDIATELY:
-                        return renderAskLoadImmediately();
-                    case COMPLETE:
-                        return renderComplete();
-                    default:
-                        return CompletableFuture.completedFuture(null);
-                }
-            });
+    public RenderState getRenderState() {
+        return switch (currentStep) {
+            case PACKAGE_OVERVIEW -> buildPackageOverviewState();
+            case REVIEW_CAPABILITIES -> buildCapabilityReviewState();
+            case CHOOSE_NAMESPACE -> buildNamespaceChoiceState();
+            case PASSWORD_CONFIRM -> buildPasswordConfirmState();
+            case INSTALLING -> buildInstallingState();
+            case ASK_LOAD_IMMEDIATELY -> buildAskLoadState();
+            case COMPLETE -> buildCompleteState();
+        };
     }
     
-    // ===== STEP 1: PACKAGE OVERVIEW =====
+    // ===== STATE BUILDERS =====
     
-    private CompletableFuture<Void> renderPackageOverview() {
-        return terminal.printTitle("Install Package")
-            .thenCompose(v -> terminal.printAt(5, 10, "Package: " + packageInfo.getName()))
-            .thenCompose(v -> terminal.printAt(6, 10, "Version: " + packageInfo.getVersion()))
-            .thenCompose(v -> terminal.printAt(7, 10, "Category: " + packageInfo.getCategory()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                String.format("Size: %.2f MB", packageInfo.getSize() / (1024.0 * 1024.0))))
-            .thenCompose(v -> terminal.printAt(9, 10, "Repository: " + packageInfo.getRepository()))
-            .thenCompose(v -> terminal.printAt(11, 10, "Description:"))
-            .thenCompose(v -> {
-                String desc = packageInfo.getDescription();
-                String[] lines = wrapText(desc, 60);
-                
-                CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-                for (int i = 0; i < Math.min(lines.length, 5); i++) {
-                    final int row = 12 + i;
-                    final String line = lines[i];
-                    future = future.thenCompose(v2 -> terminal.printAt(row, 10, line));
-                }
-                return future;
-            })
-            .thenCompose(v -> showOverviewMenu());
-    }
-    
-    private CompletableFuture<Void> showOverviewMenu() {
-        currentMenu = new MenuContext(basePath.append("overview"), "Continue Installation?")
-            .addItem("continue", "Continue with installation", this::proceedToCapabilities)
-            .addItem("cancel", "Cancel installation", this::cancelInstallation);
+    private RenderState buildPackageOverviewState() {
+        RenderState.Builder builder = RenderState.builder();
         
-        return renderMenu(currentMenu, 19);
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 15) / 2, "Install Package", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Package: " + packageInfo.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(6, 10, "Version: " + packageInfo.getVersion(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Category: " + packageInfo.getCategory(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, String.format("Size: %.2f MB", 
+                packageInfo.getSize() / (1024.0 * 1024.0)), gen));
+        builder.add((term, gen) -> 
+            term.printAt(9, 10, "Repository: " + packageInfo.getRepository(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(11, 10, "Description:", TextStyle.BOLD, gen));
+        
+        // Add description lines
+        String desc = packageInfo.getDescription();
+        String[] lines = wrapText(desc, 60);
+        for (int i = 0; i < Math.min(lines.length, 5); i++) {
+            final int row = 12 + i;
+            final String line = lines[i];
+            builder.add((term, gen) -> term.printAt(row, 10, line, gen));
+        }
+        
+        // Menu
+        builder.add((term, gen) -> 
+            term.printAt(19, 10, "1. Continue with installation", gen));
+        builder.add((term, gen) -> 
+            term.printAt(20, 10, "2. Cancel installation", gen));
+        builder.add((term, gen) -> 
+            term.printAt(22, 10, "Select option (or ESC to cancel):", 
+                TextStyle.INFO, gen));
+        
+        return builder.build();
     }
     
-    private void proceedToCapabilities() {
-        currentStep = Step.REVIEW_CAPABILITIES;
-        render();
+    private RenderState buildCapabilityReviewState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        PolicyManifest policy = PolicyManifest.fromNoteBytes(
+            packageInfo.getManifest().getMetadata());
+        List<PathCapability> capabilities = policy.getRequestedCapabilities();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 15) / 2, "Security Review", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "This package requests the following capabilities:", 
+                gen));
+        builder.add((term, gen) -> 
+            term.printAt(6, 10, "Review carefully before approving.", 
+                TextStyle.WARNING, gen));
+        
+        if (capabilities.isEmpty()) {
+            builder.add((term, gen) -> 
+                term.printAt(8, 10, "No special capabilities requested", 
+                    TextStyle.INFO, gen));
+        } else {
+            int row = 8;
+            for (PathCapability cap : capabilities) {
+                final int currentRow = row;
+                builder.add((term, gen) -> 
+                    term.printAt(currentRow, 10, "• " + cap.getDescription(), gen));
+                builder.add((term, gen) -> 
+                    term.printAt(currentRow + 1, 12, "Reason: " + cap.getReason(), 
+                        TextStyle.INFO, gen));
+                row += 2;
+            }
+        }
+        
+        if (policy.hasSensitivePaths()) {
+            builder.add((term, gen) -> 
+                term.printAt(16, 10, "⚠️ WARNING: Sensitive system paths requested", 
+                    TextStyle.WARNING, gen));
+        }
+        
+        // Menu
+        String approveDesc = policy.hasSensitivePaths() 
+            ? "1. Approve (WARNING: Sensitive access)" 
+            : "1. Approve capabilities";
+        
+        builder.add((term, gen) -> term.printAt(18, 10, approveDesc, gen));
+        builder.add((term, gen) -> 
+            term.printAt(19, 10, "2. Deny and cancel installation", gen));
+        builder.add((term, gen) -> 
+            term.printAt(21, 10, "Select option (or ESC to cancel):", 
+                TextStyle.INFO, gen));
+        
+        return builder.build();
     }
     
-    private void cancelInstallation() {
-        if (onCompleteCallback != null) {
-            onCompleteCallback.run();
+    private RenderState buildNamespaceChoiceState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        PackageManifest manifest = packageInfo.getManifest();
+        PackageManifest.NamespaceRequirement nsReq = manifest.getNamespaceRequirement();
+        NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 31) / 2, 
+                "Choose Installation Namespace", TextStyle.BOLD, gen));
+        
+        if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "Suggested namespace: " + nsReq.namespace(), gen));
+        } else {
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "Choose where this package will be installed:", gen));
+        }
+        
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "1. Default: " + defaultNs + " (Standard installation)", 
+                gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "2. Cancel installation", gen));
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "Select option (or ESC to cancel):", 
+                TextStyle.INFO, gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildPasswordConfirmState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 20) / 2, "Confirm Installation", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Ready to install:", TextStyle.BOLD, gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Package: " + packageInfo.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "Type 'INSTALL' to proceed:", gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildInstallingState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 18) / 2, "Installing Package", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Installing...", gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "This may take a moment.", TextStyle.INFO, gen));
+        
+        if (statusMessage != null) {
+            builder.add((term, gen) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+        }
+        
+        return builder.build();
+    }
+    
+    private RenderState buildAskLoadState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 21) / 2, "Installation Complete", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "✓ Package installed successfully!", 
+                TextStyle.SUCCESS, gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Package: " + packageInfo.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "1. Yes, load the package now", gen));
+        builder.add((term, gen) -> 
+            term.printAt(11, 10, "2. No, I'll load it later", gen));
+        builder.add((term, gen) -> 
+            term.printAt(13, 10, "Select option:", TextStyle.INFO, gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildCompleteState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        if (errorMessage != null) {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 18) / 2, "Installation Failed", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "✗ Installation failed", TextStyle.ERROR, gen));
+            builder.add((term, gen) -> 
+                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR, gen));
+        } else {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 21) / 2, "Installation Complete", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "✓ Installation successful", TextStyle.SUCCESS, gen));
+            
+            if (loadImmediately && statusMessage != null) {
+                builder.add((term, gen) -> 
+                    term.printAt(7, 10, statusMessage, TextStyle.SUCCESS, gen));
+            }
+        }
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "Press any key to return...", gen));
+        
+        return builder.build();
+    }
+    
+    // ===== STATE TRANSITIONS =====
+    
+    private void transitionTo(Step newStep) {
+        currentStep = newStep;
+        invalidate();
+        
+        switch (newStep) {
+            case PACKAGE_OVERVIEW -> setupOverviewInput();
+            case REVIEW_CAPABILITIES -> setupCapabilitiesInput();
+            case CHOOSE_NAMESPACE -> setupNamespaceInput();
+            case PASSWORD_CONFIRM -> startConfirmationEntry();
+            case INSTALLING -> performInstallation();
+            case ASK_LOAD_IMMEDIATELY -> setupLoadInput();
+            case COMPLETE -> setupCompleteInput();
         }
     }
     
-    // ===== STEP 2: REVIEW CAPABILITIES =====
+    // ===== INPUT HANDLERS =====
     
-    private CompletableFuture<Void> renderCapabilityReview() {
-        PolicyManifest policy = PolicyManifest.fromNoteBytes(
-            packageInfo.getManifest().getMetadata()
+    private void setupOverviewInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                () -> transitionTo(Step.REVIEW_CAPABILITIES)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                () -> transitionTo(Step.REVIEW_CAPABILITIES)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::cancelInstallation),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::cancelInstallation),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::cancelInstallation)
         );
         
-        List<PathCapability> capabilities = policy.getRequestedCapabilities();
+        setupKeyHandler(keys);
+    }
+    
+    private void setupCapabilitiesInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                this::approveCapabilities),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                this::approveCapabilities),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::denyCapabilities),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::denyCapabilities),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::denyCapabilities)
+        );
         
-        return terminal.printTitle("Security Review")
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "This package requests the following capabilities:"))
-            .thenCompose(v -> terminal.printAt(6, 10, 
-                "Review carefully before approving."))
-            .thenCompose(v -> {
-                CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-                
-                if (capabilities.isEmpty()) {
-                    return future.thenCompose(v2 -> terminal.printAt(8, 10, 
-                        "No special capabilities requested"));
-                }
-                
-                int row = 8;
-                for (int i = 0; i < capabilities.size(); i++) {
-                    PathCapability cap = capabilities.get(i);
-                    final int currentRow = row + (i * 2);
-                    
-                    future = future
-                        .thenCompose(v2 -> terminal.printAt(currentRow, 10, 
-                            String.format("• %s", cap.getDescription())))
-                        .thenCompose(v2 -> terminal.printAt(currentRow + 1, 12, 
-                            "Reason: " + cap.getReason()));
-                }
-                
-                return future;
-            })
-            .thenCompose(v -> {
-                if (policy.hasSensitivePaths()) {
-                    return terminal.printAt(16, 10, 
-                        "⚠️  WARNING: Sensitive system paths requested");
-                }
-                return CompletableFuture.completedFuture(null);
-            })
-            .thenCompose(v -> showCapabilityMenu(policy.hasSensitivePaths()));
+        setupKeyHandler(keys);
     }
     
-    private CompletableFuture<Void> showCapabilityMenu(boolean hasSensitivePaths) {
-        String approveDesc = hasSensitivePaths 
-            ? "Approve (WARNING: Sensitive access)" 
-            : "Approve capabilities";
-        
-        currentMenu = new MenuContext(basePath.append("capabilities"), "Security Decision")
-            .addItem("approve", approveDesc, this::approveCapabilities)
-            .addItem("deny", "Deny and cancel installation", this::denyCapabilities);
-        
-        return renderMenu(currentMenu, 18);
-    }
-    
-    private void approveCapabilities() {
-        capabilitiesApproved = true;
-        currentStep = Step.CHOOSE_NAMESPACE;
-        render();
-    }
-    
-    private void denyCapabilities() {
-        terminal.clear()
-            .thenCompose(v -> terminal.printError("Installation cancelled - capabilities denied"))
-            .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> {
-                if (onCompleteCallback != null) {
-                    onCompleteCallback.run();
-                }
-            }));
-    }
-    
-    // ===== STEP 3: CHOOSE NAMESPACE =====
-    
-    private CompletableFuture<Void> renderNamespaceChoice() {
+    private void setupNamespaceInput() {
         PackageManifest manifest = packageInfo.getManifest();
         PackageManifest.NamespaceRequirement nsReq = manifest.getNamespaceRequirement();
         
-        // Case 1: REQUIRED namespace - no choice
+        // Auto-advance if REQUIRED
         if (nsReq.mode() == PackageManifest.NamespaceMode.REQUIRED) {
-            chosenProcessConfig = ProcessConfig.create(nsReq.namespace());
-            currentStep = Step.PASSWORD_CONFIRM;
-            return render();
+            selectNamespace(nsReq.namespace());
+            return;
         }
         
-        // Case 2 & 3: Show options
-        return terminal.printTitle("Choose Installation Namespace")
-            .thenCompose(v -> {
-                if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
-                    return terminal.printAt(5, 10, 
-                        "Suggested namespace: " + nsReq.namespace());
-                } else {
-                    return terminal.printAt(5, 10, 
-                        "Choose where this package will be installed:");
-                }
-            })
-            .thenCompose(v -> showNamespaceMenu(nsReq));
-    }
-    
-    private CompletableFuture<Void> showNamespaceMenu(PackageManifest.NamespaceRequirement nsReq) {
         NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
         
-        currentMenu = new MenuContext(basePath.append("namespace"), "Installation Location")
-            .addItem("default", "Default: " + defaultNs + " (Standard installation)", 
-                () -> selectNamespace(defaultNs))
-            .addItem("cancel", "Cancel installation", this::cancelInstallation);
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                () -> selectNamespace(defaultNs)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                () -> selectNamespace(defaultNs)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::cancelInstallation),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::cancelInstallation),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::cancelInstallation)
+        );
         
-        return renderMenu(currentMenu, 7);
+        setupKeyHandler(keys);
     }
     
-    private void selectNamespace(NoteBytesReadOnly namespace) {
-        chosenProcessConfig = ProcessConfig.create(namespace);
-        currentStep = Step.PASSWORD_CONFIRM;
-        render();
-    }
-    
-    private NoteBytesReadOnly getDefaultNamespace(PackageManifest.NamespaceRequirement nsReq) {
-        switch (nsReq.mode()) {
-            case REQUIRED:
-            case DEFAULT:
-                return nsReq.namespace();
-            case FLEXIBLE:
-            default:
-                return packageInfo.getPackageId();
-        }
-    }
-    
-    // ===== STEP 4: PASSWORD CONFIRM =====
-    
-    private CompletableFuture<Void> renderPasswordConfirm() {
-        return terminal.printTitle("Confirm Installation")
-            .thenCompose(v -> terminal.printAt(5, 10, "Ready to install:"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Package: " + packageInfo.getName()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                "Namespace: " + chosenProcessConfig.getProcessId()))
-            .thenCompose(v -> terminal.printAt(10, 10, "Type 'INSTALL' to proceed:"))
-            .thenCompose(v -> terminal.moveCursor(10, 36))
-            .thenRun(this::startConfirmationEntry);
-    }
-
     private void startConfirmationEntry() {
-        TerminalInputReader inputReader = new TerminalInputReader(terminal, 10, 36, 20);
-      
+        removeKeyPressHandler();
+        inputReader = new TerminalInputReader(terminal, 10, 36, 20);
+        
         inputReader.setOnComplete(input -> {
             inputReader.close();
+            inputReader = null;
             
             if ("INSTALL".equals(input)) {
-                performInstallation();
+                transitionTo(Step.INSTALLING);
             } else {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError("Installation cancelled"))
-                    .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
+                errorMessage = "Installation cancelled";
+                invalidate();
+                terminal.waitForKeyPress(() -> {
+                    errorMessage = null;
+                    transitionTo(Step.PASSWORD_CONFIRM);
+                });
             }
         });
         
         inputReader.setOnEscape(text -> {
             inputReader.close();
+            inputReader = null;
             cancelInstallation();
         });
     }
     
-    private void startPasswordEntry() {
-        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
-        
-        passwordReader.setOnPassword(password -> {
-            passwordReader.close();
-            passwordReader = null;
-            
-            RuntimeAccess access = terminal.getSystemAccess();
-            access.verifyPassword(password)
-                .thenAccept(valid -> {
-                    if (valid) {
-                        performInstallation();
-                    } else {
-                        password.close();
-                        terminal.clear()
-                            .thenCompose(v -> terminal.printError("Invalid password"))
-                            .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
-                            .thenRun(() -> terminal.waitForKeyPress(() -> render()));
-                    }
-                })
-                .exceptionally(ex -> {
-                    password.close();
-                    terminal.printError("Verification failed: " + ex.getMessage())
-                        .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-                        .thenRun(() -> terminal.waitForKeyPress(() -> {
-                            if (onCompleteCallback != null) {
-                                onCompleteCallback.run();
-                            }
-                        }));
-                    return null;
-                });
-        });
-    }
-    
-    // ===== STEP 5: INSTALLING =====
-    
-    private CompletableFuture<Void> renderInstalling() {
-        return terminal.printTitle("Installing Package")
-            .thenCompose(v -> terminal.printAt(5, 10, "Installing..."))
-            .thenCompose(v -> terminal.printAt(7, 10, "This may take a moment."));
-    }
-    
     private void performInstallation() {
-        currentStep = Step.INSTALLING;
-        render();
-        
         PolicyManifest policyManifest = PolicyManifest.fromNoteBytes(
-            packageInfo.getManifest().getMetadata()
-        );
+            packageInfo.getManifest().getMetadata());
         
         nodeCommands.installPackage(
                 packageInfo,
@@ -376,176 +436,117 @@ class PackageInstallScreen extends TerminalScreen {
                 false
             )
             .thenAccept(installedPackage -> {
-                currentStep = Step.ASK_LOAD_IMMEDIATELY;
-                render();
+                errorMessage = null;
+                transitionTo(Step.ASK_LOAD_IMMEDIATELY);
             })
             .exceptionally(ex -> {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
-                        "✗ Installation failed\n\n" +
-                        "Error: " + ex.getMessage()))
-                    .thenCompose(v -> terminal.printAt(10, 10, "Press any key to return..."))
-                    .thenRun(() ->terminal.waitForKeyPress(() -> {
-                        if (onCompleteCallback != null) {
-                            onCompleteCallback.run();
-                        }
-                    }));
+                errorMessage = ex.getMessage();
+                transitionTo(Step.COMPLETE);
                 return null;
             });
     }
     
-    // ===== STEP 6: ASK LOAD IMMEDIATELY =====
-    
-    private CompletableFuture<Void> renderAskLoadImmediately() {
-        return terminal.printTitle("Installation Complete")
-            .thenCompose(v -> terminal.printSuccess("✓ Package installed successfully!"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Package: " + packageInfo.getName()))
-            .thenCompose(v -> terminal.printAt(8, 10, 
-                "Namespace: " + chosenProcessConfig.getProcessId()))
-            .thenCompose(v -> showLoadImmediatelyMenu());
+    private void setupLoadInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                this::loadPackageNow),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                this::loadPackageNow),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::skipLoadPackage),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::skipLoadPackage),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::skipLoadPackage)
+        );
+        
+        setupKeyHandler(keys);
     }
     
-    private CompletableFuture<Void> showLoadImmediatelyMenu() {
-        currentMenu = new MenuContext(basePath.append("load"), "Load Package Now?")
-            .addItem("load", "Yes, load the package now", this::loadPackageNow)
-            .addItem("skip", "No, I'll load it later", this::skipLoadPackage);
-        
-        return renderMenu(currentMenu, 10);
+    private void setupCompleteInput() {
+        removeKeyPressHandler();
+        terminal.waitForKeyPress(() -> {
+            if (onCompleteCallback != null) {
+                onCompleteCallback.run();
+            }
+        });
+    }
+    
+    private void setupKeyHandler(KeyRunTable keys) {
+        removeKeyPressHandler();
+        keyPressHandlerId = terminal.addKeyDownHandler(event -> {
+            if (event instanceof EphemeralRoutedEvent ephemeral) {
+                try (ephemeral) {
+                    if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
+                        keys.run(ekd.getKeyCodeBytes());
+                    }
+                }
+            } else if (event instanceof KeyDownEvent keyDown) {
+                keys.run(keyDown.getKeyCodeBytes());
+            }
+        });
+    }
+    
+    // ===== ACTIONS =====
+    
+    private void approveCapabilities() {
+        capabilitiesApproved = true;
+        transitionTo(Step.CHOOSE_NAMESPACE);
+    }
+    
+    private void denyCapabilities() {
+        errorMessage = "Installation cancelled - capabilities denied";
+        transitionTo(Step.COMPLETE);
+    }
+    
+    private void selectNamespace(NoteBytesReadOnly namespace) {
+        chosenProcessConfig = ProcessConfig.create(namespace);
+        transitionTo(Step.PASSWORD_CONFIRM);
     }
     
     private void loadPackageNow() {
         loadImmediately = true;
+        statusMessage = "Loading package...";
+        invalidate();
         
-        // Load using the package ID from the installed package
         nodeCommands.loadNode(packageInfo.getPackageId())
             .thenAccept(instance -> {
-                terminal.printAt(12, 10, "✓ Node loaded: " + instance.getInstanceId())
-                    .thenRun(() -> {
-                        currentStep = Step.COMPLETE;
-                        render();
-                    });
+                statusMessage = "✓ Node loaded: " + instance.getInstanceId();
+                transitionTo(Step.COMPLETE);
             })
             .exceptionally(ex -> {
-                terminal.printError("Failed to load: " + ex.getMessage())
-                    .thenRun(() -> {
-                        currentStep = Step.COMPLETE;
-                        render();
-                    });
+                statusMessage = "Failed to load: " + ex.getMessage();
+                transitionTo(Step.COMPLETE);
                 return null;
             });
     }
     
     private void skipLoadPackage() {
-        currentStep = Step.COMPLETE;
-        render();
+        transitionTo(Step.COMPLETE);
     }
     
-    // ===== STEP 7: COMPLETE =====
-    
-    private CompletableFuture<Void> renderComplete() {
-        return terminal.printTitle("Installation Complete")
-            .thenCompose(v -> terminal.printSuccess("✓ Installation successful"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Press any key to return..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> {
-                if (onCompleteCallback != null) {
-                    onCompleteCallback.run();
-                }
-            }));
-    }
-    
-    // ===== MENU RENDERING =====
-    
-    /**
-     * Render a menu at the specified row
-     */
-    private CompletableFuture<Void> renderMenu(MenuContext menu, int startRow) {
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
-        int row = startRow;
-        int index = 1;
-        
-        for (MenuContext.MenuItem item : menu.getItems()) {
-            final int currentRow = row;
-            final String itemText = String.format("%d. %s", index, item.description);
-            
-            future = future.thenCompose(v -> terminal.printAt(currentRow, 10, itemText));
-            
-            row++;
-            index++;
+    private void cancelInstallation() {
+        if (onCompleteCallback != null) {
+            onCompleteCallback.run();
         }
-        
-        final int selectRow = row + 1;
-        return future
-            .thenCompose(v -> terminal.printAt(selectRow, 10, "Use arrow keys and Enter to select"))
-            .thenRun(() -> startMenuNavigation(menu));
-    }
-    
-    private NoteBytesReadOnly keyPressHandlerId = null;
-
-    private void removeKeyPressHandler(){
-        if(keyPressHandlerId != null){
-            terminal.removeKeyDownHandler(keyPressHandlerId);
-            keyPressHandlerId = null;
-        }
-    }
-    /**
-     * Start menu navigation with arrow keys
-     */
-    private void startMenuNavigation(MenuContext menu) {
-        List<MenuContext.MenuItem> items = new java.util.ArrayList<>(menu.getItems());
-        final int[] selectedIndex = {0};
-        
-        KeyRunTable navigationKeys = new KeyRunTable(
-            new NoteBytesRunnablePair(KeyCodeBytes.UP, () -> {
-                selectedIndex[0] = (selectedIndex[0] - 1 + items.size()) % items.size();
-                highlightSelection(menu, selectedIndex[0]);
-            }),
-            new NoteBytesRunnablePair(KeyCodeBytes.DOWN, () -> {
-                selectedIndex[0] = (selectedIndex[0] + 1) % items.size();
-                highlightSelection(menu, selectedIndex[0]);
-            }),
-            new NoteBytesRunnablePair(KeyCodeBytes.ENTER, () -> {
-                removeKeyPressHandler();
-                MenuContext.MenuItem selected = items.get(selectedIndex[0]);
-                menu.navigate(selected.name);
-            }),
-            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, () -> {
-                removeKeyPressHandler();
-                cancelInstallation();
-            })
-        );
-        
-        keyPressHandlerId = terminal.addKeyDownHandler(event -> {
-            if (event instanceof EphemeralRoutedEvent ephemeral) {
-                try (ephemeral) {
-                    if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
-                        navigationKeys.run(ekd.getKeyCodeBytes());
-                    }
-                }
-            } else if (event instanceof KeyDownEvent keyDown) {
-                navigationKeys.run(keyDown.getKeyCodeBytes());
-            }
-        });
-        
-        // Initial highlight
-        highlightSelection(menu, 0);
-    }
-    
-    private void highlightSelection(MenuContext menu, int selectedIndex) {
-        // TODO: use menu navigator / context
-        // For now, just log or update display
     }
     
     // ===== UTILITIES =====
     
-   
+    private NoteBytesReadOnly getDefaultNamespace(
+            PackageManifest.NamespaceRequirement nsReq) {
+        return switch (nsReq.mode()) {
+            case REQUIRED, DEFAULT -> nsReq.namespace();
+            case FLEXIBLE -> packageInfo.getPackageId();
+        };
+    }
+    
     private String[] wrapText(String text, int width) {
         if (text == null || text.isEmpty()) {
             return new String[0];
         }
         
         String[] words = text.split("\\s+");
-        List<String> lines = new java.util.ArrayList<>();
+        List<String> lines = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         
         for (String word : words) {
@@ -569,12 +570,21 @@ class PackageInstallScreen extends TerminalScreen {
         return lines.toArray(new String[0]);
     }
     
+    // ===== CLEANUP =====
+    
+    private void removeKeyPressHandler() {
+        if (keyPressHandlerId != null) {
+            terminal.removeKeyDownHandler(keyPressHandlerId);
+            keyPressHandlerId = null;
+        }
+    }
+    
     private void cleanup() {
         removeKeyPressHandler();
         
-        if (passwordReader != null) {
-            passwordReader.close();
-            passwordReader = null;
+        if (inputReader != null) {
+            inputReader.close();
+            inputReader = null;
         }
     }
 }

@@ -8,6 +8,8 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
@@ -20,6 +22,7 @@ import io.netnotes.engine.utils.TimeHelpers;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
  * PasswordChangeScreen - Change master password
@@ -46,42 +49,97 @@ class PasswordChangeScreen extends TerminalScreen {
     private Map<String, TerminalProgressBar> progressBars = new HashMap<>();
     private Map<String, Integer> progressBarRows = new HashMap<>();
     private int currentRow = 10;
+    private String statusMessage = null;
+    private String errorMessage = null;
     
     public PasswordChangeScreen(String name, SystemTerminalContainer terminal) {
         super(name, terminal);
     }
     
+    // ===== RENDERABLE INTERFACE =====
+    
+    @Override
+    public RenderState getRenderState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        // Clear screen
+        builder.add((term, gen) -> term.clear(gen));
+        
+        // Title
+        builder.add((term, gen) -> 
+            term.printAt(1, (term.getCols() - 21) / 2, "Change Master Password", TextStyle.BOLD, gen));
+        
+        // Current prompt based on step
+        String prompt;
+        int cursorCol;
+        switch (currentStep) {
+            case VERIFY_CURRENT:
+                prompt = "Enter current password:";
+                cursorCol = 33;
+                break;
+            case ENTER_NEW:
+                prompt = "Enter new password:";
+                cursorCol = 30;
+                break;
+            case CONFIRM_NEW:
+                prompt = "Confirm new password:";
+                cursorCol = 32;
+                break;
+            default:
+                prompt = "";
+                cursorCol = 0;
+        }
+        
+        if (!prompt.isEmpty()) {
+            builder.add((term, gen) -> {
+                term.printAt(5, 10, prompt, TextStyle.NORMAL, gen);
+                term.moveCursor(5, cursorCol, gen);
+            });
+        }
+        
+        // Status message
+        if (statusMessage != null && !statusMessage.isEmpty()) {
+            builder.add((term, gen) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+        }
+        
+        // Error message
+        if (errorMessage != null && !errorMessage.isEmpty()) {
+            builder.add((term, gen) -> 
+                term.printAt(15, 10, errorMessage, TextStyle.ERROR, gen));
+        }
+        
+        // Add progress bar labels and bars
+        for (Map.Entry<String, Integer> entry : progressBarRows.entrySet()) {
+            String scope = entry.getKey();
+            int row = entry.getValue();
+            String label = getScopeLabel(scope);
+            
+            builder.add((term, gen) -> 
+                term.printAt(row - 1, 10, label, TextStyle.NORMAL, gen));
+            
+            TerminalProgressBar bar = progressBars.get(scope);
+            if (bar != null) {
+                builder.addAll(bar.getRenderState().getElements());
+            }
+        }
+        
+        return builder.build();
+    }
+    
+    // ===== LIFECYCLE =====
+    
     @Override
     public CompletableFuture<Void> onShow() {
         currentStep = Step.VERIFY_CURRENT;
-        return render();
+        invalidate(); // Trigger initial render
+        startPasswordEntry();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
     public void onHide() {
         cleanup();
-    }
-    
-    @Override
-    public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Change Master Password"))
-            .thenCompose(v -> {
-                switch (currentStep) {
-                    case VERIFY_CURRENT:
-                        return terminal.printAt(5, 10, "Enter current password:")
-                            .thenCompose(v2 -> terminal.moveCursor(5, 33));
-                    case ENTER_NEW:
-                        return terminal.printAt(5, 10, "Enter new password:")
-                            .thenCompose(v2 -> terminal.moveCursor(5, 30));
-                    case CONFIRM_NEW:
-                        return terminal.printAt(5, 10, "Confirm new password:")
-                            .thenCompose(v2 -> terminal.moveCursor(5, 32));
-                    default:
-                        return CompletableFuture.completedFuture(null);
-                }
-            })
-            .thenRun(this::startPasswordEntry);
     }
     
     private void startPasswordEntry() {
@@ -122,7 +180,8 @@ class PasswordChangeScreen extends TerminalScreen {
                                 terminal.printAt(9, 10, summary)
                                     .thenRun(() -> {
                                         currentStep = Step.ENTER_NEW;
-                                        render();
+                                        statusMessage = summary;
+                                        invalidate();
                                     });
                             } else {
                                 currentPassword.close();
@@ -141,10 +200,14 @@ class PasswordChangeScreen extends TerminalScreen {
                         });
                 } else {
                     password.close();
-                    terminal.clear()
-                        .thenCompose(v->terminal.printError("Invalid password. Please try again."))
-                        .thenRunAsync(()->TimeHelpers.timeDelay(2))
-                        .thenCompose(v -> render());
+                    errorMessage = "Invalid password. Please try again.";
+                    invalidate();
+                    // Delay and retry
+                    CompletableFuture.runAsync(() -> TimeHelpers.timeDelay(2), VirtualExecutors.getVirtualExecutor())
+                        .thenRun(() -> {
+                            errorMessage = null;
+                            invalidate();
+                        });
                 }
             })
             .exceptionally(ex -> {
@@ -159,7 +222,7 @@ class PasswordChangeScreen extends TerminalScreen {
         newPassword = password.copy();
         password.close();
         currentStep = Step.CONFIRM_NEW;
-        render();
+        invalidate();
     }
     
     private void handleConfirmNew(NoteBytesEphemeral password) {
@@ -172,12 +235,14 @@ class PasswordChangeScreen extends TerminalScreen {
             newPassword.close();
             newPassword = null;
             password.close();
-            terminal.clear()
-                .thenCompose(v-> terminal.printError("Passwords do not match. Please try again."))
-                .thenRunAsync(()->TimeHelpers.timeDelay(2))
+            errorMessage = "Passwords do not match. Please try again.";
+            invalidate();
+            // Delay and retry
+            CompletableFuture.runAsync(() -> TimeHelpers.timeDelay(2), VirtualExecutors.getVirtualExecutor())
                 .thenRun(() -> {
+                    errorMessage = null;
                     currentStep = Step.ENTER_NEW;
-                    render();
+                    invalidate();
                 });
         }
     }
@@ -372,14 +437,13 @@ class PasswordChangeScreen extends TerminalScreen {
             progressBarRows.put(scope, row);
             currentRow += 3; // Space between progress bars
             
-            // Create label for this scope
-            String label = getScopeLabel(scope);
-            terminal.printAt(row - 1, 10, label);
-            
             // Create new progress bar
             progressBar = new TerminalProgressBar(
                 terminal, row, 10, 50, TerminalProgressBar.Style.CLASSIC);
             progressBars.put(scope, progressBar);
+            
+            // Trigger redraw to show new progress bar
+            invalidate();
         }
         
         // Format progress message based on scope
@@ -387,6 +451,9 @@ class PasswordChangeScreen extends TerminalScreen {
         
         // Update the progress bar (thread-safe because we're in single-threaded executor)
         progressBar.update(percentage, formattedProgress);
+        
+        // Trigger redraw
+        invalidate();
     }
     
     private String getScopeLabel(String scope) {

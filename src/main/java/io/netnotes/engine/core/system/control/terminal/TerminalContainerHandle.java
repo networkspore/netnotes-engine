@@ -1,13 +1,13 @@
-package io.netnotes.engine.core.system.control.containers;
+package io.netnotes.engine.core.system.control.terminal;
 
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
-import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.containers.ContainerCommands;
+import io.netnotes.engine.core.system.control.containers.ContainerConfig;
+import io.netnotes.engine.core.system.control.containers.ContainerHandle;
+import io.netnotes.engine.core.system.control.containers.ContainerType;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.ContextPath;
@@ -16,11 +16,12 @@ import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.input.events.EventHandlerRegistry.RoutedEventHandler;
+import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalContainerHandle - Terminal-style container with keyboard utilities
@@ -28,12 +29,10 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 public class TerminalContainerHandle extends ContainerHandle {
     
     // Temporary key wait state
-    private volatile boolean isWaitingForKey = false;
     private CompletableFuture<RoutedEvent> keyWaitFuture = null;
     private CompletableFuture<Void> anyKeyFuture = null;
     private NoteBytesReadOnly handlerId = null;
-    private List<RoutedEventHandler> savedKeyHandlers = null;
-    
+    private RenderManager renderManager;
     /**
      * Constructor - creates terminal-style container
      */
@@ -131,18 +130,14 @@ public class TerminalContainerHandle extends ContainerHandle {
      * @return CompletableFuture<KeyDownEvent> that completes when key pressed
      */
     public CompletableFuture<Void> waitForKeyPress() {
-        if (isWaitingForKey) {
+        if (anyKeyFuture != null) {
             // Already waiting, return existing future
             return anyKeyFuture;
         }
-        
-        isWaitingForKey = true;
+        Log.logMsg("[TerminalContainerHandle] waitForKeyPress");
+
         anyKeyFuture = new CompletableFuture<>();
-        
-        // Save current keyboard handlers
-        savedKeyHandlers = new ArrayList<>(clearKeyDownHandlers());
-        
-       
+          
         
         // Create temporary handler that captures ANY key press
         Consumer<RoutedEvent> consumer = event -> {
@@ -172,8 +167,39 @@ public class TerminalContainerHandle extends ContainerHandle {
             .thenRun(action);
     }
     
-  
+    @Override
+    public CompletableFuture<Void> run() {
+ 
+        return super.run().thenAccept(v -> {
+            // Start render manager after stream is ready
+            this.renderManager = new RenderManager(this);
+            renderManager.start();
+            Log.logMsg("[TerminalContainerHandle] RenderManager started");
+        });
+    }
+
+    public RenderManager getRenderManager() {
+        return renderManager;
+    }
+
+    @Override
+    protected void onContainerResized(ContainerResizeEvent event) {
+        setDimensions(event.getWidth(), event.getHeight());
+        
+        // Invalidate to trigger re-render with new dimensions
+        if (renderManager != null) {
+            renderManager.invalidate();
+        }
+    }
     
+    @Override
+    public void onStop() {
+        if (renderManager != null) {
+            renderManager.stop();
+        }
+        super.onStop();
+    }
+
     /**
      * Wait for SPECIFIC key press
      * 
@@ -184,16 +210,14 @@ public class TerminalContainerHandle extends ContainerHandle {
      * @return CompletableFuture<KeyDownEvent> that completes when key pressed
      */
     public CompletableFuture<RoutedEvent> waitForKey(NoteBytes keyCodeBytes) {
-        if (isWaitingForKey) {
+        if (keyWaitFuture != null) {
             // Already waiting, return existing future
             return keyWaitFuture;
         }
         
-        isWaitingForKey = true;
         keyWaitFuture = new CompletableFuture<>();
         
-        // Save current keyboard handlers
-        savedKeyHandlers = new ArrayList<>(clearKeyDownHandlers());
+   
         
         // Create temporary handler that captures key presses
         Consumer<RoutedEvent> consumer = event -> {
@@ -244,7 +268,7 @@ public class TerminalContainerHandle extends ContainerHandle {
      * Handle key wait completion
      */
     private void handleKeyWaitComplete(RoutedEvent event) {
-        if (!isWaitingForKey) {
+        if (keyWaitFuture == null) {
             return;
         }
         
@@ -252,14 +276,6 @@ public class TerminalContainerHandle extends ContainerHandle {
         if (handlerId != null) {
             removeKeyDownHandler(handlerId);
             handlerId = null;
-        }
-        
-        // Restore saved handlers
-        if (savedKeyHandlers != null) {
-            for (RoutedEventHandler handler : savedKeyHandlers) {
-                addKeyDownHandler(handler);
-            }
-            savedKeyHandlers = null;
         }
         
         // Complete the future
@@ -267,27 +283,18 @@ public class TerminalContainerHandle extends ContainerHandle {
             keyWaitFuture.complete(event);
         }
         
-        isWaitingForKey = false;
         keyWaitFuture = null;
     }
 
     private void handleKeyWaitComplete() {
-        if (!isWaitingForKey) {
+        if (anyKeyFuture == null) {
             return;
         }
-        
+         Log.logMsg("[TerminalContainerHandle] waitComplete");
         // Remove temporary handler
         if (handlerId != null) {
             removeKeyDownHandler(handlerId);
             handlerId = null;
-        }
-        
-        // Restore saved handlers
-        if (savedKeyHandlers != null) {
-            for (RoutedEventHandler handler : savedKeyHandlers) {
-                addKeyDownHandler(handler);
-            }
-            savedKeyHandlers = null;
         }
         
         // Complete the future
@@ -295,7 +302,6 @@ public class TerminalContainerHandle extends ContainerHandle {
             anyKeyFuture.complete(null);
         }
         
-        isWaitingForKey = false;
         anyKeyFuture = null;
     }
     
@@ -303,7 +309,7 @@ public class TerminalContainerHandle extends ContainerHandle {
      * Cancel key wait (if needed)
      */
     public void cancelKeyWait() {
-        if (!isWaitingForKey) {
+        if (anyKeyFuture == null) {
             return;
         }
         
@@ -313,28 +319,91 @@ public class TerminalContainerHandle extends ContainerHandle {
             handlerId = null;
         }
         
-        // Restore saved handlers
-        if (savedKeyHandlers != null) {
-            for (RoutedEventHandler handler : savedKeyHandlers) {
-                addKeyDownHandler(handler);
-            }
-            savedKeyHandlers = null;
-        }
-        
         // Cancel the future
         if (keyWaitFuture != null && !keyWaitFuture.isDone()) {
             keyWaitFuture.cancel(false);
         }
         
-        isWaitingForKey = false;
         keyWaitFuture = null;
     }
-    
+
+    /**
+     * Execute rendering operations within a batch with generation check
+     * 
+     * This ensures:
+     * 1. All operations in the batch use the SAME generation
+     * 2. The batch is atomic (begin -> operations -> end)
+     * 3. Stale renders are prevented via generation check
+     * 
+     * Usage:
+     * <pre>
+     * terminal.batchWithGeneration(gen, () -> {
+     *     terminal.clear(gen);
+     *     terminal.printAt(0, 0, "Header", TextStyle.BOLD, gen);
+     *     terminal.drawBox(2, 0, 40, 10, "Content", BoxStyle.SINGLE, gen);
+     * });
+     * </pre>
+     * 
+     * @param generation The generation to use for all operations
+     * @param operations Runnable containing the rendering operations
+     * @return CompletableFuture that completes when batch is done
+     */
+    public CompletableFuture<Void> batchWithGeneration(long generation, Runnable operations) {
+        // Check if generation is still current before starting
+        if (!isRenderGenerationCurrent(generation)) {
+            Log.logMsg("[TerminalContainerHandle] Skipping batch - stale generation: " + 
+                generation + " (current: " + getCurrentRenderGeneration() + ")");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        return beginBatch(generation)
+            .thenRun(() -> {
+                // Double-check generation before executing operations
+                if (isRenderGenerationCurrent(generation)) {
+                    try {
+                        operations.run();
+                    } catch (Exception e) {
+                        Log.logError("[TerminalContainerHandle] Error in batch operations: " + 
+                            e.getMessage());
+                        throw new RuntimeException("Batch operations failed", e);
+                    }
+                } else {
+                    Log.logMsg("[TerminalContainerHandle] Generation changed during batch setup");
+                }
+            })
+            .thenCompose(v -> {
+                // Only end batch if generation is still current
+                if (isRenderGenerationCurrent(generation)) {
+                    return endBatch(generation);
+                } else {
+                    Log.logMsg("[TerminalContainerHandle] Skipping endBatch - generation changed");
+                    return CompletableFuture.completedFuture(null);
+                }
+            })
+            .exceptionally(ex -> {
+                Log.logError("[TerminalContainerHandle] Batch failed: " + ex.getMessage());
+                // Try to end batch anyway to prevent renderer getting stuck
+                try {
+                    endBatch(generation).join();
+                } catch (Exception e) {
+                    // Ignore - already handling an error
+                }
+                return null;
+            });
+    }
+
+    /**
+     * Convenience overload using current generation
+     */
+    public CompletableFuture<Void> batch(Runnable operations) {
+        return batchWithGeneration(getCurrentRenderGeneration(), operations);
+    }
+        
     /**
      * Check if currently waiting for key press
      */
     public boolean isWaitingForKeyPress() {
-        return isWaitingForKey;
+        return keyWaitFuture != null;
     }
     
     // ===== TERMINAL COMMANDS =====
@@ -342,32 +411,40 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Clear the entire terminal screen
      */
-    public CompletableFuture<Void> clear() {
+    public CompletableFuture<Void> clear(long generation) {
+        
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
+    }
+
+    public CompletableFuture<Void> clear() {
+        return clear(getCurrentRenderGeneration());
     }
     
+    public CompletableFuture<Void> print(String text) {
+        return print(text, TextStyle.NORMAL, getCurrentRenderGeneration());
+    }
     /**
      * Print text at current cursor position
      */
-    public CompletableFuture<Void> print(String text) {
-        return print(text, TextStyle.NORMAL);
+    public CompletableFuture<Void> print(String text, long generation) {
+        return print(text, TextStyle.NORMAL, generation);
     }
     
     /**
      * Print styled text at current cursor position
      */
-    public CompletableFuture<Void> print(String text, TextStyle style) {
+    public CompletableFuture<Void> print(String text, TextStyle style, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(Keys.TEXT, text);
         command.put(Keys.STYLE, style.toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
@@ -380,14 +457,18 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Print styled text + newline
      */
-    public CompletableFuture<Void> println(String text, TextStyle style) {
+    public CompletableFuture<Void> println(String text, TextStyle style, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(Keys.TEXT, text);
         command.put(Keys.STYLE, style.toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
+    }
+
+    public CompletableFuture<Void> println(String text, TextStyle style) {
+        return println(text, style, getCurrentRenderGeneration());
     }
     
     /**
@@ -396,11 +477,23 @@ public class TerminalContainerHandle extends ContainerHandle {
     public CompletableFuture<Void> printAt(int row, int col, String text) {
         return printAt(row, col, text, TextStyle.NORMAL);
     }
-    
+
+    /**
+     * Print text at specific screen position
+     */
+    public CompletableFuture<Void> printAt(int row, int col, String text, long generation) {
+        return printAt(row, col, text, TextStyle.NORMAL, generation);
+    }
+
+    public CompletableFuture<Void> printAt(int row, int col, String text, TextStyle style) {
+        return printAt(row, col, text, style, getCurrentRenderGeneration());
+    }
+
+ 
     /**
      * Print styled text at specific position
      */
-    public CompletableFuture<Void> printAt(int row, int col, String text, TextStyle style) {
+    public CompletableFuture<Void> printAt(int row, int col, String text, TextStyle style, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT_AT);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
@@ -409,71 +502,73 @@ public class TerminalContainerHandle extends ContainerHandle {
         command.put(Keys.TEXT, text);
         command.put(Keys.STYLE, style.toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
      * Move cursor to position
      */
-    public CompletableFuture<Void> moveCursor(int row, int col) {
+    public CompletableFuture<Void> moveCursor(int row, int col, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(Keys.ROW, row);
         command.put(Keys.COL, col);
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
-    
+    public CompletableFuture<Void> moveCursor(int row, int col) {
+        return moveCursor(row, col, getCurrentRenderGeneration());
+    }
     /**
      * Show cursor
      */
-    public CompletableFuture<Void> showCursor() {
+    public CompletableFuture<Void> showCursor(long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
      * Hide cursor
      */
-    public CompletableFuture<Void> hideCursor() {
+    public CompletableFuture<Void> hideCursor(long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
      * Clear from cursor to end of line
      */
-    public CompletableFuture<Void> clearLine() {
+    public CompletableFuture<Void> clearLine(long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
      * Clear specific line
      */
-    public CompletableFuture<Void> clearLine(int row) {
+    public CompletableFuture<Void> clearLine(int row, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(Keys.ROW, row);
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
      * Clear rectangular region
      */
-    public CompletableFuture<Void> clearRegion(int startRow, int startCol, int endRow, int endCol) {
+    public CompletableFuture<Void> clearRegion(int startRow, int startCol, int endRow, int endCol, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
@@ -482,7 +577,7 @@ public class TerminalContainerHandle extends ContainerHandle {
         command.put(TerminalCommands.END_ROW, endRow);
         command.put(TerminalCommands.END_COL, endCol);
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
@@ -506,15 +601,26 @@ public class TerminalContainerHandle extends ContainerHandle {
     ) {
         return drawBox(startRow, startCol, width, height, null, boxStyle);
     }
-    
-    /**
-     * Draw styled box
-     */
+
     public CompletableFuture<Void> drawBox(
         int startRow, int startCol, 
         int width, int height,
         String title,
         BoxStyle boxStyle
+    ) {
+        return drawBox(startRow, startCol, width, height, title, boxStyle, 
+            getCurrentRenderGeneration());
+    }
+    
+    /**
+     * DrawBox with generation
+     */
+    public CompletableFuture<Void> drawBox(
+        int startRow, int startCol, 
+        int width, int height,
+        String title,
+        BoxStyle boxStyle,
+        long generation
     ) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_BOX);
@@ -523,10 +629,10 @@ public class TerminalContainerHandle extends ContainerHandle {
         command.put(TerminalCommands.START_COL, startCol);
         command.put(Keys.WIDTH, width);
         command.put(Keys.HEIGHT, height);
-        command.put(Keys.TITLE, title);
+        command.put(Keys.TITLE, title != null ? title : "");
         command.put(TerminalCommands.BOX_STYLE, boxStyle.name());
         command.put(ContainerCommands.RENDERER_ID, rendererId);
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
     
     /**
@@ -579,16 +685,23 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Draw horizontal line
      */
-    public CompletableFuture<Void> drawHLine(int row, int startCol, int length) {
+     /**
+     * DrawHLine with generation
+     */
+    public CompletableFuture<Void> drawHLine(int row, int startCol, int length, long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
         command.put(Keys.ROW, row);
         command.put(TerminalCommands.START_COL, startCol);
         command.put(Keys.LENGTH, length);
-        return sendRenderCommand(command);
+        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        return sendRenderCommand(command, generation);
     }
 
+    public CompletableFuture<Void> drawHLine(int row, int startCol, int length) {
+        return drawHLine(row, startCol, length, getCurrentRenderGeneration());
+    }
     
     /**
      * Get terminal rows
@@ -648,20 +761,24 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Begin batch of terminal operations
      */
-    public CompletableFuture<Void> beginBatch() {
+    public CompletableFuture<Void> beginBatch(long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_BEGIN_BATCH);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
-    
+
+    public CompletableFuture<Void> beginBatch() {
+        return beginBatch(getCurrentRenderGeneration());
+    }
+
     /**
      * End batch and render
      */
-    public CompletableFuture<Void> endBatch() {
+    public CompletableFuture<Void> endBatch(long generation) {
         NoteBytesMap command = new NoteBytesMap();
         command.put(Keys.CMD, TerminalCommands.TERMINAL_END_BATCH);
         command.put(Keys.CONTAINER_ID, getId().toNoteBytes());
-        return sendRenderCommand(command);
+        return sendRenderCommand(command, generation);
     }
 }

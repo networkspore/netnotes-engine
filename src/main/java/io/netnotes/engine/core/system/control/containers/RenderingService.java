@@ -299,7 +299,7 @@ public class RenderingService extends FlowProcess {
 
 
         NoteBytes[] containers = getAllContainers().stream()
-            .map(c -> c.getInfo().toNoteBytes())
+            .map(container -> container.getInfo().toNoteBytes())
             .toArray(NoteBytes[]::new);
 
         reply(packet, new NoteBytesObject(new NoteBytesPair[]{

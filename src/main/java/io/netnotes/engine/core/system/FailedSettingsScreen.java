@@ -11,6 +11,8 @@ import java.util.concurrent.CompletionException;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -76,48 +78,77 @@ class FailedSettingsScreen extends TerminalScreen {
         super(name, terminal);
     }
     
+    // ===== RENDERABLE INTERFACE =====
+    
+    @Override
+    public RenderState getRenderState() {
+        // If menu is active, return empty (MenuNavigator handles rendering)
+        if (menuNavigator != null && menuNavigator.hasMenu()) {
+            return RenderState.builder().build();
+        }
+        
+        // Otherwise, build our own state
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> {
+            term.clear(gen);
+            term.printAt(1, (term.getCols() - 14) / 2, "Settings Error", TextStyle.BOLD, gen);
+        });
+        
+        switch (currentState) {
+            case CHECKING:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Diagnosing settings issue...", TextStyle.NORMAL, gen));
+                break;
+            
+            case CORRUPT_FILE:
+                // Would need to implement showCorruptFileScreen logic here
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Settings file is corrupt", TextStyle.ERROR, gen));
+                break;
+            
+            case MISSING_FILE_WITH_DATA:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Settings file missing but data exists", TextStyle.WARNING, gen));
+                break;
+            
+            case ATTEMPTING_RECOVERY:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Attempting to recover settings data...", TextStyle.INFO, gen));
+                break;
+            
+            case RECOVERY_SUCCESS:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Recovery successful", TextStyle.SUCCESS, gen));
+                break;
+            
+            case RECOVERY_FAILED:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Recovery failed", TextStyle.ERROR, gen));
+                break;
+            
+            case UNRECOVERABLE:
+                builder.add((term, gen) -> 
+                    term.printAt(5, 10, "Unrecoverable error", TextStyle.ERROR, gen));
+                break;
+        }
+        
+        return builder.build();
+    }
+    
+    // ===== LIFECYCLE =====
+    
     @Override
     public CompletableFuture<Void> onShow() {
         currentState = DiagnosisState.CHECKING;
-        return render().thenRun(this::startDiagnosis);
+        invalidate();
+        startDiagnosis();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
     public void onHide() {
         cleanup();
-    }
-    
-    @Override
-    public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Settings Error"))
-            .thenCompose(v -> {
-                switch (currentState) {
-                    case CHECKING:
-                        return terminal.printAt(5, 10, "Diagnosing settings issue...");
-                    
-                    case CORRUPT_FILE:
-                        return showCorruptFileScreen();
-                    
-                    case MISSING_FILE_WITH_DATA:
-                        return showMissingFileScreen();
-                    
-                    case ATTEMPTING_RECOVERY:
-                        return terminal.printAt(5, 10, "Attempting to recover settings data...");
-                    
-                    case RECOVERY_SUCCESS:
-                        return showRecoverySuccessScreen();
-                    
-                    case RECOVERY_FAILED:
-                        return showRecoveryFailedScreen();
-                    
-                    case UNRECOVERABLE:
-                        return showUnrecoverableScreen();
-                    
-                    default:
-                        return CompletableFuture.completedFuture(null);
-                }
-            });
     }
     
     private void startDiagnosis() {
@@ -130,7 +161,7 @@ class FailedSettingsScreen extends TerminalScreen {
         } else if (dataExists) {
             // No settings but data exists - unrecoverable without salt
             currentState = DiagnosisState.MISSING_FILE_WITH_DATA;
-            render();
+            //  TODO: render(); should mark dirty
         } else {
             // No settings, no data - safe to start fresh
             terminal.printAt(7, 10, "No existing data found. Redirecting to setup...")
@@ -155,7 +186,7 @@ class FailedSettingsScreen extends TerminalScreen {
                 // File is corrupt - attempt recovery
                 errorDetails = ex.getMessage();
                 currentState = DiagnosisState.CORRUPT_FILE;
-                render();
+                //  TODO: render(); should mark dirty
                 return null;
             });
     }
@@ -178,7 +209,8 @@ class FailedSettingsScreen extends TerminalScreen {
             () -> {
                 cleanupMenuNavigator();
                 currentState = DiagnosisState.ATTEMPTING_RECOVERY;
-                render().thenRun(this::attemptRecovery);
+                //TOODO:  render(); should mark dirty
+                attemptRecovery();
             });
         
         menu.addItem("delete", "Delete Data and Start Fresh",
@@ -203,7 +235,7 @@ class FailedSettingsScreen extends TerminalScreen {
             } catch (Exception e) {
                 errorDetails = e.getMessage();
                 currentState = DiagnosisState.RECOVERY_FAILED;
-                render();
+                //  TODO: render(); should mark dirty
             }
         });
     }
@@ -252,7 +284,7 @@ class FailedSettingsScreen extends TerminalScreen {
             currentState = DiagnosisState.RECOVERY_FAILED;
         }
         
-        render();
+        //  TODO: render(); should mark dirty
     }
     
     private byte[] createKeyPattern(NoteBytes key) {
@@ -387,7 +419,7 @@ class FailedSettingsScreen extends TerminalScreen {
                         .thenCompose(x -> terminal.printAt(16, 10, "Press any key to see options..."))
                         .thenRun(() -> terminal.waitForKeyPress(() -> {
                             currentState = DiagnosisState.UNRECOVERABLE;
-                            render();
+                            //  TODO: render(); should mark dirty
                         }));
                 }
             });
@@ -425,7 +457,10 @@ class FailedSettingsScreen extends TerminalScreen {
             password.close();
             terminal.printError("Recovery failed: " + e.getMessage())
                 .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
-                .thenRun(() -> terminal.waitForKeyPress( () -> render()));
+
+                .thenRun(() -> terminal.waitForKeyPress( () ->{
+                    //  TODO: render(); should mark dirty
+                }));
             return;
         }
 
@@ -477,7 +512,9 @@ class FailedSettingsScreen extends TerminalScreen {
 
                 return terminal.printError("Recovery failed: " + root.getMessage())
                     .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> render()));
+                    .thenRun(() -> terminal.waitForKeyPress( () -> {
+                        //  TODO: render(); should mark dirty
+                    }));
             });
       
     }
@@ -605,7 +642,9 @@ class FailedSettingsScreen extends TerminalScreen {
             } else {
                 terminal.printAt(18, 10, "Deletion cancelled. Must type 'DELETE' exactly.")
                     .thenRunAsync(() -> TimeHelpers.timeDelay(2))
-                    .thenCompose(v -> render());
+                    .thenRun(() -> {
+                        //  TODO: render(); should mark dirty
+                    });
             }
         });
         

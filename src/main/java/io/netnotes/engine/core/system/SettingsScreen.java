@@ -2,6 +2,7 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -17,6 +18,19 @@ class SettingsScreen extends TerminalScreen {
     public SettingsScreen(String name, SystemTerminalContainer terminal) {
         super(name, terminal);
     }
+    
+    // ===== RENDERABLE INTERFACE =====
+    
+    /**
+     * MenuNavigator is the active renderable
+     * We return empty state
+     */
+    @Override
+    public RenderState getRenderState() {
+        return RenderState.builder().build();
+    }
+    
+    // ===== LIFECYCLE =====
     
     @Override
     public CompletableFuture<Void> onShow() {
@@ -77,14 +91,5 @@ class SettingsScreen extends TerminalScreen {
         });
         
         return menu;
-    }
-    
-    @Override
-    public CompletableFuture<Void> render() {
-        // MenuNavigator handles rendering and resize
-        if (menuNavigator != null && menuNavigator.hasMenu()) {
-            menuNavigator.refreshMenu();
-        }
-        return CompletableFuture.completedFuture(null);
     }
 }

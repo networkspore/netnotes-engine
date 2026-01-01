@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.core.CoreConstants;
@@ -81,6 +82,7 @@ public class ContainerHandle extends FlowProcess {
     // Stream TO Container (for render commands)
     protected StreamChannel renderStream;
     protected NoteBytesWriter renderWriter;
+    protected final AtomicLong renderGeneration = new AtomicLong(0);
 
     // Stream FROM Container (for events)
     protected StreamChannel eventChannel = null;
@@ -136,13 +138,13 @@ public class ContainerHandle extends FlowProcess {
      * Builder for ContainerHandle
      */
     public static class Builder {
-        protected String name;
-        protected String title;
-        protected ContainerType containerType = null;
-        protected NoteBytes rendererId = null;
-        protected ContainerConfig containerConfig = new ContainerConfig();
-        protected ContextPath renderingServicePath = CoreConstants.RENDERING_SERVICE_PATH;
-        protected boolean autoFocus = true;
+        public String name;
+        public String title;
+        public ContainerType containerType = null;
+        public NoteBytes rendererId = null;
+        public ContainerConfig containerConfig = new ContainerConfig();
+        public ContextPath renderingServicePath = CoreConstants.RENDERING_SERVICE_PATH;
+        public boolean autoFocus = true;
         
      
         public Builder(String name, ContainerType containerType){
@@ -228,8 +230,8 @@ public class ContainerHandle extends FlowProcess {
     
 
     protected void setupEventHandlers(){
-        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RESIZE, this::handleContainerResized);
-        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSE, this::handleContainerClosed);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RESIZED, this::handleContainerResized);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSED, this::handleContainerClosed);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_SHOWN, this::handleContainerShown);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_HIDDEN, this::handleContainerHidden);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, this::handleContainerFocusGained);
@@ -289,7 +291,7 @@ public class ContainerHandle extends FlowProcess {
                 Log.logMsg("[ContainerHandle] Render stream established");
                 this.renderStream = channel;
                 this.renderWriter = new NoteBytesWriter(
-                    channel.getQueuedOutputStream()
+                    channel.getChannelStream()
                 );
             })
             .exceptionally(ex -> {
@@ -307,7 +309,36 @@ public class ContainerHandle extends FlowProcess {
 		return height;
 	}
 
-    
+    /**
+     * Get next generation ID
+     * Call this when starting a new screen/state
+     */
+    public long nextRenderGeneration() {
+        long gen = renderGeneration.incrementAndGet();
+        Log.logMsg("[ContainerHandle] New render generation: " + gen);
+        return gen;
+    }
+
+    /**
+     * Get render generation
+     */
+    public AtomicLong getRenderGeneration() {
+        return renderGeneration;
+    }
+
+    /**
+     * Get current generation
+     */
+    public long getCurrentRenderGeneration() {
+        return renderGeneration.get();
+    }
+
+    /**
+     * Check if generation is still current
+     */
+    public boolean isRenderGenerationCurrent(long generation) {
+        return renderGeneration.get() == generation;
+    }
    
     /**
      * Override onStop to cleanup IODaemon connection
@@ -383,8 +414,7 @@ public class ContainerHandle extends FlowProcess {
                 Log.logMsg("[ContainerHandle] Event stream read thread started");
                 try (
                     NoteBytesReader reader = new NoteBytesReader(
-                        new PipedInputStream(channel.getChannelStream(), 
-                            StreamUtils.PIPE_BUFFER_SIZE)
+                        new PipedInputStream(channel.getChannelStream(),  StreamUtils.PIPE_BUFFER_SIZE)
                     );
                 ) {
                     // Signal ready
@@ -397,7 +427,6 @@ public class ContainerHandle extends FlowProcess {
                     
                     while (nextBytes != null && isAlive()) {
                         if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            Log.logMsg("[ContainerHandle]" + getId() + " event received");
                             processRoutedEvent(nextBytes);
                         }
                         nextBytes = reader.nextNoteBytes();
@@ -420,8 +449,14 @@ public class ContainerHandle extends FlowProcess {
     }
 
     protected void processRoutedEvent(NoteBytes eventBytes) {
-        RoutedEvent event = RoutedEventFactory.from(containerPath, eventBytes);
-        eventHandlerRegistry.dispatch(event);
+        try{
+            RoutedEvent event = RoutedEventFactory.from(containerPath, eventBytes);
+            eventHandlerRegistry.dispatch(event);
+        }catch(Exception ex){
+            Log.logError("[ContainerHandle] Failed to deserialize routed event: " + ex.getMessage());
+            return;
+        }
+        
     }
     
     // ===== CONTAINER OPERATIONS =====
@@ -515,41 +550,68 @@ public class ContainerHandle extends FlowProcess {
     
     // ===== RENDER COMMAND SENDING =====
     
-    /**
-     * Send render command directly to Container via stream
-     * NO WRAPPING - just write the command!
-     * 
-     * This is used by subclasses like TerminalContainerHandle
-     */
-    protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command) {
-        if (isDestroyed) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Container already destroyed")
-            );
-        }
-        
-        // Stream must be ready at this point
-        if (renderWriter == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Render stream not initialized")
-            );
-        }
 
-        if(renderStream.isActive() && !renderStream.isClosed()){
-        
+   /**
+    * Send render command with generation check
+    * 
+    * @param command Render command to send
+    * @param generation Checks generation before writing
+    * @return
+    */
+    protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command, long generation) {
+        return CompletableFuture.runAsync(() -> {
+            // GENERATION CHECK - prevents stale renders
+            if (!isRenderGenerationCurrent(generation)) {
+                return;
+            }
+            // Check if destroyed
+            if (isDestroyed) {
+                throw new CompletionException(
+                    new IllegalStateException("Container already destroyed")
+                );
+            }
+            
+            // Check if stream ready
+            if (renderWriter == null) {
+                throw new CompletionException(
+                    new IllegalStateException("Render stream not initialized")
+                );
+            }
+            
+            // Check if stream active
+            if (!renderStream.isActive() || renderStream.isClosed()) {
+                Log.logMsg("[ContainerHandle] Render stream is closed, skipping");
+                return;
+            }
+            
+            
+            
             try {
                 NoteBytes noteBytes = command.toNoteBytes();
                 renderWriter.write(noteBytes);
-                return CompletableFuture.completedFuture(null);
+                renderWriter.flush();
             } catch (IOException ex) {
-                return CompletableFuture.failedFuture(ex);
+                throw new CompletionException(ex);
             }
-        }else{
-            Log.logMsg("[ContainerHandle] reader stream is closed");
-            return CompletableFuture.completedFuture(null);
-        }
+            
+        }, renderStream.getWriteExecutor()); // Single-threaded executor ensures ordering
+    }
+
+    /**
+     * Convenience method: send with current generation
+     */
+    protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command) {
+        return sendRenderCommand(command, getCurrentRenderGeneration());
     }
     
+    /**
+     * Mark as needing render (invalidate)
+     * Doesn't actually render - just signals need for redraw
+     */
+    public void invalidate() {
+        // Subclasses can override to schedule actual render
+    }
+
     // ===== SERVICE COMMUNICATION =====
     
     /**
@@ -579,32 +641,32 @@ public class ContainerHandle extends FlowProcess {
 
 
     public  NoteBytesReadOnly addKeyCharHandler( Consumer<RoutedEvent> handler){
-        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_CHAR, handler);
+       
+        return  getDefaultKeyboardEventRegistry().register(EventBytes.EVENT_KEY_CHAR, handler);
     }
 
     public  List<RoutedEventHandler> removeKeyCharHandler(Consumer<RoutedEvent> handler){
-       return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handler);
+       return  getDefaultKeyboardEventRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handler);
     }
 
     public  List<RoutedEventHandler> removeKeyCharHandler(NoteBytesReadOnly handlerId){
-       return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handlerId);
+       return  getDefaultKeyboardEventRegistry().unregister(EventBytes.EVENT_KEY_CHAR, handlerId);
     }
 
     public  NoteBytesReadOnly addKeyDownHandler( Consumer<RoutedEvent> handler){
-        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
+        return  getDefaultKeyboardEventRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
     }
 
     public  NoteBytesReadOnly addKeyDownHandler( RoutedEventHandler handler){
-        return getEventHandlerRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
+        return getDefaultKeyboardEventRegistry().register(EventBytes.EVENT_KEY_DOWN, handler);
     }
     
-
     public  List<RoutedEventHandler> removeKeyDownHandler(Consumer<RoutedEvent> consumer){
-        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_DOWN, consumer);
+        return getDefaultKeyboardEventRegistry().unregister(EventBytes.EVENT_KEY_DOWN, consumer);
     }
 
     public  List<RoutedEventHandler> removeKeyDownHandler(NoteBytesReadOnly id){
-        return getEventHandlerRegistry().unregister(EventBytes.EVENT_KEY_DOWN, id);
+        return getDefaultKeyboardEventRegistry().unregister(EventBytes.EVENT_KEY_DOWN, id);
     }
 
     public  NoteBytesReadOnly  addKeyUpHandler( Consumer<RoutedEvent> handler){
@@ -620,15 +682,15 @@ public class ContainerHandle extends FlowProcess {
     }
 
     public  NoteBytesReadOnly addResizeHandler( Consumer<RoutedEvent> handler){
-        return getEventHandlerRegistry().register(EventBytes.EVENT_CONTAINER_RESIZE, handler);
+        return getEventHandlerRegistry().register(EventBytes.EVENT_CONTAINER_RESIZED, handler);
     }
 
     public  List<RoutedEventHandler> removeResizeHandler(Consumer<RoutedEvent> handler){
-        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZE, handler);
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZED, handler);
     }
     
     public  List<RoutedEventHandler> removeResizeHandler(NoteBytesReadOnly handlerId){
-        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZE, handlerId);
+        return getEventHandlerRegistry().unregister(EventBytes.EVENT_CONTAINER_RESIZED, handlerId);
     }
 
 

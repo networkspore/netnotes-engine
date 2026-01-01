@@ -1,9 +1,11 @@
 package io.netnotes.engine.core.system.control.containers;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -13,6 +15,8 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
  * ContainerCommands - Command types for container protocol
  * 
  * Similar to UICommands, but for container management
+ * only for ContainerHandle TO Container
+ * EVENT commands FROM container utlize EventBytes, not ContainerCommands
  */
 public class ContainerCommands {
     public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
@@ -53,13 +57,8 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly LIST_CONTAINERS = 
         new NoteBytesReadOnly("list_containers");
     
-    // ===== EVENT COMMANDS (from ContainerService to INode) =====
-    public static final NoteBytesReadOnly CONTAINER_CLOSED = 
-        new NoteBytesReadOnly("container_closed");
-    public static final NoteBytesReadOnly CONTAINER_RESIZED = 
-        new NoteBytesReadOnly("container_resized");
-    public static final NoteBytesReadOnly CONTAINER_FOCUSED = 
-        new NoteBytesReadOnly("container_focused");
+    
+  
 
     public static final NoteBytesReadOnly UPDATE_CONTAINER = 
         new NoteBytesReadOnly("update_container");
@@ -73,18 +72,6 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly RESTORE_CONTAINER = 
         new NoteBytesReadOnly("restore_container");
 
-
-    // ===== EVENTS (from ContainerService to INode) =====
-    public static final NoteBytesReadOnly CONTAINER_CREATED = 
-        new NoteBytesReadOnly("container_created");
-    public static final NoteBytesReadOnly CONTAINER_MOVED = 
-        new NoteBytesReadOnly("container_moved");
-    public static final NoteBytesReadOnly CONTAINER_MINIMIZED = 
-        new NoteBytesReadOnly("container_minimized");
-    public static final NoteBytesReadOnly CONTAINER_MAXIMIZED = 
-        new NoteBytesReadOnly("container_maximized");
-    public static final NoteBytesReadOnly CONTAINER_RESTORED = 
-        new NoteBytesReadOnly("container_restored");
 
     
     /**
@@ -217,40 +204,55 @@ public class ContainerCommands {
     
     // ===== RESPONSE/EVENT BUILDERS =====
     
-    
     /**
      * Container closed event
      */
-    public static NoteBytesMap containerClosed(ContainerId containerId) {
+    public static NoteBytesMap containerClosed(NoteBytes containerId) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, CONTAINER_CLOSED);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_CLOSED);
+        msg.put(Keys.CONTAINER_ID, containerId);
         return msg;
     }
     
     /**
      * Container focused event
      */
-    public static NoteBytesMap containerFocused(ContainerId containerId) {
+    public static NoteBytesMap containerFocused(NoteBytes containerId) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, CONTAINER_FOCUSED);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_FOCUS_GAINED);
+        msg.put(Keys.CONTAINER_ID, containerId);
+        return msg;
+    }
+
+     public static NoteBytesMap containerFocusLost(NoteBytes containerId) {
+        NoteBytesMap msg = new NoteBytesMap();
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_FOCUS_LOST);
+        msg.put(Keys.CONTAINER_ID, containerId);
         return msg;
     }
     
-    /**
-     * Container resized event
-     */
-    public static NoteBytesMap containerResized(
+     public static NoteBytesMap containerResized(
         ContainerId containerId,
         int width,
         int height
     ) {
+        return containerResized(containerId.toNoteBytes(), width, height);
+    }
+    /**
+     * Container resized event
+     */
+    public static NoteBytesMap containerResized(
+        NoteBytes containerId,
+        int width,
+        int height
+    ) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, CONTAINER_RESIZED);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
-        msg.put(Keys.WIDTH, width);
-        msg.put(Keys.HEIGHT, height);
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZED);
+        msg.put(Keys.CONTAINER_ID, containerId);
+        msg.put(Keys.PAYLOAD, new NoteBytesArrayReadOnly(new NoteBytes[]{
+            new NoteBytes(width),
+            new NoteBytes(height)
+        }));
         return msg;
     }
 }

@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class NoteBytesArray extends NoteBytes{
 
@@ -22,6 +23,10 @@ public class NoteBytesArray extends NoteBytes{
 
     public NoteBytesArray(byte[] bytes){
         super(bytes == null ||  bytes.length == 0 ? new byte[INITAL_SIZE] : bytes  , NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE);
+        if(bytes == null){
+            m_length = 0;
+            return;
+        }
         m_length = bytes.length;
         ensureCapacity(INITAL_SIZE);
     }
@@ -46,11 +51,16 @@ public class NoteBytesArray extends NoteBytes{
         }
 
         int totalLength = getByteLength(noteBytesArray);
+
+
+        
         byte[] bytes = new byte[totalLength];
         int offset = 0;
         for (NoteBytes nb : noteBytesArray) {
             offset = NoteBytes.writeNote(nb, bytes, offset);
         }
+        Log.logMsg("NoteBytesArray: " + Arrays.toString(bytes));
+
         return bytes;
     }
 
@@ -218,7 +228,7 @@ public class NoteBytesArray extends NoteBytes{
 
         int newCapacity = Math.max(buffer.length * 2, minCapacity);
         byte[] expanded = Arrays.copyOf(buffer, newCapacity);
-        super.set(expanded);
+        super.set(expanded, getType());
     }
  
 

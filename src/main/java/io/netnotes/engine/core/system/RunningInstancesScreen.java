@@ -7,6 +7,8 @@ import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.nodes.NodeState;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -38,6 +40,7 @@ class RunningInstancesScreen extends TerminalScreen {
     private MenuNavigator menuNavigator;
     private PasswordReader passwordReader;
     private final NodeCommands nodeCommands;
+    private List<NodeInstance> cachedInstances; // Cache for rendering
     
     public RunningInstancesScreen(
         String name, 
@@ -52,11 +55,46 @@ class RunningInstancesScreen extends TerminalScreen {
         this.onBack = onBack;
     }
     
+    // ===== RENDERABLE INTERFACE =====
+    
+    @Override
+    public RenderState getRenderState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        // Clear screen
+        builder.add((term, gen) -> term.clear(gen));
+        
+        // Build base content based on current view
+        switch (currentView) {
+            case INSTANCE_LIST:
+                buildInstanceListState(builder);
+                break;
+            case INSTANCE_DETAILS:
+                buildInstanceDetailsState(builder);
+                break;
+            case CONFIRM_STOP:
+                buildConfirmStopState(builder);
+                break;
+        }
+        
+        // If menu is active, add its render state on top
+        if (menuNavigator != null) {
+            builder.addAll(menuNavigator.getRenderState().getElements());
+        }
+        
+        return builder.build();
+    }
+    
+    // ===== LIFECYCLE =====
+    
     @Override
     public CompletableFuture<Void> onShow() {
         currentView = View.INSTANCE_LIST;
         selectedInstance = null;
-        return render();
+        cachedInstances = null;
+        
+        // Load instances and show
+        return loadInstancesAndShow();
     }
     
     @Override
@@ -64,56 +102,54 @@ class RunningInstancesScreen extends TerminalScreen {
         cleanup();
     }
     
-    @Override
-    public CompletableFuture<Void> render() {
-        switch (currentView) {
-            case INSTANCE_LIST:
-                return renderInstanceList();
-            case INSTANCE_DETAILS:
-                return renderInstanceDetails();
-            case CONFIRM_STOP:
-                return renderConfirmStop();
-            default:
-                return CompletableFuture.completedFuture(null);
-        }
-    }
-    
     // ===== INSTANCE LIST =====
     
-    private CompletableFuture<Void> renderInstanceList() {
+    private CompletableFuture<Void> loadInstancesAndShow() {
         return nodeCommands.getRunningInstances()
-            .thenCompose(instances -> {
-                return terminal.clear()
-                    .thenCompose(v -> terminal.printTitle("Running Node Instances"))
-                    .thenCompose(v -> {
-                        if (instances.isEmpty()) {
-                            return terminal.printAt(5, 10, "No instances currently running")
-                                .thenCompose(x -> terminal.printAt(7, 10, "Press ESC to go back"))
-                                .thenRun(() -> terminal.waitForKeyPress(this::goBack));
-                        } else {
-                            return renderInstanceTable(instances, 5)
-                                .thenCompose(x -> showInstanceListMenu(instances));
-                        }
-                    });
+            .thenAccept(instances -> {
+                cachedInstances = instances;
+                if (instances.isEmpty()) {
+                    // No instances - show message and wait for key
+                    invalidate();
+                    terminal.waitForKeyPress(this::goBack);
+                } else {
+                    // Show instances and menu
+                    invalidate();
+                    showInstanceListMenu(instances);
+                }
             })
             .exceptionally(ex -> {
                 terminal.printError("Failed to load instances: " + ex.getMessage())
                     .thenCompose(v -> terminal.printAt(7, 10, "Press any key to go back..."))
-                    .thenRun(() -> terminal.waitForKeyPress( this::goBack));
+                    .thenRun(() -> terminal.waitForKeyPress(this::goBack));
                 return null;
             });
     }
     
-    private CompletableFuture<Void> renderInstanceTable(List<NodeInstance> instances, int startRow) {
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+    private void buildInstanceListState(RenderState.Builder builder) {
+        // Title
+        builder.add((term, gen) -> 
+            term.printAt(1, (term.getCols() - 23) / 2, "Running Node Instances", TextStyle.BOLD, gen));
         
+        if (cachedInstances == null || cachedInstances.isEmpty()) {
+            builder.add((term, gen) -> {
+                term.printAt(5, 10, "No instances currently running", TextStyle.NORMAL, gen);
+                term.printAt(7, 10, "Press ESC to go back", TextStyle.INFO, gen);
+            });
+        } else {
+            buildInstanceTableState(builder, cachedInstances, 5);
+        }
+    }
+    
+    private void buildInstanceTableState(RenderState.Builder builder, List<NodeInstance> instances, int startRow) {
         // Header
-        future = future
-            .thenCompose(v -> terminal.printAt(startRow, 10, "Package"))
-            .thenCompose(v -> terminal.printAt(startRow, 35, "Process ID"))
-            .thenCompose(v -> terminal.printAt(startRow, 55, "State"))
-            .thenCompose(v -> terminal.printAt(startRow, 70, "Uptime"))
-            .thenCompose(v -> terminal.printAt(startRow + 1, 10, "─".repeat(70)));
+        builder.add((term, gen) -> {
+            term.printAt(startRow, 10, "Package", TextStyle.BOLD, gen);
+            term.printAt(startRow, 35, "Process ID", TextStyle.BOLD, gen);
+            term.printAt(startRow, 55, "State", TextStyle.BOLD, gen);
+            term.printAt(startRow, 70, "Uptime", TextStyle.BOLD, gen);
+            term.printAt(startRow + 1, 10, "─".repeat(70), TextStyle.NORMAL, gen);
+        });
         
         int row = startRow + 2;
         int index = 1;
@@ -128,21 +164,20 @@ class RunningInstancesScreen extends TerminalScreen {
             final int currentRow = row;
             final int currentIndex = index;
             
-            future = future
-                .thenCompose(v -> terminal.printAt(currentRow, 8, currentIndex + "."))
-                .thenCompose(v -> terminal.printAt(currentRow, 10, truncate(packageName, 23)))
-                .thenCompose(v -> terminal.printAt(currentRow, 35, truncate(processId, 18)))
-                .thenCompose(v -> terminal.printAt(currentRow, 55, state))
-                .thenCompose(v -> terminal.printAt(currentRow, 70, uptime));
+            builder.add((term, gen) -> {
+                term.printAt(currentRow, 8, currentIndex + ".", TextStyle.NORMAL, gen);
+                term.printAt(currentRow, 10, truncate(packageName, 23), TextStyle.NORMAL, gen);
+                term.printAt(currentRow, 35, truncate(processId, 18), TextStyle.NORMAL, gen);
+                term.printAt(currentRow, 55, state, TextStyle.NORMAL, gen);
+                term.printAt(currentRow, 70, uptime, TextStyle.NORMAL, gen);
+            });
             
             row++;
             index++;
         }
-        
-        return future;
     }
     
-    private CompletableFuture<Void> showInstanceListMenu(List<NodeInstance> instances) {
+    private void showInstanceListMenu(List<NodeInstance> instances) {
         ContextPath menuPath = terminal.getSessionPath().append("menu", "instances");
         MenuContext menu = new MenuContext(menuPath, "Instance Actions");
         
@@ -159,14 +194,14 @@ class RunningInstancesScreen extends TerminalScreen {
         }
         
         menu.addSeparator("Instance Navigation");
-        menu.addItem("refresh", "Refresh List", "Reload instance list", this::onShow);
+        menu.addItem("refresh", "Refresh List", "Reload instance list", () -> {
+            cleanupMenuNavigator();
+            onShow();
+        });
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
         menuNavigator = new MenuNavigator(terminal);
-        
-     
         menuNavigator.showMenu(menu);
-        return CompletableFuture.completedFuture(null);
     }
     
     // ===== INSTANCE DETAILS =====
@@ -175,31 +210,33 @@ class RunningInstancesScreen extends TerminalScreen {
         cleanupMenuNavigator();
         selectedInstance = instance;
         currentView = View.INSTANCE_DETAILS;
-        render();
+        invalidate();
+        showInstanceDetailsMenu();
     }
     
-    private CompletableFuture<Void> renderInstanceDetails() {
+    private void buildInstanceDetailsState(RenderState.Builder builder) {
         if (selectedInstance == null) {
             currentView = View.INSTANCE_LIST;
-            return render();
+            buildInstanceListState(builder);
+            return;
         }
         
         InstalledPackage pkg = selectedInstance.getPackage();
         
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Instance Details"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Package: " + pkg.getName()))
-            .thenCompose(v -> terminal.printAt(6, 10, "Version: " + pkg.getVersion()))
-            .thenCompose(v -> terminal.printAt(7, 10, "Description: " + pkg.getDescription()))
-            .thenCompose(v -> terminal.printAt(9, 10, "Instance ID: " + selectedInstance.getInstanceId()))
-            .thenCompose(v -> terminal.printAt(10, 10, "Process ID: " + selectedInstance.getProcessId()))
-            .thenCompose(v -> terminal.printAt(11, 10, "State: " + selectedInstance.getState()))
-            .thenCompose(v -> terminal.printAt(12, 10, "Uptime: " + formatUptime(selectedInstance.getUptime())))
-            .thenCompose(v -> terminal.printAt(13, 10, "Crash Count: " + selectedInstance.getCrashCount()))
-            .thenCompose(v -> terminal.printAt(15, 10, "Data Path: " + selectedInstance.getDataRootPath()))
-            .thenCompose(v -> terminal.printAt(16, 10, "Flow Path: " + selectedInstance.getFlowBasePath()))
-            .thenCompose(v -> terminal.printAt(18, 10, "Choose an action:"))
-            .thenRun(this::showInstanceDetailsMenu);
+        builder.add((term, gen) -> {
+            term.printAt(1, (term.getCols() - 16) / 2, "Instance Details", TextStyle.BOLD, gen);
+            term.printAt(5, 10, "Package: " + pkg.getName(), TextStyle.NORMAL, gen);
+            term.printAt(6, 10, "Version: " + pkg.getVersion(), TextStyle.NORMAL, gen);
+            term.printAt(7, 10, "Description: " + pkg.getDescription(), TextStyle.NORMAL, gen);
+            term.printAt(9, 10, "Instance ID: " + selectedInstance.getInstanceId(), TextStyle.NORMAL, gen);
+            term.printAt(10, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL, gen);
+            term.printAt(11, 10, "State: " + selectedInstance.getState(), TextStyle.NORMAL, gen);
+            term.printAt(12, 10, "Uptime: " + formatUptime(selectedInstance.getUptime()), TextStyle.NORMAL, gen);
+            term.printAt(13, 10, "Crash Count: " + selectedInstance.getCrashCount(), TextStyle.NORMAL, gen);
+            term.printAt(15, 10, "Data Path: " + selectedInstance.getDataRootPath(), TextStyle.NORMAL, gen);
+            term.printAt(16, 10, "Flow Path: " + selectedInstance.getFlowBasePath(), TextStyle.NORMAL, gen);
+            term.printAt(18, 10, "Choose an action:", TextStyle.NORMAL, gen);
+        });
     }
     
     private void showInstanceDetailsMenu() {
@@ -215,21 +252,21 @@ class RunningInstancesScreen extends TerminalScreen {
         
         menu.addItem("refresh", "Refresh Details", 
             "Reload instance information",
-            () -> render());
+            () -> invalidate());
         
         menu.addSeparator("Navigation");
         menu.addItem("back", "Back to Instance List", () -> {
             cleanupMenuNavigator();
             selectedInstance = null;
             currentView = View.INSTANCE_LIST;
-            render();
+            invalidate();
+            if (cachedInstances != null && !cachedInstances.isEmpty()) {
+                showInstanceListMenu(cachedInstances);
+            }
         });
         
         menuNavigator = new MenuNavigator(terminal);
-        
-  
         menuNavigator.showMenu(menu);
-
     }
     
     // ===== CONFIRM STOP =====
@@ -237,27 +274,29 @@ class RunningInstancesScreen extends TerminalScreen {
     private void confirmStopInstance() {
         cleanupMenuNavigator();
         currentView = View.CONFIRM_STOP;
-        render();
+        invalidate();
+        startStopConfirmation();
     }
     
-    private CompletableFuture<Void> renderConfirmStop() {
+    private void buildConfirmStopState(RenderState.Builder builder) {
         if (selectedInstance == null) {
             currentView = View.INSTANCE_LIST;
-            return render();
+            buildInstanceListState(builder);
+            return;
         }
         
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Confirm Stop Instance"))
-            .thenCompose(v -> terminal.printAt(5, 10, "⚠ WARNING ⚠"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Stop instance: " + selectedInstance.getPackage().getName()))
-            .thenCompose(v -> terminal.printAt(8, 10, "Process ID: " + selectedInstance.getProcessId()))
-            .thenCompose(v -> terminal.printAt(10, 10, "This will:"))
-            .thenCompose(v -> terminal.printAt(11, 12, "• Gracefully shutdown the node"))
-            .thenCompose(v -> terminal.printAt(12, 12, "• Close all connections"))
-            .thenCompose(v -> terminal.printAt(13, 12, "• Unload from runtime"))
-            .thenCompose(v -> terminal.printAt(15, 10, "Type 'STOP' to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(15, 30))
-            .thenRun(this::startStopConfirmation);
+        builder.add((term, gen) -> {
+            term.printAt(1, (term.getCols() - 20) / 2, "Confirm Stop Instance", TextStyle.BOLD, gen);
+            term.printAt(5, 10, "⚠ WARNING ⚠", TextStyle.WARNING, gen);
+            term.printAt(7, 10, "Stop instance: " + selectedInstance.getPackage().getName(), TextStyle.NORMAL, gen);
+            term.printAt(8, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL, gen);
+            term.printAt(10, 10, "This will:", TextStyle.NORMAL, gen);
+            term.printAt(11, 12, "• Gracefully shutdown the node", TextStyle.NORMAL, gen);
+            term.printAt(12, 12, "• Close all connections", TextStyle.NORMAL, gen);
+            term.printAt(13, 12, "• Unload from runtime", TextStyle.NORMAL, gen);
+            term.printAt(15, 10, "Type 'STOP' to confirm:", TextStyle.NORMAL, gen);
+            term.moveCursor(15, 30, gen);
+        });
     }
 
     private void startStopConfirmation() {
@@ -274,7 +313,7 @@ class RunningInstancesScreen extends TerminalScreen {
                     .thenCompose(x -> terminal.printAt(17, 10, "Press any key to try again..."))
                     .thenRun(() -> terminal.waitForKeyPress( () -> {
                         currentView = View.CONFIRM_STOP;
-                        render();
+                        invalidate();
                     }));
             }
         });
@@ -283,7 +322,10 @@ class RunningInstancesScreen extends TerminalScreen {
             inputReader.close();
             selectedInstance = null;
             currentView = View.INSTANCE_LIST;
-            render();
+            invalidate();
+            if (cachedInstances != null && !cachedInstances.isEmpty()) {
+                showInstanceListMenu(cachedInstances);
+            }
         });
     }
         
@@ -297,7 +339,9 @@ class RunningInstancesScreen extends TerminalScreen {
             .thenRun(() -> {
                 selectedInstance = null;
                 currentView = View.INSTANCE_LIST;
-                render();
+                invalidate();
+                // Reload instances after stopping
+                loadInstancesAndShow();
             })
             .exceptionally(ex -> {
                 terminal.printError("Failed to stop: " + ex.getMessage())
@@ -305,7 +349,10 @@ class RunningInstancesScreen extends TerminalScreen {
                 .thenRun(() -> terminal.waitForKeyPress( () -> {
                     selectedInstance = null;
                     currentView = View.INSTANCE_LIST;
-                    render();
+                    invalidate();
+                    if (cachedInstances != null && !cachedInstances.isEmpty()) {
+                        showInstanceListMenu(cachedInstances);
+                    }
                 }));
             return null;
         });

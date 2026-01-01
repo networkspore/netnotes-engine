@@ -1,30 +1,28 @@
 package io.netnotes.engine.core.system;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
-import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
-import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
- * PackageConfigurationScreen - Modify package configuration
+ * PackageConfigurationScreen - REFACTORED for pull-based rendering
  * 
- * Allows user to:
- * - Change ProcessId (namespace)
- * - Modify security capabilities (future)
- * - Update installation settings
- * 
- * REQUIRES: Password confirmation for all changes
+ * State is stored in fields, rendering is pulled via getRenderState()
  */
 class PackageConfigurationScreen extends TerminalScreen {
     
@@ -37,13 +35,16 @@ class PackageConfigurationScreen extends TerminalScreen {
     }
     
     private final InstalledPackage originalPackage;
-    private ProcessConfig newProcessConfig;
+    private final NodeCommands nodeCommands;
     
+    // Mutable state
     private Step currentStep = Step.SHOW_CURRENT;
+    private ProcessConfig newProcessConfig;
     private PasswordReader passwordReader;
     private TerminalInputReader inputReader;
+    private NoteBytesReadOnly handlerId = null;
     private Runnable onCompleteCallback;
-    private final NodeCommands nodeCommands;
+    private String errorMessage = null;
     
     public PackageConfigurationScreen(
         String name,
@@ -64,7 +65,8 @@ class PackageConfigurationScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         currentStep = Step.SHOW_CURRENT;
-        return render();
+        invalidate();
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
@@ -72,73 +74,316 @@ class PackageConfigurationScreen extends TerminalScreen {
         cleanup();
     }
     
+    // ===== PULL-BASED RENDERING =====
+    
     @Override
-    public CompletableFuture<Void> render() {
-        return terminal.clear()
-            .thenCompose(v -> {
-                switch (currentStep) {
-                    case SHOW_CURRENT:
-                        return renderCurrentConfig();
-                    case CONFIGURE_PROCESS_ID:
-                        return renderProcessIdConfig();
-                    case PASSWORD_CONFIRM:
-                        return renderPasswordConfirm();
-                    case SAVING:
-                        return renderSaving();
-                    case COMPLETE:
-                        return renderComplete();
-                    default:
-                        return CompletableFuture.completedFuture(null);
+    public RenderState getRenderState() {
+        return switch (currentStep) {
+            case SHOW_CURRENT -> buildCurrentConfigState();
+            case CONFIGURE_PROCESS_ID -> buildProcessIdConfigState();
+            case PASSWORD_CONFIRM -> buildPasswordConfirmState();
+            case SAVING -> buildSavingState();
+            case COMPLETE -> buildCompleteState();
+        };
+    }
+    
+    // ===== STATE BUILDERS =====
+    
+    private RenderState buildCurrentConfigState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        // Title
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 22) / 2, "Package Configuration", 
+                TextStyle.BOLD, gen));
+        
+        // Package info
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Package: " + originalPackage.getName(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(6, 10, "Version: " + originalPackage.getVersion(), gen));
+        
+        // Current config
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "Current Configuration:", TextStyle.BOLD, gen));
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "ProcessId: " + originalPackage.getProcessId(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(11, 10, "Data Path: " + 
+                originalPackage.getProcessConfig().getDataRootPath(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(12, 10, "Flow Path: " + 
+                originalPackage.getProcessConfig().getFlowBasePath(), gen));
+        
+        // Menu
+        builder.addAll(buildMenuElements(14));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildProcessIdConfigState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 16) / 2, "Change ProcessId", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Current ProcessId: " + originalPackage.getProcessId(), 
+                gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Enter new ProcessId (namespace):", gen));
+        builder.add((term, gen) -> 
+            term.printAt(8, 10, "(Leave blank to cancel)", TextStyle.INFO, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(10, 10, "New ProcessId: ", gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildPasswordConfirmState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 33) / 2, 
+                "Confirm Configuration Changes", TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Configuration Summary:", TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Package: " + originalPackage.getName(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(9, 10, "Changes:", TextStyle.BOLD, gen));
+        builder.add((term, gen) -> 
+            term.printAt(10, 12, "Old ProcessId: " + originalPackage.getProcessId(), gen));
+        builder.add((term, gen) -> 
+            term.printAt(11, 12, "New ProcessId: " + newProcessConfig.getProcessId(), gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(13, 10, 
+                "⚠️ Warning: This will require reloading any running instances", 
+                TextStyle.WARNING, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(15, 10, "Type 'CONFIRM' to proceed:", gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildSavingState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        builder.add((term, gen) -> 
+            term.printAt(0, (term.getCols() - 22) / 2, "Saving Configuration", 
+                TextStyle.BOLD, gen));
+        
+        builder.add((term, gen) -> 
+            term.printAt(5, 10, "Updating package configuration...", gen));
+        builder.add((term, gen) -> 
+            term.printAt(7, 10, "Please wait...", TextStyle.INFO, gen));
+        
+        return builder.build();
+    }
+    
+    private RenderState buildCompleteState() {
+        RenderState.Builder builder = RenderState.builder();
+        
+        if (errorMessage != null) {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 20) / 2, "Configuration Failed", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, errorMessage, TextStyle.ERROR, gen));
+        } else {
+            builder.add((term, gen) -> 
+                term.printAt(0, (term.getCols() - 21) / 2, "Configuration Updated", 
+                    TextStyle.BOLD, gen));
+            
+            builder.add((term, gen) -> 
+                term.printAt(5, 10, "✓ Configuration saved successfully", 
+                    TextStyle.SUCCESS, gen));
+            builder.add((term, gen) -> 
+                term.printAt(7, 10, "New ProcessId: " + newProcessConfig.getProcessId(), 
+                    gen));
+            builder.add((term, gen) -> 
+                term.printAt(9, 10, 
+                    "Note: Reload the package for changes to take effect", 
+                    TextStyle.INFO, gen));
+        }
+        
+        builder.add((term, gen) -> 
+            term.printAt(11, 10, "Press any key to return...", gen));
+        
+        return builder.build();
+    }
+    
+    // ===== MENU ELEMENTS =====
+    
+    private List<RenderElement> buildMenuElements(int startRow) {
+        List<RenderElement> elements = new ArrayList<>();
+        
+        elements.add((term, gen) -> 
+            term.printAt(startRow, 10, "1. Change ProcessId (Namespace)", gen));
+        elements.add((term, gen) -> 
+            term.printAt(startRow + 1, 10, 
+                "2. Modify Security Capabilities (Coming Soon)", TextStyle.INFO, gen));
+        elements.add((term, gen) -> 
+            term.printAt(startRow + 3, 10, "─".repeat(40), gen));
+        elements.add((term, gen) -> 
+            term.printAt(startRow + 4, 10, "3. Cancel and Return", gen));
+        
+        elements.add((term, gen) -> 
+            term.printAt(startRow + 6, 10, "Select option (or ESC to cancel):", 
+                TextStyle.INFO, gen));
+        
+        return elements;
+    }
+    
+    // ===== STATE TRANSITIONS =====
+    
+    private void transitionTo(Step newStep) {
+        currentStep = newStep;
+        invalidate();
+        
+        // Setup interactions for new step
+        switch (newStep) {
+            case SHOW_CURRENT -> setupMainMenuInput();
+            case CONFIGURE_PROCESS_ID -> startProcessIdInput();
+            case PASSWORD_CONFIRM -> startConfirmationEntry();
+            case SAVING -> performSave();
+            case COMPLETE -> setupCompleteInput();
+        }
+    }
+    
+    // ===== INPUT HANDLERS =====
+    
+    private void setupMainMenuInput() {
+        KeyRunTable keys = new KeyRunTable(
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, false), 
+                () -> transitionTo(Step.CONFIGURE_PROCESS_ID)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(1, true), 
+                () -> transitionTo(Step.CONFIGURE_PROCESS_ID)),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, false), 
+                this::showCapabilitiesNotImplemented),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(2, true), 
+                this::showCapabilitiesNotImplemented),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(3, false), 
+                this::cancelConfiguration),
+            new NoteBytesRunnablePair(KeyCodeBytes.getNumeric(3, true), 
+                this::cancelConfiguration),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE, this::cancelConfiguration)
+        );
+        
+        removeKeyDownHandler();
+        handlerId = terminal.addKeyDownHandler(event -> {
+            if (event instanceof EphemeralRoutedEvent ephemeral) {
+                try (ephemeral) {
+                    if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
+                        keys.run(ekd.getKeyCodeBytes());
+                    }
                 }
+            } else if (event instanceof KeyDownEvent keyDown) {
+                keys.run(keyDown.getKeyCodeBytes());
+            }
+        });
+    }
+    
+    private void startProcessIdInput() {
+        removeKeyDownHandler();
+        inputReader = new TerminalInputReader(terminal, 10, 25, 64);
+        
+        inputReader.setOnComplete(newProcessId -> {
+            inputReader.close();
+            inputReader = null;
+            
+            if (newProcessId == null || newProcessId.trim().isEmpty()) {
+                transitionTo(Step.SHOW_CURRENT);
+                return;
+            }
+            
+            try {
+                NoteBytesReadOnly newProcessIdBytes = 
+                    new NoteBytesReadOnly(newProcessId.trim());
+                newProcessConfig = ProcessConfig.create(newProcessIdBytes);
+                transitionTo(Step.PASSWORD_CONFIRM);
+            } catch (Exception e) {
+                errorMessage = "Invalid ProcessId: " + e.getMessage();
+                // Show error briefly then return to input
+                invalidate();
+                terminal.waitForKeyPress(() -> {
+                    errorMessage = null;
+                    transitionTo(Step.CONFIGURE_PROCESS_ID);
+                });
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            inputReader.close();
+            inputReader = null;
+            transitionTo(Step.SHOW_CURRENT);
+        });
+    }
+    
+    private void startConfirmationEntry() {
+        removeKeyDownHandler();
+        inputReader = new TerminalInputReader(terminal, 15, 36, 20);
+        
+        inputReader.setOnComplete(input -> {
+            inputReader.close();
+            inputReader = null;
+            
+            if ("CONFIRM".equals(input)) {
+                transitionTo(Step.SAVING);
+            } else {
+                errorMessage = "Confirmation failed";
+                invalidate();
+                terminal.waitForKeyPress(() -> {
+                    errorMessage = null;
+                    transitionTo(Step.PASSWORD_CONFIRM);
+                });
+            }
+        });
+        
+        inputReader.setOnEscape(text -> {
+            inputReader.close();
+            inputReader = null;
+            cancelConfiguration();
+        });
+    }
+    
+    private void performSave() {
+        nodeCommands.updatePackageConfiguration(
+                originalPackage.getPackageId(),
+                newProcessConfig
+            )
+            .thenAccept(v -> {
+                errorMessage = null;
+                transitionTo(Step.COMPLETE);
+            })
+            .exceptionally(ex -> {
+                errorMessage = "Failed to save: " + ex.getMessage();
+                transitionTo(Step.COMPLETE);
+                return null;
             });
     }
     
-    // ===== STEP 1: SHOW CURRENT CONFIG =====
-    
-    private CompletableFuture<Void> renderCurrentConfig() {
-        return terminal.printTitle("Package Configuration")
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Package: " + originalPackage.getName()))
-            .thenCompose(v -> terminal.printAt(6, 10, 
-                "Version: " + originalPackage.getVersion()))
-            .thenCompose(v -> terminal.printAt(8, 10, "Current Configuration:"))
-            .thenCompose(v -> terminal.printAt(10, 10, 
-                "ProcessId: " + originalPackage.getProcessId()))
-            .thenCompose(v -> terminal.printAt(11, 10, 
-                "Data Path: " + originalPackage.getProcessConfig().getDataRootPath()))
-            .thenCompose(v -> terminal.printAt(12, 10, 
-                "Flow Path: " + originalPackage.getProcessConfig().getFlowBasePath()))
-            .thenCompose(v -> showConfigMenu());
+    private void setupCompleteInput() {
+        removeKeyDownHandler();
+        terminal.waitForKeyPress(() -> {
+            if (onCompleteCallback != null) {
+                onCompleteCallback.run();
+            }
+        });
     }
     
-    private CompletableFuture<Void> showConfigMenu() {
-        ContextPath basePath = ContextPath.of("config", originalPackage.getName());
-        MenuContext menu = new MenuContext(basePath, "Configuration Options")
-            .addItem("process-id", "Change ProcessId (Namespace)", 
-                this::startProcessIdConfig)
-            .addItem("capabilities", "Modify Security Capabilities (Coming Soon)", 
-                this::capabilitiesNotImplemented)
-            .addSeparator("Navigation")
-            .addItem("cancel", "Cancel and Return", this::cancelConfiguration);
-        
-        return renderMenu(menu, 14);
-    }
-    
-    private void startProcessIdConfig() {
-        currentStep = Step.CONFIGURE_PROCESS_ID;
-        render();
-    }
-    
-    private void capabilitiesNotImplemented() {
-        terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Feature Not Available"))
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Security capability modification is not yet implemented"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "This feature will be available in a future update"))
-            .thenCompose(v -> terminal.printAt(9, 10, 
-                "Press any key to continue..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> render()));
+    private void showCapabilitiesNotImplemented() {
+        // TODO: Show temporary message
+        // For now, just do nothing
     }
     
     private void cancelConfiguration() {
@@ -147,246 +392,17 @@ class PackageConfigurationScreen extends TerminalScreen {
         }
     }
     
-    // ===== STEP 2: CONFIGURE PROCESS ID =====
+    // ===== CLEANUP =====
     
-    private CompletableFuture<Void> renderProcessIdConfig() {
-        return terminal.printTitle("Change ProcessId")
-            .thenCompose(v -> terminal.printAt(5, 10, 
-                "Current ProcessId: " + originalPackage.getProcessId()))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "Enter new ProcessId (namespace):"))
-            .thenCompose(v -> terminal.printAt(8, 10, "(Leave blank to cancel)"))
-            .thenCompose(v -> terminal.printAt(10, 10, "New ProcessId: "))
-            .thenRun(this::startProcessIdInput);
-    }
-    
-    private void startProcessIdInput() {
-        inputReader = new TerminalInputReader(terminal, 10, 25, 64);
-       
-        
-        inputReader.setOnComplete(newProcessId -> {
-         
-            if (newProcessId == null || newProcessId.trim().isEmpty()) {
-                // Cancelled
-                inputReader.close();
-                inputReader = null;
-                render();
-                return;
-            }
-            
-            // Validate and create new ProcessConfig
-            try {
-                NoteBytesReadOnly newProcessIdBytes = 
-                    new NoteBytesReadOnly(newProcessId.trim());
-                newProcessConfig = ProcessConfig.create(newProcessIdBytes);
-                
-                inputReader.close();
-                inputReader = null;
-                
-                // Proceed to password confirmation
-                currentStep = Step.PASSWORD_CONFIRM;
-                render();
-                
-            } catch (Exception e) {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
-                        "Invalid ProcessId: " + e.getMessage()))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to try again..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
-            }
-        });
-        
-        inputReader.setOnEscape(text -> {
-            inputReader.close();
-            inputReader = null;
-            render();
-        });
-    }
-    
-    // ===== STEP 3: PASSWORD CONFIRM =====
-    
-    private CompletableFuture<Void> renderPasswordConfirm() {
-        return terminal.printTitle("Confirm Configuration Changes")
-            .thenCompose(v -> terminal.printAt(5, 10, "Configuration Summary:"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "Package: " + originalPackage.getName()))
-            .thenCompose(v -> terminal.printAt(9, 10, "Changes:"))
-            .thenCompose(v -> terminal.printAt(10, 12, 
-                "Old ProcessId: " + originalPackage.getProcessId()))
-            .thenCompose(v -> terminal.printAt(11, 12, 
-                "New ProcessId: " + newProcessConfig.getProcessId()))
-            .thenCompose(v -> terminal.printAt(13, 10, 
-                "⚠️ Warning: This will require reloading any running instances"))
-            .thenCompose(v -> terminal.printAt(15, 10, 
-                "Type 'CONFIRM' to proceed:"))
-            .thenCompose(v -> terminal.moveCursor(15, 36))
-            .thenRun(this::startConfirmationEntry);
-    }
-    
-    private void startConfirmationEntry() {
-        inputReader = new TerminalInputReader(terminal, 15, 36, 20);
-     
-        
-        inputReader.setOnComplete(input -> {
-            inputReader.close();
-            inputReader = null;
-            
-            if ("CONFIRM".equals(input)) {
-                saveConfiguration();
-            } else {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError("Confirmation failed"))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to try again..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> render()));
-            }
-        });
-        
-        inputReader.setOnEscape(text -> {
-            
-            inputReader.close();
-            inputReader = null;
-            cancelConfiguration();
-        });
-    }
-    
-    // ===== STEP 4: SAVING =====
-    
-    private CompletableFuture<Void> renderSaving() {
-        return terminal.printTitle("Saving Configuration")
-            .thenCompose(v -> terminal.printAt(5, 10, "Updating package configuration..."))
-            .thenCompose(v -> terminal.printAt(7, 10, "Please wait..."));
-    }
-    
-    private void saveConfiguration() {
-        currentStep = Step.SAVING;
-        render();
-        
-        nodeCommands.updatePackageConfiguration(
-                originalPackage.getPackageId(),
-                newProcessConfig
-            )
-            .thenAccept(v -> {
-                currentStep = Step.COMPLETE;
-                render();
-            })
-            .exceptionally(ex -> {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
-                        "Failed to save configuration: " + ex.getMessage()))
-                    .thenCompose(v -> terminal.printAt(10, 10, 
-                        "Press any key to return..."))
-                    .thenRun(() -> terminal.waitForKeyPress(() -> {
-                        if (onCompleteCallback != null) {
-                            onCompleteCallback.run();
-                        }
-                    }));
-                return null;
-            });
-    }
-
-    
-    // ===== STEP 5: COMPLETE =====
-    
-    private CompletableFuture<Void> renderComplete() {
-        return terminal.printTitle("Configuration Updated")
-            .thenCompose(v -> terminal.printSuccess("✓ Configuration saved successfully"))
-            .thenCompose(v -> terminal.printAt(7, 10, 
-                "New ProcessId: " + newProcessConfig.getProcessId()))
-            .thenCompose(v -> terminal.printAt(9, 10, 
-                "Note: Reload the package for changes to take effect"))
-            .thenCompose(v -> terminal.printAt(11, 10, 
-                "Press any key to return..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> {
-                if (onCompleteCallback != null) {
-                    onCompleteCallback.run();
-                }
-            }));
-    }
-    
-    // ===== UTILITIES =====
-    
-    private CompletableFuture<Void> renderMenu(MenuContext menu, int startRow) {
-        // Simplified menu rendering - just show options
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
-        int row = startRow;
-        int index = 1;
-        
-        for (MenuContext.MenuItem item : menu.getItems()) {
-            final int currentRow = row;
-            final String itemText = String.format("%d. %s", index, item.description);
-            
-            future = future.thenCompose(v -> terminal.printAt(currentRow, 10, itemText));
-            
-            row++;
-            index++;
-        }
-        
-        final int selectRow = row + 1;
-        return future
-            .thenCompose(v -> terminal.printAt(selectRow, 10, 
-                "Select option (or ESC to cancel):"))
-            .thenRun(() -> startMenuNavigation(menu));
-    }
-    
-    private NoteBytesReadOnly handlerId = null;
-
-    private void removeKeyDownHandler(){
-        if(handlerId != null){
+    private void removeKeyDownHandler() {
+        if (handlerId != null) {
             terminal.removeKeyDownHandler(handlerId);
             handlerId = null;
         }
     }
-    // TODO: use MenuNavigator!
-    private void startMenuNavigation(MenuContext menu) {
-        List<MenuContext.MenuItem> items = new java.util.ArrayList<>(menu.getItems());
-        
-        KeyRunTable navigationKeys = new KeyRunTable();
-        
-        // Add number keys for direct selection
-        for (int i = 0; i < Math.min(items.size(), 9); i++) {
-            final int index = i;
-            navigationKeys.setKeyRunnable(
-                KeyCodeBytes.getNumeric(index, true),
-                () -> {
-                    removeKeyDownHandler();
-                    MenuContext.MenuItem selected = items.get(index);
-                    menu.navigate(selected.name);
-                }
-            );
-            navigationKeys.setKeyRunnable(
-                KeyCodeBytes.getNumeric(index, false),
-                () -> {
-                    removeKeyDownHandler();
-                    MenuContext.MenuItem selected = items.get(index);
-                    menu.navigate(selected.name);
-                }
-            );
-        }
-        
-        navigationKeys.setKeyRunnable(KeyCodeBytes.ESCAPE, () -> {
-            removeKeyDownHandler();
-            cancelConfiguration();
-        });
-        
-        handlerId = terminal.addKeyDownHandler(event -> {
-            if (event instanceof EphemeralRoutedEvent ephemeral) {
-                try (ephemeral) {
-                    if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
-                        navigationKeys.run(ekd.getKeyCodeBytes());
-                    }
-                }
-            } else if (event instanceof KeyDownEvent keyDown) {
-                navigationKeys.run(keyDown.getKeyCodeBytes());
-            }
-        });
-    }
     
- 
     private void cleanup() {
-    
+        removeKeyDownHandler();
         
         if (passwordReader != null) {
             passwordReader.close();

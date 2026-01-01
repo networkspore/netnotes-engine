@@ -6,12 +6,14 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.RenderManager;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -20,16 +22,9 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.TimeHelpers;
 
 /**
- * BrowsePackagesScreen - Browse and install packages from repositories
+ * BrowsePackagesScreen - REFACTORED for pull-based rendering
  * 
- * Features:
- * - Update package cache from repositories
- * - Browse packages by category
- * - View package details
- * - Install packages (with password confirmation)
- * - Configure installation (namespace, autoload, etc.)
- * 
- * Uses RuntimeAccess to interact with system services
+ * Browse and install packages from repositories with explicit state management.
  */
 class BrowsePackagesScreen extends TerminalScreen {
     
@@ -39,23 +34,29 @@ class BrowsePackagesScreen extends TerminalScreen {
         PACKAGE_LIST,
         PACKAGE_DETAILS,
         CONFIGURE_INSTALL,
-        CONFIRM_INSTALL
+        CONFIRM_INSTALL,
+        INSTALLING,
+        SUCCESS,
+        ERROR
     }
     
+    private volatile View currentView = View.LOADING;
+    private volatile String statusMessage = null;
+    private volatile String errorMessage = null;
     
-    private View currentView = View.LOADING;
-    private List<PackageInfo> availablePackages;
-    private List<InstalledPackage> installedPackages;
-    private String selectedCategory;
-    private PackageInfo selectedPackage;
-    private ProcessConfig installConfig;
-    private boolean loadImmediately = false;
-    private Runnable onBack;
+    // Data state
+    private volatile List<PackageInfo> availablePackages;
+    private volatile List<InstalledPackage> installedPackages;
+    private volatile String selectedCategory;
+    private volatile PackageInfo selectedPackage;
+    private volatile ProcessConfig installConfig;
+    private volatile boolean loadImmediately = false;
     
+    // UI components
     private MenuNavigator menuNavigator;
-    private PasswordReader passwordReader;
     private TerminalInputReader inputReader;
     private final NodeCommands nodeCommands;
+    private Runnable onBack;
     
     public BrowsePackagesScreen(
         String name, 
@@ -72,15 +73,160 @@ class BrowsePackagesScreen extends TerminalScreen {
         this.onBack = onBack;
     }
     
+    // ===== RENDERABLE INTERFACE =====
+    
+    @Override
+    public RenderState getRenderState() {
+        return switch (currentView) {
+            case LOADING -> buildLoadingState();
+            case CATEGORY_LIST, PACKAGE_LIST, PACKAGE_DETAILS -> buildMenuState();
+            case CONFIGURE_INSTALL -> buildConfigureState();
+            case CONFIRM_INSTALL -> buildConfirmState();
+            case INSTALLING -> buildInstallingState();
+            case SUCCESS -> buildSuccessState();
+            case ERROR -> buildErrorState();
+        };
+    }
+    
+    /**
+     * Build loading state
+     */
+    private RenderState buildLoadingState() {
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(0, 0, "Browse Packages", TextStyle.BOLD, gen);
+                term.printAt(7, 10, "Updating package lists from repositories...", gen);
+                term.printAt(9, 10, "This may take a moment...", gen);
+            })
+            .build();
+    }
+    
+    /**
+     * MenuNavigator is active, return empty
+     */
+    private RenderState buildMenuState() {
+        return RenderState.builder().build();
+    }
+    
+    /**
+     * Build configure install screen
+     */
+    private RenderState buildConfigureState() {
+        if (selectedPackage == null) {
+            return buildErrorState();
+        }
+        
+        PackageManifest manifest = selectedPackage.getManifest();
+        NoteBytesReadOnly defaultNamespace = manifest.getNamespace() != null ? 
+            manifest.getNamespace() : selectedPackage.getPackageId();
+        
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD, gen);
+                term.printAt(5, 10, "Package: " + selectedPackage.getName(), gen);
+                term.printAt(7, 10, "Process Namespace:", gen);
+                term.printAt(8, 12, "Default: " + defaultNamespace, gen);
+                term.printAt(9, 12, "Leave blank to use default", gen);
+                term.printAt(11, 10, "Custom namespace (or press Enter):", gen);
+                // InputReader renders at 11, 46
+            })
+            .build();
+    }
+    
+    /**
+     * Build confirm install screen
+     */
+    private RenderState buildConfirmState() {
+        if (selectedPackage == null || installConfig == null) {
+            return buildErrorState();
+        }
+        
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(0, 0, "Confirm Installation", TextStyle.BOLD, gen);
+                term.printAt(5, 10, "Package: " + selectedPackage.getName() + 
+                    " v" + selectedPackage.getVersion(), gen);
+                term.printAt(6, 10, "Repository: " + selectedPackage.getRepository(), gen);
+                term.printAt(7, 10, "Size: " + formatSize(selectedPackage.getSize()), gen);
+                term.printAt(9, 10, "Installation Configuration:", gen);
+                term.printAt(10, 12, "• Process Namespace: " + 
+                    installConfig.getProcessId(), gen);
+                term.printAt(11, 12, "• Load Immediately: " + 
+                    (loadImmediately ? "Yes" : "No"), gen);
+                term.printAt(13, 10, "This will download and install the package.", gen);
+                term.printAt(15, 10, "Type 'INSTALL' to confirm:", gen);
+                // InputReader renders at 17, 38
+            })
+            .build();
+    }
+    
+    /**
+     * Build installing state
+     */
+    private RenderState buildInstallingState() {
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(terminal.getRows() / 2, 10, 
+                    "Installing package...", TextStyle.INFO, gen);
+                if (statusMessage != null) {
+                    term.printAt(terminal.getRows() / 2 + 2, 10, 
+                        statusMessage, TextStyle.NORMAL, gen);
+                }
+            })
+            .build();
+    }
+    
+    /**
+     * Build success state
+     */
+    private RenderState buildSuccessState() {
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(terminal.getRows() / 2, 10, 
+                    "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
+                    TextStyle.SUCCESS, gen);
+                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                    "Returning to package list...", TextStyle.NORMAL, gen);
+            })
+            .build();
+    }
+    
+    /**
+     * Build error state
+     */
+    private RenderState buildErrorState() {
+        String message = errorMessage != null ? errorMessage : "An error occurred";
+        
+        return RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(terminal.getRows() / 2, 10, 
+                    message, TextStyle.ERROR, gen);
+                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                    "Press any key to continue...", TextStyle.NORMAL, gen);
+            })
+            .build();
+    }
+    
+    // ===== LIFECYCLE =====
+    
     @Override
     public CompletableFuture<Void> onShow() {
+        // Reset state
         currentView = View.LOADING;
         selectedCategory = null;
         selectedPackage = null;
         installConfig = null;
         loadImmediately = false;
+        errorMessage = null;
+        statusMessage = null;
         
-        return render().thenRun(this::updatePackageCache);
+        // Make this screen active
+        super.onShow();
+        
+        // Start loading
+        updatePackageCache();
+        
+        return CompletableFuture.completedFuture(null);
     }
     
     @Override
@@ -88,36 +234,9 @@ class BrowsePackagesScreen extends TerminalScreen {
         cleanup();
     }
     
-    @Override
-    public CompletableFuture<Void> render() {
-        switch (currentView) {
-            case LOADING:
-                return renderLoading();
-            case CATEGORY_LIST:
-                return renderCategoryList();
-            case PACKAGE_LIST:
-                return renderPackageList();
-            case PACKAGE_DETAILS:
-                return renderPackageDetails();
-            case CONFIGURE_INSTALL:
-                return renderConfigureInstall();
-            case CONFIRM_INSTALL:
-                return renderConfirmInstall();
-            default:
-                return CompletableFuture.completedFuture(null);
-        }
-    }
-    
     // ===== LOADING =====
     
-    private CompletableFuture<Void> renderLoading() {
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Browse Packages"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Updating package lists from repositories..."))
-            .thenCompose(v -> terminal.printAt(9, 10, "This may take a moment..."));
-    }
-    
-   private void updatePackageCache() {
+    private void updatePackageCache() {
         CompletableFuture<List<PackageInfo>> availableFuture = 
             nodeCommands.browseAvailablePackages();
         CompletableFuture<List<InstalledPackage>> installedFuture = 
@@ -128,228 +247,162 @@ class BrowsePackagesScreen extends TerminalScreen {
                 availablePackages = availableFuture.join();
                 installedPackages = installedFuture.join();
                 currentView = View.CATEGORY_LIST;
-                render();
+                showCategoryList();
             })
             .exceptionally(ex -> {
-                terminal.printError("Failed to update packages: " + ex.getMessage())
-                    .thenCompose(v -> terminal.printAt(11, 10, "Press any key to go back..."))
-                    .thenRun(() -> terminal.waitForKeyPress( this::goBack));
+                errorMessage = "Failed to update packages: " + ex.getMessage();
+                currentView = View.ERROR;
+                
+                // Make this screen active to show error
+                terminal.getRenderManager().setActive(this);
+                
+                terminal.waitForKeyPress()
+                    .thenRun(this::goBack);
                 return null;
             });
     }
     
     // ===== CATEGORY LIST =====
     
-    private CompletableFuture<Void> renderCategoryList() {
+    private void showCategoryList() {
         if (availablePackages.isEmpty()) {
-            return terminal.clear()
-                .thenCompose(v -> terminal.printTitle("Browse Packages"))
-                .thenCompose(v -> terminal.printAt(5, 10, "No packages available"))
-                .thenCompose(v -> terminal.printAt(7, 10, "Check repository configuration"))
-                .thenCompose(v -> terminal.printAt(9, 10, "Press ESC to go back"))
-                .thenRun(() -> terminal.waitForKeyPress( this::goBack));
+            errorMessage = "No packages available. Check repository configuration.";
+            currentView = View.ERROR;
+            invalidate();
+            
+            terminal.waitForKeyPress()
+                .thenRun(this::goBack);
+            return;
         }
+        
+        currentView = View.CATEGORY_LIST;
         
         // Group by category
         Map<String, List<PackageInfo>> byCategory = availablePackages.stream()
             .collect(Collectors.groupingBy(PackageInfo::getCategory));
         
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Browse Packages"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Found " + availablePackages.size() + " packages"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Select a category:"))
-            .thenRun(() -> showCategoryMenu(byCategory));
-    }
-    
-    private void showCategoryMenu(Map<String, List<PackageInfo>> categories) {
+        // Build menu
         ContextPath menuPath = terminal.getSessionPath().append("menu", "categories");
-        MenuContext menu = new MenuContext(menuPath, "Package Categories");
+        MenuContext menu = new MenuContext(
+            menuPath, 
+            "Package Categories",
+            "Found " + availablePackages.size() + " packages",
+            null
+        );
         
         // Add category items
-        for (Map.Entry<String, List<PackageInfo>> entry : categories.entrySet()) {
+        for (Map.Entry<String, List<PackageInfo>> entry : byCategory.entrySet()) {
             String category = entry.getKey();
             int count = entry.getValue().size();
-            String description = category + " (" + count + " package" + (count != 1 ? "s" : "") + ")";
+            String description = category + " (" + count + " package" + 
+                (count != 1 ? "s" : "") + ")";
             
             menu.addItem(category, description, "Browse " + category + " packages",
                 () -> showCategory(category));
         }
         
-        menu.addSeparator("Package-navigation");
-        menu.addItem("all", "All Packages", "View all packages", () -> showCategory(null));
-        menu.addItem("refresh", "Refresh Package List", "Update from repositories", this::onShow);
+        menu.addSeparator("Navigation");
+        menu.addItem("all", "All Packages", "View all packages", 
+            () -> showCategory(null));
+        menu.addItem("refresh", "Refresh Package List", "Update from repositories", 
+            () -> {
+                currentView = View.LOADING;
+                invalidate();
+                updatePackageCache();
+            });
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigator(terminal);
+        if (menuNavigator == null) {
+            menuNavigator = new MenuNavigator(terminal);
+        }
         menuNavigator.showMenu(menu);
     }
     
     // ===== PACKAGE LIST =====
     
     private void showCategory(String category) {
-        cleanupMenuNavigator();
         selectedCategory = category;
         currentView = View.PACKAGE_LIST;
-        render();
-    }
-    
-    private CompletableFuture<Void> renderPackageList() {
-        List<PackageInfo> packages;
         
-        if (selectedCategory == null) {
-            packages = availablePackages;
-        } else {
-            packages = availablePackages.stream()
+        List<PackageInfo> packages = selectedCategory == null ? 
+            availablePackages : 
+            availablePackages.stream()
                 .filter(p -> p.getCategory().equals(selectedCategory))
                 .collect(Collectors.toList());
-        }
         
         String title = selectedCategory != null ? 
             "Category: " + selectedCategory : "All Packages";
         
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle(title))
-            .thenCompose(v -> renderPackageTable(packages, 5))
-            .thenRun(() -> showPackageListMenu(packages));
-    }
-    
-    private CompletableFuture<Void> renderPackageTable(List<PackageInfo> packages, int startRow) {
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        
-        // Header
-        future = future
-            .thenCompose(v -> terminal.printAt(startRow, 10, "Package"))
-            .thenCompose(v -> terminal.printAt(startRow, 35, "Version"))
-            .thenCompose(v -> terminal.printAt(startRow, 45, "Repository"))
-            .thenCompose(v -> terminal.printAt(startRow + 1, 10, "─".repeat(60)));
-        
-        int row = startRow + 2;
-        int index = 1;
-        
-        for (PackageInfo pkg : packages) {
-            final int currentRow = row;
-            final int currentIndex = index;
-            
-            // Check if already installed
-            boolean installed = isPackageInstalled(pkg.getPackageId());
-            String marker = installed ? "[INSTALLED] " : "";
-            
-            future = future
-                .thenCompose(v -> terminal.printAt(currentRow, 8, currentIndex + "."))
-                .thenCompose(v -> terminal.printAt(currentRow, 10, 
-                    marker + truncate(pkg.getName(), 20)))
-                .thenCompose(v -> terminal.printAt(currentRow, 35, pkg.getVersion()))
-                .thenCompose(v -> terminal.printAt(currentRow, 45, 
-                    truncate(pkg.getRepository(), 24)));
-            
-            row++;
-            index++;
-        }
-        
-        return future;
-    }
-    
-    private void showPackageListMenu(List<PackageInfo> packages) {
         ContextPath menuPath = terminal.getSessionPath().append("menu", "packages");
-        MenuContext menu = new MenuContext(menuPath, "Package Selection");
+        MenuContext menu = new MenuContext(menuPath, title, null, null);
         
         // Add menu item for each package
-        int index = 1;
         for (PackageInfo pkg : packages) {
-            final PackageInfo p = pkg;
-            String itemId = "package_" + index;
-            String description = pkg.getName() + " v" + pkg.getVersion();
+            boolean installed = isPackageInstalled(pkg.getPackageId());
+            String marker = installed ? "[INSTALLED] " : "";
+            String description = marker + pkg.getName() + " v" + pkg.getVersion();
             String help = truncate(pkg.getDescription(), 50);
             
-            menu.addItem(itemId, description, help, () -> showPackageDetails(p));
-            index++;
+            menu.addItem(pkg.getPackageId().toString(), description, help, 
+                () -> showPackageDetails(pkg));
         }
         
-        menu.addSeparator("Category-navigation");
+        menu.addSeparator("Navigation");
         menu.addItem("back", "Back to Categories", () -> {
-            cleanupMenuNavigator();
             selectedCategory = null;
             currentView = View.CATEGORY_LIST;
-            render();
+            showCategoryList();
         });
         
-        menuNavigator = new MenuNavigator(terminal);
         menuNavigator.showMenu(menu);
     }
     
     // ===== PACKAGE DETAILS =====
     
     private void showPackageDetails(PackageInfo pkg) {
-        cleanupMenuNavigator();
         selectedPackage = pkg;
         currentView = View.PACKAGE_DETAILS;
-        render();
-    }
-    
-    private CompletableFuture<Void> renderPackageDetails() {
-        if (selectedPackage == null) {
-            currentView = View.CATEGORY_LIST;
-            return render();
-        }
         
-        boolean isInstalled = isPackageInstalled(selectedPackage.getPackageId());
-        PackageManifest manifest = selectedPackage.getManifest();
+        boolean isInstalled = isPackageInstalled(pkg.getPackageId());
         
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Package Details"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Name: " + selectedPackage.getName()))
-            .thenCompose(v -> terminal.printAt(6, 10, "Version: " + selectedPackage.getVersion()))
-            .thenCompose(v -> terminal.printAt(7, 10, "Category: " + selectedPackage.getCategory()))
-            .thenCompose(v -> terminal.printAt(8, 10, "Repository: " + selectedPackage.getRepository()))
-            .thenCompose(v -> terminal.printAt(9, 10, "Size: " + formatSize(selectedPackage.getSize())))
-            .thenCompose(v -> terminal.printAt(11, 10, "Description:"))
-            .thenCompose(v -> terminal.printAt(12, 12, wrapText(selectedPackage.getDescription(), 60)))
-            .thenCompose(v -> terminal.printAt(14, 10, "Type: " + manifest.getType()))
-            .thenCompose(v -> terminal.printAt(15, 10, "Entry: " + manifest.getEntry()))
-            .thenCompose(v -> {
-                if (!manifest.getDependencies().isEmpty()) {
-                    return terminal.printAt(16, 10, "Dependencies: " + 
-                        String.join(", ", manifest.getDependencies()));
-                }
-                return CompletableFuture.completedFuture(null);
-            })
-            .thenCompose(v -> {
-                if (isInstalled) {
-                    return terminal.printAt(18, 10, "[ALREADY INSTALLED]");
-                }
-                return CompletableFuture.completedFuture(null);
-            })
-            .thenCompose(v -> terminal.printAt(20, 10, "Choose an action:"))
-            .thenRun(() -> showPackageDetailsMenu(isInstalled));
-    }
-    
-    private void showPackageDetailsMenu(boolean isInstalled) {
         ContextPath menuPath = terminal.getSessionPath().append("menu", "package-details");
-        MenuContext menu = new MenuContext(menuPath, "Package Actions");
+        MenuContext menu = new MenuContext(
+            menuPath, 
+            pkg.getName() + " v" + pkg.getVersion(),
+            buildPackageDescription(pkg),
+            null
+        );
         
         if (!isInstalled) {
             menu.addItem("install", "Install Package", 
                 "Install this package (requires password)",
                 this::startInstallFlow);
+        } else {
+            menu.addInfoItem("installed", "[ALREADY INSTALLED]");
         }
         
-        menu.addSeparator("Package-details-navigation");
+        menu.addSeparator("Navigation");
         menu.addItem("back", "Back to Package List", () -> {
-            cleanupMenuNavigator();
             selectedPackage = null;
             currentView = View.PACKAGE_LIST;
-            render();
+            showCategory(selectedCategory);
         });
         
-        menuNavigator = new MenuNavigator(terminal);
         menuNavigator.showMenu(menu);
     }
     
-    // ===== CONFIGURE INSTALL =====
+    private String buildPackageDescription(PackageInfo pkg) {
+        StringBuilder desc = new StringBuilder();
+        desc.append("Repository: ").append(pkg.getRepository()).append("\n");
+        desc.append("Size: ").append(formatSize(pkg.getSize())).append("\n");
+        desc.append("Type: ").append(pkg.getManifest().getType()).append("\n\n");
+        desc.append(pkg.getDescription());
+        return desc.toString();
+    }
+    
+    // ===== INSTALL FLOW =====
     
     private void startInstallFlow() {
-        cleanupMenuNavigator();
-        
         PackageManifest manifest = selectedPackage.getManifest();
         
         // If package requires specific namespace, skip configuration
@@ -357,42 +410,28 @@ class BrowsePackagesScreen extends TerminalScreen {
             installConfig = ProcessConfig.create(manifest.getNamespace());
             loadImmediately = manifest.isAutoload();
             currentView = View.CONFIRM_INSTALL;
-            render();
+            
+            // Make this screen active for confirm view
+            terminal.getRenderManager().setActive(this);
+            startConfirmation();
         } else {
             // Allow user to configure
             currentView = View.CONFIGURE_INSTALL;
-            render();
+            
+            // Make this screen active for input
+            terminal.getRenderManager().setActive(this);
+            readCustomNamespace();
         }
-    }
-    
-    private CompletableFuture<Void> renderConfigureInstall() {
-        if (selectedPackage == null) {
-            currentView = View.CATEGORY_LIST;
-            return render();
-        }
-        
-        PackageManifest manifest = selectedPackage.getManifest();
-        NoteBytesReadOnly defaultNamespace = manifest.getNamespace() != null ? 
-            manifest.getNamespace() : selectedPackage.getPackageId();
-        
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Configure Installation"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Package: " + selectedPackage.getName()))
-            .thenCompose(v -> terminal.printAt(7, 10, "Process Namespace:"))
-            .thenCompose(v -> terminal.printAt(8, 12, "Default: " + defaultNamespace))
-            .thenCompose(v -> terminal.printAt(9, 12, "Leave blank to use default"))
-            .thenCompose(v -> terminal.printAt(11, 10, "Custom namespace (or press Enter):"))
-            .thenCompose(v -> terminal.moveCursor(11, 46))
-            .thenRun(this::readCustomNamespace);
     }
     
     private void readCustomNamespace() {
         inputReader = new TerminalInputReader(terminal, 11, 46, 20);
         
         inputReader.setOnComplete(input -> {
-       
-            inputReader.close();
-            inputReader = null;
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
             
             // Determine namespace
             NoteBytesReadOnly namespace;
@@ -410,144 +449,167 @@ class BrowsePackagesScreen extends TerminalScreen {
             askAutoload();
         });
         
-
+        inputReader.setOnEscape(v -> {
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
+            selectedPackage = null;
+            installConfig = null;
+            currentView = View.CATEGORY_LIST;
+            showCategoryList();
+        });
     }
     
     private void askAutoload() {
-        terminal.printAt(13, 10, "Load immediately after installation? (y/N):")
-            .thenCompose(v -> terminal.moveCursor(13, 54))
-            .thenRun(this::readAutoloadChoice);
+        // Update view to show autoload question
+        RenderState autoloadState = RenderState.builder()
+            .add((term, gen) -> {
+                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD, gen);
+                term.printAt(5, 10, "Package: " + selectedPackage.getName(), gen);
+                term.printAt(7, 10, "Namespace: " + installConfig.getProcessId(), gen);
+                term.printAt(9, 10, "Load immediately after installation? (y/N):", gen);
+                // InputReader at 13, 54
+            })
+            .build();
+        
+        // Temporarily replace render state
+        terminal.getRenderManager().setActive(new RenderManager.Renderable() {
+            @Override
+            public RenderState getRenderState() {
+                return autoloadState;
+            }
+        });
+        
+        readAutoloadChoice();
     }
     
     private void readAutoloadChoice() {
-        inputReader = new TerminalInputReader(terminal, 13, 54, 1);
+        inputReader = new TerminalInputReader(terminal, 9, 54, 3);
         
         inputReader.setOnComplete(input -> {
-           
-            inputReader.close();
-            inputReader = null;
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
             
-            loadImmediately = "y".equalsIgnoreCase(input) || "yes".equalsIgnoreCase(input);
+            loadImmediately = "y".equalsIgnoreCase(input) || 
+                             "yes".equalsIgnoreCase(input);
             
             currentView = View.CONFIRM_INSTALL;
-            render();
+            terminal.getRenderManager().setActive(this);
+            startConfirmation();
         });
         
-       
-    }
-    
-    // ===== CONFIRM INSTALL =====
-    
-    private CompletableFuture<Void> renderConfirmInstall() {
-        if (selectedPackage == null || installConfig == null) {
+        inputReader.setOnEscape(v -> {
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
+            selectedPackage = null;
+            installConfig = null;
             currentView = View.CATEGORY_LIST;
-            return render();
-        }
-        
-        return terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Confirm Installation"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Package: " + selectedPackage.getName() + 
-                " v" + selectedPackage.getVersion()))
-            .thenCompose(v -> terminal.printAt(6, 10, "Repository: " + selectedPackage.getRepository()))
-            .thenCompose(v -> terminal.printAt(7, 10, "Size: " + formatSize(selectedPackage.getSize())))
-            .thenCompose(v -> terminal.printAt(9, 10, "Installation Configuration:"))
-            .thenCompose(v -> terminal.printAt(10, 12, "• Process Namespace: " + 
-                installConfig.getProcessId()))
-            .thenCompose(v -> terminal.printAt(11, 12, "• Load Immediately: " + 
-                (loadImmediately ? "Yes" : "No")))
-            .thenCompose(v -> terminal.printAt(13, 10, "This will download and install the package."))
-            .thenCompose(v -> terminal.printAt(15, 10, "Enter password to confirm:"))
-            .thenCompose(v -> terminal.moveCursor(15, 36))
-            .thenRun(this::verifyPasswordAndInstall);
+            showCategoryList();
+        });
     }
     
-  
-    private void verifyPasswordAndInstall() {
-        terminal.printAt(17, 10, "Type 'INSTALL' to confirm:")
-            .thenCompose(v -> terminal.moveCursor(17, 38))
-            .thenRun(this::startInstallConfirmation);
-    }
-
-    private void startInstallConfirmation() {
+    private void startConfirmation() {
         inputReader = new TerminalInputReader(terminal, 17, 38, 20);
-   
         
         inputReader.setOnComplete(input -> {
-
-            inputReader.close();
-            inputReader = null;
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
             
             if ("INSTALL".equals(input)) {
                 performInstallation();
             } else {
-                terminal.printError("Installation cancelled")
-                    .thenCompose(x -> terminal.printAt(19, 10, "Press any key..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> {
+                errorMessage = "Installation cancelled";
+                currentView = View.ERROR;
+                invalidate();
+                
+                terminal.waitForKeyPress()
+                    .thenRun(() -> {
                         currentView = View.CONFIRM_INSTALL;
-                        render();
-                    }));
+                        terminal.getRenderManager().setActive(this);
+                        startConfirmation();
+                    });
             }
         });
         
-        inputReader.setOnEscape(text -> {
-          
-            inputReader.close();
-            inputReader = null;
+        inputReader.setOnEscape(v -> {
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
             selectedPackage = null;
             installConfig = null;
             currentView = View.CATEGORY_LIST;
-            render();
+            showCategoryList();
         });
     }
     
-    private CompletableFuture<Void> performInstallation() {
+    private void performInstallation() {
+        currentView = View.INSTALLING;
+        statusMessage = "Downloading and installing...";
+        invalidate();
+        
         PolicyManifest policy = PolicyManifest.fromNoteBytes(
             selectedPackage.getManifest().getMetadata()
         );
         
-        return terminal.printAt(17, 10, "Installing package...                  ")
-            .thenCompose(v -> nodeCommands.installPackage(
-                selectedPackage,
-                installConfig,
-                policy,
-                loadImmediately
-            ))
-            .thenCompose(installedPkg -> {
-                if (loadImmediately) {
-                    return nodeCommands.loadNode(installedPkg.getPackageId().getId())
-                        .thenCompose(instance -> 
-                            terminal.printSuccess("Package installed and loaded successfully!")
-                                .thenCompose(x -> terminal.printAt(19, 10, "Instance running at: " + 
-                                    instance.getProcessId()))
-                        );
-                } else {
-                    return terminal.printSuccess("Package installed successfully!")
-                        .thenCompose(x -> terminal.printAt(19, 10, 
-                            "Use 'Running Instances' to load the package"));
-                }
-            })
-            .thenCompose(v -> terminal.printAt(21, 10, "Returning to package list..."))
-            .thenRunAsync(() -> TimeHelpers.timeDelay(3))
-            .thenRun(() -> {
+        nodeCommands.installPackage(
+            selectedPackage,
+            installConfig,
+            policy,
+            loadImmediately
+        )
+        .thenCompose(installedPkg -> {
+            if (loadImmediately) {
+                return nodeCommands.loadNode(installedPkg.getPackageId().getId())
+                    .thenApply(instance -> {
+                        statusMessage = "Package installed and loaded successfully!\n" +
+                            "Instance running at: " + instance.getProcessId();
+                        return null;
+                    });
+            } else {
+                statusMessage = "Package installed successfully!\n" +
+                    "Use 'Running Instances' to load the package";
+                return CompletableFuture.completedFuture(null);
+            }
+        })
+        .thenRun(() -> {
+            currentView = View.SUCCESS;
+            invalidate();
+            
+            // Wait a bit, then return to package list
+            CompletableFuture.runAsync(() -> {
+                TimeHelpers.timeDelay(3);
+            }).thenRun(() -> {
                 selectedPackage = null;
                 installConfig = null;
                 currentView = View.PACKAGE_LIST;
-                render();
-            })
-            .exceptionally(ex -> {
-                terminal.printError("Installation failed: " + ex.getMessage())
-                    .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> {
-                        selectedPackage = null;
-                        installConfig = null;
-                        currentView = View.CATEGORY_LIST;
-                        render();
-                    }));
-                return null;
+                showCategory(selectedCategory);
             });
+        })
+        .exceptionally(ex -> {
+            errorMessage = "Installation failed: " + ex.getMessage();
+            currentView = View.ERROR;
+            invalidate();
+            
+            terminal.waitForKeyPress()
+                .thenRun(() -> {
+                    selectedPackage = null;
+                    installConfig = null;
+                    currentView = View.CATEGORY_LIST;
+                    showCategoryList();
+                });
+            return null;
+        });
     }
     
-    // ===== UTILITY =====
+    // ===== UTILITIES =====
     
     private boolean isPackageInstalled(NoteBytesReadOnly packageId) {
         return installedPackages.stream()
@@ -561,29 +623,16 @@ class BrowsePackagesScreen extends TerminalScreen {
         }
     }
     
-    private void cleanupMenuNavigator() {
+    private void cleanup() {
         if (menuNavigator != null) {
             menuNavigator.cleanup();
             menuNavigator = null;
         }
-    }
-    
-    private void cleanup() {
-        cleanupMenuNavigator();
-        
-        if (passwordReader != null) {
-          
-            passwordReader.close();
-            passwordReader = null;
-        }
         
         if (inputReader != null) {
-          
             inputReader.close();
             inputReader = null;
         }
-        
-       
     }
     
     private String formatSize(long bytes) {
@@ -596,27 +645,5 @@ class BrowsePackagesScreen extends TerminalScreen {
         if (str == null) return "";
         if (str.length() <= maxLength) return str;
         return str.substring(0, maxLength - 3) + "...";
-    }
-    
-    private String wrapText(String text, int maxWidth) {
-        if (text == null || text.length() <= maxWidth) return text;
-        
-        List<String> lines = new ArrayList<>();
-        String[] words = text.split(" ");
-        StringBuilder line = new StringBuilder();
-        
-        for (String word : words) {
-            if (line.length() + word.length() + 1 > maxWidth) {
-                if (line.length() > 0) {
-                    lines.add(line.toString());
-                    line = new StringBuilder();
-                }
-            }
-            if (line.length() > 0) line.append(" ");
-            line.append(word);
-        }
-        if (line.length() > 0) lines.add(line.toString());
-        
-        return String.join("\n" + " ".repeat(12), lines);
     }
 }

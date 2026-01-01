@@ -21,6 +21,7 @@ import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public final class RoutedEventFactory {
 
@@ -111,13 +112,21 @@ public final class RoutedEventFactory {
         REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_LOST, (src, type, flags, p) ->
             new ContainerFocusLostEvent(src, type, flags));
 
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESIZE, (src, type, flags, p) ->
-            new ContainerResizeEvent(src, type, flags, p[0].getAsInt(), p[1].getAsInt()));
+        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESIZED, (src, type, flags, p) ->{
+            if(p == null){
+                throw new IllegalStateException("Invalid ContainerMoveEvent: missing payload");
+            }
+            return new ContainerResizeEvent(src, type, flags, p[0].getAsInt(), p[1].getAsInt());
+        });
 
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_MOVE, (src, type, flags, p) ->
-            new ContainerMoveEvent(src, type, flags, p[0].getAsInt(), p[1].getAsInt()));
+        REGISTRY.put(EventBytes.EVENT_CONTAINER_MOVE, (src, type, flags, p) ->{
+            if(p == null){
+                throw new IllegalStateException("Invalid ContainerMoveEvent: missing payload");
+            }
+            return new ContainerMoveEvent(src, type, flags, p[0].getAsInt(), p[1].getAsInt());
+        });
 
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_CLOSE, (src, type, flags, p) ->
+        REGISTRY.put(EventBytes.EVENT_CONTAINER_CLOSED, (src, type, flags, p) ->
             new ContainerCloseEvent(src, type, flags));
 
         REGISTRY.put(EventBytes.EVENT_CONTAINER_MINIMIZE, (src, type, flags, p) ->
@@ -157,6 +166,9 @@ public final class RoutedEventFactory {
             throw new IllegalStateException("Invalid InputPacket: missing EVENT");
         }
 
+        String description = EventBytes.getEventDescription(typeBytes); // for validation
+
+        Log.logMsg("[RoutedEventFactory.from] Deserializing event: " + description);
 
         int flags = 0;
         NoteBytes stateFlags = body.get(Keys.STATE_FLAGS);

@@ -2,6 +2,8 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
+import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+
 /**
  * FirstRunPasswordScreen - Create password for new system
  * Uses PasswordPrompt with confirmation
@@ -13,6 +15,19 @@ class FirstRunPasswordScreen extends TerminalScreen {
     public FirstRunPasswordScreen(String name, SystemTerminalContainer terminal) {
         super(name, terminal);
     }
+    
+    // ===== RENDERABLE INTERFACE =====
+    
+    /**
+     * PasswordPrompt is the active renderable
+     * We return empty state
+     */
+    @Override
+    public RenderState getRenderState() {
+        return RenderState.builder().build();
+    }
+    
+    // ===== LIFECYCLE =====
     
     @Override
     public CompletableFuture<Void> onShow() {
@@ -31,12 +46,6 @@ class FirstRunPasswordScreen extends TerminalScreen {
     @Override
     public void onHide() {
         cleanup();
-    }
-    
-    @Override
-    public CompletableFuture<Void> render() {
-        // PasswordPrompt handles rendering
-        return CompletableFuture.completedFuture(null);
     }
     
     private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {

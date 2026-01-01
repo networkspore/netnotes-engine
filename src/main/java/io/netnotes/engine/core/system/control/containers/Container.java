@@ -296,6 +296,7 @@ public abstract class Container<T extends Container<T>>  {
      * emitEvent(event);
      */
     public void emitEvent(NoteBytesMap event) {
+         Log.logNoteBytes("[Container.emitEvent]", event);
         if (eventWriter == null) {
             Log.logError("[Container] Cannot emit event - no event stream");
             return;
