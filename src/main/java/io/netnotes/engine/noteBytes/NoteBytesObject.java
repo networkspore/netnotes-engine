@@ -171,7 +171,7 @@ public class NoteBytesObject extends NoteBytes{
         byte[] newBytes = Arrays.copyOf(bytes, length + pair.byteLength());
         int offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
         NoteBytes.writeNote(pair.getValue(), newBytes, offset);
-        set(newBytes);
+        setInternal(newBytes);
 
     }
 
@@ -189,12 +189,18 @@ public class NoteBytesObject extends NoteBytes{
             offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
             offset = NoteBytes.writeNote(pair.getValue(), newBytes, offset);
         }
-        set(newBytes);
+        setInternal(newBytes);
 
     }
 
     public void add(NoteBytes key, NoteBytes value) {
-        add(new NoteBytesPair(key, value));       
+        byte[] bytes = getBytes();
+        int length = bytes.length;
+        int byteLength = key.byteLength() + value.byteLength() + (NoteBytesMetaData.STANDARD_META_DATA_SIZE * 2);
+        byte[] newBytes = Arrays.copyOf(bytes, length + byteLength);
+        int offset = NoteBytes.writeNote(key, newBytes, length);
+        NoteBytes.writeNote(value, newBytes, offset);
+        setInternal(newBytes);     
     }
 
      public void add(NoteBytes key, long value) {
@@ -213,7 +219,7 @@ public class NoteBytesObject extends NoteBytes{
         byte[] newBytes = Arrays.copyOf(bytes, length + key.byteLength() + value.length + 10);
         int offset = NoteBytes.writeNote(key, newBytes, length);
         NoteBytes.writeNote(value, newBytes, offset);
-        set(newBytes);
+        setInternal(newBytes);
 
     }
 
@@ -286,7 +292,7 @@ public class NoteBytesObject extends NoteBytes{
             byte[] newBytes = Arrays.copyOf(bytes, length + 10 + pair.getKey().byteLength() + pair.getValue().byteLength());
             int offset = NoteBytes.writeNote(pair.getKey(), newBytes, length);
             NoteBytes.writeNote(pair.getValue(), newBytes, offset);
-            set(newBytes);
+            setInternal(newBytes);
         }
     
     }
@@ -337,7 +343,7 @@ public class NoteBytesObject extends NoteBytes{
                 offset = valueOffset + 5 + valueSize;
             }
             
-            set(outputStream.toByteArray());
+            setInternal(outputStream.toByteArray());
             return removedPair;
         } catch (IOException e) {
             return null;
@@ -397,7 +403,7 @@ public class NoteBytesObject extends NoteBytes{
                 currentIndex++;
             }
             
-            set(outputStream.toByteArray());
+            setInternal(outputStream.toByteArray());
             return removedPair;
         }catch (IOException e) {
             return null;

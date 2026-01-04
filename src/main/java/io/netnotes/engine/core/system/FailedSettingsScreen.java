@@ -90,46 +90,46 @@ class FailedSettingsScreen extends TerminalScreen {
         // Otherwise, build our own state
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> {
-            term.clear(gen);
-            term.printAt(1, (term.getCols() - 14) / 2, "Settings Error", TextStyle.BOLD, gen);
+        builder.add((term) -> {
+            term.clear();
+            term.printAt(1, (FailedSettingsScreen.this.terminal.getCols() - 14) / 2, "Settings Error", TextStyle.BOLD);
         });
         
         switch (currentState) {
             case CHECKING:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Diagnosing settings issue...", TextStyle.NORMAL, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Diagnosing settings issue...", TextStyle.NORMAL));
                 break;
             
             case CORRUPT_FILE:
                 // Would need to implement showCorruptFileScreen logic here
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Settings file is corrupt", TextStyle.ERROR, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Settings file is corrupt", TextStyle.ERROR));
                 break;
             
             case MISSING_FILE_WITH_DATA:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Settings file missing but data exists", TextStyle.WARNING, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Settings file missing but data exists", TextStyle.WARNING));
                 break;
             
             case ATTEMPTING_RECOVERY:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Attempting to recover settings data...", TextStyle.INFO, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Attempting to recover settings data...", TextStyle.INFO));
                 break;
             
             case RECOVERY_SUCCESS:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Recovery successful", TextStyle.SUCCESS, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Recovery successful", TextStyle.SUCCESS));
                 break;
             
             case RECOVERY_FAILED:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Recovery failed", TextStyle.ERROR, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Recovery failed", TextStyle.ERROR));
                 break;
             
             case UNRECOVERABLE:
-                builder.add((term, gen) -> 
-                    term.printAt(5, 10, "Unrecoverable error", TextStyle.ERROR, gen));
+                builder.add((term) -> 
+                    term.printAt(5, 10, "Unrecoverable error", TextStyle.ERROR));
                 break;
         }
         

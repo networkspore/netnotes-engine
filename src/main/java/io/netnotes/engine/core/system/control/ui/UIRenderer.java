@@ -10,11 +10,14 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -52,6 +55,8 @@ public abstract class UIRenderer <T extends Container<?>> {
     protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> msgMap = new ConcurrentHashMap<>();
     protected UIReplyExec replyExec;
     
+    protected final SerializedVirtualExecutor rendererExecutor = 
+        new SerializedVirtualExecutor();
     /**
      * Constructor
      * 
@@ -60,25 +65,20 @@ public abstract class UIRenderer <T extends Container<?>> {
     protected UIRenderer(String rendererName) {
         this.rendererName = rendererName;
         this.state = new BitFlagStateMachine(rendererName + "-state");
-        
-        setupStateTransitions();
+        setupBaseStateTransitions();
+        setupRendererStateTransitions();
+
         setupMessageHandlers();
     }
     
     // ===== STATE TRANSITIONS =====
     
-    private void setupStateTransitions() {
+     private void setupBaseStateTransitions() {
         state.onStateAdded(RendererStates.INITIALIZING, (old, now, bit) -> 
             Log.logMsg("[" + rendererName + "] Initializing..."));
         
         state.onStateAdded(RendererStates.READY, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Ready - accepting requests"));
-        
-        state.onStateAdded(RendererStates.ACCEPTING_REQUESTS, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Now accepting requests"));
-        
-        state.onStateAdded(RendererStates.UI_RENDERER_ACTIVE, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Renderer active"));
+            Log.logMsg("[" + rendererName + "] Ready"));
         
         state.onStateAdded(RendererStates.HAS_CONTAINERS, (old, now, bit) -> 
             Log.logMsg("[" + rendererName + "] First container created"));
@@ -92,12 +92,6 @@ public abstract class UIRenderer <T extends Container<?>> {
         state.onStateRemoved(RendererStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> 
             Log.logMsg("[" + rendererName + "] No container focused"));
         
-        state.onStateAdded(RendererStates.HAS_VISIBLE_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Containers now visible"));
-        
-        state.onStateRemoved(RendererStates.HAS_VISIBLE_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] No visible containers"));
-        
         state.onStateAdded(RendererStates.SHUTTING_DOWN, (old, now, bit) -> 
             Log.logMsg("[" + rendererName + "] Shutting down..."));
         
@@ -105,8 +99,10 @@ public abstract class UIRenderer <T extends Container<?>> {
             Log.logMsg("[" + rendererName + "] Stopped"));
         
         state.onStateAdded(RendererStates.ERROR, (old, now, bit) -> 
-            Log.logError("[" + rendererName + "] ERROR state"));
+            Log.logError("[" + rendererName + "] ERROR"));
     }
+
+    protected abstract void setupRendererStateTransitions();
     
     // ===== MESSAGE HANDLERS SETUP =====
     
@@ -126,39 +122,26 @@ public abstract class UIRenderer <T extends Container<?>> {
     
     
     public final CompletableFuture<Void> initialize() {
-        if (state.hasState(RendererStates.READY)) {
-            Log.logMsg("[" + rendererName + "] Already initialized");
-            return CompletableFuture.completedFuture(null);
-        }
-        
         state.addState(RendererStates.INITIALIZING);
         
         return doInitialize()
             .thenRun(() -> {
                 state.removeState(RendererStates.INITIALIZING);
                 state.addState(RendererStates.READY);
-                state.addState(RendererStates.ACCEPTING_REQUESTS);
-                state.addState(RendererStates.UI_RENDERER_ACTIVE);
-                
-                Log.logMsg("[" + rendererName + "] Initialization complete");
             })
             .exceptionally(ex -> {
                 state.removeState(RendererStates.INITIALIZING);
                 state.addState(RendererStates.ERROR);
-                
-                Log.logError("[" + rendererName + "] Initialization failed: " + ex.getMessage());
                 throw new RuntimeException(ex);
             });
     }
     
-    
     public final CompletableFuture<Void> shutdown() {
         state.addState(RendererStates.SHUTTING_DOWN);
-        state.removeState(RendererStates.ACCEPTING_REQUESTS);
-        
+
         // Destroy all containers first
         List<CompletableFuture<Void>> futures = containers.values().stream()
-            .map(T::destroy)
+            .map(T::destroyNow)
             .toList();
         
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
@@ -174,7 +157,6 @@ public abstract class UIRenderer <T extends Container<?>> {
                 state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
                 state.removeState(RendererStates.SHUTTING_DOWN);
                 state.removeState(RendererStates.READY);
-                state.removeState(RendererStates.UI_RENDERER_ACTIVE);
                 state.addState(RendererStates.STOPPED);
                 
                 Log.logMsg("[" + rendererName + "] Shutdown complete");
@@ -200,14 +182,13 @@ public abstract class UIRenderer <T extends Container<?>> {
     
     
     public final boolean isReady() {
-        return RendererStates.canAcceptRequests(state);
+        return state.hasState(RendererStates.READY) && 
+               !state.hasState(RendererStates.ERROR) &&
+               !state.hasState(RendererStates.SHUTTING_DOWN);
     }
     
     
-    public final boolean isActive() {
-        return state.hasState(RendererStates.UI_RENDERER_ACTIVE);
-    }
-    
+    public abstract boolean isActive();
     
     public final BitFlagStateMachine getState() {
         return state;
@@ -276,7 +257,9 @@ public abstract class UIRenderer <T extends Container<?>> {
         // Dispatch commands
         RoutedMessageExecutor msgExec = msgMap.get(cmdBytes);
         if (msgExec != null) {
+    
             return msgExec.execute(msg, packet);
+  
         } else {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Unknown command: " + cmdBytes)
@@ -296,7 +279,7 @@ public abstract class UIRenderer <T extends Container<?>> {
         
         try {
             // Parse common parameters
-            NoteBytes containerIdBytes = msg.get(Keys.CONTAINER_ID);
+            NoteBytes containerIdBytes = msg.get(ContainerCommands.CONTAINER_ID);
             NoteBytes titleBytes = msg.get(Keys.TITLE);
             NoteBytes typeBytes = msg.get(Keys.TYPE);
             NoteBytes pathBytes = msg.get(Keys.PATH);
@@ -344,22 +327,15 @@ public abstract class UIRenderer <T extends Container<?>> {
                     
                     // Handle focus
                     if (autoFocus || focusedContainerId == null) {
-                        ContainerId previousFocus = focusedContainerId;
-                        focusedContainerId = containerId;
+                 
                         
                         if (!state.hasState(RendererStates.HAS_FOCUSED_CONTAINER)) {
                             state.addState(RendererStates.HAS_FOCUSED_CONTAINER);
                         }
                         
-                        if (previousFocus != null && !previousFocus.equals(containerId)) {
-                            T prevContainer = containers.get(previousFocus);
-                            if (prevContainer != null) {
-                                prevContainer.unfocus();
-                            }
-                        }
-                        
+                    
                         return container.initialize()
-                            .thenCompose(v -> container.focus());
+                            .thenCompose(v -> container.requestFocus());
                     }
                     
                     return container.initialize();
@@ -396,35 +372,7 @@ public abstract class UIRenderer <T extends Container<?>> {
         
         state.addState(RendererStates.DESTROYING_CONTAINER);
         
-        return container.destroy()
-            .thenRun(() -> {
-                // Unregister
-                containers.remove(container.getId());
-                
-                // Update state
-                if (containers.isEmpty()) {
-                    state.removeState(RendererStates.HAS_CONTAINERS);
-                    state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
-                }
-                
-                // Remove from owner tracking
-                List<ContainerId> ownerList = ownerContainers.get(container.getOwnerPath());
-                if (ownerList != null) {
-                    ownerList.remove(container.getId());
-                    if (ownerList.isEmpty()) {
-                        ownerContainers.remove(container.getOwnerPath());
-                    }
-                }
-                
-                // Clear focus if this was focused
-                if (container.getId().equals(focusedContainerId)) {
-                    focusedContainerId = null;
-                    state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
-                    onFocusCleared();
-                }
-                
-                state.removeState(RendererStates.DESTROYING_CONTAINER);
-            })
+        return container.handleDestroyContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 state.removeState(RendererStates.DESTROYING_CONTAINER);
@@ -437,16 +385,47 @@ public abstract class UIRenderer <T extends Container<?>> {
                 return null;
             });
     }
+
+    /**
+        //Recommended execution:
+        // Unregister
+        containers.remove(container.getId());
+        
+        // Update state
+        if (containers.isEmpty()) {
+            state.removeState(RendererStates.HAS_CONTAINERS);
+            state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
+        }
+        
+        // Remove from owner tracking
+        List<ContainerId> ownerList = ownerContainers.get(container.getOwnerPath());
+        if (ownerList != null) {
+            ownerList.remove(container.getId());
+            if (ownerList.isEmpty()) {
+                ownerContainers.remove(container.getOwnerPath());
+            }
+        }
+        
+        // Clear focus if this was focused
+        if (container.getId().equals(focusedContainerId)) {
+            focusedContainerId = null;
+            state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
+            onFocusCleared();
+        }
+        
+        state.removeState(RendererStates.DESTROYING_CONTAINER);
+        
+    */
+    protected abstract CompletableFuture<Void> onContainerDestroyed(ContainerId containerId);
     
     private CompletableFuture<Void> handleShowContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
         
-        return container.show()
+        return container.handleShowContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());
@@ -457,12 +436,11 @@ public abstract class UIRenderer <T extends Container<?>> {
     private CompletableFuture<Void> handleHideContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
         
-        return container.hide()
+        return container.handleHideContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());
@@ -470,65 +448,41 @@ public abstract class UIRenderer <T extends Container<?>> {
             });
     }
     
-    private CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) {
+    protected CompletableFuture<Void> handleFocusContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
         
-        // Update focus
-        ContainerId previousFocus = focusedContainerId;
-        focusedContainerId = container.getId();
-        
-        // Update state
-        if (!state.hasState(RendererStates.HAS_FOCUSED_CONTAINER)) {
-            state.addState(RendererStates.HAS_FOCUSED_CONTAINER);
-        }
-        
-        // Unfocus previous
-        if (previousFocus != null && !previousFocus.equals(container.getId())) {
-            T prevContainer = containers.get(previousFocus);
-            if (prevContainer != null) {
-                prevContainer.unfocus();
-            }
-        }
-        
-        return container.focus()
-            .thenCompose(v -> onContainerFocused(container.getId()))
+        return container.handleFocusContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());
                 return null;
             });
     }
+
+    protected abstract void onHasContainerFocused();
     
     private CompletableFuture<Void> handleMaximizeContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
-        
-        return container.maximize()
-            .thenAccept(v -> replySuccess(packet))
-            .exceptionally(ex -> {
-                replyError(packet, ex.getMessage());
-                return null;
-            });
+
+        return container.handleMaximizeContainer(msg);
     }
     
     private CompletableFuture<Void> handleRestoreContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
         
-        return container.restore()
+        return container.handleRestoreContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());
@@ -539,36 +493,33 @@ public abstract class UIRenderer <T extends Container<?>> {
     private CompletableFuture<Void> handleQueryContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("Container not found")
-            );
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
         }
-        
-        ContainerInfo info = container.getInfo();
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS );
-        response.put(Keys.DATA, info.toNoteBytes());
-        
-        return CompletableFuture.completedFuture(null)
-            .thenAccept(v -> reply(packet, response.toNoteBytes()));
+
+        NoteBytesObject obj = container.queryContainer();
+        reply(packet, obj);
+        return CompletableFuture.completedFuture(null);
     }
     
     private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) {
-        List<ContainerInfo> infoList = containers.values().stream()
-            .map(T::getInfo)
-            .toList();
+         
+        NoteBytes[] constainersArray = containers.values().stream()
+            .map(container -> container.getInfo())
+            .map(info -> (NoteBytes) info.toNoteBytes())
+            .toArray(NoteBytes[]::new);
+    
+        reply(packet, new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+            new NoteBytesPair(Keys.ITEM_COUNT, constainersArray.length),
+            new NoteBytesPair(Keys.ITEMS, new NoteBytesArrayReadOnly(constainersArray))
+        }));
         
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        response.put("count", infoList.size());
-        // Add containers array if needed
-        
-        return CompletableFuture.completedFuture(null)
-            .thenAccept(v -> reply(packet, response.toNoteBytes()));
+        return CompletableFuture.completedFuture(null);
     }
     
     protected T getContainerFromMsg(NoteBytesMap msg) {
-        NoteBytes idBytes = msg.get(Keys.CONTAINER_ID);
+        NoteBytes idBytes = msg.get(ContainerCommands.CONTAINER_ID);
         if (idBytes == null) return null;
         
         ContainerId id = ContainerId.fromNoteBytes(idBytes);
@@ -621,16 +572,7 @@ public abstract class UIRenderer <T extends Container<?>> {
         NoteBytesMap createMsg
     );
     
-    /**
-     * Called when focus is cleared (no focused container)
-     */
-    protected abstract void onFocusCleared();
-    
-    /**
-     * Called after container is focused
-     * Can trigger rendering, etc.
-     */
-    protected abstract CompletableFuture<Void> onContainerFocused(ContainerId containerId);
+
 
      /**
      * Check if renderer supports a container type

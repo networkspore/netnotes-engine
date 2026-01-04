@@ -93,10 +93,10 @@ class BrowsePackagesScreen extends TerminalScreen {
      */
     private RenderState buildLoadingState() {
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Browse Packages", TextStyle.BOLD, gen);
-                term.printAt(7, 10, "Updating package lists from repositories...", gen);
-                term.printAt(9, 10, "This may take a moment...", gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Browse Packages", TextStyle.BOLD);
+                term.printAt(7, 10, "Updating package lists from repositories...");
+                term.printAt(9, 10, "This may take a moment...");
             })
             .build();
     }
@@ -121,13 +121,13 @@ class BrowsePackagesScreen extends TerminalScreen {
             manifest.getNamespace() : selectedPackage.getPackageId();
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "Package: " + selectedPackage.getName(), gen);
-                term.printAt(7, 10, "Process Namespace:", gen);
-                term.printAt(8, 12, "Default: " + defaultNamespace, gen);
-                term.printAt(9, 12, "Leave blank to use default", gen);
-                term.printAt(11, 10, "Custom namespace (or press Enter):", gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
+                term.printAt(5, 10, "Package: " + selectedPackage.getName());
+                term.printAt(7, 10, "Process Namespace:");
+                term.printAt(8, 12, "Default: " + defaultNamespace);
+                term.printAt(9, 12, "Leave blank to use default");
+                term.printAt(11, 10, "Custom namespace (or press Enter):");
                 // InputReader renders at 11, 46
             })
             .build();
@@ -142,19 +142,19 @@ class BrowsePackagesScreen extends TerminalScreen {
         }
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Confirm Installation", TextStyle.BOLD, gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Confirm Installation", TextStyle.BOLD);
                 term.printAt(5, 10, "Package: " + selectedPackage.getName() + 
-                    " v" + selectedPackage.getVersion(), gen);
-                term.printAt(6, 10, "Repository: " + selectedPackage.getRepository(), gen);
-                term.printAt(7, 10, "Size: " + formatSize(selectedPackage.getSize()), gen);
-                term.printAt(9, 10, "Installation Configuration:", gen);
+                    " v" + selectedPackage.getVersion());
+                term.printAt(6, 10, "Repository: " + selectedPackage.getRepository());
+                term.printAt(7, 10, "Size: " + formatSize(selectedPackage.getSize()));
+                term.printAt(9, 10, "Installation Configuration:");
                 term.printAt(10, 12, "• Process Namespace: " + 
-                    installConfig.getProcessId(), gen);
+                    installConfig.getProcessId());
                 term.printAt(11, 12, "• Load Immediately: " + 
-                    (loadImmediately ? "Yes" : "No"), gen);
-                term.printAt(13, 10, "This will download and install the package.", gen);
-                term.printAt(15, 10, "Type 'INSTALL' to confirm:", gen);
+                    (loadImmediately ? "Yes" : "No"));
+                term.printAt(13, 10, "This will download and install the package.");
+                term.printAt(15, 10, "Type 'INSTALL' to confirm:");
                 // InputReader renders at 17, 38
             })
             .build();
@@ -165,12 +165,12 @@ class BrowsePackagesScreen extends TerminalScreen {
      */
     private RenderState buildInstallingState() {
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
-                    "Installing package...", TextStyle.INFO, gen);
+                    "Installing package...", TextStyle.INFO);
                 if (statusMessage != null) {
                     term.printAt(terminal.getRows() / 2 + 2, 10, 
-                        statusMessage, TextStyle.NORMAL, gen);
+                        statusMessage, TextStyle.NORMAL);
                 }
             })
             .build();
@@ -181,12 +181,12 @@ class BrowsePackagesScreen extends TerminalScreen {
      */
     private RenderState buildSuccessState() {
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
-                    TextStyle.SUCCESS, gen);
+                    TextStyle.SUCCESS);
                 term.printAt(terminal.getRows() / 2 + 2, 10, 
-                    "Returning to package list...", TextStyle.NORMAL, gen);
+                    "Returning to package list...", TextStyle.NORMAL);
             })
             .build();
     }
@@ -198,11 +198,11 @@ class BrowsePackagesScreen extends TerminalScreen {
         String message = errorMessage != null ? errorMessage : "An error occurred";
         
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
-                    message, TextStyle.ERROR, gen);
+                    message, TextStyle.ERROR);
                 term.printAt(terminal.getRows() / 2 + 2, 10, 
-                    "Press any key to continue...", TextStyle.NORMAL, gen);
+                    "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
     }
@@ -464,11 +464,11 @@ class BrowsePackagesScreen extends TerminalScreen {
     private void askAutoload() {
         // Update view to show autoload question
         RenderState autoloadState = RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "Package: " + selectedPackage.getName(), gen);
-                term.printAt(7, 10, "Namespace: " + installConfig.getProcessId(), gen);
-                term.printAt(9, 10, "Load immediately after installation? (y/N):", gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
+                term.printAt(5, 10, "Package: " + selectedPackage.getName());
+                term.printAt(7, 10, "Namespace: " + installConfig.getProcessId());
+                term.printAt(9, 10, "Load immediately after installation? (y/N):");
                 // InputReader at 13, 54
             })
             .build();

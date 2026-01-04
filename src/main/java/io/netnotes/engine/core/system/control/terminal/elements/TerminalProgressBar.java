@@ -118,17 +118,17 @@ public class TerminalProgressBar implements Renderable {
         final int currentWidth = this.width;
         final Style currentStyle = this.style;
         
-        return (terminal, gen) -> {
+        return (terminal) -> {
             // Render progress bar
             String bar = generateBarString(percent, currentWidth, currentStyle);
-            terminal.printAt(currentRow, currentCol, bar, TextStyle.NORMAL, gen);
+            terminal.printAt(currentRow, currentCol, bar, TextStyle.NORMAL);
             
             // Render message if present
             if (message != null && !message.isEmpty()) {
                 // Clear the line first to remove old message
                 int messageRow = currentRow + 1;
-                terminal.clearLine(messageRow, gen);
-                terminal.printAt(messageRow, currentCol, message, TextStyle.NORMAL, gen);
+                terminal.clearLine(messageRow);
+                terminal.printAt(messageRow, currentCol, message, TextStyle.NORMAL);
             }
         };
     }
@@ -224,7 +224,7 @@ public class TerminalProgressBar implements Renderable {
             this.currentPercent = clampedPercent;
             
             // If we're the active renderable, invalidate
-            if (renderManager != null && renderManager.getActiveRenderable() == this) {
+            if (renderManager != null && renderManager.getActive() == this) {
                 renderManager.invalidate();
             }
         }
@@ -245,7 +245,7 @@ public class TerminalProgressBar implements Renderable {
         if (this.currentMessage != null) {
             this.currentMessage = null;
             
-            if (renderManager != null && renderManager.getActiveRenderable() == this) {
+            if (renderManager != null && renderManager.getActive() == this) {
                 renderManager.invalidate();
             }
         }
@@ -300,31 +300,29 @@ public class TerminalProgressBar implements Renderable {
      * Immediate push-based rendering (legacy)
      */
     private CompletableFuture<Void> renderImmediate() {
-        long gen = terminal.getCurrentRenderGeneration();
-        
-        return terminal.batchWithGeneration(gen, () -> {
-            // Render progress bar
-            String bar = generateBarString(currentPercent, width, style);
-            terminal.printAt(row, col, bar, TextStyle.NORMAL, gen);
-            
-            // Render message if present
-            if (currentMessage != null && !currentMessage.isEmpty()) {
-                terminal.clearLine(row + 1, gen);
-                terminal.printAt(row + 1, col, currentMessage, TextStyle.NORMAL, gen);
-            }
-        });
+
+        String bar = generateBarString(currentPercent, width, style);
+
+        if (currentMessage != null && !currentMessage.isEmpty()) {
+            return terminal.executeBatch(
+                terminal.batch()
+                    .printAt(row, col, bar, TextStyle.NORMAL)
+                    .clearLine(row + 1)
+                    .printAt(row + 1, col, currentMessage, TextStyle.NORMAL)
+            );
+         }else{
+            return terminal.printAt(row, col, bar, TextStyle.NORMAL);
+         }
     }
     
     /**
      * Clear the progress bar area (legacy)
      */
     public CompletableFuture<Void> clear() {
-        long gen = terminal.getCurrentRenderGeneration();
-        
-        return terminal.batchWithGeneration(gen, () -> {
-            terminal.clearLine(row, gen);
-            terminal.clearLine(row + 1, gen);
-        });
+  
+        return terminal.executeBatch(terminal.batch()
+            .clearLine(row)
+            .clearLine(row + 1));
     }
     
     // ===== GETTERS =====

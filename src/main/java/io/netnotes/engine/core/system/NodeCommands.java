@@ -112,7 +112,7 @@ class NodeCommands {
             return sendMessageToProcess(CoreConstants.NODE_CONTROLLER_PATH, command)
                 .thenApply(response -> {
                     NoteBytesMap result = response.getPayload().getAsMap();
-                    NoteBytesArray packagesArray = result.get(NodeConstants.PACKAGES).getAsNoteBytesArray();
+                    NoteBytesArrayReadOnly packagesArray = result.get(NodeConstants.PACKAGES).getAsNoteBytesArrayReadOnly();
                     
                     List<InstalledPackage> packages = new ArrayList<>();
                     for (NoteBytes pkgBytes : packagesArray.getAsArray()) {
@@ -212,7 +212,7 @@ class NodeCommands {
             return sendMessageToProcess(CoreConstants.REPOSITORIES_PATH, command)
                 .thenApply(response -> {
                     NoteBytesMap result = response.getPayload().getAsMap();
-                    NoteBytesArray packagesArray = result.get(NodeConstants.PACKAGES).getAsNoteBytesArray();
+                    NoteBytesArrayReadOnly packagesArray = result.get(NodeConstants.PACKAGES).getAsNoteBytesArrayReadOnly();
                     
                     List<PackageInfo> packages = new ArrayList<>();
                     for (NoteBytes pkgBytes : packagesArray.getAsArray()) {
@@ -444,7 +444,7 @@ class NodeCommands {
             }
             
             try {
-                NoteBytesArray instancesArray = instancesBytes.getAsNoteBytesArray();
+                NoteBytesArrayReadOnly instancesArray = instancesBytes.getAsNoteBytesArrayReadOnly();
                 for (NoteBytes instBytes : instancesArray.getAsArray()) {
                     try {
                         NodeInstance instance = parseNodeInstance(instBytes.getAsNoteBytesMap());

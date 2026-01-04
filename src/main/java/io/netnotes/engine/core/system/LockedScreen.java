@@ -21,11 +21,11 @@ class LockedScreen extends TerminalScreen {
     @Override
     public RenderState getRenderState() {
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.clear(gen);
-                term.printAt(1, (term.getCols() - 13) / 2, "System Locked", TextStyle.BOLD, gen);
-                term.printAt(5, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL, gen);
-                term.moveCursor(5, 35, gen);
+            .add((term) -> {
+                term.clear();
+                term.printAt(1, (LockedScreen.this.terminal.getCols() - 13) / 2, "System Locked", TextStyle.BOLD);
+                term.printAt(5, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
+                term.moveCursor(5, 35);
             })
             .build();
     }

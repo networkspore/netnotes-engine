@@ -1,5 +1,7 @@
 package io.netnotes.engine.core.system.control.containers;
 
+import java.math.BigInteger;
+
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -13,7 +15,7 @@ public class ContainerInfo {
     private final ContainerId id;
     private final String title;
     private final ContainerType type;
-    private final ContainerState state;
+    private final BigInteger state;
     private final ContextPath ownerPath;
     private final ContainerConfig config;
     private final long createdTime;
@@ -22,7 +24,7 @@ public class ContainerInfo {
         ContainerId id,
         String title,
         ContainerType type,
-        ContainerState state,
+        BigInteger state,
         ContextPath ownerPath,
         ContainerConfig config,
         long createdTime
@@ -39,7 +41,7 @@ public class ContainerInfo {
     public ContainerId getId() { return id; }
     public String getTitle() { return title; }
     public ContainerType getType() { return type; }
-    public ContainerState getState() { return state; }
+    public BigInteger getState() { return state; }
     public ContextPath getOwnerPath() { return ownerPath; }
     public ContainerConfig getConfig() { return config; }
     public long getCreatedTime() { return createdTime; }
@@ -49,8 +51,8 @@ public class ContainerInfo {
         map.put("id", id.toNoteBytes());
         map.put("title", title);
         map.put("type", type.name());
-        map.put("state", state.name());
-        map.put("owner_path", ownerPath.toString());
+        map.put("state", state);
+        map.put("owner_path", ownerPath.toNoteBytes());
         map.put("config", config.toNoteBytes());
         map.put("created_time", createdTime);
         return map.toNoteBytes();

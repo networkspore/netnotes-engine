@@ -96,24 +96,24 @@ class PackageInstallScreen extends TerminalScreen {
     private RenderState buildPackageOverviewState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 15) / 2, "Install Package", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 15) / 2, "Install Package", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Package: " + packageInfo.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(6, 10, "Version: " + packageInfo.getVersion(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Category: " + packageInfo.getCategory(), gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
+            term.printAt(5, 10, "Package: " + packageInfo.getName()));
+        builder.add((term) -> 
+            term.printAt(6, 10, "Version: " + packageInfo.getVersion()));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Category: " + packageInfo.getCategory()));
+        builder.add((term) -> 
             term.printAt(8, 10, String.format("Size: %.2f MB", 
-                packageInfo.getSize() / (1024.0 * 1024.0)), gen));
-        builder.add((term, gen) -> 
-            term.printAt(9, 10, "Repository: " + packageInfo.getRepository(), gen));
+                packageInfo.getSize() / (1024.0 * 1024.0))));
+        builder.add((term) -> 
+            term.printAt(9, 10, "Repository: " + packageInfo.getRepository()));
         
-        builder.add((term, gen) -> 
-            term.printAt(11, 10, "Description:", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(11, 10, "Description:", TextStyle.BOLD));
         
         // Add description lines
         String desc = packageInfo.getDescription();
@@ -121,17 +121,17 @@ class PackageInstallScreen extends TerminalScreen {
         for (int i = 0; i < Math.min(lines.length, 5); i++) {
             final int row = 12 + i;
             final String line = lines[i];
-            builder.add((term, gen) -> term.printAt(row, 10, line, gen));
+            builder.add((term) -> term.printAt(row, 10, line));
         }
         
         // Menu
-        builder.add((term, gen) -> 
-            term.printAt(19, 10, "1. Continue with installation", gen));
-        builder.add((term, gen) -> 
-            term.printAt(20, 10, "2. Cancel installation", gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
+            term.printAt(19, 10, "1. Continue with installation"));
+        builder.add((term) -> 
+            term.printAt(20, 10, "2. Cancel installation"));
+        builder.add((term) -> 
             term.printAt(22, 10, "Select option (or ESC to cancel):", 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
         return builder.build();
     }
@@ -143,38 +143,37 @@ class PackageInstallScreen extends TerminalScreen {
             packageInfo.getManifest().getMetadata());
         List<PathCapability> capabilities = policy.getRequestedCapabilities();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 15) / 2, "Security Review", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 15) / 2, "Security Review", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "This package requests the following capabilities:", 
-                gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
+            term.printAt(5, 10, "This package requests the following capabilities:"));
+        builder.add((term) -> 
             term.printAt(6, 10, "Review carefully before approving.", 
-                TextStyle.WARNING, gen));
+                TextStyle.WARNING));
         
         if (capabilities.isEmpty()) {
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(8, 10, "No special capabilities requested", 
-                    TextStyle.INFO, gen));
+                    TextStyle.INFO));
         } else {
             int row = 8;
             for (PathCapability cap : capabilities) {
                 final int currentRow = row;
-                builder.add((term, gen) -> 
-                    term.printAt(currentRow, 10, "• " + cap.getDescription(), gen));
-                builder.add((term, gen) -> 
+                builder.add((term) -> 
+                    term.printAt(currentRow, 10, "• " + cap.getDescription()));
+                builder.add((term) -> 
                     term.printAt(currentRow + 1, 12, "Reason: " + cap.getReason(), 
-                        TextStyle.INFO, gen));
+                        TextStyle.INFO));
                 row += 2;
             }
         }
         
         if (policy.hasSensitivePaths()) {
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(16, 10, "⚠️ WARNING: Sensitive system paths requested", 
-                    TextStyle.WARNING, gen));
+                    TextStyle.WARNING));
         }
         
         // Menu
@@ -182,12 +181,12 @@ class PackageInstallScreen extends TerminalScreen {
             ? "1. Approve (WARNING: Sensitive access)" 
             : "1. Approve capabilities";
         
-        builder.add((term, gen) -> term.printAt(18, 10, approveDesc, gen));
-        builder.add((term, gen) -> 
-            term.printAt(19, 10, "2. Deny and cancel installation", gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> term.printAt(18, 10, approveDesc));
+        builder.add((term) -> 
+            term.printAt(19, 10, "2. Deny and cancel installation"));
+        builder.add((term) -> 
             term.printAt(21, 10, "Select option (or ESC to cancel):", 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
         return builder.build();
     }
@@ -199,26 +198,25 @@ class PackageInstallScreen extends TerminalScreen {
         PackageManifest.NamespaceRequirement nsReq = manifest.getNamespaceRequirement();
         NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 31) / 2, 
-                "Choose Installation Namespace", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 31) / 2, 
+                "Choose Installation Namespace", TextStyle.BOLD));
         
         if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "Suggested namespace: " + nsReq.namespace(), gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "Suggested namespace: " + nsReq.namespace()));
         } else {
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "Choose where this package will be installed:", gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "Choose where this package will be installed:"));
         }
         
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "1. Default: " + defaultNs + " (Standard installation)", 
-                gen));
-        builder.add((term, gen) -> 
-            term.printAt(8, 10, "2. Cancel installation", gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
+            term.printAt(7, 10, "1. Default: " + defaultNs + " (Standard installation)"));
+        builder.add((term) -> 
+            term.printAt(8, 10, "2. Cancel installation"));
+        builder.add((term) -> 
             term.printAt(10, 10, "Select option (or ESC to cancel):", 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
         return builder.build();
     }
@@ -226,19 +224,19 @@ class PackageInstallScreen extends TerminalScreen {
     private RenderState buildPasswordConfirmState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 20) / 2, "Confirm Installation", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 20) / 2, "Confirm Installation", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Ready to install:", TextStyle.BOLD, gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Package: " + packageInfo.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId(), gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Ready to install:", TextStyle.BOLD));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Package: " + packageInfo.getName()));
+        builder.add((term) -> 
+            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId()));
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "Type 'INSTALL' to proceed:", gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "Type 'INSTALL' to proceed:"));
         
         return builder.build();
     }
@@ -246,18 +244,18 @@ class PackageInstallScreen extends TerminalScreen {
     private RenderState buildInstallingState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 18) / 2, "Installing Package", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 18) / 2, "Installing Package", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Installing...", gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "This may take a moment.", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Installing..."));
+        builder.add((term) -> 
+            term.printAt(7, 10, "This may take a moment.", TextStyle.INFO));
         
         if (statusMessage != null) {
-            builder.add((term, gen) -> 
-                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+            builder.add((term) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO));
         }
         
         return builder.build();
@@ -266,24 +264,24 @@ class PackageInstallScreen extends TerminalScreen {
     private RenderState buildAskLoadState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 21) / 2, "Installation Complete", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 21) / 2, "Installation Complete", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
             term.printAt(5, 10, "✓ Package installed successfully!", 
-                TextStyle.SUCCESS, gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Package: " + packageInfo.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId(), gen));
+                TextStyle.SUCCESS));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Package: " + packageInfo.getName()));
+        builder.add((term) -> 
+            term.printAt(8, 10, "Namespace: " + chosenProcessConfig.getProcessId()));
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "1. Yes, load the package now", gen));
-        builder.add((term, gen) -> 
-            term.printAt(11, 10, "2. No, I'll load it later", gen));
-        builder.add((term, gen) -> 
-            term.printAt(13, 10, "Select option:", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "1. Yes, load the package now"));
+        builder.add((term) -> 
+            term.printAt(11, 10, "2. No, I'll load it later"));
+        builder.add((term) -> 
+            term.printAt(13, 10, "Select option:", TextStyle.INFO));
         
         return builder.build();
     }
@@ -292,30 +290,30 @@ class PackageInstallScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         if (errorMessage != null) {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 18) / 2, "Installation Failed", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 18) / 2, "Installation Failed", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "✗ Installation failed", TextStyle.ERROR, gen));
-            builder.add((term, gen) -> 
-                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR, gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "✗ Installation failed", TextStyle.ERROR));
+            builder.add((term) -> 
+                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR));
         } else {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 21) / 2, "Installation Complete", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 21) / 2, "Installation Complete", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "✓ Installation successful", TextStyle.SUCCESS, gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "✓ Installation successful", TextStyle.SUCCESS));
             
             if (loadImmediately && statusMessage != null) {
-                builder.add((term, gen) -> 
-                    term.printAt(7, 10, statusMessage, TextStyle.SUCCESS, gen));
+                builder.add((term) -> 
+                    term.printAt(7, 10, statusMessage, TextStyle.SUCCESS));
             }
         }
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "Press any key to return...", gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "Press any key to return..."));
         
         return builder.build();
     }

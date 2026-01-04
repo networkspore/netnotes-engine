@@ -29,7 +29,7 @@ import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
  * 4. Create ephemeral event
  * 5. Close NoteBytesObjectEphemeral (wipes decrypted bytes)
  */
-public final class EphemeralInputEventFactory {
+public final class EphemeralEventsFactory {
 
    
 

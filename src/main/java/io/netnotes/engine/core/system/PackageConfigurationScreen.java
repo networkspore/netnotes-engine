@@ -93,27 +93,27 @@ class PackageConfigurationScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         // Title
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 22) / 2, "Package Configuration", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 22) / 2, "Package Configuration", 
+                TextStyle.BOLD));
         
         // Package info
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Package: " + originalPackage.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(6, 10, "Version: " + originalPackage.getVersion(), gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Package: " + originalPackage.getName()));
+        builder.add((term) -> 
+            term.printAt(6, 10, "Version: " + originalPackage.getVersion()));
         
         // Current config
-        builder.add((term, gen) -> 
-            term.printAt(8, 10, "Current Configuration:", TextStyle.BOLD, gen));
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "ProcessId: " + originalPackage.getProcessId(), gen));
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
+            term.printAt(8, 10, "Current Configuration:", TextStyle.BOLD));
+        builder.add((term) -> 
+            term.printAt(10, 10, "ProcessId: " + originalPackage.getProcessId()));
+        builder.add((term) -> 
             term.printAt(11, 10, "Data Path: " + 
-                originalPackage.getProcessConfig().getDataRootPath(), gen));
-        builder.add((term, gen) -> 
+                originalPackage.getProcessConfig().getDataRootPath()));
+        builder.add((term) -> 
             term.printAt(12, 10, "Flow Path: " + 
-                originalPackage.getProcessConfig().getFlowBasePath(), gen));
+                originalPackage.getProcessConfig().getFlowBasePath()));
         
         // Menu
         builder.addAll(buildMenuElements(14));
@@ -124,21 +124,20 @@ class PackageConfigurationScreen extends TerminalScreen {
     private RenderState buildProcessIdConfigState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 16) / 2, "Change ProcessId", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 16) / 2, "Change ProcessId", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Current ProcessId: " + originalPackage.getProcessId(), 
-                gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Current ProcessId: " + originalPackage.getProcessId()));
         
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Enter new ProcessId (namespace):", gen));
-        builder.add((term, gen) -> 
-            term.printAt(8, 10, "(Leave blank to cancel)", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Enter new ProcessId (namespace):"));
+        builder.add((term) -> 
+            term.printAt(8, 10, "(Leave blank to cancel)", TextStyle.INFO));
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "New ProcessId: ", gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "New ProcessId: "));
         
         return builder.build();
     }
@@ -146,30 +145,30 @@ class PackageConfigurationScreen extends TerminalScreen {
     private RenderState buildPasswordConfirmState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 33) / 2, 
-                "Confirm Configuration Changes", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 33) / 2, 
+                "Confirm Configuration Changes", TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Configuration Summary:", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Configuration Summary:", TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Package: " + originalPackage.getName(), gen));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Package: " + originalPackage.getName()));
         
-        builder.add((term, gen) -> 
-            term.printAt(9, 10, "Changes:", TextStyle.BOLD, gen));
-        builder.add((term, gen) -> 
-            term.printAt(10, 12, "Old ProcessId: " + originalPackage.getProcessId(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(11, 12, "New ProcessId: " + newProcessConfig.getProcessId(), gen));
+        builder.add((term) -> 
+            term.printAt(9, 10, "Changes:", TextStyle.BOLD));
+        builder.add((term) -> 
+            term.printAt(10, 12, "Old ProcessId: " + originalPackage.getProcessId()));
+        builder.add((term) -> 
+            term.printAt(11, 12, "New ProcessId: " + newProcessConfig.getProcessId()));
         
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
             term.printAt(13, 10, 
                 "⚠️ Warning: This will require reloading any running instances", 
-                TextStyle.WARNING, gen));
+                TextStyle.WARNING));
         
-        builder.add((term, gen) -> 
-            term.printAt(15, 10, "Type 'CONFIRM' to proceed:", gen));
+        builder.add((term) -> 
+            term.printAt(15, 10, "Type 'CONFIRM' to proceed:"));
         
         return builder.build();
     }
@@ -177,14 +176,14 @@ class PackageConfigurationScreen extends TerminalScreen {
     private RenderState buildSavingState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 22) / 2, "Saving Configuration", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 22) / 2, "Saving Configuration", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Updating package configuration...", gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Please wait...", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Updating package configuration..."));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Please wait...", TextStyle.INFO));
         
         return builder.build();
     }
@@ -193,31 +192,30 @@ class PackageConfigurationScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         if (errorMessage != null) {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 20) / 2, "Configuration Failed", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 20) / 2, "Configuration Failed", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, errorMessage, TextStyle.ERROR, gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, errorMessage, TextStyle.ERROR));
         } else {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 21) / 2, "Configuration Updated", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 21) / 2, "Configuration Updated", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(5, 10, "✓ Configuration saved successfully", 
-                    TextStyle.SUCCESS, gen));
-            builder.add((term, gen) -> 
-                term.printAt(7, 10, "New ProcessId: " + newProcessConfig.getProcessId(), 
-                    gen));
-            builder.add((term, gen) -> 
+                    TextStyle.SUCCESS));
+            builder.add((term) -> 
+                term.printAt(7, 10, "New ProcessId: " + newProcessConfig.getProcessId()));
+            builder.add((term) -> 
                 term.printAt(9, 10, 
                     "Note: Reload the package for changes to take effect", 
-                    TextStyle.INFO, gen));
+                    TextStyle.INFO));
         }
         
-        builder.add((term, gen) -> 
-            term.printAt(11, 10, "Press any key to return...", gen));
+        builder.add((term) -> 
+            term.printAt(11, 10, "Press any key to return..."));
         
         return builder.build();
     }
@@ -227,19 +225,19 @@ class PackageConfigurationScreen extends TerminalScreen {
     private List<RenderElement> buildMenuElements(int startRow) {
         List<RenderElement> elements = new ArrayList<>();
         
-        elements.add((term, gen) -> 
-            term.printAt(startRow, 10, "1. Change ProcessId (Namespace)", gen));
-        elements.add((term, gen) -> 
+        elements.add((term) -> 
+            term.printAt(startRow, 10, "1. Change ProcessId (Namespace)"));
+        elements.add((term) -> 
             term.printAt(startRow + 1, 10, 
-                "2. Modify Security Capabilities (Coming Soon)", TextStyle.INFO, gen));
-        elements.add((term, gen) -> 
-            term.printAt(startRow + 3, 10, "─".repeat(40), gen));
-        elements.add((term, gen) -> 
-            term.printAt(startRow + 4, 10, "3. Cancel and Return", gen));
+                "2. Modify Security Capabilities (Coming Soon)", TextStyle.INFO));
+        elements.add((term) -> 
+            term.printAt(startRow + 3, 10, "─".repeat(40)));
+        elements.add((term) -> 
+            term.printAt(startRow + 4, 10, "3. Cancel and Return"));
         
-        elements.add((term, gen) -> 
+        elements.add((term) -> 
             term.printAt(startRow + 6, 10, "Select option (or ESC to cancel):", 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
         return elements;
     }

@@ -91,51 +91,51 @@ class PackageUninstallScreen extends TerminalScreen {
         
         if (runningInstances.isEmpty() && statusMessage == null) {
             // Still checking
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 17) / 2, "Uninstall Package", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 17) / 2, "Uninstall Package", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "Checking for running instances...", gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "Checking for running instances..."));
         } else if (runningInstances.isEmpty()) {
             // No instances, ready to proceed
             return buildShowOptionsState();
         } else {
             // Has instances - show warning
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 17) / 2, "Cannot Uninstall", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 17) / 2, "Cannot Uninstall", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(5, 10, "⚠️ Package has running instances", 
-                    TextStyle.WARNING, gen));
+                    TextStyle.WARNING));
             
-            builder.add((term, gen) -> 
-                term.printAt(7, 10, "Package: " + packageToUninstall.getName(), gen));
-            builder.add((term, gen) -> 
-                term.printAt(8, 10, "Running instances: " + runningInstances.size(), gen));
+            builder.add((term) -> 
+                term.printAt(7, 10, "Package: " + packageToUninstall.getName()));
+            builder.add((term) -> 
+                term.printAt(8, 10, "Running instances: " + runningInstances.size()));
             
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(10, 10, "The following instances must be stopped first:", 
-                    TextStyle.BOLD, gen));
+                    TextStyle.BOLD));
             
             IntCounter row = new IntCounter(12);
             for (NodeInstance instance : runningInstances) {
                 row.increment();
                 final int currentRow = row.get();
-                builder.add((term, gen) -> 
+                builder.add((term) -> 
                     term.printAt(currentRow, 12, "• " + instance.getInstanceId() + 
-                        " [" + instance.getProcessId() + "]", gen));
+                        " [" + instance.getProcessId() + "]"));
             }
             
             // Menu
-            builder.add((term, gen) -> 
-                term.printAt(row.get() + 2, 10, "1. Stop All Instances", gen));
-            builder.add((term, gen) -> 
-                term.printAt(row.get() + 3, 10, "2. Cancel Uninstall", gen));
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
+                term.printAt(row.get() + 2, 10, "1. Stop All Instances"));
+            builder.add((term) -> 
+                term.printAt(row.get() + 3, 10, "2. Cancel Uninstall"));
+            builder.add((term) -> 
                 term.printAt(row.get() + 5, 10, "Select option (or ESC to cancel):", 
-                    TextStyle.INFO, gen));
+                    TextStyle.INFO));
         }
         
         return builder.build();
@@ -144,44 +144,44 @@ class PackageUninstallScreen extends TerminalScreen {
     private RenderState buildShowOptionsState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 17) / 2, "Uninstall Options", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 17) / 2, "Uninstall Options", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Package: " + packageToUninstall.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(6, 10, "Version: " + packageToUninstall.getVersion(), gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Package: " + packageToUninstall.getName()));
+        builder.add((term) -> 
+            term.printAt(6, 10, "Version: " + packageToUninstall.getVersion()));
         
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
             term.printAt(8, 10, "Data path: " + 
                 packageToUninstall.getProcessConfig().getDataRootPath(), 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "Choose uninstall option:", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "Choose uninstall option:", TextStyle.BOLD));
         
         // Menu
-        builder.add((term, gen) -> 
-            term.printAt(12, 10, "1. Uninstall but keep data", gen));
-        builder.add((term, gen) -> 
-            term.printAt(13, 10, "2. Uninstall and delete all data", gen));
+        builder.add((term) -> 
+            term.printAt(12, 10, "1. Uninstall but keep data"));
+        builder.add((term) -> 
+            term.printAt(13, 10, "2. Uninstall and delete all data"));
         
-        builder.add((term, gen) -> 
-            term.printAt(15, 10, "─".repeat(40), gen));
-        builder.add((term, gen) -> 
-            term.printAt(16, 10, "Future Features", TextStyle.INFO, gen));
-        builder.add((term, gen) -> 
-            term.printAt(17, 12, "(Browse data - Coming Soon)", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(15, 10, "─".repeat(40)));
+        builder.add((term) -> 
+            term.printAt(16, 10, "Future Features", TextStyle.INFO));
+        builder.add((term) -> 
+            term.printAt(17, 12, "(Browse data - Coming Soon)", TextStyle.INFO));
         
-        builder.add((term, gen) -> 
-            term.printAt(19, 10, "─".repeat(40), gen));
-        builder.add((term, gen) -> 
-            term.printAt(20, 10, "3. Cancel Uninstall", gen));
+        builder.add((term) -> 
+            term.printAt(19, 10, "─".repeat(40)));
+        builder.add((term) -> 
+            term.printAt(20, 10, "3. Cancel Uninstall"));
         
-        builder.add((term, gen) -> 
+        builder.add((term) -> 
             term.printAt(22, 10, "Select option (or ESC to cancel):", 
-                TextStyle.INFO, gen));
+                TextStyle.INFO));
         
         return builder.build();
     }
@@ -189,27 +189,27 @@ class PackageUninstallScreen extends TerminalScreen {
     private RenderState buildPasswordConfirmState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 17) / 2, "Confirm Uninstall", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 17) / 2, "Confirm Uninstall", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "⚠️ WARNING", TextStyle.WARNING, gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "⚠️ WARNING", TextStyle.WARNING));
         
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "You are about to uninstall:", gen));
-        builder.add((term, gen) -> 
-            term.printAt(8, 12, "Package: " + packageToUninstall.getName(), gen));
-        builder.add((term, gen) -> 
-            term.printAt(9, 12, "Version: " + packageToUninstall.getVersion(), gen));
+        builder.add((term) -> 
+            term.printAt(7, 10, "You are about to uninstall:"));
+        builder.add((term) -> 
+            term.printAt(8, 12, "Package: " + packageToUninstall.getName()));
+        builder.add((term) -> 
+            term.printAt(9, 12, "Version: " + packageToUninstall.getVersion()));
         
         String dataMsg = deleteData ? "Data will be DELETED" : "Data will be KEPT";
         TextStyle dataStyle = deleteData ? TextStyle.WARNING : TextStyle.SUCCESS;
-        builder.add((term, gen) -> 
-            term.printAt(11, 10, dataMsg, dataStyle, gen));
+        builder.add((term) -> 
+            term.printAt(11, 10, dataMsg, dataStyle));
         
-        builder.add((term, gen) -> 
-            term.printAt(13, 10, "Type 'CONFIRM' to proceed:", gen));
+        builder.add((term) -> 
+            term.printAt(13, 10, "Type 'CONFIRM' to proceed:"));
         
         return builder.build();
     }
@@ -217,18 +217,18 @@ class PackageUninstallScreen extends TerminalScreen {
     private RenderState buildUninstallingState() {
         RenderState.Builder builder = RenderState.builder();
         
-        builder.add((term, gen) -> 
-            term.printAt(0, (term.getCols() - 20) / 2, "Uninstalling Package", 
-                TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 20) / 2, "Uninstalling Package", 
+                TextStyle.BOLD));
         
-        builder.add((term, gen) -> 
-            term.printAt(5, 10, "Uninstalling...", gen));
-        builder.add((term, gen) -> 
-            term.printAt(7, 10, "Please wait...", TextStyle.INFO, gen));
+        builder.add((term) -> 
+            term.printAt(5, 10, "Uninstalling..."));
+        builder.add((term) -> 
+            term.printAt(7, 10, "Please wait...", TextStyle.INFO));
         
         if (statusMessage != null) {
-            builder.add((term, gen) -> 
-                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+            builder.add((term) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO));
         }
         
         return builder.build();
@@ -238,33 +238,33 @@ class PackageUninstallScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         if (errorMessage != null) {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 18) / 2, "Uninstall Failed", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 18) / 2, "Uninstall Failed", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
-                term.printAt(5, 10, "✗ Uninstall failed", TextStyle.ERROR, gen));
-            builder.add((term, gen) -> 
-                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR, gen));
+            builder.add((term) -> 
+                term.printAt(5, 10, "✗ Uninstall failed", TextStyle.ERROR));
+            builder.add((term) -> 
+                term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR));
         } else {
-            builder.add((term, gen) -> 
-                term.printAt(0, (term.getCols() - 18) / 2, "Uninstall Complete", 
-                    TextStyle.BOLD, gen));
+            builder.add((term) -> 
+                term.printAt(0, (PackageUninstallScreen.this.terminal.getCols() - 18) / 2, "Uninstall Complete", 
+                    TextStyle.BOLD));
             
-            builder.add((term, gen) -> 
+            builder.add((term) -> 
                 term.printAt(5, 10, "✓ Package uninstalled successfully", 
-                    TextStyle.SUCCESS, gen));
+                    TextStyle.SUCCESS));
             
-            builder.add((term, gen) -> 
-                term.printAt(7, 10, "Package: " + packageToUninstall.getName(), gen));
+            builder.add((term) -> 
+                term.printAt(7, 10, "Package: " + packageToUninstall.getName()));
             
             String dataMsg = deleteData ? "Data deleted" : "Data preserved";
-            builder.add((term, gen) -> 
-                term.printAt(8, 10, dataMsg, TextStyle.INFO, gen));
+            builder.add((term) -> 
+                term.printAt(8, 10, dataMsg, TextStyle.INFO));
         }
         
-        builder.add((term, gen) -> 
-            term.printAt(10, 10, "Press any key to return...", gen));
+        builder.add((term) -> 
+            term.printAt(10, 10, "Press any key to return..."));
         
         return builder.build();
     }

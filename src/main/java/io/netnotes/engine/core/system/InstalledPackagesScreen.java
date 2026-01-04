@@ -79,9 +79,9 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private RenderState buildLoadingState() {
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Installed Packages", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "Loading...", TextStyle.INFO, gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Installed Packages", TextStyle.BOLD);
+                term.printAt(5, 10, "Loading...", TextStyle.INFO);
             })
             .build();
     }
@@ -93,13 +93,13 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private RenderState buildLoadingInstanceState() {
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Loading Package", TextStyle.BOLD, gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Loading Package", TextStyle.BOLD);
                 if (selectedPackage != null) {
-                    term.printAt(5, 10, "Loading: " + selectedPackage.getName(), gen);
-                    term.printAt(6, 10, "ProcessId: " + selectedPackage.getProcessId(), gen);
+                    term.printAt(5, 10, "Loading: " + selectedPackage.getName());
+                    term.printAt(6, 10, "ProcessId: " + selectedPackage.getProcessId());
                 }
-                term.printAt(8, 10, "Starting node...", TextStyle.INFO, gen);
+                term.printAt(8, 10, "Starting node...", TextStyle.INFO);
             })
             .build();
     }
@@ -110,29 +110,29 @@ class InstalledPackagesScreen extends TerminalScreen {
         }
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Package Details", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "Name: " + selectedPackage.getName(), gen);
-                term.printAt(6, 10, "Version: " + selectedPackage.getVersion(), gen);
-                term.printAt(7, 10, "ProcessId: " + selectedPackage.getProcessId(), gen);
-                term.printAt(8, 10, "Repository: " + selectedPackage.getRepository(), gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Package Details", TextStyle.BOLD);
+                term.printAt(5, 10, "Name: " + selectedPackage.getName());
+                term.printAt(6, 10, "Version: " + selectedPackage.getVersion());
+                term.printAt(7, 10, "ProcessId: " + selectedPackage.getProcessId());
+                term.printAt(8, 10, "Repository: " + selectedPackage.getRepository());
                 term.printAt(9, 10, "Installed: " + 
-                    formatDate(selectedPackage.getInstalledDate()), gen);
+                    formatDate(selectedPackage.getInstalledDate()));
                 term.printAt(10, 10, "Type: " + 
-                    selectedPackage.getManifest().getType(), gen);
-                term.printAt(12, 10, "Description:", gen);
-                term.printAt(13, 10, selectedPackage.getDescription(), gen);
-                term.printAt(15, 10, "Paths:", gen);
+                    selectedPackage.getManifest().getType());
+                term.printAt(12, 10, "Description:");
+                term.printAt(13, 10, selectedPackage.getDescription());
+                term.printAt(15, 10, "Paths:");
                 term.printAt(16, 12, "Data: " + 
-                    selectedPackage.getProcessConfig().getDataRootPath(), gen);
+                    selectedPackage.getProcessConfig().getDataRootPath());
                 term.printAt(17, 12, "Flow: " + 
-                    selectedPackage.getProcessConfig().getFlowBasePath(), gen);
-                term.printAt(19, 10, "Security:", gen);
+                    selectedPackage.getProcessConfig().getFlowBasePath());
+                term.printAt(19, 10, "Security:");
                 term.printAt(20, 12, 
                     selectedPackage.getSecurityPolicy().getGrantedCapabilities().size() + 
-                    " capabilities granted", gen);
+                    " capabilities granted");
                 term.printAt(22, 10, "Press any key to return...", 
-                    TextStyle.INFO, gen);
+                    TextStyle.INFO);
             })
             .build();
     }
@@ -143,13 +143,13 @@ class InstalledPackagesScreen extends TerminalScreen {
         }
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Confirm Uninstall", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "⚠️ Uninstall package?", TextStyle.WARNING, gen);
-                term.printAt(7, 10, "Package: " + selectedPackage.getName(), gen);
-                term.printAt(8, 10, "Version: " + selectedPackage.getVersion(), gen);
-                term.printAt(10, 10, "This action cannot be undone.", gen);
-                term.printAt(12, 10, "Type 'CONFIRM' to proceed:", gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Confirm Uninstall", TextStyle.BOLD);
+                term.printAt(5, 10, "⚠️ Uninstall package?", TextStyle.WARNING);
+                term.printAt(7, 10, "Package: " + selectedPackage.getName());
+                term.printAt(8, 10, "Version: " + selectedPackage.getVersion());
+                term.printAt(10, 10, "This action cannot be undone.");
+                term.printAt(12, 10, "Type 'CONFIRM' to proceed:");
                 // InputReader at 12, 40
             })
             .build();
@@ -157,21 +157,21 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private RenderState buildUninstallingState() {
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(0, 0, "Uninstalling", TextStyle.BOLD, gen);
-                term.printAt(5, 10, "Uninstalling package...", TextStyle.INFO, gen);
+            .add((term) -> {
+                term.printAt(0, 0, "Uninstalling", TextStyle.BOLD);
+                term.printAt(5, 10, "Uninstalling package...", TextStyle.INFO);
             })
             .build();
     }
     
     private RenderState buildSuccessState() {
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
-                    TextStyle.SUCCESS, gen);
+                    TextStyle.SUCCESS);
                 term.printAt(terminal.getRows() / 2 + 2, 10, 
-                    "Press any key to continue...", TextStyle.NORMAL, gen);
+                    "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
     }
@@ -180,11 +180,11 @@ class InstalledPackagesScreen extends TerminalScreen {
         String message = errorMessage != null ? errorMessage : "An error occurred";
         
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
-                    message, TextStyle.ERROR, gen);
+                    message, TextStyle.ERROR);
                 term.printAt(terminal.getRows() / 2 + 2, 10, 
-                    "Press any key to continue...", TextStyle.NORMAL, gen);
+                    "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
     }

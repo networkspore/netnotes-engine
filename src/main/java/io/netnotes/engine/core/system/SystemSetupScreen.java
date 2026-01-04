@@ -107,12 +107,12 @@ public class SystemSetupScreen extends TerminalScreen {
         
         return RenderState.builder()
             .add(welcomeBox.asRenderElement())
-            .add((term, gen) -> {
-                term.printAt(msgRow, msgCol, msg, TextStyle.INFO, gen);
-                term.drawHLine(msgRow + 1, lineCol, msg.length() + 2, gen);
+            .add((term) -> {
+                term.printAt(msgRow, msgCol, msg, TextStyle.INFO);
+                term.drawHLine(msgRow + 1, lineCol, msg.length() + 2);
             })
-            .add((term, gen) -> {
-                term.printAt(promptRow, promptCol, prompt, TextStyle.INFO, gen);
+            .add((term) -> {
+                term.printAt(promptRow, promptCol, prompt, TextStyle.INFO);
             })
             .build();
     }
@@ -125,8 +125,8 @@ public class SystemSetupScreen extends TerminalScreen {
         int col = Math.max(0, terminal.getCols() / 2 - 15);
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(row, col, "Detecting IODaemon...", TextStyle.INFO, gen);
+            .add((term) -> {
+                term.printAt(row, col, "Detecting IODaemon...", TextStyle.INFO);
             })
             .build();
     }
@@ -161,19 +161,19 @@ public class SystemSetupScreen extends TerminalScreen {
         int inputPromptRow = 7;
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(titleRow, 5, "Socket Path Configuration", TextStyle.BOLD, gen);
+            .add((term) -> {
+                term.printAt(titleRow, 5, "Socket Path Configuration", TextStyle.BOLD);
             })
-            .add((term, gen) -> {
-                term.printAt(pathRow, 5, "Current: " + socketPath, TextStyle.NORMAL, gen);
+            .add((term) -> {
+                term.printAt(pathRow, 5, "Current: " + socketPath, TextStyle.NORMAL);
             })
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(promptRow, 5, 
                     "Enter new socket path (or press ESC to cancel):", 
-                    TextStyle.NORMAL, gen);
+                    TextStyle.NORMAL);
             })
-            .add((term, gen) -> {
-                term.printAt(inputPromptRow, 5, "> ", TextStyle.NORMAL, gen);
+            .add((term) -> {
+                term.printAt(inputPromptRow, 5, "> ", TextStyle.NORMAL);
             })
             // InputReader renders itself at its configured position
             .build();
@@ -190,10 +190,10 @@ public class SystemSetupScreen extends TerminalScreen {
         int promptRow = errorRow + 2;
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(errorRow, 5, errorText, TextStyle.ERROR, gen);
+            .add((term) -> {
+                term.printAt(errorRow, 5, errorText, TextStyle.ERROR);
                 term.printAt(promptRow, 5, "Press any key to return...", 
-                    TextStyle.NORMAL, gen);
+                    TextStyle.NORMAL);
             })
             .build();
     }

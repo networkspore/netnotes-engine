@@ -1,6 +1,8 @@
 package io.netnotes.engine.noteBytes.collections;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -330,6 +332,23 @@ public class NoteBytesMap{
     public void put(String key, NoteBytesMap map){
         m_pairs.put(new NoteBytes( key), map.toNoteBytes());
     }
+
+    public void put(NoteBytes key, BigInteger bigInteger){
+        m_pairs.put(key, new NoteBytes(bigInteger));
+    }
+
+    public void put(String key, BigInteger bigInteger){
+        m_pairs.put(new NoteBytes( key), new NoteBytes(bigInteger));
+    }
+
+    public void put(String key, BigDecimal bigDecimal){
+        m_pairs.put(new NoteBytes( key), new NoteBytes(bigDecimal));
+    }
+
+    public void put(NoteBytes key, BigDecimal bigDecimal){
+        m_pairs.put(key, new NoteBytes(bigDecimal));
+    }
+
 
     public void put(String key, long l){
         m_pairs.put(new NoteBytes( key), new NoteBytes(l));

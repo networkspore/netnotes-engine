@@ -23,7 +23,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
-public final class RoutedEventFactory {
+public final class EventsFactory {
 
     private static final Map<NoteBytesReadOnly, EventDeserializer> REGISTRY = new HashMap<>();
 
@@ -165,16 +165,14 @@ public final class RoutedEventFactory {
         if (typeBytes == null) {
             throw new IllegalStateException("Invalid InputPacket: missing EVENT");
         }
+        NoteBytes stateFlags = body.get(Keys.STATE_FLAGS);
+        NoteBytes payloadNote = body.get(Keys.PAYLOAD);
 
         String description = EventBytes.getEventDescription(typeBytes); // for validation
-
         Log.logMsg("[RoutedEventFactory.from] Deserializing event: " + description);
 
-        int flags = 0;
-        NoteBytes stateFlags = body.get(Keys.STATE_FLAGS);
-        if (stateFlags != null) flags = stateFlags.getAsInt();
-
-        NoteBytes payloadNote = body.get(Keys.PAYLOAD);
+        
+        int flags = stateFlags != null ?stateFlags.getAsInt() : 0;
         NoteBytesArrayReadOnly payloadReadOnly = payloadNote != null ? payloadNote.getAsNoteBytesArrayReadOnly() : null;
         NoteBytes[] payloadArray = payloadReadOnly != null ? payloadReadOnly.getAsArray() : new NoteBytes[0];
 

@@ -63,11 +63,11 @@ class PasswordChangeScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         // Clear screen
-        builder.add((term, gen) -> term.clear(gen));
+        builder.add((term) -> term.clear());
         
         // Title
-        builder.add((term, gen) -> 
-            term.printAt(1, (term.getCols() - 21) / 2, "Change Master Password", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(1, (PasswordChangeScreen.this.terminal.getCols() - 21) / 2, "Change Master Password", TextStyle.BOLD));
         
         // Current prompt based on step
         String prompt;
@@ -91,22 +91,22 @@ class PasswordChangeScreen extends TerminalScreen {
         }
         
         if (!prompt.isEmpty()) {
-            builder.add((term, gen) -> {
-                term.printAt(5, 10, prompt, TextStyle.NORMAL, gen);
-                term.moveCursor(5, cursorCol, gen);
+            builder.add((term) -> {
+                term.printAt(5, 10, prompt, TextStyle.NORMAL);
+                term.moveCursor(5, cursorCol);
             });
         }
         
         // Status message
         if (statusMessage != null && !statusMessage.isEmpty()) {
-            builder.add((term, gen) -> 
-                term.printAt(9, 10, statusMessage, TextStyle.INFO, gen));
+            builder.add((term) -> 
+                term.printAt(9, 10, statusMessage, TextStyle.INFO));
         }
         
         // Error message
         if (errorMessage != null && !errorMessage.isEmpty()) {
-            builder.add((term, gen) -> 
-                term.printAt(15, 10, errorMessage, TextStyle.ERROR, gen));
+            builder.add((term) -> 
+                term.printAt(15, 10, errorMessage, TextStyle.ERROR));
         }
         
         // Add progress bar labels and bars
@@ -115,8 +115,8 @@ class PasswordChangeScreen extends TerminalScreen {
             int row = entry.getValue();
             String label = getScopeLabel(scope);
             
-            builder.add((term, gen) -> 
-                term.printAt(row - 1, 10, label, TextStyle.NORMAL, gen));
+            builder.add((term) -> 
+                term.printAt(row - 1, 10, label, TextStyle.NORMAL));
             
             TerminalProgressBar bar = progressBars.get(scope);
             if (bar != null) {
@@ -450,8 +450,8 @@ class PasswordChangeScreen extends TerminalScreen {
         String formattedProgress = formatProgressMessage(scope, completed, total, percentage, message);
         
         // Update the progress bar (thread-safe because we're in single-threaded executor)
-        progressBar.update(percentage, formattedProgress);
-        
+        progressBar.updatePercent(percentage, formattedProgress);
+       
         // Trigger redraw
         invalidate();
     }

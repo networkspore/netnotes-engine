@@ -1,6 +1,7 @@
 package io.netnotes.engine.core.system.control.containers;
 
 
+import io.netnotes.engine.core.system.control.ui.RenderingServiceStates;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -165,23 +166,23 @@ public class RenderingService extends FlowProcess {
     // ===== STATE MACHINE SETUP =====
     
     private void setupStateTransitions() {
-        state.onStateAdded(RendererStates.INITIALIZING, (old, now, bit) -> {
+        state.onStateAdded(RenderingServiceStates.INITIALIZING, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Initializing...");
         });
         
-        state.onStateAdded(RendererStates.READY, (old, now, bit) -> {
+        state.onStateAdded(RenderingServiceStates.READY, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Ready - accepting requests");
         });
         
-        state.onStateAdded(RendererStates.SHUTTING_DOWN, (old, now, bit) -> {
+        state.onStateAdded(RenderingServiceStates.SHUTTING_DOWN, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Shutting down...");
         });
         
-        state.onStateAdded(RendererStates.STOPPED, (old, now, bit) -> {
+        state.onStateAdded(RenderingServiceStates.STOPPED, (old, now, bit) -> {
             Log.logMsg("[RenderingService] Stopped");
         });
         
-        state.onStateAdded(RendererStates.ERROR, (old, now, bit) -> {
+        state.onStateAdded(RenderingServiceStates.ERROR, (old, now, bit) -> {
             Log.logError("[RenderingService] ERROR");
         });
     }
@@ -190,7 +191,7 @@ public class RenderingService extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> run() {
-        state.addState(RendererStates.INITIALIZING);
+        state.addState(RenderingServiceStates.INITIALIZING);
         
         Log.logMsg("[RenderingService] Started at: " + contextPath);
         
@@ -198,12 +199,12 @@ public class RenderingService extends FlowProcess {
         UIRenderer<?> defaultRenderer = renderers.get(systemDefaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
             Log.logMsg("[RenderingService] Default renderer active");
-            state.addState(RendererStates.UI_RENDERER_ACTIVE);
+            state.addState(RenderingServiceStates.UI_RENDERER_ACTIVE);
         }
         
-        state.removeState(RendererStates.INITIALIZING);
-        state.addState(RendererStates.READY);
-        state.addState(RendererStates.ACCEPTING_REQUESTS);
+        state.removeState(RenderingServiceStates.INITIALIZING);
+        state.addState(RenderingServiceStates.READY);
+        state.addState(RenderingServiceStates.ACCEPTING_REQUESTS);
         
         Log.logMsg("[RenderingService] Initialization complete, service running");
         return CompletableFuture.completedFuture(null);
@@ -222,7 +223,7 @@ public class RenderingService extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        if (!RendererStates.canAcceptRequests(state)) {
+        if (!RenderingServiceStates.canAcceptRequests(state)) {
             reply(packet, ProtocolObjects.getErrorObject("Service not accepting requests"));
             return CompletableFuture.completedFuture(null);
         }
@@ -297,17 +298,20 @@ public class RenderingService extends FlowProcess {
 
     private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) {
 
-
-        NoteBytes[] containers = getAllContainers().stream()
-            .map(container -> container.getInfo().toNoteBytes())
+        NoteBytes[] containers = getAllContainers()
+            .stream()
+            .map(Container::getInfo)
+            .map(info -> (NoteBytes) info.toNoteBytes())
             .toArray(NoteBytes[]::new);
-
+                    
         reply(packet, new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-            new NoteBytesPair("containers", new NoteBytesArrayReadOnly(containers))
+            new NoteBytesPair(Keys.ITEM_COUNT, containers.length),
+            new NoteBytesPair(Keys.ITEMS, new NoteBytesArrayReadOnly(containers))
         }));
-
+        
         return CompletableFuture.completedFuture(null);
+
     }
     
     /**
@@ -463,18 +467,18 @@ public class RenderingService extends FlowProcess {
     /**
      * Get all containers across all renderers
      */
-    public List<Container> getAllContainers() {
+    public List<Container<?>> getAllContainers() {
         return renderers.values().stream()
-            .<Container>flatMap(renderer -> renderer.getAllContainers().stream())
+            .<Container<?>>flatMap(renderer -> renderer.getAllContainers().stream())
             .toList();
     }
 
     /**
      * Get visible containers
      */
-    public List<Container> getVisibleContainers() {
+    public List<Container<?>> getVisibleContainers() {
         return renderers.values().stream()
-            .<Container>flatMap(renderer -> renderer.getAllContainers().stream())
+            .<Container<?>>flatMap(renderer -> renderer.getAllContainers().stream())
             .filter(Container::isVisible)
             .toList();
     }
@@ -482,18 +486,18 @@ public class RenderingService extends FlowProcess {
     /**
      * Get containers by owner across all renderers
      */
-    public List<Container> getContainersByOwner(ContextPath ownerPath) {
+    public List<Container<?>> getContainersByOwner(ContextPath ownerPath) {
         return renderers.values().stream()
-            .<Container>flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
+            .<Container<?>>flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
             .toList();
     }
     
     /**
      * Find container by ID across all renderers
      */
-    public Container findContainer(ContainerId containerId) {
+    public Container<?> findContainer(ContainerId containerId) {
         for (UIRenderer<?> renderer : renderers.values()) {
-            Container container = renderer.getContainer(containerId);
+            Container<?> container = renderer.getContainer(containerId);
             if (container != null) {
                 return container;
             }
@@ -504,8 +508,8 @@ public class RenderingService extends FlowProcess {
     // ===== SHUTDOWN =====
     
     public CompletableFuture<Void> shutdown() {
-        state.addState(RendererStates.SHUTTING_DOWN);
-        state.removeState(RendererStates.ACCEPTING_REQUESTS);
+        state.addState(RenderingServiceStates.SHUTTING_DOWN);
+        state.removeState(RenderingServiceStates.ACCEPTING_REQUESTS);
         
         Log.logMsg("[RenderingService] Shutting down all renderers...");
         
@@ -519,16 +523,16 @@ public class RenderingService extends FlowProcess {
                 renderers.clear();
                 typeDefaultRenderers.clear();
                 
-                state.removeState(RendererStates.SHUTTING_DOWN);
-                state.removeState(RendererStates.READY);
-                state.addState(RendererStates.STOPPED);
+                state.removeState(RenderingServiceStates.SHUTTING_DOWN);
+                state.removeState(RenderingServiceStates.READY);
+                state.addState(RenderingServiceStates.STOPPED);
                 
                 Log.logMsg("[RenderingService] Shutdown complete");
             });
     }
     
     public boolean isOperational() {
-        return RendererStates.isOperational(state);
+        return RenderingServiceStates.isOperational(state);
     }
     
     public BitFlagStateMachine getState() {

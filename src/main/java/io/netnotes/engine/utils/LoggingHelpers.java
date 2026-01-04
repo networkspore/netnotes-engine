@@ -134,7 +134,7 @@ public class LoggingHelpers {
             }
    
             return enqueue(LogLevel.ALL.getValue(), () -> {
-                writeLogNoteBytes(logFile, map);
+                writeLogNoteBytes(logFile, scope, map);
             });
         }
 
@@ -281,13 +281,13 @@ public class LoggingHelpers {
         }
     }
 
-    public static int writeLogNoteBytes(File logFile, NoteBytesMap message){
+    public static int writeLogNoteBytes(File logFile, String scope, NoteBytesMap message){
         if(message != null){
             NoteBytesObject nbo = message.toNoteBytes();
             JsonElement json = NoteBytes.toJson(nbo);
             try {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                String line = gson.toJson(json)+"\n";
+                String line = scope + ": " + gson.toJson(json)+"\n";
                 Files.writeString(logFile.toPath(), line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                 return line.length();
             } catch (Exception e) {

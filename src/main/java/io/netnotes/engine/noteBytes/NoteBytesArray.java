@@ -10,7 +10,6 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.processing.ByteDecoding;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public class NoteBytesArray extends NoteBytes{
 
@@ -59,7 +58,6 @@ public class NoteBytesArray extends NoteBytes{
         for (NoteBytes nb : noteBytesArray) {
             offset = NoteBytes.writeNote(nb, bytes, offset);
         }
-        Log.logMsg("NoteBytesArray: " + Arrays.toString(bytes));
 
         return bytes;
     }

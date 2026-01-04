@@ -54,9 +54,9 @@ class LoginScreen extends TerminalScreen {
         int col = terminal.getCols() / 2 - 15;
         
         return RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(row, col, "Verifying password...", 
-                    TextStyle.INFO, gen);
+                    TextStyle.INFO);
             })
             .build();
     }
@@ -71,10 +71,10 @@ class LoginScreen extends TerminalScreen {
         String message = errorMessage != null ? errorMessage : "Authentication failed";
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(errorRow, 10, message, TextStyle.ERROR, gen);
+            .add((term) -> {
+                term.printAt(errorRow, 10, message, TextStyle.ERROR);
                 term.printAt(promptRow, 10, "Press any key to try again...", 
-                    TextStyle.NORMAL, gen);
+                    TextStyle.NORMAL);
             })
             .build();
     }

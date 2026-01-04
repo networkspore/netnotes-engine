@@ -135,7 +135,6 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly UUID_128      = new NoteBytesReadOnly("uuid_128");
         // Identity & Routing
         public static final NoteBytesReadOnly TYPE          = new NoteBytesReadOnly("type");
-        public static final NoteBytesReadOnly SEQUENCE      = new NoteBytesReadOnly("seq_id");
         public static final NoteBytesReadOnly SOURCE_ID     = new NoteBytesReadOnly("source_id");
         public static final NoteBytesReadOnly DEVICE_ID     = new NoteBytesReadOnly("device_id");
         public static final NoteBytesReadOnly SESSION_ID    = new NoteBytesReadOnly("session_id");
@@ -143,9 +142,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly PROCESS_ID    = new NoteBytesReadOnly("process_id");
         public static final NoteBytesReadOnly NODE_ID       = new NoteBytesReadOnly("node_id");
         public static final NoteBytesReadOnly INSTANCE_ID   = new NoteBytesReadOnly("instance_id");
-        public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
-        
         public static final NoteBytesReadOnly PID           = new NoteBytesReadOnly("pid");
+        
         public static final NoteBytesReadOnly RECEIVER_ID   = new NoteBytesReadOnly("receiver_id");
         public static final NoteBytesReadOnly SENDER_ID     = new NoteBytesReadOnly("sender_id");
         public static final NoteBytesReadOnly CODE_KEY      = new NoteBytesReadOnly("code");

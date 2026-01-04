@@ -62,7 +62,7 @@ class RunningInstancesScreen extends TerminalScreen {
         RenderState.Builder builder = RenderState.builder();
         
         // Clear screen
-        builder.add((term, gen) -> term.clear(gen));
+        builder.add((term) -> term.clear());
         
         // Build base content based on current view
         switch (currentView) {
@@ -128,13 +128,13 @@ class RunningInstancesScreen extends TerminalScreen {
     
     private void buildInstanceListState(RenderState.Builder builder) {
         // Title
-        builder.add((term, gen) -> 
-            term.printAt(1, (term.getCols() - 23) / 2, "Running Node Instances", TextStyle.BOLD, gen));
+        builder.add((term) -> 
+            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 23) / 2, "Running Node Instances", TextStyle.BOLD));
         
         if (cachedInstances == null || cachedInstances.isEmpty()) {
-            builder.add((term, gen) -> {
-                term.printAt(5, 10, "No instances currently running", TextStyle.NORMAL, gen);
-                term.printAt(7, 10, "Press ESC to go back", TextStyle.INFO, gen);
+            builder.add((term) -> {
+                term.printAt(5, 10, "No instances currently running", TextStyle.NORMAL);
+                term.printAt(7, 10, "Press ESC to go back", TextStyle.INFO);
             });
         } else {
             buildInstanceTableState(builder, cachedInstances, 5);
@@ -143,12 +143,12 @@ class RunningInstancesScreen extends TerminalScreen {
     
     private void buildInstanceTableState(RenderState.Builder builder, List<NodeInstance> instances, int startRow) {
         // Header
-        builder.add((term, gen) -> {
-            term.printAt(startRow, 10, "Package", TextStyle.BOLD, gen);
-            term.printAt(startRow, 35, "Process ID", TextStyle.BOLD, gen);
-            term.printAt(startRow, 55, "State", TextStyle.BOLD, gen);
-            term.printAt(startRow, 70, "Uptime", TextStyle.BOLD, gen);
-            term.printAt(startRow + 1, 10, "─".repeat(70), TextStyle.NORMAL, gen);
+        builder.add((term) -> {
+            term.printAt(startRow, 10, "Package", TextStyle.BOLD);
+            term.printAt(startRow, 35, "Process ID", TextStyle.BOLD);
+            term.printAt(startRow, 55, "State", TextStyle.BOLD);
+            term.printAt(startRow, 70, "Uptime", TextStyle.BOLD);
+            term.printAt(startRow + 1, 10, "─".repeat(70), TextStyle.NORMAL);
         });
         
         int row = startRow + 2;
@@ -164,12 +164,12 @@ class RunningInstancesScreen extends TerminalScreen {
             final int currentRow = row;
             final int currentIndex = index;
             
-            builder.add((term, gen) -> {
-                term.printAt(currentRow, 8, currentIndex + ".", TextStyle.NORMAL, gen);
-                term.printAt(currentRow, 10, truncate(packageName, 23), TextStyle.NORMAL, gen);
-                term.printAt(currentRow, 35, truncate(processId, 18), TextStyle.NORMAL, gen);
-                term.printAt(currentRow, 55, state, TextStyle.NORMAL, gen);
-                term.printAt(currentRow, 70, uptime, TextStyle.NORMAL, gen);
+            builder.add((term) -> {
+                term.printAt(currentRow, 8, currentIndex + ".", TextStyle.NORMAL);
+                term.printAt(currentRow, 10, truncate(packageName, 23), TextStyle.NORMAL);
+                term.printAt(currentRow, 35, truncate(processId, 18), TextStyle.NORMAL);
+                term.printAt(currentRow, 55, state, TextStyle.NORMAL);
+                term.printAt(currentRow, 70, uptime, TextStyle.NORMAL);
             });
             
             row++;
@@ -223,19 +223,19 @@ class RunningInstancesScreen extends TerminalScreen {
         
         InstalledPackage pkg = selectedInstance.getPackage();
         
-        builder.add((term, gen) -> {
-            term.printAt(1, (term.getCols() - 16) / 2, "Instance Details", TextStyle.BOLD, gen);
-            term.printAt(5, 10, "Package: " + pkg.getName(), TextStyle.NORMAL, gen);
-            term.printAt(6, 10, "Version: " + pkg.getVersion(), TextStyle.NORMAL, gen);
-            term.printAt(7, 10, "Description: " + pkg.getDescription(), TextStyle.NORMAL, gen);
-            term.printAt(9, 10, "Instance ID: " + selectedInstance.getInstanceId(), TextStyle.NORMAL, gen);
-            term.printAt(10, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL, gen);
-            term.printAt(11, 10, "State: " + selectedInstance.getState(), TextStyle.NORMAL, gen);
-            term.printAt(12, 10, "Uptime: " + formatUptime(selectedInstance.getUptime()), TextStyle.NORMAL, gen);
-            term.printAt(13, 10, "Crash Count: " + selectedInstance.getCrashCount(), TextStyle.NORMAL, gen);
-            term.printAt(15, 10, "Data Path: " + selectedInstance.getDataRootPath(), TextStyle.NORMAL, gen);
-            term.printAt(16, 10, "Flow Path: " + selectedInstance.getFlowBasePath(), TextStyle.NORMAL, gen);
-            term.printAt(18, 10, "Choose an action:", TextStyle.NORMAL, gen);
+        builder.add((term) -> {
+            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 16) / 2, "Instance Details", TextStyle.BOLD);
+            term.printAt(5, 10, "Package: " + pkg.getName(), TextStyle.NORMAL);
+            term.printAt(6, 10, "Version: " + pkg.getVersion(), TextStyle.NORMAL);
+            term.printAt(7, 10, "Description: " + pkg.getDescription(), TextStyle.NORMAL);
+            term.printAt(9, 10, "Instance ID: " + selectedInstance.getInstanceId(), TextStyle.NORMAL);
+            term.printAt(10, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL);
+            term.printAt(11, 10, "State: " + selectedInstance.getState(), TextStyle.NORMAL);
+            term.printAt(12, 10, "Uptime: " + formatUptime(selectedInstance.getUptime()), TextStyle.NORMAL);
+            term.printAt(13, 10, "Crash Count: " + selectedInstance.getCrashCount(), TextStyle.NORMAL);
+            term.printAt(15, 10, "Data Path: " + selectedInstance.getDataRootPath(), TextStyle.NORMAL);
+            term.printAt(16, 10, "Flow Path: " + selectedInstance.getFlowBasePath(), TextStyle.NORMAL);
+            term.printAt(18, 10, "Choose an action:", TextStyle.NORMAL);
         });
     }
     
@@ -285,17 +285,17 @@ class RunningInstancesScreen extends TerminalScreen {
             return;
         }
         
-        builder.add((term, gen) -> {
-            term.printAt(1, (term.getCols() - 20) / 2, "Confirm Stop Instance", TextStyle.BOLD, gen);
-            term.printAt(5, 10, "⚠ WARNING ⚠", TextStyle.WARNING, gen);
-            term.printAt(7, 10, "Stop instance: " + selectedInstance.getPackage().getName(), TextStyle.NORMAL, gen);
-            term.printAt(8, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL, gen);
-            term.printAt(10, 10, "This will:", TextStyle.NORMAL, gen);
-            term.printAt(11, 12, "• Gracefully shutdown the node", TextStyle.NORMAL, gen);
-            term.printAt(12, 12, "• Close all connections", TextStyle.NORMAL, gen);
-            term.printAt(13, 12, "• Unload from runtime", TextStyle.NORMAL, gen);
-            term.printAt(15, 10, "Type 'STOP' to confirm:", TextStyle.NORMAL, gen);
-            term.moveCursor(15, 30, gen);
+        builder.add((term) -> {
+            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 20) / 2, "Confirm Stop Instance", TextStyle.BOLD);
+            term.printAt(5, 10, "⚠ WARNING ⚠", TextStyle.WARNING);
+            term.printAt(7, 10, "Stop instance: " + selectedInstance.getPackage().getName(), TextStyle.NORMAL);
+            term.printAt(8, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL);
+            term.printAt(10, 10, "This will:", TextStyle.NORMAL);
+            term.printAt(11, 12, "• Gracefully shutdown the node", TextStyle.NORMAL);
+            term.printAt(12, 12, "• Close all connections", TextStyle.NORMAL);
+            term.printAt(13, 12, "• Unload from runtime", TextStyle.NORMAL);
+            term.printAt(15, 10, "Type 'STOP' to confirm:", TextStyle.NORMAL);
+            term.moveCursor(15, 30);
         });
     }
 

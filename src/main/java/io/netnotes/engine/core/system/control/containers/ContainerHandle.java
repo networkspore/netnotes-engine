@@ -21,7 +21,7 @@ import io.netnotes.engine.io.daemon.IODaemonProtocol.USBDeviceDescriptor;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry.RoutedEventHandler;
-import io.netnotes.engine.io.input.events.RoutedEventFactory;
+import io.netnotes.engine.io.input.events.EventsFactory;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.containers.ContainerMoveEvent;
 import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
@@ -249,7 +249,7 @@ public class ContainerHandle extends FlowProcess {
         // Build CREATE_CONTAINER command with all our parameters
         NoteBytesMap createCmd = new NoteBytesMap();
         createCmd.put(Keys.CMD, ContainerCommands.CREATE_CONTAINER);
-        createCmd.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        createCmd.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         createCmd.put(Keys.TITLE, new NoteBytes(title));
         createCmd.put(Keys.TYPE, new NoteBytes(containerType.name()));
         createCmd.put(Keys.PATH, getParentPath().toNoteBytes());
@@ -450,7 +450,7 @@ public class ContainerHandle extends FlowProcess {
 
     protected void processRoutedEvent(NoteBytes eventBytes) {
         try{
-            RoutedEvent event = RoutedEventFactory.from(containerPath, eventBytes);
+            RoutedEvent event = EventsFactory.from(containerPath, eventBytes);
             eventHandlerRegistry.dispatch(event);
         }catch(Exception ex){
             Log.logError("[ContainerHandle] Failed to deserialize routed event: " + ex.getMessage());
@@ -1082,7 +1082,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Handle container resized event
      */
-    protected void setDimensions(int width, int hight) {
+    protected void setDimensions(int width, int height) {
         this.height = height;
         this.width = width;
     }

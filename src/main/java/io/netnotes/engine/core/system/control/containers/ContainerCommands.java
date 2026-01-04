@@ -19,6 +19,8 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
  * EVENT commands FROM container utlize EventBytes, not ContainerCommands
  */
 public class ContainerCommands {
+
+    public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
     public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
     public static final NoteBytesReadOnly X = new NoteBytesReadOnly("x");
     public static final NoteBytesReadOnly Y = new NoteBytesReadOnly("y");
@@ -30,6 +32,7 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly ICON = new NoteBytesReadOnly("icon");
     public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
     public static final NoteBytesReadOnly AUTO_FOCUS = new NoteBytesReadOnly( "auto_focus");
+    public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
     
     // ===== LIFECYCLE COMMANDS =====
     public static final NoteBytesReadOnly CREATE_CONTAINER = 
@@ -89,7 +92,7 @@ public class ContainerCommands {
 
         NoteBytesObject msg = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.CMD, CREATE_CONTAINER),
-            new NoteBytesPair(Keys.CONTAINER_ID, containerId.toNoteBytes()),
+            new NoteBytesPair(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes()),
             new NoteBytesPair(Keys.TITLE, new NoteBytes(title)),
             new NoteBytesPair(Keys.TYPE, new NoteBytes(type.name())),
             new NoteBytesPair(Keys.PATH, ownerPath.getSegments()),
@@ -107,7 +110,7 @@ public class ContainerCommands {
     public static NoteBytesMap destroyContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, DESTROY_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -121,7 +124,7 @@ public class ContainerCommands {
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, UPDATE_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(Keys.UPDATES, updates);
          msg.put(RENDERER_ID, rendererId);
         return msg;
@@ -133,7 +136,7 @@ public class ContainerCommands {
     public static NoteBytesMap showContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, SHOW_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -144,7 +147,7 @@ public class ContainerCommands {
     public static NoteBytesMap hideContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, HIDE_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -155,7 +158,7 @@ public class ContainerCommands {
     public static NoteBytesMap maximizeContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, MAXIMIZE_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -166,7 +169,7 @@ public class ContainerCommands {
     public static NoteBytesMap restoreContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, RESTORE_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -177,7 +180,7 @@ public class ContainerCommands {
     public static NoteBytesMap focusContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, FOCUS_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -188,7 +191,7 @@ public class ContainerCommands {
     public static NoteBytesMap queryContainer(ContainerId containerId, NoteBytes rendererId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.CMD, QUERY_CONTAINER);
-        msg.put(Keys.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
@@ -210,7 +213,7 @@ public class ContainerCommands {
     public static NoteBytesMap containerClosed(NoteBytes containerId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_CLOSED);
-        msg.put(Keys.CONTAINER_ID, containerId);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId);
         return msg;
     }
     
@@ -220,14 +223,14 @@ public class ContainerCommands {
     public static NoteBytesMap containerFocused(NoteBytes containerId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_FOCUS_GAINED);
-        msg.put(Keys.CONTAINER_ID, containerId);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId);
         return msg;
     }
 
      public static NoteBytesMap containerFocusLost(NoteBytes containerId) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_FOCUS_LOST);
-        msg.put(Keys.CONTAINER_ID, containerId);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId);
         return msg;
     }
     
@@ -248,11 +251,12 @@ public class ContainerCommands {
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZED);
-        msg.put(Keys.CONTAINER_ID, containerId);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId);
         msg.put(Keys.PAYLOAD, new NoteBytesArrayReadOnly(new NoteBytes[]{
             new NoteBytes(width),
             new NoteBytes(height)
         }));
         return msg;
     }
+    
 }

@@ -1,225 +1,109 @@
 package io.netnotes.engine.core.system.control.terminal;
 
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-
-import io.netnotes.engine.utils.LoggingHelpers.Log;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * RenderManager - Single owner of rendering (pull-based)
+ * RenderManager - Client-side pull-based rendering coordinator
  * 
- * KEY PRINCIPLE: Nothing renders itself. Only RenderManager renders.
+ * This manages rendering on the CLIENT side (TerminalContainerHandle)
+ * NOT to be confused with ConsoleRenderManager (server-side)
  * 
- * Components (screens, menus, etc) are PASSIVE:
- * - They expose state (what to draw)
- * - They DO NOT draw themselves
+ * RESPONSIBILITIES:
+ * 1. Track active Renderable
+ * 2. Track generation for stale render detection
+ * 3. Provide invalidate() to mark dirty
+ * 4. Render when needed (converts Renderable → RenderState → BatchBuilder → execute)
  * 
- * RenderManager is ACTIVE:
- * - It polls for changes
- * - It decides when to render
- * - It calls getRenderState() on the active component
- * - It batches all rendering within a single generation
- * 
- * Generation Management:
- * - Generation increments ONLY when setActive() is called
- * - All rendering within a batch uses the SAME generation
- * - This prevents mid-batch generation conflicts
+ * PATTERN:
+ * - User code calls setActive(renderable)
+ * - User code or renderable calls invalidate()
+ * - RenderManager calls renderable.getRenderState()
+ * - Converts RenderState to BatchBuilder
+ * - Executes batch
  */
 public class RenderManager {
     
     private final TerminalContainerHandle terminal;
+    private final AtomicReference<Renderable> activeRenderable = new AtomicReference<>(null);
     private final AtomicLong generation = new AtomicLong(0);
+    private final AtomicBoolean dirty = new AtomicBoolean(false);
+    private final AtomicBoolean rendering = new AtomicBoolean(false);
     
-    // The ONE active renderable
-    private Renderable activeRenderable = null;
-    private volatile boolean dirty = true;
-    
-    // Render loop control
+    // Manual rendering (no auto-loop by default)
+    private volatile boolean autoRender = false;
     private volatile boolean running = false;
     private CompletableFuture<Void> renderLoop;
     
-    // Frame rate control
-    private static final long FRAME_TIME_MS = 16; // ~60fps
-    
-    // Rendering state
-    private final AtomicBoolean isRendering = new AtomicBoolean(false);
+    private static final long FRAME_TIME_MS = 16; // ~60fps if auto-render enabled
     
     public RenderManager(TerminalContainerHandle terminal) {
         this.terminal = terminal;
     }
     
+    // ===== ACTIVE RENDERABLE MANAGEMENT =====
+    
     /**
-     * Start the render loop (pull-based)
+     * Set active renderable
+     * Increments generation and triggers render
      */
-    public void start() {
-        if (running) return;
+    public void setActive(Renderable renderable) {
+        Renderable previous = activeRenderable.getAndSet(renderable);
         
-        running = true;
-        renderLoop = CompletableFuture.runAsync(this::renderLoopImpl);
-        Log.logMsg("[RenderManager] Render loop started");
-    }
-    
-    /**
-     * Stop the render loop
-     */
-    public void stop() {
-        running = false;
-        if (renderLoop != null) {
-            renderLoop.cancel(false);
-        }
-        Log.logMsg("[RenderManager] Render loop stopped");
-    }
-    
-    /**
-     * The render loop - PULLS state and renders
-     */
-    private void renderLoopImpl() {
-        while (running) {
-            try {
-                // PULL: Check if anything needs rendering
-                if (dirty && activeRenderable != null && !isRendering.get()) {
-                    
-                    // Mark as rendering to prevent concurrent renders
-                    if (isRendering.compareAndSet(false, true)) {
-                        try {
-                            // Get current generation ONCE for entire batch
-                            long currentGen = generation.get();
-                            
-                            // PULL: Get current state and render it
-                            renderContent(activeRenderable, currentGen)
-                                .thenRun(() -> {
-                                    dirty = false;
-                                    isRendering.set(false);
-                                })
-                                .exceptionally(ex -> {
-                                    Log.logError("[RenderManager] Render failed: " + ex.getMessage());
-                                    isRendering.set(false);
-                                    return null;
-                                });
-                            
-                        } catch (Exception e) {
-                            Log.logError("[RenderManager] Render setup error: " + e.getMessage());
-                            isRendering.set(false);
-                        }
-                    }
-                }
-                
-                // Sleep briefly
-                Thread.sleep(FRAME_TIME_MS);
-                
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                Log.logError("[RenderManager] Render loop error: " + e.getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Render the given component (PULL its state and draw)
-     * 
-     * CRITICAL: This entire method operates under a SINGLE generation.
-     * Generation is captured at the start and used throughout the batch.
-     */
-    private CompletableFuture<Void> renderContent(Renderable renderable, long gen) {
-        try {
-            // PULL: Ask component for its current state
-            RenderState state = renderable.getRenderState();
+        if (previous != renderable) {
+            generation.incrementAndGet();
+            invalidate();
             
-            if (state == null || state.getElements().isEmpty()) {
-                return CompletableFuture.completedFuture(null);
-            }
-            
-            // Render the state within a batch, using the SAME generation throughout
-            return terminal.batchWithGeneration(gen, () -> {
-                drawState(state, gen);
-            });
-            
-        } catch (Exception e) {
-            Log.logError("[RenderManager] Render error: " + e.getMessage());
-            return CompletableFuture.failedFuture(e);
+            Log.logMsg("[RenderManager] Active renderable changed (gen=" + 
+                generation.get() + ")");
         }
     }
     
     /**
-     * Draw the render state
-     * 
-     * This is called within a batch, so all operations use the same generation.
+     * Get active renderable
      */
-    private void drawState(RenderState state, long gen) {
-        // Clear screen first
-        terminal.clear(gen);
-        
-        // Draw each element from state
-        for (RenderElement element : state.getElements()) {
-            try {
-                element.draw(terminal, gen);
-            } catch (Exception e) {
-                Log.logError("[RenderManager] Element draw error: " + e.getMessage());
-            }
-        }
+    public Renderable getActive() {
+        return activeRenderable.get();
     }
     
     /**
-     * Set the active renderable (changes screen)
-     * 
-     * This is the ONLY place where generation should increment.
-     * Incrementing here ensures:
-     * - Old renders from previous screen are invalidated
-     * - New screen gets a clean generation to render with
+     * Clear active renderable
      */
-    public long setActive(Renderable renderable) {
-        // Notify old renderable it's being deactivated
-        if (this.activeRenderable != null && this.activeRenderable != renderable) {
-            try {
-                this.activeRenderable.onInactive();
-            } catch (Exception e) {
-                Log.logError("[RenderManager] onInactive error: " + e.getMessage());
-            }
-        }
-        
-        this.activeRenderable = renderable;
-        
-        // Increment generation for new screen
-        long gen = generation.incrementAndGet();
-        
-        // Also increment terminal's generation to stay in sync
-        terminal.nextRenderGeneration();
-        
-        dirty = true;
-        
-        // Notify new renderable it's being activated
-        if (renderable != null) {
-            try {
-                renderable.onActive();
-            } catch (Exception e) {
-                Log.logError("[RenderManager] onActive error: " + e.getMessage());
-            }
-        }
-        
-        Log.logMsg("[RenderManager] Active renderable changed, gen=" + gen);
-        return gen;
+    public void clearActive() {
+        activeRenderable.set(null);
+        dirty.set(false);
     }
     
+    // ===== INVALIDATION =====
+    
     /**
-     * Mark as dirty (needs redraw)
-     * Components call this, but DON'T render themselves
-     * 
-     * This does NOT increment generation - we reuse the current generation.
+     * Mark as needing re-render
+     * Doesn't increment generation - reuses current generation
      */
     public void invalidate() {
-        dirty = true;
+        dirty.set(true);
+        
+        if (autoRender) {
+            // Auto-render will pick it up
+        } else {
+            // Manual mode - caller must call render()
+        }
     }
     
     /**
-     * Handle resize - just invalidate
+     * Check if needs render
      */
-    public void onResize(int width, int height) {
-        Log.logMsg("[RenderManager] Resize: " + width + "x" + height);
-        invalidate();
+    public boolean isDirty() {
+        return dirty.get();
     }
+    
+    // ===== GENERATION MANAGEMENT =====
     
     /**
      * Get current generation
@@ -229,65 +113,195 @@ public class RenderManager {
     }
     
     /**
-     * Get active renderable
+     * Check if generation is current
      */
-    public Renderable getActiveRenderable() {
-        return activeRenderable;
+    public boolean isGenerationCurrent(long gen) {
+        return generation.get() == gen;
     }
     
     /**
-     * Check if dirty (needs render)
+     * Increment generation (call on layout changes like resize)
      */
-    public boolean isDirty() {
-        return dirty;
+    public void incrementGeneration() {
+        generation.incrementAndGet();
+        invalidate();
+    }
+    
+    // ===== RENDERING =====
+    
+    /**
+     * Render current active renderable
+     * 
+     * Flow:
+     * 1. Get active renderable
+     * 2. Call renderable.getRenderState()
+     * 3. Convert RenderState to BatchBuilder
+     * 4. Execute batch with current generation
+     * 
+     * @return CompletableFuture that completes when render done
+     */
+    public CompletableFuture<Void> render() {
+        Renderable renderable = activeRenderable.get();
+        
+        if (renderable == null) {
+            dirty.set(false);
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        if (!dirty.compareAndSet(true, false)) {
+            // Not dirty, skip render
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        if (!rendering.compareAndSet(false, true)) {
+            // Already rendering
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        try {
+            long currentGen = generation.get();
+            
+            // Get render state from renderable
+            RenderState state = renderable.getRenderState();
+            
+            // Convert to batch
+            BatchBuilder batch = state.toBatch(terminal, currentGen);
+            
+            // Execute
+            return terminal.executeBatch(batch)
+                .whenComplete((v, ex) -> {
+                    rendering.set(false);
+                    
+                    if (ex != null) {
+                        Log.logError("[RenderManager] Render error: " + ex.getMessage());
+                    }
+                });
+            
+        } catch (Exception e) {
+            rendering.set(false);
+            Log.logError("[RenderManager] Render error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
     }
     
     /**
-     * Check if currently rendering
+     * Render only if dirty
      */
-    public boolean isRendering() {
-        return isRendering.get();
+    public CompletableFuture<Void> renderIfNeeded() {
+        if (isDirty()) {
+            return render();
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    // ===== AUTO-RENDER MODE =====
+    
+    /**
+     * Start auto-render loop (optional - for animations)
+     */
+    public void start() {
+        if (running) return;
+        
+        running = true;
+        autoRender = true;
+        
+        renderLoop = CompletableFuture.runAsync(() -> {
+            while (running) {
+                try {
+                    renderIfNeeded().join();
+                    Thread.sleep(FRAME_TIME_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    Log.logError("[RenderManager] Loop error: " + e.getMessage());
+                }
+            }
+        });
+        
+        Log.logMsg("[RenderManager] Auto-render started");
+    }
+    
+    /**
+     * Stop auto-render loop
+     */
+    public void stop() {
+        running = false;
+        autoRender = false;
+        
+        if (renderLoop != null) {
+            renderLoop.cancel(false);
+            renderLoop = null;
+        }
+        
+        Log.logMsg("[RenderManager] Auto-render stopped");
     }
     
     // ===== INTERFACES =====
     
     /**
-     * Interface for renderable components
-     * Components are PASSIVE - they expose state, not behavior
+     * Renderable - something that can be rendered
      */
+    @FunctionalInterface
     public interface Renderable {
         /**
-         * Get current render state (PULL)
-         * This should be fast - just return current state
-         * 
-         * IMPORTANT: This may be called from render thread, so must be thread-safe
+         * Get current render state
+         * Should be fast and thread-safe
          */
         RenderState getRenderState();
-        
-        /**
-         * Called when becoming inactive (for cleanup)
-         */
-        default void onInactive() {}
-        
-        /**
-         * Called when becoming active (for setup)
-         */
-        default void onActive() {}
     }
     
     /**
-     * Render state - describes WHAT to draw
-     * Immutable snapshot of visual state
+     * RenderElement - adds commands to a batch
+     */
+    @FunctionalInterface
+    public interface RenderElement {
+        /**
+         * Add rendering commands to batch
+         * 
+         * @param batch The batch to add commands to
+         */
+        void addToBatch(BatchBuilder batch);
+    }
+    
+    /**
+     * RenderState - collection of render elements
      */
     public static class RenderState {
-        private final java.util.List<RenderElement> elements;
+        private final List<RenderElement> elements;
         
-        public RenderState(java.util.List<RenderElement> elements) {
-            this.elements = elements;
+        private RenderState(List<RenderElement> elements) {
+            this.elements = List.copyOf(elements);
         }
         
-        public java.util.List<RenderElement> getElements() {
+        /**
+         * Convert to batch with generation check
+         */
+        public BatchBuilder toBatch(TerminalContainerHandle terminal, long generation) {
+            BatchBuilder batch = terminal.batch(generation);
+            
+            for (RenderElement element : elements) {
+                element.addToBatch(batch);
+            }
+            
+            return batch;
+        }
+        
+        /**
+         * Get number of elements
+         */
+        public int getElementCount() {
+            return elements.size();
+        }
+        
+        public List<RenderElement> getElements(){
             return elements;
+        }
+        /**
+         * Check if empty
+         */
+        public boolean isEmpty() {
+            return elements.isEmpty();
         }
         
         public static Builder builder() {
@@ -295,37 +309,45 @@ public class RenderManager {
         }
         
         public static class Builder {
-            private final java.util.List<RenderElement> elements = new java.util.ArrayList<>();
+            private final List<RenderElement> elements = new ArrayList<>();
             
+            /**
+             * Add single element
+             */
             public Builder add(RenderElement element) {
                 elements.add(element);
                 return this;
             }
             
-            public Builder addAll(java.util.List<RenderElement> elements) {
+            /**
+             * Add multiple elements
+             */
+            public Builder addAll(List<RenderElement> elements) {
                 this.elements.addAll(elements);
                 return this;
             }
             
+            /**
+             * Add multiple elements (varargs)
+             */
+            public Builder addAll(RenderElement... elements) {
+                this.elements.addAll(List.of(elements));
+                return this;
+            }
+            
+            /**
+             * Conditionally add element
+             */
+            public Builder addIf(boolean condition, RenderElement element) {
+                if (condition) {
+                    elements.add(element);
+                }
+                return this;
+            }
+            
             public RenderState build() {
-                return new RenderState(new java.util.ArrayList<>(elements));
+                return new RenderState(elements);
             }
         }
-    }
-    
-    /**
-     * Render element - a drawable thing
-     * 
-     * Each element knows how to draw itself on the terminal.
-     * Elements should be lightweight and fast to create.
-     */
-    public interface RenderElement {
-        /**
-         * Draw this element to the terminal
-         * 
-         * @param terminal The terminal to draw on
-         * @param generation The render generation (for batching)
-         */
-        void draw(TerminalContainerHandle terminal, long generation);
     }
 }

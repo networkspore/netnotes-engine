@@ -29,12 +29,12 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
 import io.netnotes.engine.io.input.InputDevice;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralInputEventFactory;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralEventsFactory;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.input.events.RoutedEventFactory;
+import io.netnotes.engine.io.input.events.EventsFactory;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 
@@ -215,10 +215,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     {
         if(m_onCreateEvent == null){
             if(event instanceof NoteBytesEphemeral ephemeralEvent){
-                EphemeralRoutedEvent ephemeralRoutedEvent = EphemeralInputEventFactory.from(getContextPath(), ephemeralEvent);
+                EphemeralRoutedEvent ephemeralRoutedEvent = EphemeralEventsFactory.from(getContextPath(), ephemeralEvent);
                 this.eventHandlerRegistry.dispatch(ephemeralRoutedEvent);
             }else{
-                RoutedEvent routedEvent = RoutedEventFactory.from(getContextPath(), event);
+                RoutedEvent routedEvent = EventsFactory.from(getContextPath(), event);
                 this.eventHandlerRegistry.dispatch(routedEvent);
             }
         }else{

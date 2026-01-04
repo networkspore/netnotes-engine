@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
 import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
 import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
@@ -104,12 +105,13 @@ public class TerminalTextBox implements Renderable {
             .build();
     }
     
+    
     /**
      * Convert this TextBox to a RenderElement
-     * Allows using TextBox as part of another component's RenderState
+     * Returns a function that adds commands to a BatchBuilder
      */
     public RenderElement asRenderElement() {
-        // Capture current state for rendering
+        // Capture current state
         final int currentRow = this.row;
         final int currentCol = this.col;
         final int currentWidth = this.width;
@@ -127,9 +129,9 @@ public class TerminalTextBox implements Renderable {
         final TextOverflow currentTextOverflow = this.textOverflow;
         final int currentHorizontalScrollOffset = this.horizontalScrollOffset;
         
-        return (terminal, gen) -> {
-            renderWithGeneration(
-                terminal, gen,
+        return (batch) -> {
+            addRenderCommandsToBatch(
+                batch,
                 currentRow, currentCol, currentWidth, currentHeight,
                 currentBoxStyle, currentTextStyle,
                 currentTitle, currentTitlePlacement, currentTitleStyle,
@@ -139,12 +141,13 @@ public class TerminalTextBox implements Renderable {
             );
         };
     }
-    
+
     /**
-     * Internal rendering method used by both pull and push modes
+     * Add all rendering commands to batch
+     * This is the core rendering logic that works for both pull and push modes
      */
-    private void renderWithGeneration(
-            TerminalContainerHandle terminal, long gen,
+    private void addRenderCommandsToBatch(
+            BatchBuilder batch,
             int row, int col, int width, int height,
             BoxStyle boxStyle, TextStyle textStyle,
             String title, TitlePlacement titlePlacement, TextStyle titleStyle,
@@ -154,28 +157,32 @@ public class TerminalTextBox implements Renderable {
         
         // Draw box border
         if (titlePlacement == TitlePlacement.BORDER_TOP && title != null) {
-            terminal.drawBox(row, col, width, height, title, boxStyle, gen);
+            batch.drawBox(row, col, width, height, title, boxStyle);
         } else {
-            terminal.drawBox(row, col, width, height, "", boxStyle, gen);
+            batch.drawBox(row, col, width, height, "", boxStyle);
         }
         
         // Draw title (if not in border)
         if (title != null && !title.isEmpty() && titlePlacement != TitlePlacement.BORDER_TOP) {
-            renderTitleAtPosition(terminal, gen, row, col, width, height, 
+            addTitleToBatch(batch, row, col, width, height, 
                 title, titlePlacement, titleStyle, contentAlignment);
         }
         
         // Draw content
         if (!contentLines.isEmpty()) {
-            renderContentLines(terminal, gen, row, col, width, height,
+            addContentLinesToBatch(batch, row, col, width, height,
                 contentLines, contentAlignment, padding, textStyle,
                 scrollable, scrollOffset, textOverflow, horizontalScrollOffset,
                 titlePlacement, title);
         }
     }
-    
-    private void renderTitleAtPosition(
-            TerminalContainerHandle terminal, long gen,
+
+
+    /**
+     * Add title rendering to batch
+     */
+    private void addTitleToBatch(
+            BatchBuilder batch,
             int row, int col, int width, int height,
             String title, TitlePlacement placement, TextStyle style,
             ContentAlignment contentAlignment) {
@@ -184,36 +191,39 @@ public class TerminalTextBox implements Renderable {
             case INSIDE_TOP -> {
                 int titleRow = row + 1;
                 int titleCol = calculateAlignment(col, width, title.length(), contentAlignment);
-                terminal.printAt(titleRow, titleCol, title, style, gen);
+                batch.printAt(titleRow, titleCol, title, style);
             }
             case INSIDE_CENTER -> {
                 int titleRow = row + height / 2;
                 int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
-                terminal.printAt(titleRow, titleCol, title, style, gen);
+                batch.printAt(titleRow, titleCol, title, style);
             }
             case INSIDE_BOTTOM -> {
                 int titleRow = row + height - 2;
                 int titleCol = calculateAlignment(col, width, title.length(), contentAlignment);
-                terminal.printAt(titleRow, titleCol, title, style, gen);
+                batch.printAt(titleRow, titleCol, title, style);
             }
             case ABOVE_BOX -> {
                 int titleRow = row - 1;
                 int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
-                terminal.printAt(titleRow, titleCol, title, style, gen);
+                batch.printAt(titleRow, titleCol, title, style);
             }
             case BELOW_BOX -> {
                 int titleRow = row + height;
                 int titleCol = calculateAlignment(col, width, title.length(), ContentAlignment.CENTER);
-                terminal.printAt(titleRow, titleCol, title, style, gen);
+                batch.printAt(titleRow, titleCol, title, style);
             }
             case BORDER_TOP -> {
-                // Already handled in renderBox
+                // Already handled in drawBox
             }
         }
     }
-    
-    private void renderContentLines(
-            TerminalContainerHandle terminal, long gen,
+
+    /**
+     * Add content lines rendering to batch
+     */
+    private void addContentLinesToBatch(
+            BatchBuilder batch,
             int row, int col, int width, int height,
             List<String> contentLines, ContentAlignment alignment, int padding,
             TextStyle textStyle, boolean scrollable, int scrollOffset,
@@ -229,7 +239,7 @@ public class TerminalTextBox implements Renderable {
         int startLine = scrollable ? scrollOffset : 0;
         int endLine = Math.min(contentLines.size(), startLine + contentHeight);
         
-        // Render each visible line
+        // Add each visible line to batch
         for (int i = startLine; i < endLine; i++) {
             String line = contentLines.get(i);
             String displayLine = processLineOverflow(line, contentWidth, textOverflow, horizontalScrollOffset);
@@ -237,33 +247,36 @@ public class TerminalTextBox implements Renderable {
             int lineRow = contentStartRow + (i - startLine);
             int lineCol = calculateAlignment(col, width, displayLine.length(), alignment);
             
-            terminal.printAt(lineRow, lineCol, displayLine, textStyle, gen);
+            batch.printAt(lineRow, lineCol, displayLine, textStyle);
         }
         
-        // Render scroll indicators if scrollable
+        // Add scroll indicators if scrollable
         if (scrollable && contentLines.size() > contentHeight) {
             if (scrollOffset > 0) {
                 int indicatorCol = col + width - 3;
-                terminal.printAt(contentStartRow, indicatorCol, "↑", TextStyle.INFO, gen);
+                batch.printAt(contentStartRow, indicatorCol, "↑", TextStyle.INFO);
             }
             
             if (endLine < contentLines.size()) {
                 int indicatorCol = col + width - 3;
                 int indicatorRow = contentStartRow + contentHeight - 1;
-                terminal.printAt(indicatorRow, indicatorCol, "↓", TextStyle.INFO, gen);
+                batch.printAt(indicatorRow, indicatorCol, "↓", TextStyle.INFO);
             }
         }
         
-        // Render horizontal scroll indicators if needed
+        // Add horizontal scroll indicators if needed
         if (textOverflow == TextOverflow.SCROLL) {
-            renderHorizontalScrollIndicators(terminal, gen, row, col, width,
+            addHorizontalScrollIndicatorsToBatch(batch, row, col, width,
                 contentStartRow, contentHeight, contentWidth, 
                 contentLines, horizontalScrollOffset);
         }
     }
-    
-    private void renderHorizontalScrollIndicators(
-            TerminalContainerHandle terminal, long gen,
+
+    /**
+     * Add horizontal scroll indicators to batch
+     */
+    private void addHorizontalScrollIndicatorsToBatch(
+            BatchBuilder batch,
             int row, int col, int width,
             int contentStartRow, int contentHeight, int contentWidth,
             List<String> contentLines, int horizontalScrollOffset) {
@@ -280,7 +293,7 @@ public class TerminalTextBox implements Renderable {
         if (horizontalScrollOffset > 0) {
             int indicatorRow = contentStartRow + contentHeight / 2;
             int indicatorCol = col + 1;
-            terminal.printAt(indicatorRow, indicatorCol, "◄", TextStyle.INFO, gen);
+            batch.printAt(indicatorRow, indicatorCol, "◄", TextStyle.INFO);
         }
         
         // Show right indicator if more content to the right
@@ -290,9 +303,11 @@ public class TerminalTextBox implements Renderable {
         if (hasMoreRight) {
             int indicatorRow = contentStartRow + contentHeight / 2;
             int indicatorCol = col + width - 2;
-            terminal.printAt(indicatorRow, indicatorCol, "►", TextStyle.INFO, gen);
+            batch.printAt(indicatorRow, indicatorCol, "►", TextStyle.INFO);
         }
     }
+    
+
     
     /**
      * Process line based on overflow strategy
@@ -353,23 +368,25 @@ public class TerminalTextBox implements Renderable {
     // ===== LEGACY PUSH-BASED RENDERING =====
     
     /**
-     * Legacy render method for backward compatibility
-     * Uses push-based rendering with automatic generation
+     * Legacy render method - now uses BatchBuilder
      */
     public CompletableFuture<Void> render(TerminalContainerHandle terminal) {
-        long gen = terminal.getCurrentRenderGeneration();
+         // Create batch with all commands
+        BatchBuilder batch = terminal.batch();
         
-        return terminal.batchWithGeneration(gen, () -> {
-            renderWithGeneration(
-                terminal, gen,
-                this.row, this.col, this.width, this.height,
-                this.boxStyle, this.textStyle,
-                this.title, this.titlePlacement, this.titleStyle,
-                this.contentLines, this.contentAlignment, this.padding,
-                this.scrollable, this.scrollOffset,
-                this.textOverflow, this.horizontalScrollOffset
-            );
-        });
+        // Add all rendering commands to batch
+        addRenderCommandsToBatch(
+            batch,
+            this.row, this.col, this.width, this.height,
+            this.boxStyle, this.textStyle,
+            this.title, this.titlePlacement, this.titleStyle,
+            this.contentLines, this.contentAlignment, this.padding,
+            this.scrollable, this.scrollOffset,
+            this.textOverflow, this.horizontalScrollOffset
+        );
+        
+        // Execute batch
+        return terminal.executeBatch(batch);
     }
     
     // ===== SCROLLING METHODS =====
@@ -479,6 +496,8 @@ public class TerminalTextBox implements Renderable {
     public enum ContentAlignment {
         LEFT, CENTER, RIGHT
     }
+
+   
     
     // ===== BUILDER CLASS =====
     

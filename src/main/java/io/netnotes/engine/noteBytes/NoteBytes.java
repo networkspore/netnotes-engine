@@ -120,6 +120,19 @@ public class NoteBytes {
         set(ByteDecoding.stringToBytes(value, type), type);
     }
 
+    protected void setInternal(byte[] value, byte type) {
+        if(isRuined()){
+            throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");
+        }
+        m_value = value != null ? value : new byte[0];
+        m_type = type;
+        dataUpdated();
+    }
+
+    protected void setInternal(byte[] value) {
+        setInternal(value, getType());
+    }
+
 
     public byte getType(){
         return m_type;
@@ -177,14 +190,7 @@ public class NoteBytes {
         return new NoteBytes(dst, type);
     }
     
-    protected void setInternal(byte[] value){
-        if(isRuined()){
-            throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");
-        }
-        m_value = value != null ? value : new byte[0];
-        dataUpdated();
-    }
-
+ 
     protected byte[] getBytesInternal(){
         if(isRuined()){
             throw new IllegalStateException("NoteBytes data has been ruined and can no longer be accessed");

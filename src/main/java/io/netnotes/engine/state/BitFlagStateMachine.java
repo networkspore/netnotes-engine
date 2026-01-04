@@ -1,15 +1,22 @@
 package io.netnotes.engine.state;
 
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
 /**
  * Generic statechart system using BigInteger for unlimited orthogonal states.
@@ -25,8 +32,53 @@ import java.util.function.BiConsumer;
  */
 public class BitFlagStateMachine {
 
+    /**
+     * Immutable snapshot of state at a specific version.
+     * Use this for consistent reads across multiple queries.
+     */
+    public static class StateSnapshot {
+        public final BigInteger state;
+        public final long version;
+        public final long timestamp;
+
+        public StateSnapshot(BigInteger state, long version) {
+            this.state = state;
+            this.version = version;
+            this.timestamp = System.nanoTime();
+        }
+
+        public boolean hasState(BigInteger stateBit) {
+            return state.and(stateBit).equals(stateBit);
+        }
+
+        public boolean hasState(int bitPosition) {
+            return state.testBit(bitPosition);
+        }
+
+        public boolean hasAllStates(BigInteger... stateBits) {
+            for (BigInteger bit : stateBits) {
+                if (!hasState(bit)) return false;
+            }
+            return true;
+        }
+
+        public boolean hasAnyState(BigInteger... stateBits) {
+            for (BigInteger bit : stateBits) {
+                if (hasState(bit)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("StateSnapshot[version=%d, state=%s]", 
+                version, state.toString(16));
+        }
+    }
+
+    private final AtomicLong m_version = new AtomicLong(0);
     private final String m_id;
-    private BigInteger m_state;
+    private final AtomicReference<BigInteger> m_state = new AtomicReference<>();
     private final Map<BigInteger, List<StateTransition>> m_transitions;
     private final Map<BigInteger, List<BiConsumer<BigInteger, BigInteger>>> m_stateListeners;
     private final List<BiConsumer<BigInteger, BigInteger>> m_globalListeners;
@@ -39,7 +91,7 @@ public class BitFlagStateMachine {
 
     public BitFlagStateMachine(String id, BigInteger initialState) {
         this.m_id = id;
-        this.m_state = initialState;
+        this.m_state.set(initialState);
         this.m_transitions = new ConcurrentHashMap<>();
         this.m_stateListeners = new ConcurrentHashMap<>();
         this.m_globalListeners = new CopyOnWriteArrayList<>();
@@ -54,11 +106,11 @@ public class BitFlagStateMachine {
     // ========== State Queries ==========
 
     public boolean hasState(BigInteger stateBit) {
-        return m_state.and(stateBit).equals(stateBit);
+        return getState().and(stateBit).equals(stateBit);
     }
 
     public boolean hasState(int bitPosition) {
-        return m_state.testBit(bitPosition);
+        return getState().testBit(bitPosition);
     }
 
     public boolean hasState(long stateBit) {
@@ -95,7 +147,7 @@ public class BitFlagStateMachine {
 
     // Convenience aliases
     public boolean hasAllFlags(BigInteger flags) {
-        return m_state.and(flags).equals(flags);
+        return getState().and(flags).equals(flags);
     }
 
     public boolean hasAllFlags(long flags) {
@@ -103,7 +155,7 @@ public class BitFlagStateMachine {
     }
 
     public boolean hasAnyFlags(BigInteger flags) {
-        return !m_state.and(flags).equals(BigInteger.ZERO);
+        return !getState().and(flags).equals(BigInteger.ZERO);
     }
 
     public boolean hasAnyFlags(long flags) {
@@ -123,7 +175,7 @@ public class BitFlagStateMachine {
     }
 
     public BigInteger getState() {
-        return m_state;
+        return m_state.get();
     }
 
     public String getId() {
@@ -133,20 +185,21 @@ public class BitFlagStateMachine {
     // ========== State Mutations ==========
 
     public boolean addState(BigInteger stateBit) {
-        if (hasState(stateBit)) {
-            return false; // Already has state
+        while (true) {
+            BigInteger oldState = m_state.get();
+            if (oldState.and(stateBit).equals(stateBit)) {
+                return false;
+            }
+
+            BigInteger newState = oldState.or(stateBit);
+            validateStateConstraints(newState);
+
+            if (m_state.compareAndSet(oldState, newState)) {
+                notifyStateChange(oldState, newState, stateBit, true);
+                checkTransitions(stateBit, true, newState, oldState);
+                return true;
+            }
         }
-
-        BigInteger oldState = m_state;
-        BigInteger newState = m_state.or(stateBit);
-        
-        validateStateConstraints(newState);
-        m_state = newState;
-
-        notifyStateChange(oldState, m_state, stateBit, true);
-        checkTransitions(stateBit, true, oldState);
-
-        return true;
     }
 
     public boolean addState(int bitPosition) {
@@ -158,17 +211,20 @@ public class BitFlagStateMachine {
     }
 
     public boolean removeState(BigInteger stateBit) {
-        if (!hasState(stateBit)) {
-            return false; // Doesn't have state
+        while (true) {
+            BigInteger oldState = m_state.get();
+            if (!oldState.and(stateBit).equals(stateBit)) {
+                return false;
+            }
+
+            BigInteger newState = oldState.andNot(stateBit);
+
+            if (m_state.compareAndSet(oldState, newState)) {
+                notifyStateChange(oldState, newState, stateBit, false);
+                checkTransitions(stateBit, false, newState, oldState);
+                return true;
+            }
         }
-
-        BigInteger oldState = m_state;
-        m_state = m_state.andNot(stateBit);
-
-        notifyStateChange(oldState, m_state, stateBit, false);
-        checkTransitions(stateBit, false, oldState);
-
-        return true;
     }
 
     public boolean removeState(int bitPosition) {
@@ -196,22 +252,21 @@ public class BitFlagStateMachine {
     }
 
     public void setState(BigInteger newState) {
-        BigInteger oldState = m_state;
+        validateStateConstraints(newState);
+
+        BigInteger oldState = m_state.getAndSet(newState);
         if (oldState.equals(newState)) return;
 
-        validateStateConstraints(newState);
-        m_state = newState;
         notifyStateChange(oldState, newState, BigInteger.ZERO, false);
 
-        // Check transitions for all changed bits
         BigInteger changed = oldState.xor(newState);
         int bitLength = Math.max(oldState.bitLength(), newState.bitLength());
-        
+
         for (int i = 0; i < bitLength; i++) {
             if (changed.testBit(i)) {
                 BigInteger bitValue = bit(i);
                 boolean added = newState.testBit(i);
-                checkTransitions(bitValue, added, oldState);
+                checkTransitions(bitValue, added, newState, oldState);
             }
         }
     }
@@ -351,11 +406,11 @@ public class BitFlagStateMachine {
         addTransition(BigInteger.valueOf(fromState), BigInteger.valueOf(toState), action);
     }
 
-    private void checkTransitions(BigInteger triggerBit, boolean isAdd, BigInteger oldState) {
+    private void checkTransitions(BigInteger triggerBit, boolean isAdd, BigInteger newState, BigInteger oldState) {
         List<StateTransition> transitions = m_transitions.get(triggerBit);
         if (transitions == null) return;
-
-        BigInteger newState = m_state;
+        
+        //BigInteger newState = getState();
         for (StateTransition transition : transitions) {
             if (transition.onAdd == isAdd) {
                 if (transition.guard == null || transition.guard.canTransition(oldState, newState, triggerBit)) {
@@ -486,49 +541,69 @@ public class BitFlagStateMachine {
 
     // ========== NoteBytes Serialization ==========
 
-    public NoteBytesObject toNoteBytes() {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair("id", new NoteString(m_id)),
-            new NoteBytesPair("state", new NoteString(m_state.toString()))
-        });
-    }
 
-    public static BitFlagStateMachine fromNoteBytes(NoteBytesObject obj) {
-        NoteBytesMap map = obj.getAsNoteBytesMap();
-        String id = map.get("id").getAsString();
-        BigInteger state = new BigInteger(map.get("state").getAsString());
-        return new BitFlagStateMachine(id, state);
-    }
+ 
 
     // ========== Utility Methods ==========
 
     public List<BigInteger> getActiveStates() {
         List<BigInteger> active = new ArrayList<>();
-        int bitLength = m_state.bitLength();
+        BigInteger state = getState();
+        int bitLength = state.bitLength();
         for (int i = 0; i < bitLength; i++) {
-            if (m_state.testBit(i)) {
+            if (state.testBit(i)) {
                 active.add(bit(i));
             }
         }
         return active;
     }
 
-   /*public List<Integer> getActiveBitPositions() {
-        List<Integer> positions = new ArrayList<>();
-        int bitLength = m_state.bitLength();
-        for (int i = 0; i < bitLength; i++) {
-            if (m_state.testBit(i)) {
-                positions.add(i);
+    public void update(UnaryOperator<BigInteger> updater) {
+        while (true) {
+            BigInteger oldState = m_state.get();
+            BigInteger newState = updater.apply(oldState);
+
+            if (oldState.equals(newState)) return;
+
+            validateStateConstraints(newState);
+
+            if (m_state.compareAndSet(oldState, newState)) {
+                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+                replayTransitions(oldState, newState);
+                return;
             }
         }
-        return positions;
-    }*/
+    }
+
+    private void replayTransitions(BigInteger oldState, BigInteger newState) {
+        BigInteger added   = newState.andNot(oldState);
+        BigInteger removed = oldState.andNot(newState);
+
+        int maxBits = Math.max(oldState.bitLength(), newState.bitLength());
+
+        // Handle added bits
+        for (int i = 0; i < maxBits; i++) {
+            if (added.testBit(i)) {
+                BigInteger bit = BigInteger.ONE.shiftLeft(i);
+                checkTransitions(bit, true, newState, oldState);
+            }
+        }
+
+        // Handle removed bits
+        for (int i = 0; i < maxBits; i++) {
+            if (removed.testBit(i)) {
+                BigInteger bit = BigInteger.ONE.shiftLeft(i);
+                checkTransitions(bit, false, newState, oldState);
+            }
+        }
+    }
 
      public NoteIntegerArray getActiveBitPositions() {
         NoteIntegerArray positions = new NoteIntegerArray();
-        int bitLength = m_state.bitLength();
+        BigInteger state = getState();
+        int bitLength = state.bitLength();
         for (int i = 0; i < bitLength; i++) {
-            if (m_state.testBit(i)) {
+            if (state.testBit(i)) {
                 positions.add(i);
             }
         }
@@ -536,11 +611,11 @@ public class BitFlagStateMachine {
     }
 
     public int getHighestStateBit() {
-        return m_state.bitLength() - 1;
+        return getState().bitLength() - 1;
     }
 
     public int getActiveStateCount() {
-        return m_state.bitCount();
+        return getState().bitCount();
     }
 
     public String getStateString(Map<Long, String> stateNames) {
@@ -557,10 +632,11 @@ public class BitFlagStateMachine {
         StringBuilder sb = new StringBuilder();
         sb.append("[");
         boolean first = true;
-        int bitLength = m_state.bitLength();
+        BigInteger state = getState();
+        int bitLength = state.bitLength();
         
         for (int i = 0; i < bitLength; i++) {
-            if (m_state.testBit(i)) {
+            if (state.testBit(i)) {
                 if (!first) sb.append(", ");
                 
                 BigInteger bitValue = bit(i);
@@ -586,8 +662,9 @@ public class BitFlagStateMachine {
 
     @Override
     public String toString() {
+        BigInteger state = getState();
         return String.format("StateMachine[id=%s, state=%s, active=%d, bits=%d]",
-                m_id, m_state.toString(16), getActiveStateCount(), m_state.bitLength());
+                m_id, state.toString(16), getActiveStateCount(), state.bitLength());
     }
 
     // ========== Static Helpers ==========
@@ -688,10 +765,11 @@ public class BitFlagStateMachine {
      * Get state as long (only safe if state fits in 64 bits)
      */
     public long getStateAsLong() {
-        if (m_state.bitLength() > 63) {
-            throw new ArithmeticException("State does not fit in long (bitLength=" + m_state.bitLength() + ")");
+        BigInteger state = getState();
+        if (state.bitLength() > 63) {
+            throw new ArithmeticException("State does not fit in long (bitLength=" + state.bitLength() + ")");
         }
-        return m_state.longValue();
+        return state.longValue();
     }
 
     /**
@@ -702,6 +780,336 @@ public class BitFlagStateMachine {
             return getStateAsLong();
         } catch (ArithmeticException e) {
             return defaultValue;
+        }
+    }
+
+    /**
+     * Get a consistent snapshot of current state and version.
+     * This is lock-free but guarantees the state and version match.
+     */
+    public StateSnapshot getSnapshot() {
+        long v1, v2;
+        BigInteger state;
+        
+        do {
+            v1 = m_version.get();
+            state = m_state.get();
+            v2 = m_version.get();
+        } while (v1 != v2); // Retry if version changed during read
+        
+        return new StateSnapshot(state, v1);
+    }
+
+    /**
+     * Get current version number. Useful for change detection.
+     */
+    public long getVersion() {
+        return m_version.get();
+    }
+
+    // ========== Conditional Updates ==========
+
+    /**
+     * Apply update only if version hasn't changed.
+     * Returns true if applied, false if version changed (conflict).
+     * 
+     * Pattern for optimistic concurrency:
+     * <pre>
+     * StateSnapshot snap = machine.getSnapshot();
+     * // ... compute based on snap ...
+     * boolean success = machine.updateIfVersion(snap.version, state -> {
+     *     return state.or(newBits);
+     * });
+     * </pre>
+     */
+    public boolean updateIfVersion(long expectedVersion, 
+                                    Function<BigInteger, BigInteger> updater) {
+        while (true) {
+            long currentVersion = m_version.get();
+            if (currentVersion != expectedVersion) {
+                return false; // Version changed - conflict
+            }
+            
+            BigInteger oldState = m_state.get();
+            BigInteger newState = updater.apply(oldState);
+            
+            if (oldState.equals(newState)) {
+                return true; // No change needed
+            }
+            
+            validateStateConstraints(newState);
+            
+            if (m_state.compareAndSet(oldState, newState)) {
+                m_version.incrementAndGet();
+                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+                replayTransitions(oldState, newState);
+                return true;
+            }
+            // CAS failed, loop and recheck version
+        }
+    }
+
+    /**
+     * Apply update only if state matches expected state.
+     * More specific than version check - useful when you care about exact state.
+     */
+    public boolean updateIfState(BigInteger expectedState, 
+                                  Function<BigInteger, BigInteger> updater) {
+        while (true) {
+            BigInteger oldState = m_state.get();
+            if (!oldState.equals(expectedState)) {
+                return false; // State changed - conflict
+            }
+            
+            BigInteger newState = updater.apply(oldState);
+            
+            if (oldState.equals(newState)) {
+                return true; // No change needed
+            }
+            
+            validateStateConstraints(newState);
+            
+            if (m_state.compareAndSet(oldState, newState)) {
+                m_version.incrementAndGet();
+                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+                replayTransitions(oldState, newState);
+                return true;
+            }
+        }
+    }
+
+    /**
+     * Apply update only if condition remains true.
+     * Condition is rechecked on each CAS retry.
+     * 
+     * Example: Only add flag if another flag is still set
+     * <pre>
+     * machine.updateIf(
+     *     state -> state.testBit(ACTIVE_BIT),
+     *     state -> state.or(NEW_FLAG)
+     * );
+     * </pre>
+     */
+    public boolean updateIf(Predicate<BigInteger> condition,
+                            Function<BigInteger, BigInteger> updater) {
+        while (true) {
+            BigInteger oldState = m_state.get();
+            if (!condition.test(oldState)) {
+                return false; // Condition no longer true
+            }
+            
+            BigInteger newState = updater.apply(oldState);
+            
+            if (oldState.equals(newState)) {
+                return true; // No change needed
+            }
+            
+            validateStateConstraints(newState);
+            
+            if (m_state.compareAndSet(oldState, newState)) {
+                m_version.incrementAndGet();
+                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+                replayTransitions(oldState, newState);
+                return true;
+            }
+        }
+    }
+
+    // ========== Batch Operations ==========
+
+    /**
+     * Atomically add multiple states.
+     * More efficient than individual addState calls.
+     */
+    public boolean addStates(BigInteger... stateBits) {
+        if (stateBits.length == 0) return false;
+        BigInteger combined = combine(stateBits);
+        return addState(combined);
+    }
+
+    public boolean addStates(int... bitPositions) {
+        if (bitPositions.length == 0) return false;
+        BigInteger combined = combine(bitPositions);
+        return addState(combined);
+    }
+
+    /**
+     * Atomically remove multiple states.
+     */
+    public boolean removeStates(BigInteger... stateBits) {
+        if (stateBits.length == 0) return false;
+        BigInteger combined = combine(stateBits);
+        return removeState(combined);
+    }
+
+    public boolean removeStates(int... bitPositions) {
+        if (bitPositions.length == 0) return false;
+        BigInteger combined = combine(bitPositions);
+        return removeState(combined);
+    }
+
+    /**
+     * Atomically set specific bits to specific values.
+     * Example: setStates(mask, newBits) sets all bits in mask to corresponding bits in newBits
+     */
+    public void setStates(BigInteger mask, BigInteger newBits) {
+        update(state -> {
+            // Clear masked bits, then set new bits
+            return state.andNot(mask).or(newBits.and(mask));
+        });
+    }
+
+    // ========== Update existing methods to increment version ==========
+
+    /*
+     * IMPORTANT: Add m_version.incrementAndGet() after each successful
+     * m_state.compareAndSet in these existing methods:
+     * - addState(BigInteger)
+     * - removeState(BigInteger)
+     * - setState(BigInteger)
+     * - update(UnaryOperator<BigInteger>)
+     * 
+     * Example for addState:
+     * 
+     * if (m_state.compareAndSet(oldState, newState)) {
+     *     m_version.incrementAndGet(); // ADD THIS LINE
+     *     notifyStateChange(oldState, newState, stateBit, true);
+     *     checkTransitions(stateBit, true, newState, oldState);
+     *     return true;
+     * }
+     */
+
+    // ========== Waiting/Polling Utilities ==========
+
+    /**
+     * Result of a wait operation.
+     */
+    public static class WaitResult {
+        public final boolean success;
+        public final StateSnapshot snapshot;
+        public final long elapsedNanos;
+
+        public WaitResult(boolean success, StateSnapshot snapshot, long elapsedNanos) {
+            this.success = success;
+            this.snapshot = snapshot;
+            this.elapsedNanos = elapsedNanos;
+        }
+    }
+
+    /**
+     * Busy-wait until condition is met or timeout.
+     * Returns immediately if condition already true.
+     * 
+     * Note: This is a spin-wait. For longer waits, consider using listeners instead.
+     */
+    public WaitResult waitUntil(Predicate<BigInteger> condition, 
+                                 long timeoutNanos) {
+        long startTime = System.nanoTime();
+        long endTime = startTime + timeoutNanos;
+        
+        while (true) {
+            StateSnapshot snap = getSnapshot();
+            if (condition.test(snap.state)) {
+                return new WaitResult(true, snap, System.nanoTime() - startTime);
+            }
+            
+            if (System.nanoTime() >= endTime) {
+                return new WaitResult(false, snap, System.nanoTime() - startTime);
+            }
+            
+            // Yield to avoid burning CPU
+            Thread.yield();
+        }
+    }
+
+    /**
+     * Check if state has changed since given version.
+     * Useful for efficient polling.
+     */
+    public boolean hasChangedSince(long version) {
+        return m_version.get() != version;
+    }
+
+    /**
+     * Get snapshot only if version has changed.
+     * Returns null if version unchanged - avoids allocation.
+     */
+    public StateSnapshot getSnapshotIfChanged(long lastVersion) {
+        if (!hasChangedSince(lastVersion)) {
+            return null;
+        }
+        return getSnapshot();
+    }
+
+    // ========== Serialization Update ==========
+
+    /**
+     * Updated toNoteBytes to include version
+     */
+    public NoteBytesObject toNoteBytes() {
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.ID, new NoteString(m_id)),
+            new NoteBytesPair(Keys.STATE, new NoteBytes(m_state.get())),
+            new NoteBytesPair(Keys.VERSION, new NoteLong(m_version.get()))
+        });
+    }
+
+    /**
+     * Updated fromNoteBytes to restore version
+     */
+    public static BitFlagStateMachine fromNoteBytes(NoteBytes notebytes) {
+        if(notebytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+            NoteBytesMap map = notebytes.getAsNoteBytesMap();
+            NoteBytes idBytes = map.get(Keys.ID);
+            NoteBytes statebytes = map.get(Keys.STATE);
+            NoteBytes versionBytes = map.get(Keys.VERSION);
+            if(statebytes == null || statebytes.getType() != NoteBytesMetaData.BIG_INTEGER_TYPE){
+                throw new IllegalArgumentException("state must be BIG_INTEGER_TYPE");
+            }
+
+            BigInteger state = statebytes.getAsBigInteger();
+            String id = idBytes != null ? idBytes.getAsString() : NoteUUID.createSafeUUID64();
+            BitFlagStateMachine machine = new BitFlagStateMachine(id, state);
+            if (versionBytes != null) {
+                machine.m_version.set(versionBytes.getAsLong());
+            }
+            
+            return machine;
+        }
+
+        throw new IllegalArgumentException("Cannot create state machine from notebytes");
+    }
+
+    // ========== Debug/Monitoring ==========
+
+    /**
+     * Get statistics about state changes.
+     * Useful for monitoring contention.
+     */
+    public StateStats getStats() {
+        StateSnapshot snap = getSnapshot();
+        return new StateStats(
+            snap.version,
+            snap.state.bitCount(),
+            snap.state.bitLength()
+        );
+    }
+
+    public static class StateStats {
+        public final long version;
+        public final int activeStates;
+        public final int maxBitPosition;
+
+        public StateStats(long version, int activeStates, int maxBitPosition) {
+            this.version = version;
+            this.activeStates = activeStates;
+            this.maxBitPosition = maxBitPosition;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("StateStats[version=%d, active=%d, maxBit=%d]",
+                version, activeStates, maxBitPosition);
         }
     }
 }

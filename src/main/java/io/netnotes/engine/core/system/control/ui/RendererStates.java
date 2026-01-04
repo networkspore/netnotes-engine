@@ -1,4 +1,4 @@
-package io.netnotes.engine.core.system.control.containers;
+package io.netnotes.engine.core.system.control.ui;
 
 import io.netnotes.engine.state.BitFlagStateMachine;
 
@@ -17,94 +17,39 @@ public class RendererStates {
     
     // ===== LIFECYCLE STATES =====
     
-    /**
-     * ContainerService is initializing
-     */
-    public static final long INITIALIZING           = 1L << 0;
-    
-    /**
-     * Service is ready and accepting requests
-     */
-    public static final long READY                  = 1L << 1;
-    
-    /**
-     * Service is actively processing requests
-     */
-    public static final long ACCEPTING_REQUESTS     = 1L << 2;
-    
-    /**
-     * Service is shutting down
-     */
-    public static final long SHUTTING_DOWN          = 1L << 3;
-    
-    /**
-     * Service is stopped
-     */
-    public static final long STOPPED                = 1L << 4;
-    
-    /**
-     * Error occurred
-     */
-    public static final long ERROR                  = 1L << 5;
+    // Renderer lifecycle (all renderers)
+    public static final int INITIALIZING       = 0;
+    public static final int READY              = 1;
+    public static final int SHUTTING_DOWN      = 2;
+    public static final int STOPPED            = 3;
+    public static final int ERROR              = 4;
+
+    // Container tracking (all renderers)
+    public static final int HAS_CONTAINERS         = 10;
+    public static final int HAS_FOCUSED_CONTAINER  = 11;
+    public static final int HAS_VISIBLE_CONTAINERS = 12;
+    public static final int CREATING_CONTAINER     = 13;
+    public static final int DESTROYING_CONTAINER   = 14;
     
     // ===== OPERATIONAL STATES =====
     
-    /**
-     * UI renderer is connected and functional
-     */
-    public static final long UI_RENDERER_ACTIVE     = 1L << 10;
-    
-    /**
-     * At least one container exists
-     */
-    public static final long HAS_CONTAINERS         = 1L << 11;
-    
-    /**
-     * At least one container is visible
-     */
-    public static final long HAS_VISIBLE_CONTAINERS = 1L << 12;
-    
-    /**
-     * A container currently has focus
-     */
-    public static final long HAS_FOCUSED_CONTAINER  = 1L << 13;
-    
-    /**
-     * Processing a container creation
-     */
-    public static final long CREATING_CONTAINER     = 1L << 14;
-    
-    /**
-     * Processing a container destruction
-     */
-    public static final long DESTROYING_CONTAINER   = 1L << 15;
     
     /**
      * Rendering UI changes
      */
-    public static final long RENDERING              = 1L << 16;
+    public static final int RENDERING              = 16;
+
+
+    // Console-specific states (bits 20+)
+    public static final int HAS_ACTIVE         = 20;
+    public static final int SWITCHING_FOCUS    = 21;
+    public static final int CLEARING_SCREEN    = 22;
+    public static final int HANDLING_RESIZE    = 23;
     
     // ===== HELPER METHODS =====
     
-    /**
-     * Check if service is operational
-     */
-    public static boolean isOperational(BitFlagStateMachine state) {
-        return state.hasState(READY) && 
-               state.hasState(ACCEPTING_REQUESTS) &&
-               state.hasState(UI_RENDERER_ACTIVE) &&
-               !state.hasState(ERROR) &&
-               !state.hasState(SHUTTING_DOWN);
-    }
-    
-    /**
-     * Check if service can accept new container requests
-     */
-    public static boolean canAcceptRequests(BitFlagStateMachine state) {
-        return state.hasState(READY) && 
-               state.hasState(ACCEPTING_REQUESTS) &&
-               !state.hasState(SHUTTING_DOWN);
-    }
+   
+   
     
     /**
      * Check if service is busy
@@ -115,20 +60,18 @@ public class RendererStates {
                state.hasState(RENDERING);
     }
     
-    /**
-     * Check if UI is available
-     */
-    public static boolean hasUI(BitFlagStateMachine state) {
-        return state.hasState(UI_RENDERER_ACTIVE);
+   
+    public static boolean canAcceptRequests(BitFlagStateMachine state) {
+        return state.hasState(READY) && 
+               !state.hasState(SHUTTING_DOWN);
     }
-    
-    /**
+ 
+       /**
      * Check if containers exist
      */
     public static boolean hasContainers(BitFlagStateMachine state) {
         return state.hasState(HAS_CONTAINERS);
     }
-    
     /**
      * Check if any containers are visible
      */
@@ -204,12 +147,7 @@ public class RendererStates {
         status.append("ContainerService: ").append(describe(state)).append("\n");
         status.append("  Containers: ").append(containerCount).append("\n");
         
-        if (state.hasState(UI_RENDERER_ACTIVE)) {
-            status.append("  UI Renderer: Active\n");
-        } else {
-            status.append("  UI Renderer: Inactive\n");
-        }
-        
+
         if (state.hasState(HAS_VISIBLE_CONTAINERS)) {
             status.append("  Visible containers: Yes\n");
         }
@@ -217,13 +155,7 @@ public class RendererStates {
         if (state.hasState(HAS_FOCUSED_CONTAINER)) {
             status.append("  Focused container: Yes\n");
         }
-        
-        if (state.hasState(ACCEPTING_REQUESTS)) {
-            status.append("  Accepting requests: Yes");
-        } else {
-            status.append("  Accepting requests: No");
-        }
-        
+      
         return status.toString();
     }
 }

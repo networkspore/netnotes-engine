@@ -130,13 +130,13 @@ class NodeManagerScreen extends TerminalScreen {
                 
                 // Show error and offer retry
                 RenderState errorState = RenderState.builder()
-                    .add((term, gen) -> {
+                    .add((term) -> {
                         term.printAt(terminal.getRows() / 2, 10, 
                             "Authentication failed: " + ex.getMessage(), 
-                            TextStyle.ERROR, gen);
+                            TextStyle.ERROR);
                         term.printAt(terminal.getRows() / 2 + 2, 10, 
                             "Press any key to retry...", 
-                            TextStyle.NORMAL, gen);
+                            TextStyle.NORMAL);
                     })
                     .build();
                 
@@ -157,13 +157,13 @@ class NodeManagerScreen extends TerminalScreen {
     private void handleTimeout() {
         // Show timeout message
         RenderState timeoutState = RenderState.builder()
-            .add((term, gen) -> {
+            .add((term) -> {
                 term.printAt(terminal.getRows() / 2, 10, 
                     "Authentication timeout", 
-                    TextStyle.ERROR, gen);
+                    TextStyle.ERROR);
                 term.printAt(terminal.getRows() / 2 + 2, 10, 
                     "Press any key...", 
-                    TextStyle.NORMAL, gen);
+                    TextStyle.NORMAL);
             })
             .build();
         

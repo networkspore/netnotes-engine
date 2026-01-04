@@ -123,9 +123,9 @@ public class PasswordPrompt implements Renderable {
             int statusRow = boxRow + 11;  // Below the box
             int statusCol = boxCol + 25 - statusMessage.length() / 2;  // Center relative to box
             
-            builder.add((term, gen) -> {
+            builder.add((term) -> {
                 term.printAt(statusRow, statusCol, statusMessage, 
-                    TextStyle.WARNING, gen);
+                    TextStyle.WARNING);
             });
         }
         
@@ -137,8 +137,8 @@ public class PasswordPrompt implements Renderable {
         int inputRow = boxRow + 5;  // Center of box vertically
         int inputCol = boxCol + 25 - 10;  // Center of box horizontally, offset for "> "
         
-        builder.add((term, gen) -> {
-            term.printAt(inputRow, inputCol, "> ", TextStyle.NORMAL, gen);
+        builder.add((term) -> {
+            term.printAt(inputRow, inputCol, "> ", TextStyle.NORMAL);
             // PasswordReader renders masked input after this
         });
         
@@ -153,8 +153,8 @@ public class PasswordPrompt implements Renderable {
         int col = terminal.getCols() / 2 - 15;
         
         return RenderState.builder()
-            .add((term, gen) -> {
-                term.printAt(row, col, "Processing...", TextStyle.INFO, gen);
+            .add((term) -> {
+                term.printAt(row, col, "Processing...", TextStyle.INFO);
             })
             .build();
     }
@@ -166,9 +166,9 @@ public class PasswordPrompt implements Renderable {
         int row = terminal.getRows() - 2;
         int col = terminal.getCols() / 2 - text.length() / 2;
         
-        return (term, gen) -> {
-            term.drawHLine(row - 1, 0, terminal.getCols(), gen);
-            term.printAt(row, col, text, TextStyle.INFO, gen);
+        return (term) -> {
+            term.drawHLine(row - 1, 0, terminal.getCols());
+            term.printAt(row, col, text, TextStyle.INFO);
         };
     }
     
