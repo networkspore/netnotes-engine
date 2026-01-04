@@ -5,10 +5,10 @@ import java.util.List;
 import java.util.Stack;
 
 import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.RenderManager;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
@@ -31,13 +31,13 @@ import java.util.function.Consumer;
  * 1. RenderElement now uses BatchBuilder instead of (terminal, gen) lambda
  * 2. All rendering operations add commands to batch
  * 3. No direct terminal.print() calls
- * 4. Clean separation: getRenderState() builds description, RenderManager renders it
+ * 4. Clean separation: getRenderState() builds description, ClientRenderManager renders it
  */
 public class MenuNavigator implements Renderable {
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
-    private final RenderManager renderManager;
+    private final ClientRenderManager renderManager;
     private ScrollableMenuItem menuItemRenderer;
     private int horizontalScrollOffset = 0;
     

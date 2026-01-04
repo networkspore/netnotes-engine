@@ -4,10 +4,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.terminal.RenderManager;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
@@ -19,7 +19,7 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 /**
  * PasswordPrompt - REFACTORED for pull-based rendering
  * 
- * Now implements Renderable and works with RenderManager.
+ * Now implements Renderable and works with ClientRenderManager.
  * Can be used as the active screen during password entry.
  * 
  * Usage:
@@ -37,7 +37,7 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 public class PasswordPrompt implements Renderable {
     
     private final SystemTerminalContainer terminal;
-    private final RenderManager renderManager;
+    private final ClientRenderManager renderManager;
     
     // Configuration
     private String title = "Authentication";

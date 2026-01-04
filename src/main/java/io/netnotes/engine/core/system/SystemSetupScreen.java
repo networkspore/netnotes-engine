@@ -1,6 +1,6 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;

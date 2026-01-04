@@ -2,8 +2,8 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -70,7 +70,7 @@ class NodeManagerScreen extends TerminalScreen {
      */
     private RenderState buildSubScreenState() {
         // Sub-screens handle their own rendering
-        // They should be Renderable and active in RenderManager
+        // They should be Renderable and active in ClientRenderManager
         return RenderState.builder().build();
     }
     
@@ -140,7 +140,7 @@ class NodeManagerScreen extends TerminalScreen {
                     })
                     .build();
                 
-                terminal.getRenderManager().setActive(new RenderManager.Renderable() {
+                terminal.getRenderManager().setActive(new ClientRenderManager.Renderable() {
                     @Override
                     public RenderState getRenderState() {
                         return errorState;
@@ -167,7 +167,7 @@ class NodeManagerScreen extends TerminalScreen {
             })
             .build();
         
-        terminal.getRenderManager().setActive(new RenderManager.Renderable() {
+        terminal.getRenderManager().setActive(new ClientRenderManager.Renderable() {
             @Override
             public RenderState getRenderState() {
                 return timeoutState;

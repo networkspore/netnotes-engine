@@ -6,11 +6,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * RenderManager - Client-side pull-based rendering coordinator
+ * ClientRenderManager - Client-side pull-based rendering coordinator
  * 
  * This manages rendering on the CLIENT side (TerminalContainerHandle)
  * NOT to be confused with ConsoleRenderManager (server-side)
@@ -24,15 +23,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * PATTERN:
  * - User code calls setActive(renderable)
  * - User code or renderable calls invalidate()
- * - RenderManager calls renderable.getRenderState()
+ * - ClientRenderManager calls renderable.getRenderState()
  * - Converts RenderState to BatchBuilder
  * - Executes batch
  */
-public class RenderManager {
+public class ClientRenderManager {
     
     private final TerminalContainerHandle terminal;
     private final AtomicReference<Renderable> activeRenderable = new AtomicReference<>(null);
-    private final AtomicLong generation = new AtomicLong(0);
     private final AtomicBoolean dirty = new AtomicBoolean(false);
     private final AtomicBoolean rendering = new AtomicBoolean(false);
     
@@ -43,7 +41,7 @@ public class RenderManager {
     
     private static final long FRAME_TIME_MS = 16; // ~60fps if auto-render enabled
     
-    public RenderManager(TerminalContainerHandle terminal) {
+    public ClientRenderManager(TerminalContainerHandle terminal) {
         this.terminal = terminal;
     }
     
@@ -57,11 +55,11 @@ public class RenderManager {
         Renderable previous = activeRenderable.getAndSet(renderable);
         
         if (previous != renderable) {
-            generation.incrementAndGet();
+            terminal.nextRenderGeneration(); // Use terminal's generation
             invalidate();
             
             Log.logMsg("[RenderManager] Active renderable changed (gen=" + 
-                generation.get() + ")");
+                getCurrentGeneration() + ")");
         }
     }
     
@@ -109,21 +107,21 @@ public class RenderManager {
      * Get current generation
      */
     public long getCurrentGeneration() {
-        return generation.get();
+        return terminal.getCurrentRenderGeneration();
     }
     
     /**
      * Check if generation is current
      */
     public boolean isGenerationCurrent(long gen) {
-        return generation.get() == gen;
+        return getCurrentGeneration() == gen;
     }
     
     /**
      * Increment generation (call on layout changes like resize)
      */
     public void incrementGeneration() {
-        generation.incrementAndGet();
+        terminal.nextRenderGeneration();
         invalidate();
     }
     
@@ -140,6 +138,9 @@ public class RenderManager {
      * 
      * @return CompletableFuture that completes when render done
      */
+    /**
+     * Render current active renderable
+     */
     public CompletableFuture<Void> render() {
         Renderable renderable = activeRenderable.get();
         
@@ -149,25 +150,19 @@ public class RenderManager {
         }
         
         if (!dirty.compareAndSet(true, false)) {
-            // Not dirty, skip render
             return CompletableFuture.completedFuture(null);
         }
         
         if (!rendering.compareAndSet(false, true)) {
-            // Already rendering
             return CompletableFuture.completedFuture(null);
         }
         
         try {
-            long currentGen = generation.get();
+            long currentGen = getCurrentGeneration(); // Get from terminal
             
-            // Get render state from renderable
             RenderState state = renderable.getRenderState();
-            
-            // Convert to batch
             BatchBuilder batch = state.toBatch(terminal, currentGen);
             
-            // Execute
             return terminal.executeBatch(batch)
                 .whenComplete((v, ex) -> {
                     rendering.set(false);
@@ -214,12 +209,12 @@ public class RenderManager {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    Log.logError("[RenderManager] Loop error: " + e.getMessage());
+                    Log.logError("[ClientRenderManager] Loop error: " + e.getMessage());
                 }
             }
         });
         
-        Log.logMsg("[RenderManager] Auto-render started");
+        Log.logMsg("[ClientRenderManager] Auto-render started");
     }
     
     /**
@@ -234,7 +229,7 @@ public class RenderManager {
             renderLoop = null;
         }
         
-        Log.logMsg("[RenderManager] Auto-render stopped");
+        Log.logMsg("[ClientRenderManager] Auto-render stopped");
     }
     
     // ===== INTERFACES =====

@@ -32,7 +32,7 @@ public class TerminalContainerHandle extends ContainerHandle {
     private CompletableFuture<RoutedEvent> keyWaitFuture = null;
     private CompletableFuture<Void> anyKeyFuture = null;
     private NoteBytesReadOnly handlerId = null;
-    private RenderManager renderManager;
+    private ClientRenderManager renderManager;
     /**
      * Constructor - creates terminal-style container
      */
@@ -172,13 +172,14 @@ public class TerminalContainerHandle extends ContainerHandle {
  
         return super.run().thenAccept(v -> {
             // Start render manager after stream is ready
-            this.renderManager = new RenderManager(this);
+            this.renderManager = new ClientRenderManager(this);
+    
             renderManager.start();
-            Log.logMsg("[TerminalContainerHandle] RenderManager started");
+            Log.logMsg("[TerminalContainerHandle] ClientRenderManager started (gen=1)");
         });
     }
 
-    public RenderManager getRenderManager() {
+    public ClientRenderManager getRenderManager() {
         return renderManager;
     }
 

@@ -11,8 +11,8 @@ import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -474,7 +474,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             .build();
         
         // Temporarily replace render state
-        terminal.getRenderManager().setActive(new RenderManager.Renderable() {
+        terminal.getRenderManager().setActive(new ClientRenderManager.Renderable() {
             @Override
             public RenderState getRenderState() {
                 return autoloadState;

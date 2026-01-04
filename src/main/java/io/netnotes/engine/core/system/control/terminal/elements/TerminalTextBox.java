@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
@@ -16,7 +16,7 @@ import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
  * TextBox - Composable text box primitive for terminal UIs
  * 
  * DUAL INTERFACE:
- * 1. As Renderable - can be active screen in RenderManager
+ * 1. As Renderable - can be active screen in ClientRenderManager
  * 2. As RenderElement - can be part of another component's RenderState
  * 
  * Usage as Renderable:

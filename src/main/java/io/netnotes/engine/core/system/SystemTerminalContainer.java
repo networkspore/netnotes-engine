@@ -705,6 +705,9 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     // ===== SCREEN MANAGEMENT =====
     
     public CompletableFuture<Void> showScreen(TerminalScreen screen) {
+        if(screen.isShowing()){
+            return CompletableFuture.completedFuture(null);
+        }
         screen.setTerminal(this);
         
         if (currentScreen != null && currentScreen != screen) {

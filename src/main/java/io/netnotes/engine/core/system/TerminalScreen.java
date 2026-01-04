@@ -2,9 +2,10 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalScreen - Base class for all screens (REFACTORED for pull-based rendering)
@@ -13,6 +14,7 @@ abstract class TerminalScreen implements Renderable {
     protected final String name;
     protected SystemTerminalContainer terminal;
     protected TerminalScreen parent;
+    private volatile boolean isShowing = false;
     
     public TerminalScreen(String name, SystemTerminalContainer terminal) {
         this.name = name;
@@ -38,13 +40,20 @@ abstract class TerminalScreen implements Renderable {
     /**
      * Called when screen becomes visible
      * 
-     * Default implementation makes this screen active in RenderManager.
+     * Default implementation makes this screen active in ClientRenderManager.
      * Override to add custom initialization (event handlers, data loading, etc.)
      * 
-     * IMPORTANT: Always call super.onShow() or manually activate in RenderManager
+     * IMPORTANT: Always call super.onShow() or manually activate in ClientRenderManager
      */
     public CompletableFuture<Void> onShow() {
-        // Make this screen active in RenderManager
+        if (isShowing) {
+            Log.logMsg("[" + name + "] Already showing, skipping duplicate onShow()");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        isShowing = true;
+
+        // Make this screen active in ClientRenderManager
         terminal.getRenderManager().setActive(this);
         return CompletableFuture.completedFuture(null);
     }
@@ -54,12 +63,19 @@ abstract class TerminalScreen implements Renderable {
      * Override to cleanup (unregister handlers, release resources, etc.)
      *
      */
-    public abstract void onHide();
+    public void onHide() {
+        isShowing = false;
+    }
     
+
+    public boolean isShowing(){
+        return this.isShowing;
+    }
+
     /**
      * Get render state (PULL-BASED)
      * 
-     * RenderManager calls this to get what to draw.
+     * ClientRenderManager calls this to get what to draw.
      * This should be FAST and thread-safe.
      * 
      * Build RenderState from current screen state.

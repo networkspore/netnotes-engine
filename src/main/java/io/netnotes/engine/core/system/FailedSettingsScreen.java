@@ -11,7 +11,7 @@ import java.util.concurrent.CompletionException;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;

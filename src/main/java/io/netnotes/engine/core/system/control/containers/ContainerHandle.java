@@ -82,7 +82,7 @@ public class ContainerHandle extends FlowProcess {
     // Stream TO Container (for render commands)
     protected StreamChannel renderStream;
     protected NoteBytesWriter renderWriter;
-    protected final AtomicLong renderGeneration = new AtomicLong(0);
+    protected final AtomicLong renderGeneration = new AtomicLong(1);
 
     // Stream FROM Container (for events)
     protected StreamChannel eventChannel = null;

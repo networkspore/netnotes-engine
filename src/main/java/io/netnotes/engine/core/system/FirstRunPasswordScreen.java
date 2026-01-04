@@ -2,7 +2,7 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
 
 /**
  * FirstRunPasswordScreen - Create password for new system

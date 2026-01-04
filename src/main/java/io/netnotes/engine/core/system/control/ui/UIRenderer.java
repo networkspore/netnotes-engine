@@ -463,7 +463,6 @@ public abstract class UIRenderer <T extends Container<?>> {
             });
     }
 
-    protected abstract void onHasContainerFocused();
     
     private CompletableFuture<Void> handleMaximizeContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);

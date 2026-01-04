@@ -7,6 +7,7 @@ import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.netnotes.engine.io.ContextPath;
@@ -123,7 +124,9 @@ public abstract class Container<T extends Container<T>> {
     protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
     
     // ===== MESSAGE DISPATCH =====
-    protected final HashMap<NoteBytesReadOnly, MessageExecutor> msgMap = new HashMap<>();
+    protected final ConcurrentHashMap<NoteBytesReadOnly, MessageExecutor> msgMap = new ConcurrentHashMap<>();
+    protected final HashMap<NoteBytes, MessageExecutor> batchMsgMap = new HashMap<>();
+
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
 
     //HandlerFutures
@@ -170,13 +173,17 @@ public abstract class Container<T extends Container<T>> {
         
         // Subclass adds its handlers
         setupMessageMap();
+
+        setupBatchMsgMap();
     }
     
     // ===== ABSTRACT METHODS (Subclass Implementation) =====
     
     protected abstract void setupMessageMap();
+    protected abstract void setupBatchMsgMap();
     protected void setupStateTransitions() {}
     protected abstract CompletableFuture<Void> initializeRenderer();
+
 
     
     // ===== BASE STATE TRANSITIONS =====
@@ -354,6 +361,8 @@ public abstract class Container<T extends Container<T>> {
             Log.logError("[Container:" + id + "] No cmd in command");
             return;
         }
+
+        Log.logNoteBytes("[Container: "+ getTitle()+"]", command);
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
@@ -377,7 +386,7 @@ public abstract class Container<T extends Container<T>> {
     
     public void emitEvent(NoteBytes event) {
         if (eventWriter == null) {
-            Log.logError("[Container:" + id + "] Cannot emit event - no event stream");
+            Log.logNoteBytes("[Container:" + id + "] Cannot emit event - no event stream", event);
             return;
         }
         

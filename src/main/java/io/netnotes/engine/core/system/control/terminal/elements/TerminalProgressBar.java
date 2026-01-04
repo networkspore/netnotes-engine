@@ -2,10 +2,10 @@ package io.netnotes.engine.core.system.control.terminal.elements;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.RenderManager;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 
@@ -13,7 +13,7 @@ import io.netnotes.engine.core.system.control.terminal.TextStyle;
  * ProgressBar - Terminal progress bar renderer
  * 
  * DUAL INTERFACE:
- * 1. As Renderable - can be active screen in RenderManager (for long operations)
+ * 1. As Renderable - can be active screen in ClientRenderManager (for long operations)
  * 2. As RenderElement - can be part of another component's RenderState
  * 
  * Renders progress bars in various styles:
@@ -63,7 +63,7 @@ public class TerminalProgressBar implements Renderable {
     private volatile String currentMessage = null;
     
     // For pull-based rendering invalidation
-    private RenderManager renderManager = null;
+    private ClientRenderManager renderManager = null;
     
     public enum Style {
         /** |10%|=====-------| */
@@ -215,7 +215,7 @@ public class TerminalProgressBar implements Renderable {
      * Thread-safe setter
      * 
      * For pull-based rendering, this just updates state and invalidates.
-     * The RenderManager will pull the new state on next render cycle.
+     * The ClientRenderManager will pull the new state on next render cycle.
      */
     public synchronized void updatePercent(double percent) {
         double clampedPercent = Math.max(0, Math.min(100, percent));

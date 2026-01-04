@@ -7,7 +7,7 @@ import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.nodes.NodeState;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;

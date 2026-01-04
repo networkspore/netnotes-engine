@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
-import io.netnotes.engine.core.system.control.terminal.RenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
