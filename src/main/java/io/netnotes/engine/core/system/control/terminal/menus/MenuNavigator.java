@@ -5,13 +5,13 @@ import java.util.List;
 import java.util.Stack;
 
 import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
+import io.netnotes.engine.core.system.control.terminal.elements.Invalidatable;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
@@ -25,20 +25,41 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import java.util.function.Consumer;
 
 /**
- * MenuNavigator - REFACTORED for BatchBuilder-based rendering
+ * MenuNavigator - REFACTORED for composition
  * 
- * KEY CHANGES:
- * 1. RenderElement now uses BatchBuilder instead of (terminal, gen) lambda
- * 2. All rendering operations add commands to batch
- * 3. No direct terminal.print() calls
- * 4. Clean separation: getRenderState() builds description, ClientRenderManager renders it
+ * TWO USAGE MODES:
+ * 
+ * 1. STANDALONE (legacy, for simple screens):
+ *    MenuNavigator menu = new MenuNavigator(terminal);
+ *    menu.showMenu(menuContext);
+ *    // MenuNavigator becomes active renderable
+ * 
+ * 2. COMPONENT (preferred, for composition):
+ *    MenuNavigator menu = new MenuNavigator(terminal).withParent(parentScreen);
+ *    menu.showMenu(menuContext);
+ *    // Parent screen includes menu via asRenderElement()
+ *    // Menu invalidates parent instead of terminal
+ * 
+ * COMPOSITION PATTERN:
+ * <pre>
+ * class MyScreen extends TerminalScreen {
+ *     private MenuNavigator menu = new MenuNavigator(terminal).withParent(this);
+ *     private TerminalProgressBar progress = new TerminalProgressBar(...).withParent(this);
+ *     
+ *     public RenderState getRenderState() {
+ *         return RenderState.builder()
+ *             .add(menu.asRenderElement())
+ *             .add(progress.asRenderElement())
+ *             .add(batch -> batch.printAt(0, 0, "Status: OK", TextStyle.SUCCESS))
+ *             .build();
+ *     }
+ * }
+ * </pre>
  */
 public class MenuNavigator implements Renderable {
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
-    private final ClientRenderManager renderManager;
-    private ScrollableMenuItem menuItemRenderer;
     private int horizontalScrollOffset = 0;
     
     // Navigation state
@@ -77,9 +98,14 @@ public class MenuNavigator implements Renderable {
     public static final long WAITING_PASSWORD = 1L << 3;
     public static final long EXECUTING_ACTION = 1L << 4;
     
+    // DIRTY FLAG for rendering
+    private volatile boolean needsRender = false;
+    
+    // PARENT RENDERABLE (for composition pattern)
+    private Invalidatable parentRenderable = null;
+    
     public MenuNavigator(TerminalContainerHandle terminal) {
         this.terminal = terminal;
-        this.renderManager = terminal.getRenderManager();
         this.state = new BitFlagStateMachine("menu-navigator");
         
         this.keyboardConsumer = this::handleKeyboardEvent;
@@ -87,6 +113,15 @@ public class MenuNavigator implements Renderable {
         
         setupStateTransitions();
         state.addState(IDLE);
+    }
+    
+    /**
+     * Set parent renderable (for composition pattern)
+     * When MenuNavigator is a component, invalidate parent instead of terminal
+     */
+    public MenuNavigator withParent(Invalidatable parent) {
+        this.parentRenderable = parent;
+        return this;
     }
     
     private void setupStateTransitions() {
@@ -100,7 +135,12 @@ public class MenuNavigator implements Renderable {
             terminal.addResizeHandler(resizeConsumer);
             
             if (currentMenu != null) {
-                renderManager.setActive(this);
+                // STANDALONE MODE: Make menu the active renderable
+                // COMPONENT MODE: Parent will include us via asRenderElement()
+                if (parentRenderable == null) {
+                    terminal.setRenderable(this);
+                }
+                invalidate(); // Initial render
             }
         });
         
@@ -127,47 +167,98 @@ public class MenuNavigator implements Renderable {
             return RenderState.builder().build();
         }
         
-        RenderState.Builder stateBuilder = RenderState.builder();
-        MenuDimensions dims = calculateMenuDimensions();
-        
-        // Add all render elements
-        stateBuilder.add(createHeaderElement(dims));
-        stateBuilder.addIf(navigationStack.size() > 0, createBreadcrumbElement(dims));
-        
-        String description = currentMenu.getDescription();
-        stateBuilder.addIf(description != null && !description.isEmpty(), 
-            createDescriptionElement(dims));
-        
-        stateBuilder.addAll(createMenuItemElements(dims));
-        stateBuilder.add(createFooterElement(dims));
-        
-        return stateBuilder.build();
+        return RenderState.builder()
+            .add(asRenderElement())
+            .build();
     }
     
-    // ===== RENDER ELEMENT CREATORS =====
-    
     /**
-     * Create header element
-     * Returns a function that adds commands to BatchBuilder
+     * Convert MenuNavigator to RenderElement
+     * This is the KEY for composition - parent screens use this
      */
-    private RenderElement createHeaderElement(MenuDimensions dims) {
-        String title = currentMenu.getTitle();
+    public RenderElement asRenderElement() {
+        if (currentMenu == null) {
+            return batch -> {}; // No-op
+        }
+        
+        // Capture current state (thread-safe snapshot)
+        final MenuContext menu = this.currentMenu;
+        final int selIdx = this.selectedIndex;
+        final int scrOffset = this.scrollOffset;
+        final int horzScroll = this.horizontalScrollOffset;
+        final Stack<MenuContext> navStack = new Stack<>();
+        navStack.addAll(this.navigationStack);
         
         return batch -> {
-            batch.drawBox(0, dims.boxCol, dims.boxWidth, 3, title, BoxStyle.SINGLE);
+            MenuDimensions dims = calculateMenuDimensions(menu);
             
-            int titleRow = 1;
-            int titleCol = dims.boxCol + (dims.boxWidth - title.length()) / 2;
-            batch.printAt(titleRow, titleCol, title, TextStyle.BOLD);
+            // Add all rendering to batch
+            addHeaderToBatch(batch, menu, dims);
+            
+            if (navStack.size() > 0) {
+                addBreadcrumbToBatch(batch, menu, dims);
+            }
+            
+            String description = menu.getDescription();
+            if (description != null && !description.isEmpty()) {
+                addDescriptionToBatch(batch, menu, dims);
+            }
+            
+            addMenuItemsToBatch(batch, menu, dims, selIdx, scrOffset, horzScroll);
+            addFooterToBatch(batch, menu, dims, navStack.size() > 0);
         };
     }
     
     /**
-     * Create breadcrumb element
+     * Check if needs rendering
      */
-    private RenderElement createBreadcrumbElement(MenuDimensions dims) {
+    @Override
+    public boolean needsRender() {
+        return needsRender;
+    }
+    
+    /**
+     * Clear render flag after successful render
+     */
+    @Override
+    public void clearRenderFlag() {
+        this.needsRender = false;
+    }
+    
+    /**
+     * Mark as needing render
+     * 
+     * TWO CASES:
+     * 1. Standalone: Invalidate terminal (we're the active renderable)
+     * 2. Component: Invalidate parent (parent will re-render us)
+     */
+    private void invalidate() {
+        this.needsRender = true;
+        
+        if (parentRenderable != null) {
+            // We're a component - invalidate parent
+            parentRenderable.invalidate();
+        } else {
+            // We're standalone - invalidate terminal directly
+            terminal.invalidate();
+        }
+    }
+    
+    // ===== BATCH RENDERING HELPERS =====
+    
+    private void addHeaderToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
+        String title = menu.getTitle();
+        
+        batch.drawBox(0, dims.boxCol, dims.boxWidth, 3, title, BoxStyle.SINGLE);
+        
+        int titleRow = 1;
+        int titleCol = dims.boxCol + (dims.boxWidth - title.length()) / 2;
+        batch.printAt(titleRow, titleCol, title, TextStyle.BOLD);
+    }
+    
+    private void addBreadcrumbToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
         List<String> trail = new ArrayList<>();
-        MenuContext current = currentMenu;
+        MenuContext current = menu;
         
         while (current != null) {
             trail.add(0, current.getTitle());
@@ -177,66 +268,62 @@ public class MenuNavigator implements Renderable {
         String breadcrumb = String.join(" > ", trail);
         int textCol = dims.boxCol + (dims.boxWidth - breadcrumb.length()) / 2;
         
-        return batch -> {
-            batch.printAt(3, textCol, breadcrumb, TextStyle.INFO);
-        };
+        batch.printAt(3, textCol, breadcrumb, TextStyle.INFO);
     }
     
-    /**
-     * Create description element
-     */
-    private RenderElement createDescriptionElement(MenuDimensions dims) {
-        String description = currentMenu.getDescription();
+    private void addDescriptionToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
+        String description = menu.getDescription();
         String[] lines = description.split("\n");
         int descRow = 5;
         
-        return batch -> {
-            for (int i = 0; i < lines.length && i < 8; i++) {
-                String line = lines[i];
-                int row = descRow + i;
-                int col = dims.boxCol + 4;
-                batch.printAt(row, col, line, TextStyle.NORMAL);
-            }
-        };
+        for (int i = 0; i < lines.length && i < 8; i++) {
+            String line = lines[i];
+            int row = descRow + i;
+            int col = dims.boxCol + 4;
+            batch.printAt(row, col, line, TextStyle.NORMAL);
+        }
     }
     
-    /**
-     * Create menu items elements
-     */
-    private List<RenderElement> createMenuItemElements(MenuDimensions dims) {
-        List<RenderElement> elements = new ArrayList<>();
+    private void addMenuItemsToBatch(
+            BatchBuilder batch, 
+            MenuContext menu, 
+            MenuDimensions dims,
+            int selectedIdx,
+            int scrollOff,
+            int horizScroll) {
         
-        List<MenuContext.MenuItem> items = new ArrayList<>(currentMenu.getItems());
-        List<MenuContext.MenuItem> selectableItems = getSelectableItems();
+        List<MenuContext.MenuItem> items = new ArrayList<>(menu.getItems());
+        List<MenuContext.MenuItem> selectableItems = items.stream()
+            .filter(item -> item.type != MenuContext.MenuItemType.SEPARATOR &&
+                           item.type != MenuContext.MenuItemType.INFO)
+            .toList();
         
         // Clamp selection
-        if (selectedIndex >= selectableItems.size()) {
-            selectedIndex = Math.max(0, selectableItems.size() - 1);
-        }
+        int actualSelectedIdx = Math.min(selectedIdx, Math.max(0, selectableItems.size() - 1));
         
         int totalItems = items.size();
-        int visibleStart = scrollOffset;
+        int visibleStart = scrollOff;
         int visibleEnd = Math.min(visibleStart + MAX_VISIBLE_ITEMS, totalItems);
         
-        String description = currentMenu.getDescription();
+        String description = menu.getDescription();
         int descriptionLines = 0;
         if (description != null && !description.isEmpty()) {
             descriptionLines = Math.min(description.split("\n").length + 1, 9);
         }
         
-        final int startRow = 5 + descriptionLines;
+        int startRow = 5 + descriptionLines;
         int selectableIndex = 0;
         
-        // Create element for each visible item
+        // Render each visible item
         for (int i = visibleStart; i < visibleEnd; i++) {
             MenuContext.MenuItem item = items.get(i);
-            final int currentRow = startRow + (i - visibleStart);
+            int currentRow = startRow + (i - visibleStart);
             
             boolean isSelected = (item.type != MenuContext.MenuItemType.SEPARATOR &&
                                 item.type != MenuContext.MenuItemType.INFO &&
-                                selectableIndex == selectedIndex);
+                                selectableIndex == actualSelectedIdx);
             
-            elements.add(createMenuItemElement(item, currentRow, isSelected, dims));
+            addMenuItemToBatch(batch, item, currentRow, isSelected, dims, horizScroll);
             
             if (item.type != MenuContext.MenuItemType.SEPARATOR &&
                 item.type != MenuContext.MenuItemType.INFO) {
@@ -245,37 +332,32 @@ public class MenuNavigator implements Renderable {
         }
         
         // Scroll indicators
-        if (scrollOffset > 0) {
+        if (scrollOff > 0) {
             int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
             int indicatorRow = startRow - 1;
-            elements.add(batch -> 
-                batch.printAt(indicatorRow, indicatorCol, "↑ More above", TextStyle.INFO));
+            batch.printAt(indicatorRow, indicatorCol, "↑ More above", TextStyle.INFO);
         }
         
         if (visibleEnd < totalItems) {
             int indicatorCol = dims.boxCol + dims.boxWidth / 2 - 5;
             int indicatorRow = startRow + (visibleEnd - visibleStart);
-            elements.add(batch -> 
-                batch.printAt(indicatorRow, indicatorCol, "↓ More below", TextStyle.INFO));
+            batch.printAt(indicatorRow, indicatorCol, "↓ More below", TextStyle.INFO);
         }
-        
-        return elements;
     }
     
-    /**
-     * Create single menu item element
-     */
-    private RenderElement createMenuItemElement(
+    private void addMenuItemToBatch(
+            BatchBuilder batch,
             MenuContext.MenuItem item,
             int row,
             boolean isSelected,
-            MenuDimensions dims) {
+            MenuDimensions dims,
+            int horizScroll) {
         
         int contentStartCol = dims.boxCol + 2;
         int contentWidth = dims.itemContentWidth;
         
-        return switch (item.type) {
-            case SEPARATOR -> batch -> {
+        switch (item.type) {
+            case SEPARATOR -> {
                 String separatorLine = "─".repeat(contentWidth);
                 batch.printAt(row, contentStartCol, separatorLine, TextStyle.NORMAL);
                 
@@ -285,90 +367,61 @@ public class MenuNavigator implements Renderable {
                     batch.printAt(row, labelCol, 
                         " " + item.description + " ", TextStyle.BOLD);
                 }
-            };
+            }
             
-            case INFO -> batch -> {
+            case INFO -> {
                 int infoCol = contentStartCol + 
                     (contentWidth - item.description.length()) / 2;
                 batch.printAt(row, infoCol, item.description, TextStyle.INFO);
-            };
+            }
             
-            default -> batch -> {
+            default -> {
                 String badge = item.badge != null ? " [" + item.badge + "]" : "";
                 String itemText = item.description + badge;
                 
                 if (isSelected) {
                     // Highlighted with scroll
-                    addHighlightedItemToBatch(
-                        batch,
-                        row,
-                        contentStartCol,
-                        contentWidth,
-                        itemText,
-                        horizontalScrollOffset
-                    );
+                    String indicator = "> ";
+                    int textWidth = contentWidth - indicator.length();
+                    
+                    String displayText;
+                    if (itemText.length() <= textWidth) {
+                        displayText = itemText;
+                    } else {
+                        int startIdx = Math.min(horizScroll, 
+                            Math.max(0, itemText.length() - textWidth));
+                        int endIdx = Math.min(itemText.length(), startIdx + textWidth);
+                        displayText = itemText.substring(startIdx, endIdx);
+                    }
+                    
+                    displayText = String.format("%-" + textWidth + "s", displayText);
+                    batch.printAt(row, contentStartCol, indicator + displayText, 
+                        TextStyle.INVERSE);
                 } else {
-                    // Normal item
                     String displayText = "  " + truncateText(itemText, contentWidth - 2);
                     TextStyle style = item.enabled ? TextStyle.NORMAL : TextStyle.INFO;
                     batch.printAt(row, contentStartCol, displayText, style);
                 }
-            };
-        };
-    }
-    
-    /**
-     * Add highlighted menu item to batch
-     */
-    private void addHighlightedItemToBatch(
-            BatchBuilder batch,
-            int row,
-            int col,
-            int maxWidth,
-            String text,
-            int scrollOffset) {
-        
-        // Selection indicator
-        String indicator = "> ";
-        
-        // Available width after indicator
-        int textWidth = maxWidth - indicator.length();
-        
-        // Apply scroll offset
-        String displayText;
-        if (text.length() <= textWidth) {
-            // Fits without scrolling
-            displayText = text;
-        } else {
-            // Apply horizontal scroll
-            int startIdx = Math.min(scrollOffset, Math.max(0, text.length() - textWidth));
-            int endIdx = Math.min(text.length(), startIdx + textWidth);
-            displayText = text.substring(startIdx, endIdx);
+            }
         }
-        
-        // Pad to fill width
-        displayText = String.format("%-" + textWidth + "s", displayText);
-        
-        // Add to batch
-        batch.printAt(row, col, indicator + displayText, TextStyle.INVERSE);
     }
     
-    /**
-     * Create footer element
-     */
-    private RenderElement createFooterElement(MenuDimensions dims) {
+    private void addFooterToBatch(
+            BatchBuilder batch, 
+            MenuContext menu, 
+            MenuDimensions dims,
+            boolean hasParent) {
+        
         int footerRow = terminal.getRows() - 2;
         
-        String help = currentMenu.hasParent() || !navigationStack.isEmpty() 
+        String help = hasParent || menu.hasParent()
             ? "↑↓: Navigate  ←→: Scroll Text  Enter: Select  ESC: Back  Home/End: Jump"
             : "↑↓: Navigate  ←→: Scroll Text  Enter: Select  Home/End: Jump";
         
         int helpCol = dims.boxCol + (dims.boxWidth - help.length()) / 2;
         
-        return batch -> {
-            batch.drawHLine(footerRow - 1, dims.boxCol, dims.boxWidth);
-            batch.printAt(footerRow, helpCol, help, TextStyle.INFO);
-        };
+        batch.drawHLine(footerRow - 1, dims.boxCol, dims.boxWidth);
+        batch.printAt(footerRow, helpCol, help, TextStyle.INFO);
     }
     
     // ===== KEYBOARD EVENT HANDLING =====
@@ -395,7 +448,7 @@ public class MenuNavigator implements Renderable {
     private void handleResizeEvent(RoutedEvent event) {
         if (state.hasState(DISPLAYING_MENU) && currentMenu != null) {
             horizontalScrollOffset = 0;
-            renderManager.incrementGeneration(); // Resize = new generation
+            invalidate();
         }
     }
     
@@ -411,7 +464,7 @@ public class MenuNavigator implements Renderable {
             scrollOffset = selectedIndex;
         }
         
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleNavigateDown() {
@@ -424,7 +477,7 @@ public class MenuNavigator implements Renderable {
             scrollOffset = selectedIndex - MAX_VISIBLE_ITEMS + 1;
         }
         
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleSelectCurrent() {
@@ -473,7 +526,7 @@ public class MenuNavigator implements Renderable {
             state.removeState(EXECUTING_ACTION);
             state.addState(DISPLAYING_MENU);
             
-            renderManager.invalidate();
+            invalidate();
         }
     }
     
@@ -483,7 +536,7 @@ public class MenuNavigator implements Renderable {
         
         selectedIndex = Math.max(0, selectedIndex - MAX_VISIBLE_ITEMS);
         scrollOffset = Math.max(0, scrollOffset - MAX_VISIBLE_ITEMS);
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handlePageDown() {
@@ -496,13 +549,13 @@ public class MenuNavigator implements Renderable {
         int maxScroll = Math.max(0, selectableItems.size() - MAX_VISIBLE_ITEMS);
         scrollOffset = Math.min(maxScroll, scrollOffset + MAX_VISIBLE_ITEMS);
         
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleHome() {
         selectedIndex = 0;
         scrollOffset = 0;
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleEnd() {
@@ -511,7 +564,7 @@ public class MenuNavigator implements Renderable {
         
         selectedIndex = selectableItems.size() - 1;
         scrollOffset = Math.max(0, selectableItems.size() - MAX_VISIBLE_ITEMS);
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleScrollRight() {
@@ -522,20 +575,20 @@ public class MenuNavigator implements Renderable {
         String itemText = item.description + 
             (item.badge != null ? " [" + item.badge + "]" : "");
         
-        MenuDimensions dims = calculateMenuDimensions();
-        int maxWidth = dims.itemContentWidth - 2; // Account for "> "
+        MenuDimensions dims = calculateMenuDimensions(currentMenu);
+        int maxWidth = dims.itemContentWidth - 2;
         
         if (itemText.length() > maxWidth) {
             int maxOffset = itemText.length() - maxWidth;
             horizontalScrollOffset = Math.min(maxOffset, horizontalScrollOffset + 5);
-            renderManager.invalidate();
+            invalidate();
         }
     }
 
     private void handleScrollLeft() {
         if (horizontalScrollOffset > 0) {
             horizontalScrollOffset = Math.max(0, horizontalScrollOffset - 5);
-            renderManager.invalidate();
+            invalidate();
         }
     }
     
@@ -559,10 +612,10 @@ public class MenuNavigator implements Renderable {
         return text.substring(0, maxLength - 3) + "...";
     }
     
-    private MenuDimensions calculateMenuDimensions() {
-        List<MenuContext.MenuItem> items = new ArrayList<>(currentMenu.getItems());
+    private MenuDimensions calculateMenuDimensions(MenuContext menu) {
+        List<MenuContext.MenuItem> items = new ArrayList<>(menu.getItems());
         
-        int maxTextLength = currentMenu.getTitle().length();
+        int maxTextLength = menu.getTitle().length();
         
         for (MenuContext.MenuItem item : items) {
             int itemLength = item.description.length();
@@ -600,11 +653,13 @@ public class MenuNavigator implements Renderable {
         state.removeState(NAVIGATING);
         state.removeState(EXECUTING_ACTION);
         state.addState(DISPLAYING_MENU);
+        
+        invalidate();
     }
     
     public void refreshMenu() {
         if (state.hasState(DISPLAYING_MENU) && currentMenu != null) {
-            renderManager.invalidate();
+            invalidate();
         }
     }
     
@@ -650,7 +705,11 @@ public class MenuNavigator implements Renderable {
     public void cleanup() {
         terminal.removeKeyDownHandler(keyboardConsumer);
         terminal.removeResizeHandler(resizeConsumer);
-        renderManager.clearActive();
+        
+        // Only clear if we're standalone
+        if (parentRenderable == null) {
+            terminal.clearRenderable();
+        }
     }
     
     // ===== GETTERS =====
@@ -664,8 +723,5 @@ public class MenuNavigator implements Renderable {
     
     // ===== INNER CLASSES =====
     
-    /**
-     * Menu dimensions helper
-     */
     private record MenuDimensions(int boxWidth, int boxCol, int itemContentWidth) {}
 }

@@ -1,6 +1,6 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
@@ -60,7 +60,7 @@ public class SystemSetupScreen extends TerminalScreen {
     
     public SystemSetupScreen(String id, SystemTerminalContainer terminal) {
         super(id, terminal);
-        this.menuNavigator = new MenuNavigator(terminal);
+        this.menuNavigator = new MenuNavigator(terminal).withParent(this);
         this.isFirstRun = !terminal.isAuthenticated();
         
         if (!isFirstRun) {
@@ -106,6 +106,7 @@ public class SystemSetupScreen extends TerminalScreen {
         int promptCol = Math.max(0, terminal.getCols() / 2 - prompt.length() / 2);
         
         return RenderState.builder()
+            .add((term)-> term.clear())
             .add(welcomeBox.asRenderElement())
             .add((term) -> {
                 term.printAt(msgRow, msgCol, msg, TextStyle.INFO);
@@ -137,7 +138,10 @@ public class SystemSetupScreen extends TerminalScreen {
     private RenderState buildMainMenuState() {
         // MenuNavigator handles its own rendering
         // Return empty state - MenuNavigator is active renderable
-        return RenderState.builder().build();
+        return RenderState.builder()
+            .add(batch -> batch.clear())
+            .add(menuNavigator.asRenderElement())
+            .build();
     }
     
     /**
@@ -145,7 +149,10 @@ public class SystemSetupScreen extends TerminalScreen {
      */
     private RenderState buildKeyboardSelectionState() {
         // MenuNavigator handles its own rendering
-        return RenderState.builder().build();
+        return RenderState.builder()
+            .add(batch -> batch.clear())
+            .add(menuNavigator.asRenderElement())
+            .build();
     }
     
     /**
@@ -609,7 +616,7 @@ public class SystemSetupScreen extends TerminalScreen {
         Log.logMsg("[SystemSetupScreen] Setup complete");
         
         if (isFirstRun) {
-            terminal.getState().addState(SystemTerminalContainer.CHECKING_SETTINGS);
+            terminal.getStateMachine().addState(SystemTerminalContainer.CHECKING_SETTINGS);
         } else {
             terminal.goBack();
         }

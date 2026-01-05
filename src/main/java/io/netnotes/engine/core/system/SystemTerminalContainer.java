@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.SettingsData;
+import io.netnotes.engine.core.system.control.containers.Container;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.io.ContextPath;
@@ -17,7 +18,6 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
@@ -42,7 +42,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         TerminalScreen create(String id, SystemTerminalContainer terminal);
     }
     
-    private final BitFlagStateMachine state;
     private final ProcessRegistryInterface registry;
     private final ContextPath sessionPath;
 
@@ -70,17 +69,17 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     private final Map<String, ScreenFactory> screenFactories = new HashMap<>();
     
     // States - UI flow only, not data states
-    public static final long INITIALIZING = 1L << 0;
-    public static final long SETUP_NEEDED = 1L << 1;
-    public static final long SETUP_COMPLETE = 1L << 2;
-    public static final long LOCKED = 1L << 3;
-    public static final long OPENING = 1L << 4;
-    public static final long CHECKING_SETTINGS = 1L << 5;
-    public static final long FIRST_RUN = 1L << 6;
-    public static final long AUTHENTICATING = 1L << 7;  // UI state: showing auth screen
-    public static final long SHOWING_SCREEN = 1L << 8;
-    public static final long ERROR = 1L << 9;
-    public static final long FAILED_SETTINGS = 1L << 10;
+    public static final int INITIALIZING = 63;
+    public static final int SETUP_NEEDED = 62;
+    public static final int SETUP_COMPLETE = 61;
+    public static final int LOCKED = 60;
+    public static final int OPENING = 59;
+    public static final int CHECKING_SETTINGS = 58;
+    public static final int FIRST_RUN = 57;
+    public static final int AUTHENTICATING = 56;  // UI state: showing auth screen
+    public static final int SHOWING_SCREEN = 55;
+    public static final int ERROR = 54;
+    public static final int FAILED_SETTINGS = 53;
     
     
     public SystemTerminalContainer(RenderingService renderingService, ProcessRegistryInterface registry, ContextPath sessionPath) {
@@ -88,9 +87,9 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         this.renderingService = renderingService;
         this.registry = registry;
         this.sessionPath = sessionPath;
-        this.state = new BitFlagStateMachine(getName());
+
         this.ioDaemonManager = new IODaemonManager(this, registry);
-        setupStateTransitions();
+  
         registerDefaultScreens();
     }
 
@@ -135,7 +134,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     }
 
     boolean isLocked() {
-        return state.hasState(LOCKED);
+        return stateMachine.hasState(LOCKED);
     }
     
     /**
@@ -163,75 +162,75 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
 
     @Override
     public CompletableFuture<Void> run() {
-        state.addState(INITIALIZING);
+        stateMachine.addState(INITIALIZING);
         
         Log.logMsg("[SystemTerminal] Initializing");
         return super.run()
             .thenCompose(v -> {
-                state.removeState(INITIALIZING);
+                stateMachine.removeState(INITIALIZING);
                 
                 if (needsBootstrap()) {
                     Log.logMsg("[SystemTerminal] Bootstrap needed");
-                    state.addState(SETUP_NEEDED);
+                    stateMachine.addState(SETUP_NEEDED);
                     return CompletableFuture.completedFuture(null);
                 } else {
                     return loadBootstrapConfig()
                         .thenRun(() -> {
-                            state.addState(SETUP_COMPLETE);
+                            stateMachine.addState(SETUP_COMPLETE);
                             Log.logMsg("[SystemTerminal] Bootstrap loaded");
                         })
                         .exceptionally(e -> {
                             Log.logError("[SystemTerminal] Bootstrap load failed", e);
-                            state.addState(SETUP_NEEDED);
+                            stateMachine.addState(SETUP_NEEDED);
                             return null;
                         });
                 }
             });
     }
 
-    private void setupStateTransitions() {
-        state.onStateAdded(SETUP_NEEDED, (old, now, bit) -> {
+    protected void setupStateTransitions() {
+        stateMachine.onStateAdded(SETUP_NEEDED, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] SETUP_NEEDED");
             showScreen("system-setup");
         });
         
-        state.onStateAdded(CHECKING_SETTINGS, (old, now, bit) -> {
+        stateMachine.onStateAdded(CHECKING_SETTINGS, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] CHECKING_SETTINGS");
             
             if (isInRecoveryMode) {
                 // In recovery mode - go to recovery screen
                 Log.logMsg("[SystemTerminal] Recovery mode active: " + recoveryReason);
-                state.removeState(CHECKING_SETTINGS);
-                state.addState(FAILED_SETTINGS);
+                stateMachine.removeState(CHECKING_SETTINGS);
+                stateMachine.addState(FAILED_SETTINGS);
                 return;
             }
             
             checkSettingsExist()
                 .thenAccept(exists -> {
-                    state.removeState(CHECKING_SETTINGS);
+                    stateMachine.removeState(CHECKING_SETTINGS);
                     if (exists) {
                         startAuthentication();
                     } else {
                         if (!SettingsData.isIdDataFile()) {
-                            state.addState(FIRST_RUN);
+                            stateMachine.addState(FIRST_RUN);
                         } else {
-                            state.addState(FAILED_SETTINGS);
+                            stateMachine.addState(FAILED_SETTINGS);
                         }
                     }
                 })
                 .exceptionally(ex -> {
-                    state.removeState(CHECKING_SETTINGS);
-                    state.addState(FAILED_SETTINGS);
+                    stateMachine.removeState(CHECKING_SETTINGS);
+                    stateMachine.addState(FAILED_SETTINGS);
                     return null;
                 });
         });
         
-        state.onStateAdded(FIRST_RUN, (old, now, bit) -> {
+        stateMachine.onStateAdded(FIRST_RUN, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] FIRST_RUN");
             showScreen("first-run-password");
         });
 
-        state.onStateAdded(AUTHENTICATING, (old, now, bit) -> {
+        stateMachine.onStateAdded(AUTHENTICATING, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] AUTHENTICATING");
             
             claimPasswordKeyboard()
@@ -249,10 +248,12 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                 });
         });
         
-        state.onStateAdded(FAILED_SETTINGS, (old, now, bit) -> {
+        stateMachine.onStateAdded(FAILED_SETTINGS, (old, now, bit) -> {
             Log.logMsg("[SystemTerminal] FAILED_SETTINGS");
             showScreen("settings-recovery");
         });
+
+     
     }
 
     /**
@@ -260,7 +261,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
      * Used for both initial login and unlock
      */
     private void startAuthentication() {
-        state.addState(AUTHENTICATING);
+        stateMachine.addState(AUTHENTICATING);
     }
     
     /**
@@ -277,7 +278,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                 // Timeout → lock
                 releasePasswordKeyboard()
                     .thenRun(() -> {
-                        state.removeState(AUTHENTICATING);
+                        stateMachine.removeState(AUTHENTICATING);
                         if (isAuthenticated()) {
                             // Was unlocking → back to locked
                             showScreen("locked");
@@ -367,10 +368,10 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return saveBootstrapConfig()
             .thenRun(() -> {
                 Log.logMsg("[SystemTerminal] Bootstrap complete");
-                if (state.hasState(SETUP_NEEDED)) {
-                    state.removeState(SETUP_NEEDED);
-                    state.addState(SETUP_COMPLETE);
-                    state.addState(CHECKING_SETTINGS);
+                if (stateMachine.hasState(SETUP_NEEDED)) {
+                    stateMachine.removeState(SETUP_NEEDED);
+                    stateMachine.addState(SETUP_COMPLETE);
+                    stateMachine.addState(CHECKING_SETTINGS);
                 }
             });
     }
@@ -478,19 +479,19 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
             return CompletableFuture.completedFuture(null);
         }
         
-        state.addState(OPENING);
+        stateMachine.addState(OPENING);
         
         return show()
             .thenRun(() -> {
-                state.removeState(OPENING);
+                stateMachine.removeState(OPENING);
                 isVisible = true;
                 
                 // Route based on data
-                if (state.hasState(SETUP_NEEDED)) {
+                if (stateMachine.hasState(SETUP_NEEDED)) {
                     showScreen("system-setup");
                 } else if (!isAuthenticated()) {
                     // No systemAccess → need to create/load it
-                    state.addState(CHECKING_SETTINGS);
+                    stateMachine.addState(CHECKING_SETTINGS);
                 } else if (isLocked()) {
                     // Have systemAccess but locked → show locked screen
                     showScreen("locked");
@@ -506,10 +507,10 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         if(isVisible){
             return close();
         }else{
-            state.removeState(AUTHENTICATING);
+            stateMachine.removeState(AUTHENTICATING);
             if (isAuthenticated()) {
                 // Lock on close for security
-                state.addState(LOCKED);
+                stateMachine.addState(LOCKED);
             }
             return CompletableFuture.completedFuture(null);
         }
@@ -538,12 +539,12 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
             .thenCompose(v -> hide())
             .thenRun(() -> {
                 isVisible = false;
-                state.removeState(OPENING);
-                state.removeState(SHOWING_SCREEN);
-                state.removeState(AUTHENTICATING);
+                stateMachine.removeState(OPENING);
+                stateMachine.removeState(SHOWING_SCREEN);
+                stateMachine.removeState(AUTHENTICATING);
                 if (isAuthenticated()) {
                     // Lock on close for security
-                    state.addState(LOCKED);
+                    stateMachine.addState(LOCKED);
                 }
             })
             .exceptionally(ex -> {
@@ -572,11 +573,11 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                 RuntimeAccess access = new RuntimeAccess();
                 SystemRuntime runtime = new SystemRuntime(settingsData, registry, access);
                 
-                // THE state: systemAccess now exists → authenticated
+                // THE stateMachine: systemAccess now exists → authenticated
                 this.systemRuntime = runtime;
                 this.systemAccess = access;
                 
-                state.removeState(FIRST_RUN);
+                stateMachine.removeState(FIRST_RUN);
                 cancelAuthTimeout();
                 
                 // Release password keyboard if separate
@@ -612,7 +613,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                                         SystemRuntime runtime = new SystemRuntime(
                                             settingsData, registry, access);
                                         
-                                        // THE state: systemAccess now exists → authenticated
+                                        // THE stateMachine: systemAccess now exists → authenticated
                                         this.systemRuntime = runtime;
                                         this.systemAccess = access;
                                         
@@ -631,8 +632,8 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
      */
     private void onAuthenticationSuccess() {
         cancelAuthTimeout();
-        state.removeState(AUTHENTICATING);
-        state.removeState(LOCKED);
+        stateMachine.removeState(AUTHENTICATING);
+        stateMachine.removeState(LOCKED);
         // Release password keyboard if separate
         releasePasswordKeyboard()
             .thenRun(() -> showScreen("main-menu"))
@@ -686,19 +687,19 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
      * Recover system with existing settings
      */
     CompletableFuture<Void> recoverSystem(SettingsData settingsData) {
-        if (!state.hasState(FAILED_SETTINGS)) {
-            throw new SecurityException("Recovery only allowed in FAILED_SETTINGS state");
+        if (!stateMachine.hasState(FAILED_SETTINGS)) {
+            throw new SecurityException("Recovery only allowed in FAILED_SETTINGS stateMachine");
         }
         
         return CompletableFuture.runAsync(() -> {
             RuntimeAccess access = new RuntimeAccess();
             SystemRuntime runtime = new SystemRuntime(settingsData, registry, access);
             
-            // THE state: systemAccess now exists → authenticated
+            // THE stateMachine: systemAccess now exists → authenticated
             this.systemRuntime = runtime;
             this.systemAccess = access;
             
-            state.removeState(FAILED_SETTINGS);
+            stateMachine.removeState(FAILED_SETTINGS);
         }).thenRun(() -> showScreen("main-menu"));
     }
     
@@ -715,7 +716,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }
         
         currentScreen = screen;
-        state.addState(SHOWING_SCREEN);
+        stateMachine.addState(SHOWING_SCREEN);
         return screen.onShow();
     }
     
@@ -746,9 +747,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return isVisible;
     }
     
-    BitFlagStateMachine getState() {
-        return state;
-    }
+    
     
     RuntimeAccess getSystemAccess() {
         return systemAccess;

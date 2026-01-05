@@ -2,6 +2,8 @@ package io.netnotes.engine.core.system;
 
 import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager;
+import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -15,21 +17,21 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * SystemProcess (SIMPLIFIED)
- * 
- * Bootstrap removed - SystemTerminalContainer handles its own configuration
- * No message handling - ConsoleApplication calls methods directly
+ * SystemProcess - Integrated with ClientTerminalRenderManager
  * 
  * Architecture:
  * /system/
- *   rendering-service/     # RenderingService (started by SystemProcess)
- *   system-terminal/       # SystemTerminalContainer (handles bootstrap + auth + IODaemon)
+ *   rendering-service/           # RenderingService (server interface)
+ *   render-manager/              # ClientTerminalRenderManager (owns handles)
+ *     system-terminal/           # SystemTerminalContainer (handle)
+ *     [other-terminals]/         # Additional terminals as needed
  * 
  * Flow:
  * 1. Start UIRenderer
- * 2. Start RenderingService
- * 3. Ready - ConsoleApplication calls openSystemTerminal()
- * 4. Terminal handles everything (bootstrap, auth, IODaemon, screens)
+ * 2. Start RenderingService (server interface)
+ * 3. Start ClientTerminalRenderManager (client coordinator)
+ * 4. Create system terminal through manager
+ * 5. Terminal handles bootstrap, auth, IODaemon, screens
  */
 public class SystemProcess extends FlowProcess {
     
@@ -39,14 +41,16 @@ public class SystemProcess extends FlowProcess {
     // Core components
     private final UIRenderer<?> uiRenderer;
     private RenderingService renderingService;
-    private SystemTerminalContainer systemTerminal;
+    private ClientTerminalRenderManager renderManager;
+    private TerminalContainerHandle systemTerminal;
     
     // States
-    public static final long INITIALIZING = 1L << 0;
-    public static final long RENDERING_STARTING = 1L << 1;
-    public static final long TERMINAL_CREATING = 1L << 2;
-    public static final long READY = 1L << 3;
-    public static final long ERROR = 1L << 4;
+    public static final int INITIALIZING = 0;
+    public static final int RENDERING_STARTING = 1;
+    public static final int MANAGER_STARTING = 2;
+    public static final int TERMINAL_CREATING = 3;
+    public static final int READY = 4;
+    public static final int ERROR = 5;
     
     private SystemProcess(
         FlowProcessService processService,
@@ -89,16 +93,23 @@ public class SystemProcess extends FlowProcess {
         state.onStateAdded(RENDERING_STARTING, (old, now, bit) -> 
             Log.logMsg("[SystemProcess] RENDERING_STARTING"));
         
+        state.onStateAdded(MANAGER_STARTING, (old, now, bit) -> 
+            Log.logMsg("[SystemProcess] MANAGER_STARTING"));
+        
         state.onStateAdded(TERMINAL_CREATING, (old, now, bit) -> 
             Log.logMsg("[SystemProcess] TERMINAL_CREATING"));
         
         state.onStateAdded(READY, (old, now, bit) -> 
             Log.logMsg("[SystemProcess] READY - System operational"));
     }
+
+    FlowProcessService getProcessService(){
+        return processService;
+    }
     
     /**
      * Initialize system
-     * Just UIRenderer + RenderingService, that's it
+     * UIRenderer → RenderingService → ClientTerminalRenderManager → Ready
      */
     CompletableFuture<Void> initialize() {
         state.addState(INITIALIZING);
@@ -109,8 +120,13 @@ public class SystemProcess extends FlowProcess {
                 state.addState(RENDERING_STARTING);
                 return startRenderingService();
             })
-            .thenRun(() -> {
+            .thenCompose(v -> {
                 state.removeState(RENDERING_STARTING);
+                state.addState(MANAGER_STARTING);
+                return startRenderManager();
+            })
+            .thenRun(() -> {
+                state.removeState(MANAGER_STARTING);
                 state.addState(READY);
             })
             .exceptionally(ex -> {
@@ -128,7 +144,7 @@ public class SystemProcess extends FlowProcess {
     }
     
     /**
-     * Start RenderingService
+     * Start RenderingService (server interface)
      * Lives at /system/rendering-service
      */
     private CompletableFuture<Void> startRenderingService() {
@@ -144,12 +160,34 @@ public class SystemProcess extends FlowProcess {
         
         return startProcess(servicePath)
             .thenRun(() -> {
-                Log.logMsg("[SystemProcess] RenderingService started, connecting streams...");
-                
                 registry.connect(contextPath, servicePath);
                 registry.connect(servicePath, contextPath);
                 
                 Log.logMsg("[SystemProcess] RenderingService operational at: " + servicePath);
+            });
+    }
+    
+    /**
+     * Start ClientTerminalRenderManager (client coordinator)
+     * Lives at /system/render-manager
+     * 
+     * Manager owns and coordinates all terminal handles
+     */
+    private CompletableFuture<Void> startRenderManager() {
+        renderManager = new ClientTerminalRenderManager(
+            "render-manager",
+            CoreConstants.RENDERING_SERVICE_PATH
+        );
+        
+        registerChild(renderManager);
+        ContextPath managerPath = renderManager.getContextPath();
+        
+        Log.logMsg("[SystemProcess] Starting ClientTerminalRenderManager at: " + managerPath);
+        
+        return startProcess(managerPath)
+            .thenRun(() -> {
+                Log.logMsg("[SystemProcess] ClientTerminalRenderManager operational");
+                Log.logMsg("[SystemProcess] Render loop active, ready to manage terminals");
             });
     }
     
@@ -162,8 +200,6 @@ public class SystemProcess extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        // SystemProcess doesn't handle messages
-        // All interaction is direct method calls from ConsoleApplication
         Log.logError("[SystemProcess] Unexpected message from: " + 
             packet.getSourcePath());
         return CompletableFuture.completedFuture(null);
@@ -179,9 +215,9 @@ public class SystemProcess extends FlowProcess {
     
     /**
      * Create and open system terminal
-     * Called directly by ConsoleApplication after system is ready
+     * Called by ConsoleApplication after system is ready
      * 
-     * Terminal handles:
+     * Terminal is created through render manager and handles:
      * - Bootstrap configuration (if needed)
      * - Authentication (first run + login + unlock)
      * - IODaemon management (via ServicesManager)
@@ -189,55 +225,58 @@ public class SystemProcess extends FlowProcess {
      */
     public CompletableFuture<Void> openSystemTerminal() {
         if (systemTerminal == null) {
-            Log.logMsg("[SystemProcess] Creating terminal for first time");
+            Log.logMsg("[SystemProcess] Creating system terminal through render manager");
             
             return createSystemTerminal()
-                .thenCompose(v -> systemTerminal.open());
+                .thenCompose(v -> systemTerminal.show()); // Show instead of "open"
         }
         
-        // Terminal exists, just open it
-        Log.logMsg("[SystemProcess] Opening existing terminal");
-        return systemTerminal.open();
+        // Terminal exists, just show it
+        Log.logMsg("[SystemProcess] Showing existing system terminal");
+        return systemTerminal.show();
     }
     
     /**
-     * Create THE system terminal (singular, persistent)
+     * Create THE system terminal through render manager
      * 
-     * Terminal owns:
-     * - Bootstrap configuration (passwordKeyboardId, ioDaemonSocketPath, etc)
-     * - ServicesManager (manages IODaemon lifecycle)
-     * - Authentication flow (first run, login, unlock)
-     * - SystemRuntime creation
-     * - All screens and menus
+     * Manager creates handle as its child and automatically:
+     * - Registers it in the process hierarchy
+     * - Starts the handle process
+     * - Tracks it for rendering
+     * - Polls it for render state
      */
     private CompletableFuture<Void> createSystemTerminal() {
-        Log.logMsg("[SystemProcess] Creating system terminal");
+        Log.logMsg("[SystemProcess] Creating system terminal through manager");
         
         state.addState(TERMINAL_CREATING);
         
-        systemTerminal = new SystemTerminalContainer(
-            renderingService,
-            registry,
-            contextPath
-        );
+        // Create terminal through manager (manager owns it)
+        systemTerminal = renderManager.createTerminal("system-terminal")
+            .title("System Terminal")
+            .size(80, 24)
+            .autoFocus(true)
+            .build();
         
-        registerChild(systemTerminal);
-        ContextPath terminalPath = systemTerminal.getContextPath();
-        
-        return startProcess(terminalPath)
+        // Manager automatically started the terminal
+        // Wait for it to be ready
+        return systemTerminal.waitUntilReady()
             .thenRun(() -> {
-                registry.connect(contextPath, terminalPath);
-                registry.connect(terminalPath, contextPath);
-                
                 state.removeState(TERMINAL_CREATING);
-                Log.logMsg("[SystemProcess] System terminal created: " + terminalPath);
+                Log.logMsg("[SystemProcess] System terminal ready: " + 
+                    systemTerminal.getContextPath());
+                Log.logMsg("[SystemProcess] Terminal owned by render manager, " +
+                    "automatic rendering active");
             });
     }
     
     // ===== GETTERS =====
     
-    public SystemTerminalContainer getSystemTerminal() {
+    public TerminalContainerHandle getSystemTerminal() {
         return systemTerminal;
+    }
+    
+    public ClientTerminalRenderManager getRenderManager() {
+        return renderManager;
     }
     
     public boolean isReady() {

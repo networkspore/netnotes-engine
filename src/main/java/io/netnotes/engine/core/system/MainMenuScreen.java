@@ -2,7 +2,11 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -16,10 +20,11 @@ import io.netnotes.engine.io.ContextPath;
  */
 class MainMenuScreen extends TerminalScreen {
     
-    private MenuNavigator menuNavigator;
+    private final MenuNavigator menuNavigator;
     
     public MainMenuScreen(String name, SystemTerminalContainer terminal) {
         super(name, terminal);
+        menuNavigator = new MenuNavigator(terminal).withParent(this);
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -30,34 +35,33 @@ class MainMenuScreen extends TerminalScreen {
      */
     @Override
     public RenderState getRenderState() {
-        return RenderState.builder().build();
+        return RenderState.builder()
+            .add(batch -> batch.clear())
+            // Future: Add header/status bar here
+            .add(menuNavigator.asRenderElement())
+            // Future: Add footer/system info here
+            .build();
     }
     
     // ===== LIFECYCLE =====
     
     @Override
     public CompletableFuture<Void> onShow() {
-        // Create menu navigator if needed
-        if (menuNavigator == null) {
-            menuNavigator = new MenuNavigator(terminal);
-        }
+        super.onShow();
         
         // Build and show main menu
         MenuContext menu = buildMainMenu();
         menuNavigator.showMenu(menu);
         
-        // MenuNavigator becomes the active renderable
-        // (It calls terminal.getRenderManager().setActive(this) internally)
-        
+
         return CompletableFuture.completedFuture(null);
     }
     
     @Override
     public void onHide() {
-        if (menuNavigator != null) {
-            menuNavigator.cleanup();
-            menuNavigator = null;
-        }
+
+        menuNavigator.cleanup();
+        
     }
     
     // ===== MENU BUILDING =====
@@ -81,8 +85,7 @@ class MainMenuScreen extends TerminalScreen {
                 if (access != null) {
                     terminal.showScreen("node-manager");
                 } else {
-                    // Show error (would need error screen or dialog)
-                    terminal.printError("Node manager requires system access");
+                    showError("Node manager requires system access");
                 }
             });
         
@@ -91,7 +94,7 @@ class MainMenuScreen extends TerminalScreen {
             "Browse encrypted files", 
             () -> {
                 // TODO: Implement file browser
-                terminal.println("File browser not yet implemented");
+                showError("File browser not yet implemented");
             });
         
         menu.addItem("settings", 
@@ -118,5 +121,28 @@ class MainMenuScreen extends TerminalScreen {
             });
         
         return menu;
+    }
+
+    private void showError(String message) {
+       Renderable errorRenderable = () -> {
+            return RenderState.builder()
+                .add(batch -> {
+                    int row = terminal.getRows() / 2;
+                    batch.printAt(row, 10, message, TextStyle.ERROR);
+                    batch.printAt(row + 2, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
+                    batch.showCursor();
+                    batch.moveCursor(row + 2, 29);
+                })
+                .build();
+        };
+        
+        terminal.setRenderable(errorRenderable);
+        terminal.invalidate();
+        
+        terminal.waitForKeyPress()
+            .thenRun(() -> {
+                terminal.setRenderable(this);
+                invalidate();
+            });
     }
 }

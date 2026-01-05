@@ -11,8 +11,8 @@ import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -67,6 +67,8 @@ class BrowsePackagesScreen extends TerminalScreen {
         this.availablePackages = new ArrayList<>();
         this.installedPackages = new ArrayList<>();
         this.nodeCommands = nodeCommands;
+
+        menuNavigator = new MenuNavigator(terminal).withParent(this);
     }
     
     public void setOnBack(Runnable onBack) {
@@ -105,7 +107,10 @@ class BrowsePackagesScreen extends TerminalScreen {
      * MenuNavigator is active, return empty
      */
     private RenderState buildMenuState() {
-        return RenderState.builder().build();
+        return RenderState.builder()
+            .add(batch -> batch.clear())
+            .add(menuNavigator.asRenderElement())
+            .build();
     }
     
     /**
@@ -252,9 +257,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 errorMessage = "Failed to update packages: " + ex.getMessage();
                 currentView = View.ERROR;
-                
-                // Make this screen active to show error
-                terminal.getRenderManager().setActive(this);
+                invalidate(); // PATCH: Added invalidate
                 
                 terminal.waitForKeyPress()
                     .thenRun(this::goBack);
@@ -312,9 +315,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             });
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        if (menuNavigator == null) {
-            menuNavigator = new MenuNavigator(terminal);
-        }
+      
         menuNavigator.showMenu(menu);
     }
     
@@ -410,16 +411,14 @@ class BrowsePackagesScreen extends TerminalScreen {
             installConfig = ProcessConfig.create(manifest.getNamespace());
             loadImmediately = manifest.isAutoload();
             currentView = View.CONFIRM_INSTALL;
+            invalidate();
             
-            // Make this screen active for confirm view
-            terminal.getRenderManager().setActive(this);
             startConfirmation();
         } else {
             // Allow user to configure
             currentView = View.CONFIGURE_INSTALL;
-            
-            // Make this screen active for input
-            terminal.getRenderManager().setActive(this);
+            invalidate();
+
             readCustomNamespace();
         }
     }
@@ -463,23 +462,21 @@ class BrowsePackagesScreen extends TerminalScreen {
     
     private void askAutoload() {
         // Update view to show autoload question
-        RenderState autoloadState = RenderState.builder()
-            .add((term) -> {
-                term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
-                term.printAt(5, 10, "Package: " + selectedPackage.getName());
-                term.printAt(7, 10, "Namespace: " + installConfig.getProcessId());
-                term.printAt(9, 10, "Load immediately after installation? (y/N):");
-                // InputReader at 13, 54
-            })
-            .build();
+        Renderable autoloadRenderable = () -> {
+            return RenderState.builder()
+                .add((term) -> {
+                    term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
+                    term.printAt(5, 10, "Package: " + selectedPackage.getName());
+                    term.printAt(7, 10, "Namespace: " + installConfig.getProcessId());
+                    term.printAt(9, 10, "Load immediately after installation? (y/N):");
+                    // InputReader at 13, 54
+                })
+                .build();
+        };
         
         // Temporarily replace render state
-        terminal.getRenderManager().setActive(new ClientRenderManager.Renderable() {
-            @Override
-            public RenderState getRenderState() {
-                return autoloadState;
-            }
-        });
+        terminal.setRenderable(autoloadRenderable);
+        terminal.invalidate();
         
         readAutoloadChoice();
     }
@@ -497,7 +494,9 @@ class BrowsePackagesScreen extends TerminalScreen {
                              "yes".equalsIgnoreCase(input);
             
             currentView = View.CONFIRM_INSTALL;
-            terminal.getRenderManager().setActive(this);
+            terminal.setRenderable(this);
+            invalidate();
+
             startConfirmation();
         });
         
@@ -532,7 +531,8 @@ class BrowsePackagesScreen extends TerminalScreen {
                 terminal.waitForKeyPress()
                     .thenRun(() -> {
                         currentView = View.CONFIRM_INSTALL;
-                        terminal.getRenderManager().setActive(this);
+                        terminal.setRenderable(this);
+                        invalidate();
                         startConfirmation();
                     });
             }

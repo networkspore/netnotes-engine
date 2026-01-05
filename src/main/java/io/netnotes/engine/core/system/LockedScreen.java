@@ -2,7 +2,7 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 
@@ -37,8 +37,8 @@ class LockedScreen extends TerminalScreen {
         // Set up key press handler
         return terminal.waitForKeyPress(() -> {
             // Transition to AUTHENTICATING → claims password keyboard, shows login
-            terminal.getState().removeState(SystemTerminalContainer.LOCKED);
-            terminal.getState().addState(SystemTerminalContainer.AUTHENTICATING);
+            terminal.getStateMachine().removeState(SystemTerminalContainer.LOCKED);
+            terminal.getStateMachine().addState(SystemTerminalContainer.AUTHENTICATING);
         });
     }
     

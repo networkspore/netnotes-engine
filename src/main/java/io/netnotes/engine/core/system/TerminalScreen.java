@@ -2,19 +2,29 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.elements.Invalidatable;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalScreen - Base class for all screens (REFACTORED for pull-based rendering)
+ * 
+ * DIRTY FLAG PATTERN:
+ * - Screens track their own dirty state
+ * - Call invalidate() after state changes
+ * - ClientRenderManager polls needsRender()
+ * - clearRenderFlag() called after successful render
  */
-abstract class TerminalScreen implements Renderable {
+abstract class TerminalScreen implements Renderable, Invalidatable {
     protected final String name;
     protected SystemTerminalContainer terminal;
     protected TerminalScreen parent;
     private volatile boolean isShowing = false;
+    
+    // DIRTY FLAG for rendering
+    private volatile boolean needsRender = false;
     
     public TerminalScreen(String name, SystemTerminalContainer terminal) {
         this.name = name;
@@ -43,7 +53,7 @@ abstract class TerminalScreen implements Renderable {
      * Default implementation makes this screen active in ClientRenderManager.
      * Override to add custom initialization (event handlers, data loading, etc.)
      * 
-     * IMPORTANT: Always call super.onShow() or manually activate in ClientRenderManager
+     * IMPORTANT: Always call super.onShow() or manually set as active renderable
      */
     public CompletableFuture<Void> onShow() {
         if (isShowing) {
@@ -53,23 +63,27 @@ abstract class TerminalScreen implements Renderable {
         
         isShowing = true;
 
-        // Make this screen active in ClientRenderManager
-        terminal.getRenderManager().setActive(this);
+        // Make this screen the active renderable
+        terminal.setRenderable(this);
+        
+        // Mark for initial render
+        invalidate();
+        
         return CompletableFuture.completedFuture(null);
     }
     
     /**
      * Called when screen becomes hidden
      * Override to cleanup (unregister handlers, release resources, etc.)
-     *
      */
     public void onHide() {
         isShowing = false;
+        needsRender = false; // Clear dirty flag on hide
     }
     
 
     public boolean isShowing(){
-        return this.isShowing;
+        return isShowing;
     }
 
     /**
@@ -85,11 +99,33 @@ abstract class TerminalScreen implements Renderable {
     public abstract RenderState getRenderState();
     
     /**
-     * Invalidate rendering
-     * Call this after updating state to trigger redraw
+     * Check if needs rendering
+     * Called by ClientRenderManager to check if worth polling
      */
-    protected void invalidate() {
-        terminal.getRenderManager().invalidate();
+    @Override
+    public boolean needsRender() {
+        return needsRender;
+    }
+    
+    /**
+     * Clear render flag after successful render
+     * Called by ClientRenderManager after render completes
+     */
+    @Override
+    public void clearRenderFlag() {
+        this.needsRender = false;
+    }
+    
+    /**
+     * Mark as needing render
+     * Call this after updating state to trigger redraw
+     * 
+     * Public so component renderables can call it
+     */
+    public void invalidate() {
+        this.needsRender = true;
+        // Notify container that renderable needs update
+        terminal.invalidate();
     }
     
     /**
@@ -99,6 +135,4 @@ abstract class TerminalScreen implements Renderable {
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         return CompletableFuture.completedFuture(null);
     }
-    
-  
 }

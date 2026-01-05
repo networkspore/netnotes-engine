@@ -11,7 +11,7 @@ import java.util.concurrent.CompletionException;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -178,8 +178,8 @@ class FailedSettingsScreen extends TerminalScreen {
                 terminal.printAt(9, 10, "Settings file is valid. Retrying authentication...")
                     .thenRunAsync(() -> TimeHelpers.timeDelay(2))
                     .thenRun(() -> {
-                        terminal.getState().removeState(SystemTerminalContainer.FAILED_SETTINGS);
-                        terminal.getState().addState(SystemTerminalContainer.AUTHENTICATING);
+                        terminal.getStateMachine().removeState(SystemTerminalContainer.FAILED_SETTINGS);
+                        terminal.getStateMachine().addState(SystemTerminalContainer.AUTHENTICATING);
                     });
             })
             .exceptionally(ex -> {
@@ -669,8 +669,8 @@ class FailedSettingsScreen extends TerminalScreen {
             .thenCompose(v -> terminal.printAt(9, 10, "Redirecting to setup..."))
             .thenRunAsync(() -> TimeHelpers.timeDelay(2))
             .thenRun(() -> {
-                terminal.getState().removeState(SystemTerminalContainer.FAILED_SETTINGS);
-                terminal.getState().addState(SystemTerminalContainer.FIRST_RUN);
+                terminal.getStateMachine().removeState(SystemTerminalContainer.FAILED_SETTINGS);
+                terminal.getStateMachine().addState(SystemTerminalContainer.FIRST_RUN);
             })
             .exceptionally(ex -> {
                 terminal.printError("Failed to delete data: " + ex.getMessage())

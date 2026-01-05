@@ -9,7 +9,7 @@ import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PathCapability;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.io.input.KeyRunTable;

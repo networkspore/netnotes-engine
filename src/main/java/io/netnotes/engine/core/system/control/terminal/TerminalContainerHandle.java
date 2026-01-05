@@ -4,6 +4,7 @@ package io.netnotes.engine.core.system.control.terminal;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
+import io.netnotes.engine.core.system.control.containers.Container;
 import io.netnotes.engine.core.system.control.containers.ContainerCommands;
 import io.netnotes.engine.core.system.control.containers.ContainerConfig;
 import io.netnotes.engine.core.system.control.containers.ContainerHandle;
@@ -32,7 +33,10 @@ public class TerminalContainerHandle extends ContainerHandle {
     private CompletableFuture<RoutedEvent> keyWaitFuture = null;
     private CompletableFuture<Void> anyKeyFuture = null;
     private NoteBytesReadOnly handlerId = null;
-    private ClientRenderManager renderManager;
+   
+    private volatile Renderable currentRenderable;
+    
+
     /**
      * Constructor - creates terminal-style container
      */
@@ -45,7 +49,42 @@ public class TerminalContainerHandle extends ContainerHandle {
             this.setDimensions(config.getWidth(), config.getHeight()); 
         }
     }
+
+
+    @Override
+    protected void setupStateTransitions() {
+        // VISIBLE: Container is visible
+        stateMachine.onStateAdded(Container.STATE_VISIBLE, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now visible");
+        });
+        
+        // HIDDEN: Container is hidden
+        stateMachine.onStateAdded(Container.STATE_HIDDEN, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now hidden");
+        });
+        
+        // FOCUSED: Container has input focus
+        stateMachine.onStateAdded(Container.STATE_FOCUSED, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now focused");
+        });
+        
+        stateMachine.onStateRemoved(Container.STATE_FOCUSED, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Focus lost");
+        });
+        
+        // ACTIVE: Container is actively rendering
+        stateMachine.onStateAdded(Container.STATE_ACTIVE, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now active (ready to render)");
+        });
+        
+        stateMachine.onStateRemoved(Container.STATE_ACTIVE, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] No longer active");
+        });
+        
+  
     
+    }
+
     public TerminalContainerHandle(String name) {
         super(TerminalContainerHandle.builder(name));
     }
@@ -54,6 +93,52 @@ public class TerminalContainerHandle extends ContainerHandle {
         return new TerminalBuilder(name);
     }
     
+
+    /**
+     * Set active renderable for this container
+     * 
+     * Simply stores the renderable. Render manager will poll it.
+     * 
+     * Usage:
+     * <pre>
+     * MyScreen screen = new MyScreen();
+     * terminal.setRenderable(screen);
+     * terminal.invalidate(); // Signal change
+     * </pre>
+     */
+    public void setRenderable(Renderable renderable) {
+        Renderable old = this.currentRenderable;
+        this.currentRenderable = renderable;
+        
+        if (old != renderable) {
+            // New renderable - increment generation
+            nextRenderGeneration();
+            invalidate();
+            
+            Log.logMsg(String.format(
+                "[TerminalContainerHandle:%s] Renderable changed (gen=%d)",
+                getId(), getCurrentRenderGeneration()
+            ));
+        }
+    }
+
+    /**
+     * Get current renderable (for render manager to poll)
+     */
+    public Renderable getRenderable() {
+        return currentRenderable;
+    }
+
+    /**
+     * Clear renderable
+     */
+    public void clearRenderable() {
+        this.currentRenderable = null;
+        clearDirtyFlag();
+    }
+
+   
+
     // ===== BUILDER =====
     
     public static class TerminalBuilder extends ContainerHandle.Builder {
@@ -172,32 +257,33 @@ public class TerminalContainerHandle extends ContainerHandle {
  
         return super.run().thenAccept(v -> {
             // Start render manager after stream is ready
-            this.renderManager = new ClientRenderManager(this);
-    
-            renderManager.start();
+  
             Log.logMsg("[TerminalContainerHandle] ClientRenderManager started (gen=1)");
         });
     }
 
-    public ClientRenderManager getRenderManager() {
-        return renderManager;
-    }
 
     @Override
     protected void onContainerResized(ContainerResizeEvent event) {
         setDimensions(event.getWidth(), event.getHeight());
         
-        // Invalidate to trigger re-render with new dimensions
-        if (renderManager != null) {
-            renderManager.invalidate();
-        }
+        // Increment generation on resize (layout change)
+        nextRenderGeneration();
+        
+        // Invalidate to trigger re-render
+        invalidate();
     }
-    
+
+    /**
+     * Check if has active renderable
+     */
+    public boolean hasRenderable() {
+        return currentRenderable != null;
+    }
+        
     @Override
     public void onStop() {
-        if (renderManager != null) {
-            renderManager.stop();
-        }
+        clearRenderable();
         super.onStop();
     }
 

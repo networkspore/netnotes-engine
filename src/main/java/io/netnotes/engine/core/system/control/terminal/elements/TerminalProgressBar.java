@@ -2,53 +2,42 @@ package io.netnotes.engine.core.system.control.terminal.elements;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 
 /**
- * ProgressBar - Terminal progress bar renderer
+ * TerminalProgressBar - REFACTORED for pull-based rendering
  * 
- * DUAL INTERFACE:
- * 1. As Renderable - can be active screen in ClientRenderManager (for long operations)
- * 2. As RenderElement - can be part of another component's RenderState
+ * DUAL USAGE PATTERNS:
+ * 
+ * 1. STANDALONE RENDERABLE:
+ *    TerminalProgressBar progress = new TerminalProgressBar(terminal, 10, 20, 50);
+ *    progress.show(); // Becomes active renderable
+ *    progress.updatePercent(50); // Auto-invalidates
+ * 
+ * 2. COMPONENT IN ANOTHER RENDERABLE:
+ *    TerminalProgressBar progress = new TerminalProgressBar(terminal, 5, 10, 40)
+ *        .withParent(this); // Set parent screen
+ *    
+ *    RenderState.builder()
+ *        .add(progress.asRenderElement())
+ *        .build();
+ *    
+ *    progress.updatePercent(50); // Invalidates parent
+ * 
+ * DIRTY FLAG TRACKING:
+ * - Implements needsRender() and clearRenderFlag()
+ * - Calls invalidate() after state changes
+ * - Invalidates parent if component, terminal if standalone
  * 
  * Renders progress bars in various styles:
  * - |10%|=====-------| (CLASSIC)
  * - [████░░░░░░] 40%  (BLOCKS)
  * - ▓▓▓▓▓▓░░░░ 60%    (SHADED)
  * - >>>>>>>--- 70%    (ARROWS)
- * 
- * Usage as Renderable (for long-running operations):
- * <pre>
- * TerminalProgressBar progress = new TerminalProgressBar(terminal, 10, 20, 50);
- * renderManager.setActive(progress);
- * 
- * // Update from worker thread
- * progress.updatePercent(25);
- * renderManager.invalidate();
- * </pre>
- * 
- * Usage as RenderElement (part of larger UI):
- * <pre>
- * TerminalProgressBar progress = new TerminalProgressBar(terminal, 5, 10, 40);
- * 
- * RenderState.builder()
- *     .add(createHeader())
- *     .add(progress.asRenderElement())  // Embed in larger UI
- *     .add(createFooter())
- *     .build();
- * </pre>
- * 
- * Legacy push-based rendering:
- * <pre>
- * progress.update(50).thenAccept(v -> {
- *     // Progress rendered
- * });
- * </pre>
  */
 public class TerminalProgressBar implements Renderable {
     
@@ -62,8 +51,11 @@ public class TerminalProgressBar implements Renderable {
     private volatile double currentPercent = 0;
     private volatile String currentMessage = null;
     
-    // For pull-based rendering invalidation
-    private ClientRenderManager renderManager = null;
+    // DIRTY FLAG for rendering
+    private volatile boolean needsRender = false;
+    
+    // PARENT RENDERABLE (for composition pattern)
+    private Renderable parentRenderable = null;
     
     public enum Style {
         /** |10%|=====-------| */
@@ -89,7 +81,17 @@ public class TerminalProgressBar implements Renderable {
         this.col = col;
         this.width = Math.max(10, width); // Minimum 10 chars
         this.style = style;
-        this.renderManager = terminal.getRenderManager();
+    }
+    
+    // ===== CONFIGURATION =====
+    
+    /**
+     * Set parent renderable (for composition pattern)
+     * When progress bar is part of another renderable, invalidate parent instead
+     */
+    public TerminalProgressBar withParent(Renderable parent) {
+        this.parentRenderable = parent;
+        return this;
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -105,12 +107,47 @@ public class TerminalProgressBar implements Renderable {
             .build();
     }
     
+    @Override
+    public boolean needsRender() {
+        return needsRender;
+    }
+    
+    @Override
+    public void clearRenderFlag() {
+        this.needsRender = false;
+    }
+    
+    /**
+     * Mark as needing render
+     * 
+     * TWO CASES:
+     * 1. Standalone: Invalidate terminal (we're the active renderable)
+     * 2. Component: Invalidate parent (parent will re-render us)
+     */
+    private void invalidate() {
+        this.needsRender = true;
+        
+        if (parentRenderable != null) {
+            // We're a component - invalidate parent
+            // Parent is responsible for calling terminal.invalidate()
+            if (parentRenderable instanceof Invalidatable inv) {
+                inv.invalidate();
+            } else {
+                // Fallback: invalidate terminal directly
+                terminal.invalidate();
+            }
+        } else {
+            // We're standalone - invalidate terminal directly
+            terminal.invalidate();
+        }
+    }
+    
     /**
      * Convert this ProgressBar to a RenderElement
      * Allows embedding in other components' RenderState
      */
     public RenderElement asRenderElement() {
-        // Capture current state for rendering
+        // Capture current state for rendering (thread-safe snapshot)
         final double percent = this.currentPercent;
         final String message = this.currentMessage;
         final int currentRow = this.row;
@@ -118,17 +155,17 @@ public class TerminalProgressBar implements Renderable {
         final int currentWidth = this.width;
         final Style currentStyle = this.style;
         
-        return (terminal) -> {
+        return (batch) -> {
             // Render progress bar
             String bar = generateBarString(percent, currentWidth, currentStyle);
-            terminal.printAt(currentRow, currentCol, bar, TextStyle.NORMAL);
+            batch.printAt(currentRow, currentCol, bar, TextStyle.NORMAL);
             
             // Render message if present
             if (message != null && !message.isEmpty()) {
                 // Clear the line first to remove old message
                 int messageRow = currentRow + 1;
-                terminal.clearLine(messageRow);
-                terminal.printAt(messageRow, currentCol, message, TextStyle.NORMAL);
+                batch.clearLine(messageRow);
+                batch.printAt(messageRow, currentCol, message, TextStyle.NORMAL);
             }
         };
     }
@@ -222,11 +259,7 @@ public class TerminalProgressBar implements Renderable {
         
         if (this.currentPercent != clampedPercent) {
             this.currentPercent = clampedPercent;
-            
-            // If we're the active renderable, invalidate
-            if (renderManager != null && renderManager.getActive() == this) {
-                renderManager.invalidate();
-            }
+            invalidate();
         }
     }
     
@@ -234,8 +267,32 @@ public class TerminalProgressBar implements Renderable {
      * Update progress with message
      */
     public synchronized void updatePercent(double percent, String message) {
-        this.currentMessage = message;
-        updatePercent(percent);
+        boolean changed = false;
+        
+        double clampedPercent = Math.max(0, Math.min(100, percent));
+        if (this.currentPercent != clampedPercent) {
+            this.currentPercent = clampedPercent;
+            changed = true;
+        }
+        
+        if (!java.util.Objects.equals(this.currentMessage, message)) {
+            this.currentMessage = message;
+            changed = true;
+        }
+        
+        if (changed) {
+            invalidate();
+        }
+    }
+    
+    /**
+     * Set message without changing percent
+     */
+    public synchronized void setMessage(String message) {
+        if (!java.util.Objects.equals(this.currentMessage, message)) {
+            this.currentMessage = message;
+            invalidate();
+        }
     }
     
     /**
@@ -244,10 +301,7 @@ public class TerminalProgressBar implements Renderable {
     public synchronized void clearMessage() {
         if (this.currentMessage != null) {
             this.currentMessage = null;
-            
-            if (renderManager != null && renderManager.getActive() == this) {
-                renderManager.invalidate();
-            }
+            invalidate();
         }
     }
     
@@ -269,8 +323,33 @@ public class TerminalProgressBar implements Renderable {
      * Reset to 0%
      */
     public void reset() {
-        updatePercent(0);
-        clearMessage();
+        synchronized (this) {
+            boolean changed = false;
+            
+            if (this.currentPercent != 0) {
+                this.currentPercent = 0;
+                changed = true;
+            }
+            
+            if (this.currentMessage != null) {
+                this.currentMessage = null;
+                changed = true;
+            }
+            
+            if (changed) {
+                invalidate();
+            }
+        }
+    }
+    
+    // ===== SHOW (for standalone use) =====
+    
+    /**
+     * Show as standalone progress bar (becomes active renderable)
+     */
+    public void show() {
+        terminal.setRenderable(this);
+        invalidate();
     }
     
     // ===== LEGACY PUSH-BASED RENDERING =====
@@ -281,6 +360,7 @@ public class TerminalProgressBar implements Renderable {
      * 
      * @deprecated Use updatePercent() with pull-based rendering instead
      */
+    @Deprecated
     public CompletableFuture<Void> update(double percent) {
         updatePercent(percent);
         return renderImmediate();
@@ -291,6 +371,7 @@ public class TerminalProgressBar implements Renderable {
      * 
      * @deprecated Use updatePercent(percent, message) with pull-based rendering instead
      */
+    @Deprecated
     public CompletableFuture<Void> update(double percent, String message) {
         updatePercent(percent, message);
         return renderImmediate();
@@ -300,7 +381,6 @@ public class TerminalProgressBar implements Renderable {
      * Immediate push-based rendering (legacy)
      */
     private CompletableFuture<Void> renderImmediate() {
-
         String bar = generateBarString(currentPercent, width, style);
 
         if (currentMessage != null && !currentMessage.isEmpty()) {
@@ -310,16 +390,16 @@ public class TerminalProgressBar implements Renderable {
                     .clearLine(row + 1)
                     .printAt(row + 1, col, currentMessage, TextStyle.NORMAL)
             );
-         }else{
+        } else {
             return terminal.printAt(row, col, bar, TextStyle.NORMAL);
-         }
+        }
     }
     
     /**
      * Clear the progress bar area (legacy)
      */
+    @Deprecated
     public CompletableFuture<Void> clear() {
-  
         return terminal.executeBatch(terminal.batch()
             .clearLine(row)
             .clearLine(row + 1));
@@ -364,4 +444,8 @@ public class TerminalProgressBar implements Renderable {
     public double getFraction() {
         return currentPercent / 100.0;
     }
+    
+    // ===== HELPER INTERFACE =====
+    
+    
 }

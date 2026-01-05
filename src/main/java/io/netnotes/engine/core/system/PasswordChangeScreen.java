@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
@@ -327,8 +327,8 @@ class PasswordChangeScreen extends TerminalScreen {
                         .thenCompose(v -> terminal.printAt(12, 10, "Press any key to enter recovery..."))
                         .thenCompose((v) -> terminal.waitForKeyPress(() -> {
                             // Transition to recovery screen
-                            terminal.getState().removeState(SystemTerminalContainer.SHOWING_SCREEN);
-                            terminal.getState().addState(SystemTerminalContainer.FAILED_SETTINGS);
+                            terminal.getStateMachine().removeState(SystemTerminalContainer.SHOWING_SCREEN);
+                            terminal.getStateMachine().addState(SystemTerminalContainer.FAILED_SETTINGS);
                         }));
                 }
             })
@@ -538,8 +538,8 @@ class PasswordChangeScreen extends TerminalScreen {
                 TerminalCommands.PRESS_ANY_KEY))
             .thenCompose((v) -> terminal.waitForKeyPress(() -> {
                 // Transition to recovery screen
-                terminal.getState().removeState(SystemTerminalContainer.SHOWING_SCREEN);
-                terminal.getState().addState(SystemTerminalContainer.FAILED_SETTINGS);
+                terminal.getStateMachine().removeState(SystemTerminalContainer.SHOWING_SCREEN);
+                terminal.getStateMachine().addState(SystemTerminalContainer.FAILED_SETTINGS);
             }));
         
         return null;

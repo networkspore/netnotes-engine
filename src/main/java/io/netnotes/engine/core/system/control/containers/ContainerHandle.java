@@ -36,6 +36,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -67,7 +68,7 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 public class ContainerHandle extends FlowProcess {
     
     // ===== CREATION PARAMETERS (set at construction) =====
-    private final ContainerId containerId;
+    protected final ContainerId containerId;
     private final ContainerType containerType;
     private final ContainerConfig containerConfig;
     private final ContextPath renderingServicePath;
@@ -75,14 +76,14 @@ public class ContainerHandle extends FlowProcess {
     private final String title;
     private final Builder builder;
     // ===== RUNTIME STATE =====
-    private volatile boolean isDestroyed = false;
+  
     
     protected NoteBytesReadOnly rendererId = null;
 
     // Stream TO Container (for render commands)
     protected StreamChannel renderStream;
     protected NoteBytesWriter renderWriter;
-    protected final AtomicLong renderGeneration = new AtomicLong(1);
+    protected final AtomicLong renderGeneration = new AtomicLong();
 
     // Stream FROM Container (for events)
     protected StreamChannel eventChannel = null;
@@ -98,7 +99,7 @@ public class ContainerHandle extends FlowProcess {
     //<NoteMessaging.ItemTypes, id>
     private Map<NoteBytesReadOnly, String> defaultEventHandlers = new ConcurrentHashMap<>();
    
-
+    protected final BitFlagStateMachine stateMachine;
     
     // Event map allows events from the Container to reach the handle
     protected volatile int width;
@@ -116,10 +117,74 @@ public class ContainerHandle extends FlowProcess {
         this.renderingServicePath = builder.renderingServicePath;
         this.containerPath = renderingServicePath.append(containerId.toNoteBytes());
         this.builder = builder;
-
+        this.stateMachine = new BitFlagStateMachine("ContainerHandle:" + containerId);
+        setupBaseStateHandler();
         setupEventHandlers();
+        setupStateTransitions();
     }
 
+    private void setupBaseStateHandler(){
+        stateMachine.onStateAdded(Container.STATE_DESTROYED, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] destroyed");
+            if(stateMachine.hasState(Container.STATE_DESTROYING)){
+                stateMachine.removeState(Container.STATE_DESTROYING);
+            }   
+        });
+
+        stateMachine.onStateAdded(Container.STATE_DESTROYING, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] destroyed");
+            if(stateMachine.hasState(Container.STATE_DESTROYED)){
+                stateMachine.removeState(Container.STATE_DESTROYING);
+            }   
+        });
+    }
+
+    protected void setupStateTransitions(){
+
+    }
+
+    
+
+    public BitFlagStateMachine getStateMachine() {
+        return stateMachine;
+    }
+
+    public BitFlagStateMachine.StateSnapshot getStateSnapshot() {
+        return stateMachine.getSnapshot();
+    }
+
+     /**
+     * Check if container is visible (server-confirmed)
+     */
+    public boolean isContainerVisible() {
+        return stateMachine.hasState(Container.STATE_VISIBLE);
+    }
+    
+    /**
+     * Check if container is hidden
+     */
+    public boolean isContainerHidden() {
+        return stateMachine.hasState(Container.STATE_HIDDEN);
+    }
+    
+    /**
+     * Check if container is focused
+     */
+    public boolean isContainerFocused() {
+        return stateMachine.hasState(Container.STATE_FOCUSED);
+    }
+    
+    /**
+     * Check if container is active (ready to render)
+     */
+    public boolean isContainerActive() {
+        return stateMachine.hasState(Container.STATE_ACTIVE);
+    }
+    
+    public boolean isDestroyed(){
+        return stateMachine.hasState(Container.STATE_DESTROYED);
+    }
+    
     /**
      * Create a builder for ContainerHandle
      */
@@ -296,7 +361,7 @@ public class ContainerHandle extends FlowProcess {
             })
             .exceptionally(ex -> {
                 Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
-                isDestroyed = true;
+                stateMachine.setState(Container.STATE_DESTROYED);
                 return null;
             });
     }
@@ -346,7 +411,7 @@ public class ContainerHandle extends FlowProcess {
     @Override
     public void onStop() {
         Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + containerId);
-        isDestroyed = true;
+        stateMachine.setState(Container.STATE_DESTROYED);
         
         // Close render stream
         if (renderStream != null) {
@@ -516,24 +581,33 @@ public class ContainerHandle extends FlowProcess {
         return sendToService(msg);
     }
     
+    
+
     /**
      * Destroy container
      */
     public CompletableFuture<Void> destroy() {
-        if (isDestroyed) {
+        if (isDestroyed()) {
             return CompletableFuture.completedFuture(null);
         }
         if(rendererId == null){
             return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
         }
         NoteBytesMap msg = ContainerCommands.destroyContainer(containerId, rendererId);
-        return sendToService(msg)
-            .thenRun(() -> {
-                // Self-cleanup after destroy
-                if (registry != null) {
-                    registry.unregisterProcess(contextPath);
-                }
-            });
+        if(!isDestroying()){
+            return sendToService(msg)
+                .thenRun(() -> {
+                    // Self-cleanup after destroy
+                    if (registry != null) {
+                        registry.unregisterProcess(contextPath);
+                    }
+                });
+        }else{
+            if (registry != null) {
+                registry.unregisterProcess(contextPath);
+            }
+            return CompletableFuture.completedFuture(null);
+        }
     }
     
     /**
@@ -551,6 +625,7 @@ public class ContainerHandle extends FlowProcess {
     // ===== RENDER COMMAND SENDING =====
     
 
+
    /**
     * Send render command with generation check
     * 
@@ -560,19 +635,28 @@ public class ContainerHandle extends FlowProcess {
     */
     protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command, long generation) {
         return CompletableFuture.runAsync(() -> {
+
+            BitFlagStateMachine.StateSnapshot snap = stateMachine.getSnapshot();
+            
+            // STATE CHECK - don't send if not active
+            if (!snap.hasState(Container.STATE_ACTIVE)) {
+                Log.logMsg("[ContainerHandle:" + containerId + "] Skipping render - container not active yet");
+                return;
+            }
+
             // GENERATION CHECK - prevents stale renders
             if (!isRenderGenerationCurrent(generation)) {
                 return;
             }
             // Check if destroyed
-            if (isDestroyed) {
+            if (isDestroyed()) {
                 throw new CompletionException(
                     new IllegalStateException("Container already destroyed")
                 );
             }
             
             // Check if stream ready
-            if (renderWriter == null) {
+            if (!isRenderStreamReady()) {
                 throw new CompletionException(
                     new IllegalStateException("Render stream not initialized")
                 );
@@ -604,12 +688,27 @@ public class ContainerHandle extends FlowProcess {
         return sendRenderCommand(command, getCurrentRenderGeneration());
     }
     
-    /**
-     * Mark as needing render (invalidate)
-     * Doesn't actually render - just signals need for redraw
+     /**
+     * Check if container needs rendering
+     * 
+     * Render manager calls this to check if worth polling
      */
+    public boolean isDirty() {
+        return this.stateMachine.hasState(Container.STATE_UPDATE_REQUESTED);
+    }
+
+    /**
+     * Clear dirty flag
+     * 
+     * Render manager calls this after successful render
+     */
+    public void clearDirtyFlag() {
+        this.stateMachine.removeState(Container.STATE_UPDATE_REQUESTED);
+    }
+
+
     public void invalidate() {
-        // Subclasses can override to schedule actual render
+        stateMachine.addState(Container.STATE_UPDATE_REQUESTED);
     }
 
     // ===== SERVICE COMMUNICATION =====
@@ -618,7 +717,7 @@ public class ContainerHandle extends FlowProcess {
      * Send command to RenderingService
      */
     private CompletableFuture<Void> sendToService(NoteBytesMap command) {
-        if (isDestroyed) {
+        if (isDestroyed()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Container already destroyed")
             );
@@ -1093,18 +1192,47 @@ public class ContainerHandle extends FlowProcess {
         setDimensions(event.getWidth(), event.getHeight());
     }
 
+    public boolean isDestroying(){
+        return stateMachine.hasState(Container.STATE_DESTROYING);
+    }
+
     protected void onContainerClosed(){
+        if(!isDestroyed()){
+            stateMachine.addState(Container.STATE_DESTROYING);
+            destroy();
+        }
+        // Removes active if not already removed
+        stateMachine.removeState(Container.STATE_ACTIVE); 
+        stateMachine.removeState(Container.STATE_VISIBLE);
+        stateMachine.removeState(Container.STATE_ACTIVE);
+        stateMachine.removeState(Container.STATE_FOCUSED);
     }
 
-    protected void onContainerShown(){
+    protected void onContainerShown() {
+        stateMachine.addState(Container.STATE_VISIBLE);
+        stateMachine.removeState(Container.STATE_HIDDEN);
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container shown (server confirmed)");
     }
-    protected void onContainerHidden(){
-    }
-    protected void onContainerFocusGained(){
 
+    protected void onContainerHidden() {
+        stateMachine.addState(Container.STATE_HIDDEN);
+        stateMachine.removeState(Container.STATE_VISIBLE);
+        stateMachine.removeState(Container.STATE_ACTIVE);
+        stateMachine.removeState(Container.STATE_FOCUSED);
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container hidden (server confirmed)");
     }
-    protected void onContainerFocusLost(){
+
+    protected void onContainerFocusGained() {
+        stateMachine.addState(Container.STATE_FOCUSED);
+        stateMachine.addState(Container.STATE_ACTIVE);
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container focused (server confirmed)");
     }
+    protected void onContainerFocusLost() {
+        stateMachine.removeState(Container.STATE_FOCUSED);
+        stateMachine.removeState(Container.STATE_ACTIVE);
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container focus lost (server confirmed)");
+    }
+
     protected void onContainerMove(ContainerMoveEvent moveEvent){
 
     }
@@ -1131,14 +1259,18 @@ public class ContainerHandle extends FlowProcess {
         return renderingServicePath;
     }
     
-    public boolean isDestroyed() {
-        return isDestroyed;
-    }
+    private boolean readyCache = false;
 
     public boolean isRenderStreamReady() {
-        return renderStream != null && 
-               renderStream.getReadyFuture().isDone() &&
-               !renderStream.getReadyFuture().isCompletedExceptionally();
+        if(!readyCache){
+            readyCache = renderStream != null && 
+                renderStream.getReadyFuture().isDone() &&
+                !renderStream.getReadyFuture().isCompletedExceptionally();
+            return readyCache;
+        }else{
+            readyCache = readyCache && renderStream != null;
+            return readyCache;
+        }
     }
 
     public CompletableFuture<Void> waitUntilReady() {
@@ -1146,7 +1278,7 @@ public class ContainerHandle extends FlowProcess {
             // Stream hasn't been created yet, wait for it
             Log.logMsg("[ContainerHandle] waiting for ready");
             return CompletableFuture.runAsync(() -> {
-                while (renderStream == null && !isDestroyed) {
+                while (renderStream == null && !isDestroyed()) {
                     try {
                         Thread.sleep(10);
                     } catch (InterruptedException e) {
@@ -1154,7 +1286,7 @@ public class ContainerHandle extends FlowProcess {
                         throw new RuntimeException(e);
                     }
                 }
-                if (isDestroyed) {
+                if (isDestroyed()) {
                     throw new IllegalStateException("Container destroyed before ready");
                 }
             }, VirtualExecutors.getVirtualExecutor()).thenCompose(v -> {

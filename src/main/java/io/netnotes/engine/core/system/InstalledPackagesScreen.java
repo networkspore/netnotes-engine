@@ -5,7 +5,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -42,7 +42,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     // UI components
     private final ContextPath menuBasePath;
-    private MenuNavigator menuNavigator;
+    private final MenuNavigator menuNavigator;
     private TerminalInputReader inputReader;
     private final NodeCommands nodeCommands;
     private Runnable onBackCallback;
@@ -55,6 +55,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         super(name, terminal);
         this.menuBasePath = ContextPath.of("installed-packages");
         this.nodeCommands = nodeCommands;
+        this.menuNavigator = new MenuNavigator(terminal).withParent(this);
     }
     
     public void setOnBack(Runnable callback) {
@@ -88,7 +89,10 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private RenderState buildMenuState() {
         // MenuNavigator is active
-        return RenderState.builder().build();
+        return RenderState.builder()
+            .add(batch -> batch.clear())
+            .add(menuNavigator.asRenderElement())
+            .build();
     }
     
     private RenderState buildLoadingInstanceState() {
@@ -223,8 +227,8 @@ class InstalledPackagesScreen extends TerminalScreen {
             if (packages == null || packages.isEmpty()) {
                 errorMessage = "No packages installed";
                 currentView = View.ERROR;
-                
-                terminal.getRenderManager().setActive(this);
+                invalidate();
+
                 terminal.waitForKeyPress()
                     .thenRun(this::goBack);
             } else {
@@ -235,8 +239,8 @@ class InstalledPackagesScreen extends TerminalScreen {
         .exceptionally(ex -> {
             errorMessage = "Failed to load packages: " + ex.getMessage();
             currentView = View.ERROR;
-            
-            terminal.getRenderManager().setActive(this);
+            invalidate();
+
             terminal.waitForKeyPress()
                 .thenRun(this::goBack);
             
@@ -269,9 +273,7 @@ class InstalledPackagesScreen extends TerminalScreen {
             this::loadPackages);
         menu.addItem("back", "Back", this::goBack);
         
-        if (menuNavigator == null) {
-            menuNavigator = new MenuNavigator(terminal);
-        }
+       
         menuNavigator.showMenu(menu);
     }
     
@@ -323,9 +325,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private void loadInstance() {
         currentView = View.LOADING_INSTANCE;
-        
-        // Make this screen active
-        terminal.getRenderManager().setActive(this);
+        invalidate();
         
         nodeCommands.loadNode(selectedPackage.getPackageId().getId())
             .thenAccept(instance -> {
@@ -376,9 +376,8 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     private void showDetailedView() {
         currentView = View.DETAILED_VIEW;
-        
-        // Make this screen active
-        terminal.getRenderManager().setActive(this);
+        invalidate();
+
         
         terminal.waitForKeyPress()
             .thenRun(() -> {
@@ -395,8 +394,8 @@ class InstalledPackagesScreen extends TerminalScreen {
             errorMessage = "Cannot uninstall package with running instances.\n" +
                 "Stop all instances first using the 'Running Instances' screen.";
             currentView = View.ERROR;
+            invalidate();
             
-            terminal.getRenderManager().setActive(this);
             terminal.waitForKeyPress()
                 .thenRun(() -> {
                     currentView = View.PACKAGE_DETAILS;
@@ -439,7 +438,6 @@ class InstalledPackagesScreen extends TerminalScreen {
     private void cleanup() {
         if (menuNavigator != null) {
             menuNavigator.cleanup();
-            menuNavigator = null;
         }
         
         if (inputReader != null) {

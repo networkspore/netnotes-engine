@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;

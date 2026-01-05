@@ -4,10 +4,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.Renderable;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
@@ -21,6 +20,11 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * 
  * Now implements Renderable and works with ClientRenderManager.
  * Can be used as the active screen during password entry.
+ * 
+ * DIRTY FLAG TRACKING:
+ * - Tracks needsRender flag like other renderables
+ * - Calls invalidate() after state changes
+ * - Container polls and renders
  * 
  * Usage:
  * <pre>
@@ -37,7 +41,6 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 public class PasswordPrompt implements Renderable {
     
     private final SystemTerminalContainer terminal;
-    private final ClientRenderManager renderManager;
     
     // Configuration
     private String title = "Authentication";
@@ -66,6 +69,9 @@ public class PasswordPrompt implements Renderable {
     private volatile String currentPromptText = null;
     private volatile String statusMessage = null;  // For error/info messages
     
+    // DIRTY FLAG for rendering
+    private volatile boolean needsRender = false;
+    
     // Internal components
     private PasswordReader passwordReader;
     private CompletableFuture<Void> timeoutFuture;
@@ -73,7 +79,6 @@ public class PasswordPrompt implements Renderable {
     
     public PasswordPrompt(SystemTerminalContainer terminal) {
         this.terminal = terminal;
-        this.renderManager = terminal.getRenderManager();
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -85,6 +90,24 @@ public class PasswordPrompt implements Renderable {
             case PROMPTING, CONFIRMING -> buildPromptState();
             case PROCESSING -> buildProcessingState();
         };
+    }
+    
+    @Override
+    public boolean needsRender() {
+        return needsRender;
+    }
+    
+    @Override
+    public void clearRenderFlag() {
+        this.needsRender = false;
+    }
+    
+    /**
+     * Mark as needing render
+     */
+    private void invalidate() {
+        this.needsRender = true;
+        terminal.invalidate();
     }
     
     /**
@@ -229,7 +252,7 @@ public class PasswordPrompt implements Renderable {
     
     /**
      * Show password prompt
-     * Makes this the active renderable
+     * Makes this the active renderable in the container
      */
     public CompletableFuture<Void> show() {
         if (currentState != State.INACTIVE) {
@@ -243,7 +266,8 @@ public class PasswordPrompt implements Renderable {
         statusMessage = null;
         
         // Make this the active renderable
-        renderManager.setActive(this);
+        terminal.setRenderable(this);
+        invalidate();
         
         return terminal.claimPasswordKeyboard()
             .thenRun(() -> {
@@ -303,7 +327,7 @@ public class PasswordPrompt implements Renderable {
             }
         });
         
-        renderManager.invalidate();
+        invalidate();
     }
     
     private void handleFirstPassword(NoteBytesEphemeral password) {
@@ -317,7 +341,7 @@ public class PasswordPrompt implements Renderable {
         currentState = State.CONFIRMING;
         currentPromptText = confirmPrompt;
         statusMessage = null;
-        renderManager.invalidate();
+        invalidate();
         
         // Restart input
         startPasswordEntry();
@@ -357,7 +381,7 @@ public class PasswordPrompt implements Renderable {
                 currentState = State.PROMPTING;
                 currentPromptText = prompt;
                 statusMessage = "Passwords do not match - try again";
-                renderManager.invalidate();
+                invalidate();
                 
                 // Brief delay, then restart
                 CompletableFuture.runAsync(() -> {
@@ -368,7 +392,7 @@ public class PasswordPrompt implements Renderable {
                     }
                 }).thenRun(() -> {
                     statusMessage = null;
-                    renderManager.invalidate();
+                    invalidate();
                     startPasswordEntry();
                     startTimeout();
                 });
@@ -420,6 +444,7 @@ public class PasswordPrompt implements Renderable {
         if (currentState == State.INACTIVE) return;
         
         currentState = State.INACTIVE;
+        needsRender = false;
         
         cancelTimeout();
         

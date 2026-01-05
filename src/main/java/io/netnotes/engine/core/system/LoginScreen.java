@@ -1,7 +1,7 @@
 package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
-import io.netnotes.engine.core.system.control.terminal.ClientRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.utils.TimeHelpers;
 
@@ -10,13 +10,18 @@ import io.netnotes.engine.utils.TimeHelpers;
  * 
  * Uses PasswordPrompt which is also pull-based.
  * This screen acts as a coordinator, delegating rendering to PasswordPrompt.
+ * 
+ * RENDERABLE OWNERSHIP:
+ * - When PasswordPrompt is active, it's the container's renderable
+ * - When showing error/processing, this screen is the renderable
+ * - Only ONE is active at a time
  */
 class LoginScreen extends TerminalScreen {
     
     private enum State {
-        SHOWING_PROMPT,     // PasswordPrompt is active
-        PROCESSING,         // Verifying password
-        ERROR               // Showing error message
+        SHOWING_PROMPT,     // PasswordPrompt is active renderable
+        PROCESSING,         // This screen is active, showing processing
+        ERROR               // This screen is active, showing error
     }
     
     private volatile State currentState = State.SHOWING_PROMPT;
@@ -43,6 +48,8 @@ class LoginScreen extends TerminalScreen {
      * PasswordPrompt is active renderable, we return empty
      */
     private RenderState buildPromptState() {
+        // PasswordPrompt is the active renderable
+        // We shouldn't be rendering
         return RenderState.builder().build();
     }
     
@@ -86,7 +93,7 @@ class LoginScreen extends TerminalScreen {
         String title = terminal.isAuthenticated() ? "System Locked" : "Netnotes";
         
         currentState = State.SHOWING_PROMPT;
-        invalidate();
+        // Don't call invalidate() - PasswordPrompt will become active
         
         passwordPrompt = new PasswordPrompt(terminal)
             .withTitle(title)
@@ -96,12 +103,14 @@ class LoginScreen extends TerminalScreen {
             .onTimeout(this::handleTimeout)
             .onCancel(this::handleCancel);
         
+        // PasswordPrompt.show() will call terminal.setRenderable(passwordPrompt)
         return passwordPrompt.show();
     }
     
     @Override
     public void onHide() {
         cleanup();
+        super.onHide();
     }
     
     // ===== EVENT HANDLING =====
@@ -109,8 +118,9 @@ class LoginScreen extends TerminalScreen {
     private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
         currentState = State.PROCESSING;
         
-        // Make this screen active to show processing
-        terminal.getRenderManager().setActive(this);
+        // Make THIS screen the active renderable to show processing
+        terminal.setRenderable(this);
+        invalidate();
         
         terminal.authenticate(password)
             .thenAccept(valid -> {
@@ -154,8 +164,9 @@ class LoginScreen extends TerminalScreen {
         errorMessage = "Authentication timeout";
         currentState = State.ERROR;
         
-        // Make this screen active to show error
-        terminal.getRenderManager().setActive(this);
+        // Make THIS screen the active renderable to show error
+        terminal.setRenderable(this);
+        invalidate();
         
         terminal.waitForKeyPress()
             .thenRun(() -> {
