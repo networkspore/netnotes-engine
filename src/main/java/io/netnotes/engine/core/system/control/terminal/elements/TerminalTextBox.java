@@ -4,14 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalBatchBuilder;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
-
 /**
  * TextBox - Composable text box primitive for terminal UIs
  * 
@@ -43,7 +42,7 @@ import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
  * textBox.render(terminal);  // Direct rendering
  * </pre>
  */
-public class TerminalTextBox implements Renderable {
+public class TerminalTextBox implements TerminalRenderable {
     
     // Position and dimensions
     private final int row;
@@ -99,8 +98,8 @@ public class TerminalTextBox implements Renderable {
      * Thread-safe read-only state capture
      */
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder()
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder()
             .add(asRenderElement())
             .build();
     }
@@ -110,7 +109,7 @@ public class TerminalTextBox implements Renderable {
      * Convert this TextBox to a RenderElement
      * Returns a function that adds commands to a BatchBuilder
      */
-    public RenderElement asRenderElement() {
+    public TerminalRenderElement asRenderElement() {
         // Capture current state
         final int currentRow = this.row;
         final int currentCol = this.col;
@@ -147,7 +146,7 @@ public class TerminalTextBox implements Renderable {
      * This is the core rendering logic that works for both pull and push modes
      */
     private void addRenderCommandsToBatch(
-            BatchBuilder batch,
+            TerminalBatchBuilder batch,
             int row, int col, int width, int height,
             BoxStyle boxStyle, TextStyle textStyle,
             String title, TitlePlacement titlePlacement, TextStyle titleStyle,
@@ -182,7 +181,7 @@ public class TerminalTextBox implements Renderable {
      * Add title rendering to batch
      */
     private void addTitleToBatch(
-            BatchBuilder batch,
+            TerminalBatchBuilder batch,
             int row, int col, int width, int height,
             String title, TitlePlacement placement, TextStyle style,
             ContentAlignment contentAlignment) {
@@ -223,7 +222,7 @@ public class TerminalTextBox implements Renderable {
      * Add content lines rendering to batch
      */
     private void addContentLinesToBatch(
-            BatchBuilder batch,
+            TerminalBatchBuilder batch,
             int row, int col, int width, int height,
             List<String> contentLines, ContentAlignment alignment, int padding,
             TextStyle textStyle, boolean scrollable, int scrollOffset,
@@ -276,7 +275,7 @@ public class TerminalTextBox implements Renderable {
      * Add horizontal scroll indicators to batch
      */
     private void addHorizontalScrollIndicatorsToBatch(
-            BatchBuilder batch,
+            TerminalBatchBuilder batch,
             int row, int col, int width,
             int contentStartRow, int contentHeight, int contentWidth,
             List<String> contentLines, int horizontalScrollOffset) {
@@ -372,7 +371,7 @@ public class TerminalTextBox implements Renderable {
      */
     public CompletableFuture<Void> render(TerminalContainerHandle terminal) {
          // Create batch with all commands
-        BatchBuilder batch = terminal.batch();
+        TerminalBatchBuilder batch = terminal.batch();
         
         // Add all rendering commands to batch
         addRenderCommandsToBatch(

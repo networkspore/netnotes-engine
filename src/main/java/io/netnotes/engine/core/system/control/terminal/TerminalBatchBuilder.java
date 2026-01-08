@@ -1,11 +1,10 @@
 package io.netnotes.engine.core.system.control.terminal;
 
-import io.netnotes.engine.core.system.control.containers.ContainerCommands;
 import io.netnotes.engine.core.system.control.containers.ContainerId;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
+import io.netnotes.engine.core.system.control.ui.BatchBuilder;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
@@ -31,37 +30,20 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
  * });
  * </pre>
  */
-public class BatchBuilder {
+public class TerminalBatchBuilder extends BatchBuilder {
     
-    private final ContainerId containerId;
-    private final NoteBytes rendererId;
-    private final NoteBytesArray commands;
-    private final long generation;
     
-    public BatchBuilder(ContainerId containerId, NoteBytes rendererId, long generation) {
-        this.containerId = containerId;
-        this.rendererId = rendererId;
-        this.generation = generation;
-        this.commands = new NoteBytesArray();
+    public TerminalBatchBuilder(ContainerId containerId, NoteBytes rendererId, long generation) {
+        super(containerId, rendererId, generation);
     }
     
-    /**
-     * Build final batch command
-     */
-    public NoteBytesMap build() {
-        NoteBytesMap batchCommand = new NoteBytesMap();
-        batchCommand.put(Keys.CMD, TerminalCommands.TERMINAL_BATCH);
-        batchCommand.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
-        batchCommand.put(ContainerCommands.RENDERER_ID, rendererId);
-        batchCommand.put(ContainerCommands.GENERATION, generation);
-        batchCommand.put(TerminalCommands.BATCH_COMMANDS, commands);
-        return batchCommand;
-    }
+ 
     
     /**
      * Add raw command to batch
      */
-    public BatchBuilder addCommand(NoteBytesMap cmd) {
+    @Override
+    public TerminalBatchBuilder addCommand(NoteBytesMap cmd) {
         commands.add(cmd.toNoteBytes());
         return this;
     }
@@ -69,38 +51,19 @@ public class BatchBuilder {
     /**
      * Add raw command bytes to batch
      */
-    public BatchBuilder addCommand(NoteBytes cmd) {
+    @Override
+    public TerminalBatchBuilder addCommand(NoteBytes cmd) {
         commands.add(cmd);
         return this;
     }
     
-    /**
-     * Get generation this batch is for
-     */
-    public long getGeneration() {
-        return generation;
-    }
-    
-    /**
-     * Get number of commands in batch
-     */
-    public int getCommandCount() {
-        return commands.size();
-    }
-    
-    /**
-     * Check if batch is empty
-     */
-    public boolean isEmpty() {
-        return commands.isEmpty();
-    }
     
     // ===== CONVENIENCE METHODS =====
     
     /**
      * Clear screen
      */
-    public BatchBuilder clear() {
+    public TerminalBatchBuilder clear() {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
         return addCommand(cmd);
@@ -109,14 +72,14 @@ public class BatchBuilder {
     /**
      * Print text
      */
-    public BatchBuilder print(String text) {
+    public TerminalBatchBuilder print(String text) {
         return print(text, TextStyle.NORMAL);
     }
     
     /**
      * Print styled text
      */
-    public BatchBuilder print(String text, TextStyle style) {
+    public TerminalBatchBuilder print(String text, TextStyle style) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
         cmd.put(Keys.TEXT, text);
@@ -127,14 +90,14 @@ public class BatchBuilder {
     /**
      * Print line
      */
-    public BatchBuilder println(String text) {
+    public TerminalBatchBuilder println(String text) {
         return println(text, TextStyle.NORMAL);
     }
     
     /**
      * Print styled line
      */
-    public BatchBuilder println(String text, TextStyle style) {
+    public TerminalBatchBuilder println(String text, TextStyle style) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
         cmd.put(Keys.TEXT, text);
@@ -145,14 +108,14 @@ public class BatchBuilder {
     /**
      * Print at position
      */
-    public BatchBuilder printAt(int row, int col, String text) {
+    public TerminalBatchBuilder printAt(int row, int col, String text) {
         return printAt(row, col, text, TextStyle.NORMAL);
     }
     
     /**
      * Print styled text at position
      */
-    public BatchBuilder printAt(int row, int col, String text, TextStyle style) {
+    public TerminalBatchBuilder printAt(int row, int col, String text, TextStyle style) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT_AT);
         cmd.put(Keys.ROW, row);
@@ -165,7 +128,7 @@ public class BatchBuilder {
     /**
      * Move cursor
      */
-    public BatchBuilder moveCursor(int row, int col) {
+    public TerminalBatchBuilder moveCursor(int row, int col) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
         cmd.put(Keys.ROW, row);
@@ -176,7 +139,7 @@ public class BatchBuilder {
     /**
      * Show cursor
      */
-    public BatchBuilder showCursor() {
+    public TerminalBatchBuilder showCursor() {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
         return addCommand(cmd);
@@ -185,7 +148,7 @@ public class BatchBuilder {
     /**
      * Hide cursor
      */
-    public BatchBuilder hideCursor() {
+    public TerminalBatchBuilder hideCursor() {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
         return addCommand(cmd);
@@ -194,7 +157,7 @@ public class BatchBuilder {
     /**
      * Clear line at cursor
      */
-    public BatchBuilder clearLine() {
+    public TerminalBatchBuilder clearLine() {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
         return addCommand(cmd);
@@ -203,7 +166,7 @@ public class BatchBuilder {
     /**
      * Clear specific line
      */
-    public BatchBuilder clearLine(int row) {
+    public TerminalBatchBuilder clearLine(int row) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
         cmd.put(Keys.ROW, row);
@@ -213,7 +176,7 @@ public class BatchBuilder {
     /**
      * Clear region
      */
-    public BatchBuilder clearRegion(int startRow, int startCol, int endRow, int endCol) {
+    public TerminalBatchBuilder clearRegion(int startRow, int startCol, int endRow, int endCol) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
         cmd.put(TerminalCommands.START_ROW, startRow);
@@ -226,7 +189,7 @@ public class BatchBuilder {
     /**
      * Draw box
      */
-    public BatchBuilder drawBox(
+    public TerminalBatchBuilder drawBox(
         int startRow, int startCol,
         int width, int height,
         String title,
@@ -246,7 +209,7 @@ public class BatchBuilder {
     /**
      * Draw box (no title)
      */
-    public BatchBuilder drawBox(
+    public TerminalBatchBuilder drawBox(
         int startRow, int startCol,
         int width, int height,
         BoxStyle boxStyle
@@ -257,7 +220,7 @@ public class BatchBuilder {
     /**
      * Draw horizontal line
      */
-    public BatchBuilder drawHLine(int row, int startCol, int length) {
+    public TerminalBatchBuilder drawHLine(int row, int startCol, int length) {
         NoteBytesMap cmd = new NoteBytesMap();
         cmd.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
         cmd.put(Keys.ROW, row);

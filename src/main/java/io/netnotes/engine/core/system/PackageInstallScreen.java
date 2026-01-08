@@ -9,8 +9,9 @@ import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PathCapability;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -51,11 +52,11 @@ class PackageInstallScreen extends TerminalScreen {
     
     public PackageInstallScreen(
         String name, 
-        SystemTerminalContainer terminal, 
+        SystemApplication systemApplication, 
         PackageInfo packageInfo,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal);
+        super(name, systemApplication);
         this.packageInfo = packageInfo;
         this.nodeCommands = nodeCommands;
     }
@@ -79,7 +80,7 @@ class PackageInstallScreen extends TerminalScreen {
     // ===== PULL-BASED RENDERING =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentStep) {
             case PACKAGE_OVERVIEW -> buildPackageOverviewState();
             case REVIEW_CAPABILITIES -> buildCapabilityReviewState();
@@ -93,11 +94,11 @@ class PackageInstallScreen extends TerminalScreen {
     
     // ===== STATE BUILDERS =====
     
-    private RenderState buildPackageOverviewState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildPackageOverviewState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 15) / 2, "Install Package", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 15) / 2, "Install Package", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -136,15 +137,15 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildCapabilityReviewState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildCapabilityReviewState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         PolicyManifest policy = PolicyManifest.fromNoteBytes(
             packageInfo.getManifest().getMetadata());
         List<PathCapability> capabilities = policy.getRequestedCapabilities();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 15) / 2, "Security Review", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 15) / 2, "Security Review", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -191,15 +192,15 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildNamespaceChoiceState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildNamespaceChoiceState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         PackageManifest manifest = packageInfo.getManifest();
         PackageManifest.NamespaceRequirement nsReq = manifest.getNamespaceRequirement();
         NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 31) / 2, 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 31) / 2, 
                 "Choose Installation Namespace", TextStyle.BOLD));
         
         if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
@@ -221,11 +222,11 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildPasswordConfirmState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildPasswordConfirmState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 20) / 2, "Confirm Installation", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Confirm Installation", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -241,11 +242,11 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildInstallingState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildInstallingState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 18) / 2, "Installing Package", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Installing Package", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -261,11 +262,11 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildAskLoadState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildAskLoadState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 21) / 2, "Installation Complete", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Installation Complete", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -286,12 +287,12 @@ class PackageInstallScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildCompleteState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildCompleteState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         if (errorMessage != null) {
             builder.add((term) -> 
-                term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 18) / 2, "Installation Failed", 
+                term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Installation Failed", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -300,7 +301,7 @@ class PackageInstallScreen extends TerminalScreen {
                 term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR));
         } else {
             builder.add((term) -> 
-                term.printAt(0, (PackageInstallScreen.this.terminal.getCols() - 21) / 2, "Installation Complete", 
+                term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Installation Complete", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -398,7 +399,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         removeKeyPressHandler();
-        inputReader = new TerminalInputReader(terminal, 10, 36, 20);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 10, 36, 20);
         
         inputReader.setOnComplete(input -> {
             inputReader.close();
@@ -409,7 +410,7 @@ class PackageInstallScreen extends TerminalScreen {
             } else {
                 errorMessage = "Installation cancelled";
                 invalidate();
-                terminal.waitForKeyPress(() -> {
+                systemApplication.getTerminal().waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.PASSWORD_CONFIRM);
                 });
@@ -462,7 +463,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void setupCompleteInput() {
         removeKeyPressHandler();
-        terminal.waitForKeyPress(() -> {
+        systemApplication.getTerminal().waitForKeyPress(() -> {
             if (onCompleteCallback != null) {
                 onCompleteCallback.run();
             }
@@ -471,7 +472,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void setupKeyHandler(KeyRunTable keys) {
         removeKeyPressHandler();
-        keyPressHandlerId = terminal.addKeyDownHandler(event -> {
+        keyPressHandlerId = systemApplication.getTerminal().addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -572,7 +573,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void removeKeyPressHandler() {
         if (keyPressHandlerId != null) {
-            terminal.removeKeyDownHandler(keyPressHandlerId);
+            systemApplication.getTerminal().removeKeyDownHandler(keyPressHandlerId);
             keyPressHandlerId = null;
         }
     }

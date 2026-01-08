@@ -1,6 +1,4 @@
-package io.netnotes.engine.core.system.control.terminal;
-
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+package io.netnotes.engine.core.system.control.ui;
 
 /**
  * Renderable - something that can be rendered
@@ -11,22 +9,20 @@ import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManag
  * - Tracks if it needs rendering
  * - Clears render flag after successful render
  */
-public interface Renderable {
+/**
+ * Renderable - something that can be rendered
+ * 
+ * @param <B> BatchBuilder type
+ * @param <E> RenderElement type
+ */
+public interface Renderable<B extends BatchBuilder, E extends RenderElement<B>> {
     /**
      * Get current render state
-     * 
-     * CRITICAL: This should be FAST and READ-ONLY
-     * - Build and return RenderState from current internal state
-     * - Do NOT modify state
-     * - Do NOT send commands directly
-     * - Thread-safe read of current state
      */
-    RenderState getRenderState();
+    RenderState<B, E> getRenderState();
     
     /**
      * Check if needs rendering
-     * 
-     * Returns true if state has changed since last render
      */
     default boolean needsRender() {
         return true;

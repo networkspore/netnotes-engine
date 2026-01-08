@@ -2,9 +2,9 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 
 /**
  * LockedScreen - Shows when system is locked
@@ -12,18 +12,18 @@ import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
  */
 class LockedScreen extends TerminalScreen {
     
-    public LockedScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
+    public LockedScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder()
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.clear();
-                term.printAt(1, (LockedScreen.this.terminal.getCols() - 13) / 2, "System Locked", TextStyle.BOLD);
+                term.printAt(1, (LockedScreen.this.systemApplication.getTerminal().getCols() - 13) / 2, "System Locked", TextStyle.BOLD);
                 term.printAt(5, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
                 term.moveCursor(5, 35);
             })
@@ -35,16 +35,16 @@ class LockedScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         // Set up key press handler
-        return terminal.waitForKeyPress(() -> {
+        return systemApplication.getTerminal().waitForKeyPress(() -> {
             // Transition to AUTHENTICATING → claims password keyboard, shows login
-            terminal.getStateMachine().removeState(SystemTerminalContainer.LOCKED);
-            terminal.getStateMachine().addState(SystemTerminalContainer.AUTHENTICATING);
+            systemApplication.getStateMachine().removeState(SystemApplication.LOCKED);
+            systemApplication.getStateMachine().addState(SystemApplication.AUTHENTICATING);
         });
     }
     
     @Override
     public void onHide() {
         // Cancel any pending key wait
-        terminal.cancelKeyWait();
+        systemApplication.getTerminal().cancelKeyWait();
     }
 }

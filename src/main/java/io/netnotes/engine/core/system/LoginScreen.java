@@ -1,7 +1,8 @@
 package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.utils.TimeHelpers;
 
@@ -29,14 +30,14 @@ class LoginScreen extends TerminalScreen {
     
     private PasswordPrompt passwordPrompt;
 
-    public LoginScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
+    public LoginScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentState) {
             case SHOWING_PROMPT -> buildPromptState();
             case PROCESSING -> buildProcessingState();
@@ -47,20 +48,20 @@ class LoginScreen extends TerminalScreen {
     /**
      * PasswordPrompt is active renderable, we return empty
      */
-    private RenderState buildPromptState() {
+    private TerminalRenderState buildPromptState() {
         // PasswordPrompt is the active renderable
         // We shouldn't be rendering
-        return RenderState.builder().build();
+        return TerminalRenderState.builder().build();
     }
     
     /**
      * Show processing indicator
      */
-    private RenderState buildProcessingState() {
-        int row = terminal.getRows() / 2;
-        int col = terminal.getCols() / 2 - 15;
+    private TerminalRenderState buildProcessingState() {
+        int row = systemApplication.getTerminal().getRows() / 2;
+        int col = systemApplication.getTerminal().getCols() / 2 - 15;
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(row, col, "Verifying password...", 
                     TextStyle.INFO);
@@ -71,13 +72,13 @@ class LoginScreen extends TerminalScreen {
     /**
      * Show error message
      */
-    private RenderState buildErrorState() {
-        int errorRow = terminal.getRows() / 2;
+    private TerminalRenderState buildErrorState() {
+        int errorRow = systemApplication.getTerminal().getRows() / 2;
         int promptRow = errorRow + 2;
         
         String message = errorMessage != null ? errorMessage : "Authentication failed";
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(errorRow, 10, message, TextStyle.ERROR);
                 term.printAt(promptRow, 10, "Press any key to try again...", 
@@ -90,12 +91,12 @@ class LoginScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> onShow() {
-        String title = terminal.isAuthenticated() ? "System Locked" : "Netnotes";
+        String title = systemApplication.isAuthenticated() ? "System Locked" : "Netnotes";
         
         currentState = State.SHOWING_PROMPT;
         // Don't call invalidate() - PasswordPrompt will become active
         
-        passwordPrompt = new PasswordPrompt(terminal)
+        passwordPrompt = new PasswordPrompt(systemApplication)
             .withTitle(title)
             .withPrompt("Enter password:")
             .withTimeout(30)
@@ -119,10 +120,10 @@ class LoginScreen extends TerminalScreen {
         currentState = State.PROCESSING;
         
         // Make THIS screen the active renderable to show processing
-        terminal.setRenderable(this);
+        systemApplication.setRenderable(this);
         invalidate();
         
-        terminal.authenticate(password)
+        systemApplication.authenticate(password)
             .thenAccept(valid -> {
                 password.close();
                 
@@ -150,7 +151,7 @@ class LoginScreen extends TerminalScreen {
                 invalidate();
                 
                 // Wait for keypress, then retry
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(() -> {
                         currentState = State.SHOWING_PROMPT;
                         onShow();
@@ -165,23 +166,23 @@ class LoginScreen extends TerminalScreen {
         currentState = State.ERROR;
         
         // Make THIS screen the active renderable to show error
-        terminal.setRenderable(this);
+        systemApplication.getTerminal().setRenderable(this);
         invalidate();
         
-        terminal.waitForKeyPress()
+        systemApplication.getTerminal().waitForKeyPress()
             .thenRun(() -> {
-                if (terminal.isAuthenticated()) {
+                if (systemApplication.isAuthenticated()) {
                     // Was unlocking → back to locked screen
-                    terminal.showScreen("locked");
+                    systemApplication.showScreen("locked");
                 } else {
                     // Was logging in → show locked screen
-                    terminal.showScreen("locked");
+                    systemApplication.showScreen("locked");
                 }
             });
     }
     
     private void handleCancel() {
-        terminal.goBack();
+        systemApplication.goBack();
     }
     
     // ===== CLEANUP =====

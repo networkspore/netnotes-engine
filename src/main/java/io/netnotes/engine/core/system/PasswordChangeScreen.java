@@ -8,9 +8,10 @@ import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.StreamReader;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalProgressBar;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.task.ProgressMessage;
@@ -52,22 +53,22 @@ class PasswordChangeScreen extends TerminalScreen {
     private String statusMessage = null;
     private String errorMessage = null;
     
-    public PasswordChangeScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
+    public PasswordChangeScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
-        RenderState.Builder builder = RenderState.builder();
+    public TerminalRenderState getRenderState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         // Clear screen
         builder.add((term) -> term.clear());
         
         // Title
         builder.add((term) -> 
-            term.printAt(1, (PasswordChangeScreen.this.terminal.getCols() - 21) / 2, "Change Master Password", TextStyle.BOLD));
+            term.printAt(1, (PasswordChangeScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Change Master Password", TextStyle.BOLD));
         
         // Current prompt based on step
         String prompt;
@@ -143,7 +144,7 @@ class PasswordChangeScreen extends TerminalScreen {
     }
     
     private void startPasswordEntry() {
-        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
+        passwordReader = new PasswordReader(systemApplication.getPasswordEventHandlerRegistry());
 
         
         passwordReader.setOnPassword(password -> {
@@ -159,16 +160,16 @@ class PasswordChangeScreen extends TerminalScreen {
     }
     
     private void handleVerifyCurrent(NoteBytesEphemeral password) {
-        RuntimeAccess access = terminal.getSystemAccess();
+        RuntimeAccess access = systemApplication.getSystemAccess();
    
-        terminal.printAt(7, 10, "Verifying current password...")
+        systemApplication.getTerminal().printAt(7, 10, "Verifying current password...")
             .thenCompose(v -> access.verifyPassword(password))
             .thenAccept(valid -> {
                 if (valid) {
                     currentPassword = password.copy();
                     password.close();
                     
-                    terminal.printAt(8, 10, "Validating disk space...")
+                    systemApplication.getTerminal().printAt(8, 10, "Validating disk space...")
                         .thenCompose(v -> access.validateDiskSpaceForReEncryption())
                         .thenAccept(validation -> {
                             if (validation.isValid()) {
@@ -177,7 +178,7 @@ class PasswordChangeScreen extends TerminalScreen {
                                     validation.getNumberOfFiles(),
                                     validation.getTotalFileSizes() / (1024.0 * 1024.0)
                                 );
-                                terminal.printAt(9, 10, summary)
+                                systemApplication.getTerminal().printAt(9, 10, summary)
                                     .thenRun(() -> {
                                         currentStep = Step.ENTER_NEW;
                                         statusMessage = summary;
@@ -192,10 +193,10 @@ class PasswordChangeScreen extends TerminalScreen {
                         .exceptionally(ex -> {
                             currentPassword.close();
                             currentPassword = null;
-                            terminal.clear()
-                                .thenCompose(v->terminal.printError("Validation failed: " + ex.getMessage()))
-                                .thenCompose(v -> terminal.printAt(15, 10, TerminalCommands.PRESS_ANY_KEY))
-                                .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                            systemApplication.getTerminal().clear()
+                                .thenCompose(v->systemApplication.getTerminal().printError("Validation failed: " + ex.getMessage()))
+                                .thenCompose(v -> systemApplication.getTerminal().printAt(15, 10, TerminalCommands.PRESS_ANY_KEY))
+                                .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> systemApplication.goBack()));
                             return null;
                         });
                 } else {
@@ -212,8 +213,8 @@ class PasswordChangeScreen extends TerminalScreen {
             })
             .exceptionally(ex -> {
                 password.close();
-                terminal.printError("Verification failed: " + ex.getMessage())
-                    .thenRun(() -> terminal.goBack());
+                systemApplication.getTerminal().printError("Verification failed: " + ex.getMessage())
+                    .thenRun(() -> systemApplication.goBack());
                 return null;
             });
     }
@@ -268,12 +269,12 @@ class PasswordChangeScreen extends TerminalScreen {
      * This ensures all terminal operations are serialized, preventing race conditions.
      */
     private void performPasswordChange() {
-        RuntimeAccess access = terminal.getSystemAccess();
-        terminal.enterRecoveryMode("password_change_in_progress")
-        .thenCompose(v->terminal.clear())
-            .thenCompose(v -> terminal.printTitle("Changing Password"))
-            .thenCompose(v -> terminal.printAt(5, 10, "Re-encrypting files..."))
-            .thenCompose(v -> terminal.printAt(7, 10, "This may take a while. Please wait."))
+        RuntimeAccess access = systemApplication.getSystemAccess();
+        systemApplication.enterRecoveryMode("password_change_in_progress")
+        .thenCompose(v->systemApplication.getTerminal().clear())
+            .thenCompose(v -> systemApplication.getTerminal().printTitle("Changing Password"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(5, 10, "Re-encrypting files..."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "This may take a while. Please wait."))
             .thenCompose(v -> {
                 // Reset progress tracking
                 progressBars.clear();
@@ -310,25 +311,25 @@ class PasswordChangeScreen extends TerminalScreen {
                 cleanupPasswords();
                 
                 if (success) {
-                    return terminal.exitRecoveryMode()
-                        .thenCompose((v)->terminal.clear())
-                                .thenCompose(v -> terminal.printSuccess(
+                    return systemApplication.exitRecoveryMode()
+                        .thenCompose((v)->systemApplication.getTerminal().clear())
+                                .thenCompose(v -> systemApplication.getTerminal().printSuccess(
                                     "✓ Password changed successfully!\n\n" +
                                     "All files have been re-encrypted."))
-                                .thenCompose(v -> terminal.printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
-                                .thenRun(() -> terminal.waitForKeyPress( () -> terminal.goBack()));
+                                .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
+                                .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> systemApplication.goBack()));
                         
                 } else {
-                    return terminal.clear()
-                        .thenCompose(v -> terminal.printError(
+                    return systemApplication.getTerminal().clear()
+                        .thenCompose(v -> systemApplication.getTerminal().printError(
                             "✗ Password change completed with errors\n\n" +
                             "Some files may not have been re-encrypted."))
-                        .thenCompose(v -> terminal.printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
-                        .thenCompose(v -> terminal.printAt(12, 10, "Press any key to enter recovery..."))
-                        .thenCompose((v) -> terminal.waitForKeyPress(() -> {
+                        .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, TerminalCommands.PRESS_ANY_KEY))
+                        .thenCompose(v -> systemApplication.getTerminal().printAt(12, 10, "Press any key to enter recovery..."))
+                        .thenCompose((v) -> systemApplication.getTerminal().waitForKeyPress(() -> {
                             // Transition to recovery screen
-                            terminal.getStateMachine().removeState(SystemTerminalContainer.SHOWING_SCREEN);
-                            terminal.getStateMachine().addState(SystemTerminalContainer.FAILED_SETTINGS);
+                            systemApplication.getStateMachine().removeState(SystemApplication.SHOWING_SCREEN);
+                            systemApplication.getStateMachine().addState(SystemApplication.FAILED_SETTINGS);
                         }));
                 }
             })
@@ -439,7 +440,7 @@ class PasswordChangeScreen extends TerminalScreen {
             
             // Create new progress bar
             progressBar = new TerminalProgressBar(
-                terminal, row, 10, 50, TerminalProgressBar.Style.CLASSIC);
+                systemApplication.getTerminal(), row, 10, 50, TerminalProgressBar.Style.CLASSIC);
             progressBars.put(scope, progressBar);
             
             // Trigger redraw to show new progress bar
@@ -516,7 +517,7 @@ class PasswordChangeScreen extends TerminalScreen {
             
             // Display error below progress bars
             int errorRow = currentRow + 2;
-            terminal.printAt(errorRow, 10, "⚠ " + errMsg);
+            systemApplication.getTerminal().printAt(errorRow, 10, "⚠ " + errMsg);
             currentRow = errorRow + 1;
         }
     }
@@ -529,17 +530,17 @@ class PasswordChangeScreen extends TerminalScreen {
         
         cleanupPasswords();
         
-        terminal.clear()
-            .thenCompose(v -> terminal.printError(
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printError(
                 "✗ Password change failed\n\n" +
                 "Error: " + ex.getMessage() + "\n\n" +
                 "System may require recovery."))
-            .thenCompose(v -> terminal.printAt(10, 10, 
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, 
                 TerminalCommands.PRESS_ANY_KEY))
-            .thenCompose((v) -> terminal.waitForKeyPress(() -> {
+            .thenCompose((v) -> systemApplication.getTerminal().waitForKeyPress(() -> {
                 // Transition to recovery screen
-                terminal.getStateMachine().removeState(SystemTerminalContainer.SHOWING_SCREEN);
-                terminal.getStateMachine().addState(SystemTerminalContainer.FAILED_SETTINGS);
+                systemApplication.getStateMachine().removeState(SystemApplication.SHOWING_SCREEN);
+                systemApplication.getStateMachine().addState(SystemApplication.FAILED_SETTINGS);
             }));
         
         return null;
@@ -576,11 +577,11 @@ class PasswordChangeScreen extends TerminalScreen {
                 validation.getAvailableSpace()) / (1024.0 * 1024.0)
         );
         
-        terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Insufficient Disk Space"))
-            .thenCompose(v -> terminal.printError(error))
-            .thenCompose(v -> terminal.printAt(15, 10, "Press any key to go back..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> terminal.goBack()));
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printTitle("Insufficient Disk Space"))
+            .thenCompose(v -> systemApplication.getTerminal().printError(error))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(15, 10, "Press any key to go back..."))
+            .thenRun(() -> systemApplication.getTerminal().waitForKeyPress(() -> systemApplication.goBack()));
     }
     
     private void cleanup() {

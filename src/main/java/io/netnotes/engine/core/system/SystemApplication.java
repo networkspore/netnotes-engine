@@ -7,9 +7,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.containers.Container;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.ui.Renderable;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.ClaimedDevice;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
@@ -18,32 +18,36 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
- * SystemTerminalContainer
+ * SystemApplication - Application Logic Layer
  * 
- * Let the data speak:
- * - systemAccess != null → authenticated, runtime exists
- * - passwordKeyboardId != null → we use a password keyboard
- * - passwordKeyboardId == getDefaultKeyboardId() → same keyboard for both
- * - passwordKeyboardId != getDefaultKeyboardId() → separate keyboards
- * - getClaimedDevice(passwordKeyboardId) != null → password keyboard is claimed
+ * This class wraps a TerminalContainerHandle and provides:
+ * - Bootstrap configuration (keyboard selection, IODaemon setup)
+ * - Authentication flow (first run, login, unlock)
+ * - IODaemon lifecycle management
+ * - Screen navigation and coordination
  * 
- * State machine used only for UI flow states, not data states
+ * It does NOT own the terminal handle - the handle is created and managed
+ * by ClientTerminalRenderManager. SystemApplication just uses it.
  */
-public class SystemTerminalContainer extends TerminalContainerHandle {
+public class SystemApplication {
     
     public static final String DEFAULT_IO_DAEMON_SOCKET_PATH = "/var/run/io-daemon.sock";
     
     @FunctionalInterface
     public interface ScreenFactory {
-        TerminalScreen create(String id, SystemTerminalContainer terminal);
+        TerminalScreen create(String id, SystemApplication systemApplication);
     }
     
+    // The terminal handle we're using (provided by render manager)
+    // Nullable: application can run headless until terminal attaches
+    private TerminalContainerHandle terminalHandle;
     private final ProcessRegistryInterface registry;
-    private final ContextPath sessionPath;
+    private final ContextPath systemContextPath;
 
     // Bootstrap configuration - loaded once from disk
     private String passwordKeyboardId = null;  // null = use GUI keyboard
@@ -55,6 +59,7 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     private final RenderingService renderingService;
     
     // Authentication state - THE source of truth
+    // Cleared on terminal detach for security
     private SystemRuntime systemRuntime = null;
     private RuntimeAccess systemAccess = null;  // null = not authenticated
     
@@ -64,11 +69,13 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     
     private volatile boolean isVisible = false;
     
-    // Current screen
+    // Screen persistence - screen to restore when terminal reattaches
     private TerminalScreen currentScreen;
+    private String lastScreenName = null;  // Remember screen across detach/attach
     private final Map<String, ScreenFactory> screenFactories = new HashMap<>();
     
     // States - UI flow only, not data states
+    private final BitFlagStateMachine stateMachine;
     public static final int INITIALIZING = 63;
     public static final int SETUP_NEEDED = 62;
     public static final int SETUP_COMPLETE = 61;
@@ -76,20 +83,45 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     public static final int OPENING = 59;
     public static final int CHECKING_SETTINGS = 58;
     public static final int FIRST_RUN = 57;
-    public static final int AUTHENTICATING = 56;  // UI state: showing auth screen
+    public static final int AUTHENTICATING = 56;
     public static final int SHOWING_SCREEN = 55;
     public static final int ERROR = 54;
     public static final int FAILED_SETTINGS = 53;
     
+    // Attachment states - for daemon mode support
+    public static final int DETACHED = 52;       // No terminal attached (headless)
+    public static final int ATTACHED_LOCAL = 51; // Local terminal attached
+    public static final int ATTACHED_REMOTE = 50; // Remote client attached
     
-    public SystemTerminalContainer(RenderingService renderingService, ProcessRegistryInterface registry, ContextPath sessionPath) {
-        super("system-terminal");
+    /**
+     * Constructor - can be created with or without a terminal handle
+     * 
+     * @param terminalHandle The terminal handle (can be null for headless mode)
+     * @param renderingService The rendering service
+     * @param registry The process registry
+     * @param systemContextPath The system's context path for session data
+     */
+    public SystemApplication(
+        TerminalContainerHandle terminalHandle,
+        RenderingService renderingService,
+        ProcessRegistryInterface registry,
+        ContextPath systemContextPath
+    ) {
+        this.terminalHandle = terminalHandle;
         this.renderingService = renderingService;
         this.registry = registry;
-        this.sessionPath = sessionPath;
-
+        this.systemContextPath = systemContextPath;
+        this.stateMachine = new BitFlagStateMachine("SystemApplication");
         this.ioDaemonManager = new IODaemonManager(this, registry);
-  
+        
+        // Set initial attachment state
+        if (terminalHandle == null) {
+            stateMachine.addState(DETACHED);
+        } else {
+            stateMachine.addState(ATTACHED_LOCAL);
+        }
+        
+        setupStateTransitions();
         registerDefaultScreens();
     }
 
@@ -102,24 +134,28 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
 
     // ===== DATA QUERIES - let the data speak =====
     
-    /**
-     * Are we authenticated?
-     * Source of truth: systemAccess exists
-     */
     public boolean isAuthenticated() {
         return systemAccess != null;
     }
     
-
-
-    /**
-     * Is password keyboard claimed right now?
-     */
+    public boolean isTerminalAttached() {
+        return terminalHandle != null && !stateMachine.hasState(DETACHED);
+    }
+    
+    public boolean isLocalAttachment() {
+        return stateMachine.hasState(ATTACHED_LOCAL);
+    }
+    
+    public boolean isRemoteAttachment() {
+        return stateMachine.hasState(ATTACHED_REMOTE);
+    }
+    
     private boolean isPasswordKeyboardClaimed() {
         if (passwordKeyboardId == null) return false;
-        if (!hasActiveIODaemonSession()) return false;
+        if (!isTerminalAttached()) return false;
+        if (!terminalHandle.hasActiveIODaemonSession()) return false;
         
-        ClaimedDevice device = ioDaemonSession.getClaimedDevice(passwordKeyboardId);
+        ClaimedDevice device = terminalHandle.getIODaemonSession().getClaimedDevice(passwordKeyboardId);
         return device != null && device.isActive();
     }
 
@@ -137,50 +173,51 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return stateMachine.hasState(LOCKED);
     }
     
-    /**
-     * Do we use a separate password keyboard?
-     * (vs GUI keyboard or same keyboard for everything)
-     */
     boolean usesSeparatePasswordKeyboard() {
         if (passwordKeyboardId == null) return false;
         String defaultId = getDefaultKeyboardId();
         return defaultId == null || !passwordKeyboardId.equals(defaultId);
     }
     
-    
     private boolean needsPasswordKeyboardRelease() {
         return passwordKeyboardId != null &&
             !passwordKeyboardId.equals(getDefaultKeyboardId()) &&
             isPasswordKeyboardClaimed();
     }
-    /**
-     * Check if bootstrap config exists
-     */
+    
     private boolean needsBootstrap() {
         return !SettingsData.isSystemConfigData();
     }
 
-    @Override
-    public CompletableFuture<Void> run() {
+    /**
+     * Initialize - called after construction
+     * Can initialize without terminal (headless mode)
+     */
+    public CompletableFuture<Void> initialize() {
         stateMachine.addState(INITIALIZING);
         
-        Log.logMsg("[SystemTerminal] Initializing");
-        return super.run()
-            .thenCompose(v -> {
+        Log.logMsg("[SystemApplication] Initializing (terminal attached: " + isTerminalAttached() + ")");
+        
+        // If we have a terminal, wait for it to be ready
+        CompletableFuture<Void> terminalReady = isTerminalAttached() 
+            ? terminalHandle.waitUntilReady()
+            : CompletableFuture.completedFuture(null);
+        
+        return terminalReady.thenCompose(v -> {
                 stateMachine.removeState(INITIALIZING);
                 
                 if (needsBootstrap()) {
-                    Log.logMsg("[SystemTerminal] Bootstrap needed");
+                    Log.logMsg("[SystemApplication] Bootstrap needed");
                     stateMachine.addState(SETUP_NEEDED);
                     return CompletableFuture.completedFuture(null);
                 } else {
                     return loadBootstrapConfig()
                         .thenRun(() -> {
                             stateMachine.addState(SETUP_COMPLETE);
-                            Log.logMsg("[SystemTerminal] Bootstrap loaded");
+                            Log.logMsg("[SystemApplication] Bootstrap loaded");
                         })
                         .exceptionally(e -> {
-                            Log.logError("[SystemTerminal] Bootstrap load failed", e);
+                            Log.logError("[SystemApplication] Bootstrap load failed", e);
                             stateMachine.addState(SETUP_NEEDED);
                             return null;
                         });
@@ -190,16 +227,15 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
 
     protected void setupStateTransitions() {
         stateMachine.onStateAdded(SETUP_NEEDED, (old, now, bit) -> {
-            Log.logMsg("[SystemTerminal] SETUP_NEEDED");
+            Log.logMsg("[SystemApplication] SETUP_NEEDED");
             showScreen("system-setup");
         });
         
         stateMachine.onStateAdded(CHECKING_SETTINGS, (old, now, bit) -> {
-            Log.logMsg("[SystemTerminal] CHECKING_SETTINGS");
+            Log.logMsg("[SystemApplication] CHECKING_SETTINGS");
             
             if (isInRecoveryMode) {
-                // In recovery mode - go to recovery screen
-                Log.logMsg("[SystemTerminal] Recovery mode active: " + recoveryReason);
+                Log.logMsg("[SystemApplication] Recovery mode active: " + recoveryReason);
                 stateMachine.removeState(CHECKING_SETTINGS);
                 stateMachine.addState(FAILED_SETTINGS);
                 return;
@@ -226,12 +262,12 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         });
         
         stateMachine.onStateAdded(FIRST_RUN, (old, now, bit) -> {
-            Log.logMsg("[SystemTerminal] FIRST_RUN");
+            Log.logMsg("[SystemApplication] FIRST_RUN");
             showScreen("first-run-password");
         });
 
         stateMachine.onStateAdded(AUTHENTICATING, (old, now, bit) -> {
-            Log.logMsg("[SystemTerminal] AUTHENTICATING");
+            Log.logMsg("[SystemApplication] AUTHENTICATING");
             
             claimPasswordKeyboard()
                 .thenRun(() -> {
@@ -239,9 +275,8 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                     showScreen("login");
                 })
                 .exceptionally(ex -> {
-                    Log.logError("[SystemTerminal] Password keyboard setup failed: " + 
+                    Log.logError("[SystemApplication] Password keyboard setup failed: " + 
                         ex.getMessage());
-                    // Show login anyway (will use GUI keyboard)
                     startAuthTimeout();
                     showScreen("login");
                     return null;
@@ -249,44 +284,32 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         });
         
         stateMachine.onStateAdded(FAILED_SETTINGS, (old, now, bit) -> {
-            Log.logMsg("[SystemTerminal] FAILED_SETTINGS");
+            Log.logMsg("[SystemApplication] FAILED_SETTINGS");
             showScreen("settings-recovery");
         });
-
-     
     }
 
-    /**
-     * Start authentication flow
-     * Used for both initial login and unlock
-     */
     private void startAuthentication() {
         stateMachine.addState(AUTHENTICATING);
     }
     
-    /**
-     * Start authentication timeout
-     */
     private void startAuthTimeout() {
-        cancelAuthTimeout();  // Cancel any existing
+        cancelAuthTimeout();
         
         authTimeoutFuture = CompletableFuture.runAsync(() -> {
             try {
                 TimeUnit.SECONDS.sleep(AUTH_TIMEOUT_SECONDS);
-                Log.logMsg("[SystemTerminal] Authentication timeout");
+                Log.logMsg("[SystemApplication] Authentication timeout");
                 
-                // Timeout → lock
                 releasePasswordKeyboard()
                     .thenRun(() -> {
                         stateMachine.removeState(AUTHENTICATING);
                         if (isAuthenticated()) {
-                            // Was unlocking → back to locked
                             showScreen("locked");
                         } else {
-                            // Was logging in → show timeout message
-                            clear()
-                                .thenCompose(v -> printError("Authentication timeout"))
-                                .thenCompose(v -> waitForKeyPress())
+                            terminalHandle.clear()
+                                .thenCompose(v -> terminalHandle.printError("Authentication timeout"))
+                                .thenCompose(v -> terminalHandle.waitForKeyPress())
                                 .thenRun(() -> showScreen("locked"));
                         }
                     });
@@ -297,9 +320,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }, VirtualExecutors.getVirtualExecutor());
     }
     
-    /**
-     * Cancel authentication timeout
-     */
     private void cancelAuthTimeout() {
         if (authTimeoutFuture != null) {
             authTimeoutFuture.cancel(true);
@@ -307,10 +327,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }
     }
 
-    
-    /**
-     * Load bootstrap config from disk
-     */
     private CompletableFuture<Void> loadBootstrapConfig() {
         if (SettingsData.isSystemConfigData()) {
             return SettingsData.loadSettingsMap()
@@ -326,19 +342,16 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                     recoveryReason = reasonBytes != null ? reasonBytes.getAsString() : null;
                 
                     if (isInRecoveryMode) {
-                        Log.logMsg("[SystemTerminal] RECOVERY MODE DETECTED: " + recoveryReason);
+                        Log.logMsg("[SystemApplication] RECOVERY MODE DETECTED: " + recoveryReason);
                     }
 
-                    Log.logMsg("[SystemTerminal] Bootstrap loaded: passwordKeyboard=" + passwordKeyboardId);
+                    Log.logMsg("[SystemApplication] Bootstrap loaded: passwordKeyboard=" + passwordKeyboardId);
                 });
         } else {
             return CompletableFuture.failedFuture(new IOException("Config does not exist"));
         }
     }
 
-    /**
-     * Save bootstrap config
-     */
     private CompletableFuture<Void> saveBootstrapConfig() {
         NoteBytesMap map = new NoteBytesMap();
         
@@ -354,20 +367,15 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }
         
         return SettingsData.saveSystemConfig(map)
-            .thenRun(() -> Log.logMsg("[SystemTerminal] Bootstrap saved (recovery=" + isInRecoveryMode + ")"));
+            .thenRun(() -> Log.logMsg("[SystemApplication] Bootstrap saved (recovery=" + isInRecoveryMode + ")"));
     }
 
-    /**
-     * Complete bootstrap wizard
-     */
-    public CompletableFuture<Void> completeBootstrap(
-            String selectedKeyboardId) {
-        
+    public CompletableFuture<Void> completeBootstrap(String selectedKeyboardId) {
         this.passwordKeyboardId = selectedKeyboardId;
         
         return saveBootstrapConfig()
             .thenRun(() -> {
-                Log.logMsg("[SystemTerminal] Bootstrap complete");
+                Log.logMsg("[SystemApplication] Bootstrap complete");
                 if (stateMachine.hasState(SETUP_NEEDED)) {
                     stateMachine.removeState(SETUP_NEEDED);
                     stateMachine.addState(SETUP_COMPLETE);
@@ -376,35 +384,35 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
             });
     }
 
-    /**
-     * Get password event registry
-     * Returns password keyboard registry if claimed, otherwise default
-     */
     EventHandlerRegistry getPasswordEventHandlerRegistry() {
+        if (!isTerminalAttached()) {
+            throw new IllegalStateException("Cannot get event registry - no terminal attached");
+        }
+        
         if (passwordKeyboardId != null) {
-            EventHandlerRegistry registry = getClaimedDeviceRegistry(passwordKeyboardId);
+            EventHandlerRegistry registry = terminalHandle.getClaimedDeviceRegistry(passwordKeyboardId);
             if (registry != null) {
                 return registry;
             }
         }
-        return getEventHandlerRegistry();
+        return terminalHandle.getEventHandlerRegistry();
     }
 
-    /**
-     * Claim password keyboard for authentication
-     */
     CompletableFuture<Void> claimPasswordKeyboard() {
         if (!needsPasswordKeyboardClaim()) {
-            Log.logMsg("[SystemTerminal] Password keyboard not needed or already claimed");
+            Log.logMsg("[SystemApplication] Password keyboard not needed or already claimed");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        if (!isTerminalAttached()) {
+            Log.logMsg("[SystemApplication] Cannot claim keyboard - no terminal attached");
             return CompletableFuture.completedFuture(null);
         }
 
-        // Ensure IODaemon available
         return ioDaemonManager.ensureAvailable()
-            .thenCompose(ioDaemonPath -> connectToIODaemon(ioDaemonPath))
+            .thenCompose(ioDaemonPath -> terminalHandle.connectToIODaemon(ioDaemonPath))
             .thenCompose(session -> session.discoverDevices())
             .thenCompose(devices -> {
-                // Verify keyboard exists
                 var deviceInfo = devices.stream()
                     .filter(d -> d.usbDevice().getDeviceId().equals(passwordKeyboardId))
                     .findFirst()
@@ -414,45 +422,42 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                     throw new RuntimeException("Password keyboard not found: " + passwordKeyboardId);
                 }
                 
-                return claimDevice(passwordKeyboardId, "parsed");
+                return terminalHandle.claimDevice(passwordKeyboardId, "parsed");
             })
             .thenRun(() -> {
-                Log.logMsg("[SystemTerminal] Password keyboard claimed: " + passwordKeyboardId);
+                Log.logMsg("[SystemApplication] Password keyboard claimed: " + passwordKeyboardId);
             })
             .exceptionally(ex -> {
                 passwordKeyboardId = null;
-                Log.logError("[SystemTerminal] Password keyboard claim failed: " + ex.getMessage());
+                Log.logError("[SystemApplication] Password keyboard claim failed: " + ex.getMessage());
                 return null;
             });
     }
 
-    /**
-     * Release password keyboard after authentication
-     * Only if it's separate from default keyboard
-     */
     CompletableFuture<Void> releasePasswordKeyboard() {
         if (!needsPasswordKeyboardRelease()) {
             return CompletableFuture.completedFuture(null);
         }
-            
-        Log.logMsg("[SystemTerminal] Releasing password keyboard");
         
-        return releaseDevice(passwordKeyboardId)
+        if (!isTerminalAttached()) {
+            return CompletableFuture.completedFuture(null);
+        }
+            
+        Log.logMsg("[SystemApplication] Releasing password keyboard");
+        
+        return terminalHandle.releaseDevice(passwordKeyboardId)
             .thenCompose(v -> {
-                // Disconnect session if no devices claimed
-                if (ioDaemonSession.getClaimedDevices().isEmpty()) {
-                    return disconnectFromIODaemon();
+                if (terminalHandle.getIODaemonSession().getClaimedDevices().isEmpty()) {
+                    return terminalHandle.disconnectFromIODaemon();
                 }
                 return CompletableFuture.completedFuture(null);
             })
-            .thenRun(() -> Log.logMsg("[SystemTerminal] Password keyboard released"))
+            .thenRun(() -> Log.logMsg("[SystemApplication] Password keyboard released"))
             .exceptionally(ex -> {
-                Log.logError("[SystemTerminal] Release failed: " + ex.getMessage());
+                Log.logError("[SystemApplication] Release failed: " + ex.getMessage());
                 return null;
             });
     }
-
-
 
     public void registerScreen(String id, ScreenFactory factory) {
         screenFactories.put(id, factory);
@@ -472,34 +477,113 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     // ===== LIFECYCLE =====
     
     /**
-     * Open terminal
+     * Attach a terminal to the application
+     * For daemon mode - terminal connects after application is initialized
+     * 
+     * @param handle The terminal handle to attach
+     * @param isRemote True if this is a remote client, false for local terminal
      */
+    public CompletableFuture<Void> attachTerminal(TerminalContainerHandle handle, boolean isRemote) {
+        if (isTerminalAttached()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Terminal already attached"));
+        }
+        
+        Log.logMsg("[SystemApplication] Attaching terminal (remote: " + isRemote + ")");
+        
+        this.terminalHandle = handle;
+        
+        // Update attachment state
+        stateMachine.removeState(DETACHED);
+        stateMachine.addState(isRemote ? ATTACHED_REMOTE : ATTACHED_LOCAL);
+        
+        // Wait for terminal to be ready, then open
+        return handle.waitUntilReady()
+            .thenCompose(v -> open());
+    }
+    
+    /**
+     * Detach terminal from the application
+     * Application continues running headless
+     * Authentication is CLEARED for security
+     */
+    public CompletableFuture<Void> detachTerminal() {
+        if (!isTerminalAttached()) {
+            Log.logMsg("[SystemApplication] No terminal attached, nothing to detach");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        Log.logMsg("[SystemApplication] Detaching terminal");
+        
+        // Remember current screen for when we reattach
+        if (currentScreen != null) {
+            lastScreenName = currentScreen.getName();
+            currentScreen.onHide();
+        }
+        
+        cancelAuthTimeout();
+        
+        return releasePasswordKeyboard()
+            .thenCompose(v -> terminalHandle != null ? terminalHandle.hide() : CompletableFuture.completedFuture(null))
+            .thenRun(() -> {
+                isVisible = false;
+                
+                // Clear authentication for security
+                Log.logMsg("[SystemApplication] Clearing authentication on detach");
+                systemAccess = null;
+                systemRuntime = null;
+                
+                // Clear UI state
+                stateMachine.removeState(OPENING);
+                stateMachine.removeState(SHOWING_SCREEN);
+                stateMachine.removeState(AUTHENTICATING);
+                stateMachine.removeState(ATTACHED_LOCAL);
+                stateMachine.removeState(ATTACHED_REMOTE);
+                stateMachine.addState(DETACHED);
+                stateMachine.addState(LOCKED);
+                
+                // Null out the handle
+                terminalHandle = null;
+                
+                Log.logMsg("[SystemApplication] Terminal detached, running headless");
+            })
+            .exceptionally(ex -> {
+                Log.logError("[SystemApplication] Detach error: " + ex.getMessage());
+                return null;
+            });
+    }
+    
     public CompletableFuture<Void> open() {
+        if (!isTerminalAttached()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Cannot open - no terminal attached"));
+        }
+        
         if (isVisible) {
             return CompletableFuture.completedFuture(null);
         }
         
         stateMachine.addState(OPENING);
         
-        return show()
+        return terminalHandle.show()
             .thenRun(() -> {
                 stateMachine.removeState(OPENING);
                 isVisible = true;
                 
-                // Route based on data
-                if (stateMachine.hasState(SETUP_NEEDED)) {
+                // Restore last screen or go to appropriate screen
+                if (lastScreenName != null && isAuthenticated()) {
+                    // Restore previous screen (user was working on something)
+                    Log.logMsg("[SystemApplication] Restoring screen: " + lastScreenName);
+                    showScreen(lastScreenName);
+                } else if (stateMachine.hasState(SETUP_NEEDED)) {
                     showScreen("system-setup");
                 } else if (!isAuthenticated()) {
-                    // No systemAccess → need to create/load it
                     stateMachine.addState(CHECKING_SETTINGS);
                 } else if (isLocked()) {
-                    // Have systemAccess but locked → show locked screen
                     showScreen("locked");
                 } else {
-                    // Have systemAccess and not locked → go to menu
                     showScreen("main-menu");
                 }
-
             });
     }
 
@@ -509,46 +593,42 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }else{
             stateMachine.removeState(AUTHENTICATING);
             if (isAuthenticated()) {
-                // Lock on close for security
                 stateMachine.addState(LOCKED);
             }
             return CompletableFuture.completedFuture(null);
         }
     }
     
-    /**
-     * Close terminal
-     * Releases password keyboard, keeps runtime in memory
-     */
     public CompletableFuture<Void> close() {
+        if (!isTerminalAttached()) {
+            Log.logMsg("[SystemApplication] No terminal attached, nothing to close");
+            return CompletableFuture.completedFuture(null);
+        }
+        
         if (!isVisible) {
             return CompletableFuture.completedFuture(null);
         }
         
         if (currentScreen != null) {
+            lastScreenName = currentScreen.getName();
             currentScreen.onHide();
         }
         
         cancelAuthTimeout();
-
         
-
-        
-        // Release password keyboard if separate
         return releasePasswordKeyboard()
-            .thenCompose(v -> hide())
+            .thenCompose(v -> terminalHandle.hide())
             .thenRun(() -> {
                 isVisible = false;
                 stateMachine.removeState(OPENING);
                 stateMachine.removeState(SHOWING_SCREEN);
                 stateMachine.removeState(AUTHENTICATING);
                 if (isAuthenticated()) {
-                    // Lock on close for security
                     stateMachine.addState(LOCKED);
                 }
             })
             .exceptionally(ex -> {
-                Log.logError("[SystemTerminal] Close error: " + ex.getMessage());
+                Log.logError("[SystemApplication] Close error: " + ex.getMessage());
                 return null;
             });
     }
@@ -562,9 +642,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return CompletableFuture.completedFuture(false);
     }
     
-    /**
-     * Create new system (first run)
-     */
     public CompletableFuture<Void> createNewSystem(NoteBytesEphemeral password) {
         return SettingsData.createSettings(password)
             .thenApply(settingsData -> {
@@ -573,26 +650,19 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                 RuntimeAccess access = new RuntimeAccess();
                 SystemRuntime runtime = new SystemRuntime(settingsData, registry, access);
                 
-                // THE stateMachine: systemAccess now exists → authenticated
                 this.systemRuntime = runtime;
                 this.systemAccess = access;
                 
                 stateMachine.removeState(FIRST_RUN);
                 cancelAuthTimeout();
                 
-                // Release password keyboard if separate
                 return releasePasswordKeyboard();
             })
             .thenRun(() -> showScreen("main-menu"));
     }
 
-    /**
-     * Verify and load system (login or unlock)
-     * Single entry point for all authentication
-     */
     public CompletableFuture<Boolean> authenticate(NoteBytesEphemeral password) {
         if (systemAccess != null) {
-            // Unlocking → verify with runtime
             return systemAccess.verifyPassword(password)
                 .thenApply(valid -> {
                     if (valid) {
@@ -601,7 +671,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                     return valid;
                 });
         } else {
-            // Logging in → load runtime
             return SettingsData.loadSettingsMap()
                 .thenCompose(settingsMap -> 
                     SettingsData.verifyPassword(password, settingsMap)
@@ -613,7 +682,6 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
                                         SystemRuntime runtime = new SystemRuntime(
                                             settingsData, registry, access);
                                         
-                                        // THE stateMachine: systemAccess now exists → authenticated
                                         this.systemRuntime = runtime;
                                         this.systemAccess = access;
                                         
@@ -627,54 +695,37 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         }
     }
     
-    /**
-     * Handle successful authentication
-     */
     private void onAuthenticationSuccess() {
         cancelAuthTimeout();
         stateMachine.removeState(AUTHENTICATING);
         stateMachine.removeState(LOCKED);
-        // Release password keyboard if separate
         releasePasswordKeyboard()
             .thenRun(() -> showScreen("main-menu"))
             .exceptionally(ex -> {
-                Log.logError("[SystemTerminal] Post-auth cleanup error: " + ex.getMessage());
-                showScreen("main-menu");  // Continue anyway
+                Log.logError("[SystemApplication] Post-auth cleanup error: " + ex.getMessage());
+                showScreen("main-menu");
                 return null;
             });
     }
 
-    // ====== Recovery ========
-
-    /**
-     * Enter recovery mode
-     * Called before risky operations like password change
-     */
     CompletableFuture<Void> enterRecoveryMode(String reason) {
         this.isInRecoveryMode = true;
         this.recoveryReason = reason;
         
-        Log.logMsg("[SystemTerminal] Entering recovery mode: " + reason);
+        Log.logMsg("[SystemApplication] Entering recovery mode: " + reason);
         
         return saveBootstrapConfig();
     }
 
-    /**
-     * Exit recovery mode
-     * Called after successful completion of risky operations
-     */
     CompletableFuture<Void> exitRecoveryMode() {
         this.isInRecoveryMode = false;
         this.recoveryReason = null;
         
-        Log.logMsg("[SystemTerminal] Exiting recovery mode");
+        Log.logMsg("[SystemApplication] Exiting recovery mode");
         
         return saveBootstrapConfig();
     }
 
-    /**
-     * Check if in recovery mode
-     */
     boolean isInRecoveryMode() {
         return isInRecoveryMode;
     }
@@ -683,19 +734,15 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return recoveryReason;
     }
 
-    /**
-     * Recover system with existing settings
-     */
     CompletableFuture<Void> recoverSystem(SettingsData settingsData) {
         if (!stateMachine.hasState(FAILED_SETTINGS)) {
-            throw new SecurityException("Recovery only allowed in FAILED_SETTINGS stateMachine");
+            throw new SecurityException("Recovery only allowed in FAILED_SETTINGS state");
         }
         
         return CompletableFuture.runAsync(() -> {
             RuntimeAccess access = new RuntimeAccess();
             SystemRuntime runtime = new SystemRuntime(settingsData, registry, access);
             
-            // THE stateMachine: systemAccess now exists → authenticated
             this.systemRuntime = runtime;
             this.systemAccess = access;
             
@@ -706,28 +753,40 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     // ===== SCREEN MANAGEMENT =====
     
     public CompletableFuture<Void> showScreen(TerminalScreen screen) {
+        Log.logMsg("[SystemApplication] showScreen(TerminalScreen) called for: " + screen.getName());
+        
         if(screen.isShowing()){
+            Log.logMsg("[SystemApplication] Screen already showing");
             return CompletableFuture.completedFuture(null);
         }
-        screen.setTerminal(this);
+        
         
         if (currentScreen != null && currentScreen != screen) {
+            Log.logMsg("[SystemApplication] Hiding current screen: " + currentScreen.getName());
             currentScreen.onHide();
         }
         
         currentScreen = screen;
         stateMachine.addState(SHOWING_SCREEN);
+        
+        Log.logMsg("[SystemApplication] Calling screen.onShow()");
         return screen.onShow();
     }
     
     public CompletableFuture<Void> showScreen(String screenName) {
+        Log.logMsg("[SystemApplication] showScreen(String) called for: " + screenName);
+        
         ScreenFactory screenFactory = screenFactories.get(screenName);
         if (screenFactory == null) {
-            Log.logError("[SystemTerminal] Screen not found: " + screenName);
+            Log.logError("[SystemApplication] Screen not found: " + screenName);
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Screen not found: " + screenName));
         }
+        
+        Log.logMsg("[SystemApplication] Creating screen: " + screenName);
         TerminalScreen screen = screenFactory.create(screenName, this);
+        Log.logMsg("[SystemApplication] Screen created: " + screen.getClass().getSimpleName());
+        
         return showScreen(screen);
     }
     
@@ -735,26 +794,45 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
         return currentScreen;
     }
     
-
-    @Override
-    protected void onContainerClosed() {
-        close();
-    }
-    
     // ===== GETTERS =====
+    
+    /**
+     * Get terminal handle - throws if not attached
+     * Use isTerminalAttached() to check first
+     */
+    public TerminalContainerHandle getTerminal() {
+        if (terminalHandle == null) {
+            throw new IllegalStateException("No terminal attached - application is running headless");
+        }
+        return terminalHandle;
+    }
+
+    void invalidate(){
+        if (isTerminalAttached()) {
+            terminalHandle.invalidate();
+        }
+    }
+
+    void setRenderable(Renderable renderable){
+        if (isTerminalAttached()) {
+            terminalHandle.setRenderable(renderable);
+        }
+    }
     
     public boolean isVisible() {
         return isVisible;
     }
     
-    
+    public BitFlagStateMachine getStateMachine() {
+        return stateMachine;
+    }
     
     RuntimeAccess getSystemAccess() {
         return systemAccess;
     }
 
-    ContextPath getSessionPath() {
-        return sessionPath;
+    ContextPath getSystemContextPath() {
+        return systemContextPath;
     }
 
     String getPasswordKeyboardId() {
@@ -771,6 +849,17 @@ public class SystemTerminalContainer extends TerminalContainerHandle {
     
     public boolean isIODaemonHealthy() {
         return ioDaemonManager.isHealthy();
+    }
+    
+    private String getDefaultKeyboardId() {
+        if (!isTerminalAttached()) {
+            return null;
+        }
+        return terminalHandle.getDefaultKeyboardId();
+    }
+
+    ContextPath getContextPath(){
+        return systemContextPath;
     }
     
     // ===== NAVIGATION =====

@@ -32,11 +32,11 @@ import java.util.concurrent.CompletableFuture;
  */
 class NodeCommands {
     
-    private final SystemTerminalContainer terminal;
+    private final SystemApplication systemApplication;
     private final AsymmetricPairs pairs;
     
-    NodeCommands(SystemTerminalContainer terminal, AsymmetricPairs pairs) {
-        this.terminal = terminal;
+    NodeCommands(SystemApplication systemApplication, AsymmetricPairs pairs) {
+        this.systemApplication = systemApplication;
         this.pairs = pairs;
 
     }
@@ -85,7 +85,7 @@ class NodeCommands {
         ) {
       
             try {
-                return terminal.request(targetPath, signCommand(command.toNoteBytes()), Duration.ofSeconds(1));
+                return systemApplication.getTerminal().request(targetPath, signCommand(command.toNoteBytes()), Duration.ofSeconds(1));
             } catch (IllegalStateException e) {
                 return CompletableFuture.failedFuture(e);
             }

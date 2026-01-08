@@ -25,11 +25,11 @@ import java.util.concurrent.CompletableFuture;
  */
 public class IODaemonManager {
 
-    private final SystemTerminalContainer terminal;
+    private final SystemApplication systemApplication;
     private final ProcessRegistryInterface registry;
     
-    public IODaemonManager(SystemTerminalContainer terminal, ProcessRegistryInterface registry) {
-        this.terminal = terminal;
+    public IODaemonManager(SystemApplication sysApp, ProcessRegistryInterface registry) {
+        this.systemApplication = sysApp;
         this.registry = registry;
     }
     
@@ -143,7 +143,7 @@ public class IODaemonManager {
      */
     private CompletableFuture<ContextPath> registerAndStart(String socketPath) {
         String actualSocketPath = (socketPath != null) ? 
-            socketPath : terminal.getIODaemonSocketPath();
+            socketPath : systemApplication.getIODaemonSocketPath();
         
         Log.logMsg("[IODaemonManager] Registering IODaemon at: " + actualSocketPath);
         

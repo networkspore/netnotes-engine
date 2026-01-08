@@ -11,8 +11,8 @@ import io.netnotes.engine.core.system.control.nodes.PackageInfo;
 import io.netnotes.engine.core.system.control.nodes.PackageManifest;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
 import io.netnotes.engine.core.system.control.nodes.security.PolicyManifest;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -60,15 +60,15 @@ class BrowsePackagesScreen extends TerminalScreen {
     
     public BrowsePackagesScreen(
         String name, 
-        SystemTerminalContainer terminal, 
+        SystemApplication systemApplication, 
         NodeCommands nodeCommands
     ) {
-        super(name, terminal);
+        super(name, systemApplication);
         this.availablePackages = new ArrayList<>();
         this.installedPackages = new ArrayList<>();
         this.nodeCommands = nodeCommands;
 
-        menuNavigator = new MenuNavigator(terminal).withParent(this);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
     }
     
     public void setOnBack(Runnable onBack) {
@@ -78,7 +78,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentView) {
             case LOADING -> buildLoadingState();
             case CATEGORY_LIST, PACKAGE_LIST, PACKAGE_DETAILS -> buildMenuState();
@@ -93,8 +93,8 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build loading state
      */
-    private RenderState buildLoadingState() {
-        return RenderState.builder()
+    private TerminalRenderState buildLoadingState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Browse Packages", TextStyle.BOLD);
                 term.printAt(7, 10, "Updating package lists from repositories...");
@@ -106,8 +106,8 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * MenuNavigator is active, return empty
      */
-    private RenderState buildMenuState() {
-        return RenderState.builder()
+    private TerminalRenderState buildMenuState() {
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             .add(menuNavigator.asRenderElement())
             .build();
@@ -116,7 +116,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build configure install screen
      */
-    private RenderState buildConfigureState() {
+    private TerminalRenderState buildConfigureState() {
         if (selectedPackage == null) {
             return buildErrorState();
         }
@@ -125,7 +125,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         NoteBytesReadOnly defaultNamespace = manifest.getNamespace() != null ? 
             manifest.getNamespace() : selectedPackage.getPackageId();
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
                 term.printAt(5, 10, "Package: " + selectedPackage.getName());
@@ -141,12 +141,12 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build confirm install screen
      */
-    private RenderState buildConfirmState() {
+    private TerminalRenderState buildConfirmState() {
         if (selectedPackage == null || installConfig == null) {
             return buildErrorState();
         }
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Confirm Installation", TextStyle.BOLD);
                 term.printAt(5, 10, "Package: " + selectedPackage.getName() + 
@@ -168,13 +168,13 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build installing state
      */
-    private RenderState buildInstallingState() {
-        return RenderState.builder()
+    private TerminalRenderState buildInstallingState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(terminal.getRows() / 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                     "Installing package...", TextStyle.INFO);
                 if (statusMessage != null) {
-                    term.printAt(terminal.getRows() / 2 + 2, 10, 
+                    term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                         statusMessage, TextStyle.NORMAL);
                 }
             })
@@ -184,13 +184,13 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build success state
      */
-    private RenderState buildSuccessState() {
-        return RenderState.builder()
+    private TerminalRenderState buildSuccessState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(terminal.getRows() / 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
                     TextStyle.SUCCESS);
-                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                     "Returning to package list...", TextStyle.NORMAL);
             })
             .build();
@@ -199,14 +199,14 @@ class BrowsePackagesScreen extends TerminalScreen {
     /**
      * Build error state
      */
-    private RenderState buildErrorState() {
+    private TerminalRenderState buildErrorState() {
         String message = errorMessage != null ? errorMessage : "An error occurred";
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(terminal.getRows() / 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                     message, TextStyle.ERROR);
-                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
@@ -259,7 +259,7 @@ class BrowsePackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate(); // PATCH: Added invalidate
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(this::goBack);
                 return null;
             });
@@ -273,7 +273,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            terminal.waitForKeyPress()
+            systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(this::goBack);
             return;
         }
@@ -285,7 +285,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             .collect(Collectors.groupingBy(PackageInfo::getCategory));
         
         // Build menu
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "categories");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "categories");
         MenuContext menu = new MenuContext(
             menuPath, 
             "Package Categories",
@@ -334,7 +334,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         String title = selectedCategory != null ? 
             "Category: " + selectedCategory : "All Packages";
         
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "packages");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "packages");
         MenuContext menu = new MenuContext(menuPath, title, null, null);
         
         // Add menu item for each package
@@ -366,7 +366,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         
         boolean isInstalled = isPackageInstalled(pkg.getPackageId());
         
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "package-details");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "package-details");
         MenuContext menu = new MenuContext(
             menuPath, 
             pkg.getName() + " v" + pkg.getVersion(),
@@ -424,7 +424,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     }
     
     private void readCustomNamespace() {
-        inputReader = new TerminalInputReader(terminal, 11, 46, 20);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 11, 46, 20);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -462,8 +462,8 @@ class BrowsePackagesScreen extends TerminalScreen {
     
     private void askAutoload() {
         // Update view to show autoload question
-        Renderable autoloadRenderable = () -> {
-            return RenderState.builder()
+        TerminalRenderable autoloadRenderable = () -> {
+            return TerminalRenderState.builder()
                 .add((term) -> {
                     term.printAt(0, 0, "Configure Installation", TextStyle.BOLD);
                     term.printAt(5, 10, "Package: " + selectedPackage.getName());
@@ -475,14 +475,14 @@ class BrowsePackagesScreen extends TerminalScreen {
         };
         
         // Temporarily replace render state
-        terminal.setRenderable(autoloadRenderable);
-        terminal.invalidate();
+        systemApplication.setRenderable(autoloadRenderable);
+        systemApplication.invalidate();
         
         readAutoloadChoice();
     }
     
     private void readAutoloadChoice() {
-        inputReader = new TerminalInputReader(terminal, 9, 54, 3);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 9, 54, 3);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -494,7 +494,7 @@ class BrowsePackagesScreen extends TerminalScreen {
                              "yes".equalsIgnoreCase(input);
             
             currentView = View.CONFIRM_INSTALL;
-            terminal.setRenderable(this);
+            systemApplication.getTerminal().setRenderable(this);
             invalidate();
 
             startConfirmation();
@@ -513,7 +513,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     }
     
     private void startConfirmation() {
-        inputReader = new TerminalInputReader(terminal, 17, 38, 20);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 17, 38, 20);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -528,10 +528,10 @@ class BrowsePackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(() -> {
                         currentView = View.CONFIRM_INSTALL;
-                        terminal.setRenderable(this);
+                        systemApplication.getTerminal().setRenderable(this);
                         invalidate();
                         startConfirmation();
                     });
@@ -598,7 +598,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            terminal.waitForKeyPress()
+            systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(() -> {
                     selectedPackage = null;
                     installConfig = null;

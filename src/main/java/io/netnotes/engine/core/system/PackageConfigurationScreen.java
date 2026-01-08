@@ -7,9 +7,10 @@ import java.util.concurrent.CompletableFuture;
 import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.ProcessConfig;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -48,11 +49,11 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     public PackageConfigurationScreen(
         String name,
-        SystemTerminalContainer terminal,
+        SystemApplication systemApplication,
         InstalledPackage pkg,
         NodeCommands nodeCommands
     ) {
-        super(name, terminal);
+        super(name, systemApplication);
         this.originalPackage = pkg;
         this.newProcessConfig = pkg.getProcessConfig();
         this.nodeCommands = nodeCommands;
@@ -77,7 +78,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     // ===== PULL-BASED RENDERING =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentStep) {
             case SHOW_CURRENT -> buildCurrentConfigState();
             case CONFIGURE_PROCESS_ID -> buildProcessIdConfigState();
@@ -89,12 +90,12 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     // ===== STATE BUILDERS =====
     
-    private RenderState buildCurrentConfigState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildCurrentConfigState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         // Title
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 22) / 2, "Package Configuration", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 22) / 2, "Package Configuration", 
                 TextStyle.BOLD));
         
         // Package info
@@ -121,11 +122,11 @@ class PackageConfigurationScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildProcessIdConfigState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildProcessIdConfigState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 16) / 2, "Change ProcessId", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 16) / 2, "Change ProcessId", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -142,11 +143,11 @@ class PackageConfigurationScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildPasswordConfirmState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildPasswordConfirmState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 33) / 2, 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 33) / 2, 
                 "Confirm Configuration Changes", TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -173,11 +174,11 @@ class PackageConfigurationScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildSavingState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildSavingState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 22) / 2, "Saving Configuration", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 22) / 2, "Saving Configuration", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -188,19 +189,19 @@ class PackageConfigurationScreen extends TerminalScreen {
         return builder.build();
     }
     
-    private RenderState buildCompleteState() {
-        RenderState.Builder builder = RenderState.builder();
+    private TerminalRenderState buildCompleteState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         if (errorMessage != null) {
             builder.add((term) -> 
-                term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 20) / 2, "Configuration Failed", 
+                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Configuration Failed", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
                 term.printAt(5, 10, errorMessage, TextStyle.ERROR));
         } else {
             builder.add((term) -> 
-                term.printAt(0, (PackageConfigurationScreen.this.terminal.getCols() - 21) / 2, "Configuration Updated", 
+                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Configuration Updated", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -222,8 +223,8 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     // ===== MENU ELEMENTS =====
     
-    private List<RenderElement> buildMenuElements(int startRow) {
-        List<RenderElement> elements = new ArrayList<>();
+    private List<TerminalRenderElement> buildMenuElements(int startRow) {
+        List<TerminalRenderElement> elements = new ArrayList<>();
         
         elements.add((term) -> 
             term.printAt(startRow, 10, "1. Change ProcessId (Namespace)"));
@@ -278,7 +279,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         );
         
         removeKeyDownHandler();
-        handlerId = terminal.addKeyDownHandler(event -> {
+        handlerId = systemApplication.getTerminal().addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -293,7 +294,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startProcessIdInput() {
         removeKeyDownHandler();
-        inputReader = new TerminalInputReader(terminal, 10, 25, 64);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 10, 25, 64);
         
         inputReader.setOnComplete(newProcessId -> {
             inputReader.close();
@@ -313,7 +314,7 @@ class PackageConfigurationScreen extends TerminalScreen {
                 errorMessage = "Invalid ProcessId: " + e.getMessage();
                 // Show error briefly then return to input
                 invalidate();
-                terminal.waitForKeyPress(() -> {
+                systemApplication.getTerminal().waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.CONFIGURE_PROCESS_ID);
                 });
@@ -329,7 +330,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         removeKeyDownHandler();
-        inputReader = new TerminalInputReader(terminal, 15, 36, 20);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 15, 36, 20);
         
         inputReader.setOnComplete(input -> {
             inputReader.close();
@@ -340,7 +341,7 @@ class PackageConfigurationScreen extends TerminalScreen {
             } else {
                 errorMessage = "Confirmation failed";
                 invalidate();
-                terminal.waitForKeyPress(() -> {
+                systemApplication.getTerminal().waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.PASSWORD_CONFIRM);
                 });
@@ -372,7 +373,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void setupCompleteInput() {
         removeKeyDownHandler();
-        terminal.waitForKeyPress(() -> {
+        systemApplication.getTerminal().waitForKeyPress(() -> {
             if (onCompleteCallback != null) {
                 onCompleteCallback.run();
             }
@@ -394,7 +395,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void removeKeyDownHandler() {
         if (handlerId != null) {
-            terminal.removeKeyDownHandler(handlerId);
+            systemApplication.getTerminal().removeKeyDownHandler(handlerId);
             handlerId = null;
         }
     }

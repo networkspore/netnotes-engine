@@ -1,7 +1,7 @@
 package io.netnotes.engine.core.system;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
@@ -58,11 +58,11 @@ public class SystemSetupScreen extends TerminalScreen {
     // For socket config input
     private TerminalInputReader inputReader = null;
     
-    public SystemSetupScreen(String id, SystemTerminalContainer terminal) {
-        super(id, terminal);
-        this.menuNavigator = new MenuNavigator(terminal).withParent(this);
-        this.isFirstRun = !terminal.isAuthenticated();
-        
+    public SystemSetupScreen(String id, SystemApplication systemApplication) {
+        super(id, systemApplication);
+        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        this.isFirstRun = !systemApplication.isAuthenticated();
+        Log.logMsg("[SystemSetupScreen] created: " + id + ": terminal: " + systemApplication.getTerminal().getId());
         if (!isFirstRun) {
             currentState = SetupState.DETECTING;
         }
@@ -71,7 +71,7 @@ public class SystemSetupScreen extends TerminalScreen {
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         // Build UI based on current state
         return switch (currentState) {
             case WELCOME -> buildWelcomeState();
@@ -86,26 +86,26 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build welcome screen state
      */
-    private RenderState buildWelcomeState() {
+    private TerminalRenderState buildWelcomeState() {
         TerminalTextBox welcomeBox = TerminalTextBox.builder()
             .position(0, 2)
-            .size(terminal.getWidth() - 4, 5)
+            .size(systemApplication.getTerminal().getWidth() - 4, 5)
             .title("Welcome to Netnotes", TerminalTextBox.TitlePlacement.INSIDE_CENTER)
             .style(BoxStyle.DOUBLE)
             .titleStyle(TextStyle.BOLD)
             .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
             .build();
         
-        int msgRow = Math.max(terminal.getRows() / 2 + 2, 8);
+        int msgRow = Math.max(systemApplication.getTerminal().getRows() / 2 + 2, 8);
         String msg = "Initial Setup";
-        int msgCol = Math.max(0, terminal.getCols() / 2 - msg.length() / 2);
+        int msgCol = Math.max(0, systemApplication.getTerminal().getCols() / 2 - msg.length() / 2);
         int lineCol = Math.max(0, msgCol - 1);
         
-        int promptRow = terminal.getRows() / 2 + 5;
+        int promptRow = systemApplication.getTerminal().getRows() / 2 + 5;
         String prompt = TerminalCommands.PRESS_ANY_KEY;
-        int promptCol = Math.max(0, terminal.getCols() / 2 - prompt.length() / 2);
+        int promptCol = Math.max(0, systemApplication.getTerminal().getCols() / 2 - prompt.length() / 2);
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term)-> term.clear())
             .add(welcomeBox.asRenderElement())
             .add((term) -> {
@@ -121,11 +121,11 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build detecting screen state
      */
-    private RenderState buildDetectingState() {
-        int row = terminal.getRows() / 2;
-        int col = Math.max(0, terminal.getCols() / 2 - 15);
+    private TerminalRenderState buildDetectingState() {
+        int row = systemApplication.getTerminal().getRows() / 2;
+        int col = Math.max(0, systemApplication.getTerminal().getCols() / 2 - 15);
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(row, col, "Detecting IODaemon...", TextStyle.INFO);
             })
@@ -135,10 +135,10 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build main menu state
      */
-    private RenderState buildMainMenuState() {
+    private TerminalRenderState buildMainMenuState() {
         // MenuNavigator handles its own rendering
         // Return empty state - MenuNavigator is active renderable
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             .add(menuNavigator.asRenderElement())
             .build();
@@ -147,9 +147,9 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build keyboard selection state
      */
-    private RenderState buildKeyboardSelectionState() {
+    private TerminalRenderState buildKeyboardSelectionState() {
         // MenuNavigator handles its own rendering
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             .add(menuNavigator.asRenderElement())
             .build();
@@ -158,7 +158,7 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build socket config state
      */
-    private RenderState buildSocketConfigState() {
+    private TerminalRenderState buildSocketConfigState() {
         // TerminalInputReader handles its own rendering
         // But we need to show the UI around it
         
@@ -167,7 +167,7 @@ public class SystemSetupScreen extends TerminalScreen {
         int promptRow = 5;
         int inputPromptRow = 7;
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(titleRow, 5, "Socket Path Configuration", TextStyle.BOLD);
             })
@@ -189,14 +189,14 @@ public class SystemSetupScreen extends TerminalScreen {
     /**
      * Build error state
      */
-    private RenderState buildErrorState() {
+    private TerminalRenderState buildErrorState() {
         String errorText = "Setup error: " + 
             (errorMessage != null ? errorMessage : "Unknown error");
         
-        int errorRow = terminal.getRows() / 2;
+        int errorRow = systemApplication.getTerminal().getRows() / 2;
         int promptRow = errorRow + 2;
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(errorRow, 5, errorText, TextStyle.ERROR);
                 term.printAt(promptRow, 5, "Press any key to return...", 
@@ -217,7 +217,7 @@ public class SystemSetupScreen extends TerminalScreen {
         // Start the flow
         if (currentState == SetupState.WELCOME) {
             // Wait for keypress, then move to detecting
-            return terminal.waitForKeyPress()
+            return systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(() -> {
                     currentState = SetupState.DETECTING;
                     invalidate();
@@ -243,7 +243,7 @@ public class SystemSetupScreen extends TerminalScreen {
     // ===== IODaemon DETECTION =====
     
     private CompletableFuture<Void> detectIODaemon() {
-        return terminal.getIoDaemonManager().detect()
+        return systemApplication.getIoDaemonManager().detect()
             .thenCompose(detectionResult -> {
                 ioDaemonAvailable = detectionResult.isAvailable();
                 
@@ -251,14 +251,14 @@ public class SystemSetupScreen extends TerminalScreen {
                     Log.logMsg("[SystemSetupScreen] IODaemon fully operational");
                     socketPath = detectionResult.socketPath;
                     
-                    return terminal.getIoDaemonManager().ensureAvailable()
+                    return systemApplication.getIoDaemonManager().ensureAvailable()
                         .thenCompose(ioDaemonPath -> discoverKeyboards());
                         
                 } else if (detectionResult.binaryExists && !detectionResult.processRunning) {
                     Log.logMsg("[SystemSetupScreen] IODaemon installed but not running");
                     socketPath = detectionResult.socketPath;
                     
-                    return terminal.getIoDaemonManager().ensureAvailable()
+                    return systemApplication.getIoDaemonManager().ensureAvailable()
                         .thenCompose(ioDaemonPath -> discoverKeyboards())
                         .exceptionally(ex -> {
                             Log.logError("[SystemSetupScreen] Failed to start IODaemon: " + 
@@ -272,7 +272,7 @@ public class SystemSetupScreen extends TerminalScreen {
                     ioDaemonAvailable = false;
                     
                     IODaemonDetection.InstallationPaths paths = 
-                        terminal.getIoDaemonManager().getInstallationPaths();
+                        systemApplication.getIoDaemonManager().getInstallationPaths();
                     if (paths != null) {
                         socketPath = paths.socketPath;
                     }
@@ -304,15 +304,15 @@ public class SystemSetupScreen extends TerminalScreen {
                 invalidate();
                 
                 // Wait for keypress, then go back
-                terminal.waitForKeyPress()
-                    .thenRun(() -> terminal.goBack());
+                systemApplication.getTerminal().waitForKeyPress()
+                    .thenRun(() -> systemApplication.goBack());
                 
                 return null;
             });
     }
     
     private CompletableFuture<Void> discoverKeyboards() {
-        return terminal.connectToIODaemon()
+        return systemApplication.getTerminal().connectToIODaemon()
             .thenCompose(session -> session.discoverDevices())
             .thenAccept(devices -> {
                 availableKeyboards = devices.stream()
@@ -335,7 +335,7 @@ public class SystemSetupScreen extends TerminalScreen {
     private void showMainSetupMenu() {
         currentState = SetupState.MAIN_MENU;
         
-        ContextPath menuPath = terminal.getContextPath().append("system-setup");
+        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("system-setup");
         String description = buildSetupDescription();
         
         MenuContext menu = new MenuContext(
@@ -381,7 +381,7 @@ public class SystemSetupScreen extends TerminalScreen {
         } else {
             menu.addItem("back",
                 "Back to Settings",
-                () -> terminal.goBack());
+                () -> systemApplication.goBack());
         }
         
         // MenuNavigator becomes the active renderable
@@ -407,7 +407,7 @@ public class SystemSetupScreen extends TerminalScreen {
             desc.append("✗ IODaemon not available\n\n");
             
             IODaemonDetection.InstallationPaths paths = 
-                terminal.getIoDaemonManager().getInstallationPaths();
+                systemApplication.getIoDaemonManager().getInstallationPaths();
             
             if (paths != null) {
                 desc.append("Expected location: ").append(paths.binaryPath).append("\n");
@@ -426,7 +426,7 @@ public class SystemSetupScreen extends TerminalScreen {
     private void showKeyboardSelectionMenu(boolean forPassword) {
         currentState = SetupState.KEYBOARD_SELECTION;
         
-        ContextPath menuPath = terminal.getContextPath().append("keyboard-selection");
+        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("keyboard-selection");
         
         String title = forPassword ? "Select Password Keyboard" : "Select Default Keyboard";
         String description = "Choose which USB keyboard to use for " + 
@@ -473,7 +473,7 @@ public class SystemSetupScreen extends TerminalScreen {
         Log.logMsg("[SystemSetupScreen] Selected keyboard: " + deviceId);
         
         if (forPassword) {
-            terminal.completeBootstrap(deviceId)
+            systemApplication.completeBootstrap(deviceId)
                 .thenRun(() -> {
                     if (isFirstRun) {
                         completeSetup();
@@ -493,7 +493,7 @@ public class SystemSetupScreen extends TerminalScreen {
                 currentState = SetupState.ERROR;
                 invalidate();
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(() -> showKeyboardSelectionMenu(true));
                 return null;
             });
@@ -504,12 +504,12 @@ public class SystemSetupScreen extends TerminalScreen {
     private void configureGUIOnly() {
         // This transitions to a different screen
         // We don't render here - just update state and navigate
-        terminal.completeBootstrap(null)
+        systemApplication.completeBootstrap(null)
             .thenRun(() -> {
                 if (isFirstRun) {
                     completeSetup();
                 } else {
-                    terminal.goBack();
+                    systemApplication.goBack();
                 }
             });
     }
@@ -519,7 +519,7 @@ public class SystemSetupScreen extends TerminalScreen {
         invalidate();
         
         // Create input reader
-        inputReader = new TerminalInputReader(terminal, 7, 7, 60);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 7, 7, 60);
         inputReader.setText(socketPath);
         
         inputReader.setOnComplete(newPath -> {
@@ -553,7 +553,7 @@ public class SystemSetupScreen extends TerminalScreen {
             currentState = SetupState.ERROR;
             invalidate();
             
-            terminal.waitForKeyPress()
+            systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(this::configureSocketPath);
             return;
         }
@@ -562,10 +562,10 @@ public class SystemSetupScreen extends TerminalScreen {
         socketPath = newPath.trim();
         
         // Update and test connection
-        terminal.completeBootstrap(terminal.getPasswordKeyboardId())
-            .thenCompose(v -> terminal.getIoDaemonManager()
+        systemApplication.completeBootstrap(systemApplication.getPasswordKeyboardId())
+            .thenCompose(v -> systemApplication.getIoDaemonManager()
                 .reconfigureSocketPath(socketPath))
-            .thenCompose(v -> terminal.getIoDaemonManager().detect())
+            .thenCompose(v -> systemApplication.getIoDaemonManager().detect())
             .thenAccept(result -> {
                 if (result.isFullyOperational()) {
                     ioDaemonAvailable = true;
@@ -579,13 +579,13 @@ public class SystemSetupScreen extends TerminalScreen {
             .exceptionally(ex -> {
                 // Revert on failure
                 socketPath = oldPath;
-                terminal.completeBootstrap(terminal.getPasswordKeyboardId());
+                systemApplication.completeBootstrap(systemApplication.getPasswordKeyboardId());
                 
                 errorMessage = "Failed to apply new path: " + ex.getMessage();
                 currentState = SetupState.ERROR;
                 invalidate();
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(() -> {
                         currentState = SetupState.MAIN_MENU;
                         showMainSetupMenu();
@@ -616,9 +616,9 @@ public class SystemSetupScreen extends TerminalScreen {
         Log.logMsg("[SystemSetupScreen] Setup complete");
         
         if (isFirstRun) {
-            terminal.getStateMachine().addState(SystemTerminalContainer.CHECKING_SETTINGS);
+            systemApplication.getStateMachine().addState(SystemApplication.CHECKING_SETTINGS);
         } else {
-            terminal.goBack();
+            systemApplication.goBack();
         }
     }
 }

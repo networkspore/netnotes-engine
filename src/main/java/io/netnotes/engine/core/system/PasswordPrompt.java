@@ -4,10 +4,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.core.system.control.PasswordReader;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
@@ -38,9 +39,9 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  *     .show();
  * </pre>
  */
-public class PasswordPrompt implements Renderable {
+public class PasswordPrompt implements TerminalRenderable {
     
-    private final SystemTerminalContainer terminal;
+    private final SystemApplication systemApplicatoin;
     
     // Configuration
     private String title = "Authentication";
@@ -77,14 +78,14 @@ public class PasswordPrompt implements Renderable {
     private CompletableFuture<Void> timeoutFuture;
     private NoteBytesEphemeral firstPassword = null;
     
-    public PasswordPrompt(SystemTerminalContainer terminal) {
-        this.terminal = terminal;
+    public PasswordPrompt(SystemApplication systemApplication) {
+        this.systemApplicatoin = systemApplication;
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentState) {
             case INACTIVE -> buildInactiveState();
             case PROMPTING, CONFIRMING -> buildPromptState();
@@ -107,23 +108,23 @@ public class PasswordPrompt implements Renderable {
      */
     private void invalidate() {
         this.needsRender = true;
-        terminal.invalidate();
+        systemApplicatoin.invalidate();
     }
     
     /**
      * Build inactive state (shouldn't be rendered)
      */
-    private RenderState buildInactiveState() {
-        return RenderState.builder().build();
+    private TerminalRenderState buildInactiveState() {
+        return TerminalRenderState.builder().build();
     }
     
     /**
      * Build password prompt state
      */
-    private RenderState buildPromptState() {
+    private TerminalRenderState buildPromptState() {
         // Calculate box position - if position specified, use as top-left; otherwise center
-        int boxRow = promptRow >= 0 ? promptRow : terminal.getRows() / 2 - 5;
-        int boxCol = promptCol >= 0 ? promptCol : terminal.getCols() / 2 - 25;
+        int boxRow = promptRow >= 0 ? promptRow : systemApplicatoin.getTerminal().getRows() / 2 - 5;
+        int boxCol = promptCol >= 0 ? promptCol : systemApplicatoin.getTerminal().getCols() / 2 - 25;
         
         // Build text box for prompt
         TerminalTextBox promptBox = TerminalTextBox.builder()
@@ -138,7 +139,7 @@ public class PasswordPrompt implements Renderable {
             .addLine("")
             .build();
         
-        RenderState.Builder builder = RenderState.builder();
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         builder.add(promptBox.asRenderElement());
         
         // Add status message if present
@@ -171,11 +172,11 @@ public class PasswordPrompt implements Renderable {
     /**
      * Build processing state
      */
-    private RenderState buildProcessingState() {
-        int row = terminal.getRows() / 2;
-        int col = terminal.getCols() / 2 - 15;
+    private TerminalRenderState buildProcessingState() {
+        int row = systemApplicatoin.getTerminal().getRows() / 2;
+        int col = systemApplicatoin.getTerminal().getCols() / 2 - 15;
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(row, col, "Processing...", TextStyle.INFO);
             })
@@ -185,12 +186,12 @@ public class PasswordPrompt implements Renderable {
     /**
      * Build footer element
      */
-    private RenderElement buildFooter(String text) {
-        int row = terminal.getRows() - 2;
-        int col = terminal.getCols() / 2 - text.length() / 2;
+    private TerminalRenderElement buildFooter(String text) {
+        int row = systemApplicatoin.getTerminal().getRows() - 2;
+        int col = systemApplicatoin.getTerminal().getCols() / 2 - text.length() / 2;
         
         return (term) -> {
-            term.drawHLine(row - 1, 0, terminal.getCols());
+            term.drawHLine(row - 1, 0, systemApplicatoin.getTerminal().getCols());
             term.printAt(row, col, text, TextStyle.INFO);
         };
     }
@@ -266,10 +267,10 @@ public class PasswordPrompt implements Renderable {
         statusMessage = null;
         
         // Make this the active renderable
-        terminal.setRenderable(this);
+        systemApplicatoin.setRenderable(this);
         invalidate();
         
-        return terminal.claimPasswordKeyboard()
+        return systemApplicatoin.claimPasswordKeyboard()
             .thenRun(() -> {
                 startPasswordEntry();
                 startTimeout();
@@ -301,7 +302,7 @@ public class PasswordPrompt implements Renderable {
     // ===== PASSWORD ENTRY =====
     
     private void startPasswordEntry() {
-        EventHandlerRegistry registry = terminal.getPasswordEventHandlerRegistry();
+        EventHandlerRegistry registry = systemApplicatoin.getPasswordEventHandlerRegistry();
         
         if (passwordReader == null) {
             passwordReader = new PasswordReader(registry);
@@ -458,7 +459,7 @@ public class PasswordPrompt implements Renderable {
             firstPassword = null;
         }
         
-        terminal.releasePasswordKeyboard()
+        systemApplicatoin.releasePasswordKeyboard()
             .exceptionally(ex -> {
                 Log.logError("[PasswordPrompt] Cleanup error: " + ex.getMessage());
                 return null;

@@ -1,6 +1,7 @@
 package io.netnotes.engine.core.system;
 
 import io.netnotes.engine.core.CoreConstants;
+import io.netnotes.engine.core.SettingsData;
 import io.netnotes.engine.core.system.control.containers.RenderingService;
 import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
@@ -23,15 +24,17 @@ import java.util.concurrent.CompletableFuture;
  * /system/
  *   rendering-service/           # RenderingService (server interface)
  *   render-manager/              # ClientTerminalRenderManager (owns handles)
- *     system-terminal/           # SystemTerminalContainer (handle)
- *     [other-terminals]/         # Additional terminals as needed
+ *     system-terminal/           # TerminalContainerHandle (the UI container)
+ * 
+ * SystemApplication wraps the handle and provides application logic
  * 
  * Flow:
  * 1. Start UIRenderer
  * 2. Start RenderingService (server interface)
  * 3. Start ClientTerminalRenderManager (client coordinator)
- * 4. Create system terminal through manager
- * 5. Terminal handles bootstrap, auth, IODaemon, screens
+ * 4. Create terminal handle through manager
+ * 5. Create SystemApplication with the handle
+ * 6. SystemApplication handles bootstrap, auth, IODaemon, screens
  */
 public class SystemProcess extends FlowProcess {
     
@@ -42,15 +45,24 @@ public class SystemProcess extends FlowProcess {
     private final UIRenderer<?> uiRenderer;
     private RenderingService renderingService;
     private ClientTerminalRenderManager renderManager;
-    private TerminalContainerHandle systemTerminal;
+    
+    // Terminal handle (UI container)
+    private TerminalContainerHandle systemTerminalHandle;
+    
+    // Application logic (wraps the handle)
+    private SystemApplication systemApplication;
+    
+    // Daemon mode flag
+    private boolean daemonMode = false;
     
     // States
     public static final int INITIALIZING = 0;
     public static final int RENDERING_STARTING = 1;
     public static final int MANAGER_STARTING = 2;
     public static final int TERMINAL_CREATING = 3;
-    public static final int READY = 4;
-    public static final int ERROR = 5;
+    public static final int APPLICATION_CREATING = 4;
+    public static final int READY = 5;
+    public static final int ERROR = 6;
     
     private SystemProcess(
         FlowProcessService processService,
@@ -99,6 +111,9 @@ public class SystemProcess extends FlowProcess {
         state.onStateAdded(TERMINAL_CREATING, (old, now, bit) -> 
             Log.logMsg("[SystemProcess] TERMINAL_CREATING"));
         
+        state.onStateAdded(APPLICATION_CREATING, (old, now, bit) -> 
+            Log.logMsg("[SystemProcess] APPLICATION_CREATING"));
+        
         state.onStateAdded(READY, (old, now, bit) -> 
             Log.logMsg("[SystemProcess] READY - System operational"));
     }
@@ -108,11 +123,12 @@ public class SystemProcess extends FlowProcess {
     }
     
     /**
-     * Initialize system
+     * Initialize system (standard mode - with terminal)
      * UIRenderer → RenderingService → ClientTerminalRenderManager → Ready
      */
     CompletableFuture<Void> initialize() {
         state.addState(INITIALIZING);
+        this.daemonMode = false;
         
         return initializeUIRenderer()
             .thenCompose(v -> {
@@ -131,6 +147,47 @@ public class SystemProcess extends FlowProcess {
             })
             .exceptionally(ex -> {
                 Log.logError("[SystemProcess] Init failed: " + ex.getMessage());
+                state.addState(ERROR);
+                return null;
+            });
+    }
+    
+    /**
+     * Initialize system in daemon mode (headless - no terminal initially)
+     * UIRenderer → RenderingService → ClientTerminalRenderManager → Application → Ready
+     * 
+     * Application is created WITHOUT a terminal and can run headless
+     */
+    CompletableFuture<Void> initializeDaemon() {
+        state.addState(INITIALIZING);
+        this.daemonMode = true;
+        
+        return initializeUIRenderer()
+            .thenCompose(v -> {
+                state.removeState(INITIALIZING);
+                state.addState(RENDERING_STARTING);
+                return startRenderingService();
+            })
+            .thenCompose(v -> {
+                state.removeState(RENDERING_STARTING);
+                state.addState(MANAGER_STARTING);
+                return startRenderManager();
+            })
+            .thenCompose(v -> {
+                state.removeState(MANAGER_STARTING);
+                state.addState(APPLICATION_CREATING);
+                return createSystemApplicationHeadless();
+            })
+            .thenCompose(v -> {
+                state.removeState(APPLICATION_CREATING);
+                return systemApplication.initialize();
+            })
+            .thenRun(() -> {
+                state.addState(READY);
+                Log.logMsg("[SystemProcess] Daemon mode initialized (headless)");
+            })
+            .exceptionally(ex -> {
+                Log.logError("[SystemProcess] Daemon init failed: " + ex.getMessage());
                 state.addState(ERROR);
                 return null;
             });
@@ -174,8 +231,7 @@ public class SystemProcess extends FlowProcess {
      * Manager owns and coordinates all terminal handles
      */
     private CompletableFuture<Void> startRenderManager() {
-        renderManager = new ClientTerminalRenderManager(
-            "render-manager",
+        renderManager = new ClientTerminalRenderManager("renderManager",
             CoreConstants.RENDERING_SERVICE_PATH
         );
         
@@ -190,6 +246,7 @@ public class SystemProcess extends FlowProcess {
                 Log.logMsg("[SystemProcess] Render loop active, ready to manage terminals");
             });
     }
+    
     
     // ===== MESSAGE HANDLERS =====
     
@@ -214,30 +271,153 @@ public class SystemProcess extends FlowProcess {
     // ===== PUBLIC API (called by ConsoleApplication) =====
     
     /**
-     * Create and open system terminal
+     * Create and open system terminal (standard mode)
      * Called by ConsoleApplication after system is ready
      * 
-     * Terminal is created through render manager and handles:
-     * - Bootstrap configuration (if needed)
-     * - Authentication (first run + login + unlock)
-     * - IODaemon management (via ServicesManager)
-     * - All screens and menus
+     * Creates:
+     * 1. Terminal handle (UI container) through render manager
+     * 2. SystemApplication (wraps handle with application logic)
+     * 3. Initializes and opens the application
      */
     public CompletableFuture<Void> openSystemTerminal() {
-        if (systemTerminal == null) {
-            Log.logMsg("[SystemProcess] Creating system terminal through render manager");
-            
-            return createSystemTerminal()
-                .thenCompose(v -> systemTerminal.show()); // Show instead of "open"
+        if (daemonMode) {
+            // In daemon mode, use attach instead
+            return attachLocalTerminal();
         }
         
-        // Terminal exists, just show it
-        Log.logMsg("[SystemProcess] Showing existing system terminal");
-        return systemTerminal.show();
+        if (systemApplication == null) {
+            Log.logMsg("[SystemProcess] Creating system terminal and application");
+            
+            return createSystemTerminal()
+                .thenCompose(v -> createSystemApplication())
+                .thenCompose(v -> systemApplication.initialize())
+                .thenCompose(v -> systemApplication.open());
+        }
+        
+        // Application exists, just open it
+        Log.logMsg("[SystemProcess] Opening existing system application");
+        return systemApplication.open();
     }
     
     /**
-     * Create THE system terminal through render manager
+     * Attach local terminal to running daemon
+     * Terminal is created and attached to existing application
+     */
+    public CompletableFuture<Void> attachLocalTerminal() {
+        if (!daemonMode) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not running in daemon mode"));
+        }
+        
+        if (systemApplication == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Application not initialized"));
+        }
+        
+        if (systemApplication.isTerminalAttached()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Terminal already attached"));
+        }
+        
+        Log.logMsg("[SystemProcess] Attaching local terminal to daemon");
+        
+        // Create terminal if needed
+        if (systemTerminalHandle == null) {
+            return createSystemTerminal()
+                .thenCompose(v -> systemApplication.attachTerminal(systemTerminalHandle, false));
+        }
+        
+        return systemApplication.attachTerminal(systemTerminalHandle, false);
+    }
+    
+    /**
+     * Detach local terminal from daemon
+     * Application continues running headless
+     */
+    public CompletableFuture<Void> detachLocalTerminal() {
+        if (!daemonMode) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not running in daemon mode"));
+        }
+        
+        if (systemApplication == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        Log.logMsg("[SystemProcess] Detaching local terminal from daemon");
+        return systemApplication.detachTerminal();
+    }
+    
+    /**
+     * Attach remote client terminal to daemon
+     * Creates a virtual terminal for the remote client
+     * 
+     * SECURITY: Only allows connection to already-configured systems.
+     * Initial setup MUST be done via local terminal.
+     * 
+     * @param clientId Unique identifier for the remote client
+     */
+    public CompletableFuture<Void> attachRemoteClient(String clientId) {
+        if (!daemonMode) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not running in daemon mode"));
+        }
+        
+        if (systemApplication == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Application not initialized"));
+        }
+        
+        // CRITICAL: Verify system is configured before allowing remote access
+        if (!SettingsData.isSettingsData()) {
+            Log.logMsg("[SystemProcess] Remote client rejected - system not configured");
+            return CompletableFuture.failedFuture(
+                new SecurityException(
+                    "System not configured. Initial setup must be performed via local terminal."));
+        }
+        
+        if (systemApplication.isTerminalAttached()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Another terminal is already attached"));
+        }
+        
+        Log.logMsg("[SystemProcess] Attaching remote client: " + clientId);
+        
+        // Create virtual terminal for remote client
+        TerminalContainerHandle remoteHandle = renderManager.createTerminal(clientId)
+            .title("Remote Client - " + clientId)
+            .size(80, 24)
+            .build();
+        
+        return remoteHandle.waitUntilReady()
+            .thenCompose(v -> systemApplication.attachTerminal(remoteHandle, true));
+    }
+    
+    /**
+     * Detach remote client terminal
+     * Application continues running headless
+     */
+    public CompletableFuture<Void> detachRemoteClient() {
+        if (!daemonMode) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Not running in daemon mode"));
+        }
+        
+        if (systemApplication == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        if (!systemApplication.isRemoteAttachment()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("No remote client attached"));
+        }
+        
+        Log.logMsg("[SystemProcess] Detaching remote client");
+        return systemApplication.detachTerminal();
+    }
+    
+    /**
+     * Create the terminal handle through render manager
      * 
      * Manager creates handle as its child and automatically:
      * - Registers it in the process hierarchy
@@ -246,12 +426,12 @@ public class SystemProcess extends FlowProcess {
      * - Polls it for render state
      */
     private CompletableFuture<Void> createSystemTerminal() {
-        Log.logMsg("[SystemProcess] Creating system terminal through manager");
+        Log.logMsg("[SystemProcess] Creating system terminal handle through manager");
         
         state.addState(TERMINAL_CREATING);
         
-        // Create terminal through manager (manager owns it)
-        systemTerminal = renderManager.createTerminal("system-terminal")
+        // Create terminal handle through manager (manager owns it)
+        systemTerminalHandle = renderManager.createTerminal("system-terminal")
             .title("System Terminal")
             .size(80, 24)
             .autoFocus(true)
@@ -259,20 +439,72 @@ public class SystemProcess extends FlowProcess {
         
         // Manager automatically started the terminal
         // Wait for it to be ready
-        return systemTerminal.waitUntilReady()
+        return systemTerminalHandle.waitUntilReady()
             .thenRun(() -> {
                 state.removeState(TERMINAL_CREATING);
-                Log.logMsg("[SystemProcess] System terminal ready: " + 
-                    systemTerminal.getContextPath());
+                Log.logMsg("[SystemProcess] Terminal handle ready: " + 
+                    systemTerminalHandle.getContextPath());
                 Log.logMsg("[SystemProcess] Terminal owned by render manager, " +
                     "automatic rendering active");
             });
     }
     
+    /**
+     * Create SystemApplication (wraps the terminal handle)
+     * Standard mode - application created with terminal attached
+     * 
+     * SystemApplication provides:
+     * - Bootstrap configuration management
+     * - Authentication flow (first run, login, unlock)
+     * - IODaemon management
+     * - Screen navigation and lifecycle
+     */
+    private CompletableFuture<Void> createSystemApplication() {
+        Log.logMsg("[SystemProcess] Creating SystemApplication with terminal");
+        
+        state.addState(APPLICATION_CREATING);
+        
+        // Create application WITH the terminal handle
+        systemApplication = new SystemApplication(
+            systemTerminalHandle,
+            renderingService,
+            registry,
+            contextPath  // System's context path for session data
+        );
+        
+        state.removeState(APPLICATION_CREATING);
+        Log.logMsg("[SystemProcess] SystemApplication created (terminal attached)");
+        
+        return CompletableFuture.completedFuture(null);
+    }
+    
+    /**
+     * Create SystemApplication in headless mode (daemon)
+     * Application created WITHOUT a terminal
+     */
+    private CompletableFuture<Void> createSystemApplicationHeadless() {
+        Log.logMsg("[SystemProcess] Creating SystemApplication (headless)");
+        
+        // Create application WITHOUT a terminal handle (null)
+        systemApplication = new SystemApplication(
+            null,  // No terminal in daemon mode
+            renderingService,
+            registry,
+            contextPath
+        );
+        
+        Log.logMsg("[SystemProcess] SystemApplication created (headless)");
+        return CompletableFuture.completedFuture(null);
+    }
+    
     // ===== GETTERS =====
     
-    public TerminalContainerHandle getSystemTerminal() {
-        return systemTerminal;
+    public TerminalContainerHandle getSystemTerminalHandle() {
+        return systemTerminalHandle;
+    }
+    
+    public SystemApplication getSystemApplication() {
+        return systemApplication;
     }
     
     public ClientTerminalRenderManager getRenderManager() {
@@ -281,6 +513,10 @@ public class SystemProcess extends FlowProcess {
     
     public boolean isReady() {
         return state.hasState(READY);
+    }
+    
+    public boolean isDaemonMode() {
+        return daemonMode;
     }
     
     public UIRenderer<?> getUIRenderer() {

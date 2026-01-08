@@ -2,7 +2,7 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -15,7 +15,7 @@ class SettingsScreen extends TerminalScreen {
     
     private MenuNavigator menuNavigator;
     
-    public SettingsScreen(String name, SystemTerminalContainer terminal) {
+    public SettingsScreen(String name, SystemApplication terminal) {
         super(name, terminal);
     }
     
@@ -26,15 +26,15 @@ class SettingsScreen extends TerminalScreen {
      * We return empty state
      */
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder().build();
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder().build();
     }
     
     // ===== LIFECYCLE =====
     
     @Override
     public CompletableFuture<Void> onShow() {
-        menuNavigator = new MenuNavigator(terminal);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal());
         
         MenuContext menu = buildSettingsMenu();
         menuNavigator.showMenu(menu);
@@ -51,18 +51,18 @@ class SettingsScreen extends TerminalScreen {
     }
     
     private MenuContext buildSettingsMenu() {
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "settings");
+        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("menu", "settings");
         MenuContext menu = new MenuContext(menuPath, "Settings");
         
         menu.addItem("change-password", "Change Master Password", 
             "⚠️ Re-encrypts all files",
             () -> {
-                terminal.showScreen("change-password");
+                systemApplication.showScreen("change-password");
             });
         
         menu.addItem("system-setup", "System Setup",
             "Configure IODaemon and keyboard devices",
-            () -> terminal.showScreen("system-setup"));
+            () -> systemApplication.showScreen("system-setup"));
         
        /* menu.addItem("appearance", "Appearance",
             "Terminal colors and themes",
@@ -87,7 +87,7 @@ class SettingsScreen extends TerminalScreen {
         menu.addSeparator("Navigation");
         
         menu.addItem("back", "← Back to Main Menu", () -> {
-            terminal.showScreen("main-menu");
+            systemApplication.showScreen("main-menu");
         });
         
         return menu;

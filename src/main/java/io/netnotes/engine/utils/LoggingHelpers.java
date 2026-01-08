@@ -2,9 +2,12 @@ package io.netnotes.engine.utils;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.gson.Gson;
@@ -96,14 +99,22 @@ public class LoggingHelpers {
         }
 
         public static CompletableFuture<Void> logError(String scope, Throwable error) {
+            return logError(scope, error, true);
+        }
+
+        public static CompletableFuture<Void> logError(String scope, Throwable error, boolean printStackTrace) {
             return enqueue(LogLevel.ERROR.getValue(), () ->
-                write(scope + ": " + getThrowableMsg(error) + "\n")
+                write(scope + ": " + getThrowableMsg(error) + (printStackTrace ? ":\n" + getStackTraceAsString(error) + "\n"  : "\n"))
             );
         }
 
         public static CompletableFuture<Void> logError(String scope, String msg, Throwable error) {
+            return logError(scope, msg, error, true);
+        }
+
+        public static CompletableFuture<Void> logError(String scope, String msg, Throwable error, boolean printStackTrace) {
             return enqueue(LogLevel.ERROR.getValue(), () ->
-                write(scope + ": '" + msg + "' - " + getThrowableMsg(error) + "\n")
+                write(scope + ": '" + msg + "' - " + getThrowableMsg(error) +  (printStackTrace ? ":\n" + getStackTraceAsString(error) + "\n"  : "\n"))
             );
         }
 
@@ -270,15 +281,23 @@ public class LoggingHelpers {
     }
 
     public static int writeLogMsg(File file, String scope, String msg, Throwable failed){
-        return writeLogMsg(file, scope, "'" + msg + "' - " + getThrowableMsg(failed));
+        return writeLogMsg(file, scope, "'" + msg + "' - " + getThrowableMsg(failed)) ;
     }
 
     public static String getThrowableMsg(Throwable throwable){
         if(throwable != null){
-            return throwable.getMessage();
+            
+            return getMessageFromError(throwable);
         }else{
             return NoteMessaging.Error.UNKNOWN;
         }
+    }
+
+    public static String getStackTraceAsString(Throwable throwable) {
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        throwable.printStackTrace(pw);
+        return sw.toString();
     }
 
     public static int writeLogNoteBytes(File logFile, String scope, NoteBytesMap message){
@@ -312,5 +331,17 @@ public class LoggingHelpers {
         }else{
             return writeLogMsg(logFile, "Logging error", "message is null");
         }
+    }
+
+    public static String getMessageFromError(Throwable ex){
+        Throwable cause = ex;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        
+        String errorMsg = cause.getMessage();
+        
+        return errorMsg == null || errorMsg.isEmpty() 
+            ? cause.getClass().getSimpleName() : errorMsg;
     }
 }

@@ -12,6 +12,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.core.CoreConstants;
+import io.netnotes.engine.core.system.control.ui.BatchBuilder;
+import io.netnotes.engine.core.system.control.ui.RenderElement;
+import io.netnotes.engine.core.system.control.ui.RenderState;
+import io.netnotes.engine.core.system.control.ui.Renderable;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClaimedDevice;
@@ -45,27 +49,20 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
 /**
- * ContainerHandle - FlowProcess-based container control with Builder pattern
+ * ContainerHandle - Base container with generic rendering and builder support
  * 
- * Usage:
- * <pre>
- * ContainerHandle handle = ContainerHandle.builder()
- *     .name("my-terminal")
- *     .type(ContainerType.TERMINAL)
- *     .config(new ContainerConfig().withSize(80, 24))
- *     .autoFocus(true)
- *     .build();
- * 
- * registry.registerChild(ownerPath, handle);
- * registry.startProcess(handle.getContextPath());
- * 
- * handle.waitUntilReady().thenRun(() -> {
- *     // Container is ready to use
- *     handle.show();
- * });
- * </pre>
+ * @param <B> BatchBuilder type for this container
+ * @param <E> RenderElement type for this container
+ * @param <H> The concrete handle type (self-reference for builder)
+ * @param <BLD> The concrete builder type
  */
-public class ContainerHandle extends FlowProcess {
+public abstract class ContainerHandle
+<
+    B extends BatchBuilder, 
+    E extends RenderElement<B>,
+    H extends ContainerHandle<B, E, H, BLD>,
+    BLD extends ContainerHandle.Builder<B, E, H, BLD>
+> extends FlowProcess {
     
     // ===== CREATION PARAMETERS (set at construction) =====
     protected final ContainerId containerId;
@@ -74,15 +71,17 @@ public class ContainerHandle extends FlowProcess {
     private final ContextPath renderingServicePath;
     private final ContextPath containerPath;
     private final String title;
-    private final Builder builder;
+    private final BLD builder;
     // ===== RUNTIME STATE =====
   
+    protected volatile Renderable<B, E> currentRenderable;
     
     protected NoteBytesReadOnly rendererId = null;
 
     // Stream TO Container (for render commands)
     protected StreamChannel renderStream;
     protected NoteBytesWriter renderWriter;
+    private volatile boolean renderReadyCache = false;
     protected final AtomicLong renderGeneration = new AtomicLong();
 
     // Stream FROM Container (for events)
@@ -98,16 +97,16 @@ public class ContainerHandle extends FlowProcess {
     
     //<NoteMessaging.ItemTypes, id>
     private Map<NoteBytesReadOnly, String> defaultEventHandlers = new ConcurrentHashMap<>();
-   
+    private Consumer<H> renderRequester;
     protected final BitFlagStateMachine stateMachine;
-    
+
     // Event map allows events from the Container to reach the handle
     protected volatile int width;
 	protected volatile int height;
     /**
      * Private constructor - use Builder
      */
-    protected ContainerHandle(Builder builder) {
+    protected ContainerHandle(BLD builder) {
         super(builder.name, ProcessType.BIDIRECTIONAL);
         this.containerId = ContainerId.generate();  // Always generate new ID
 
@@ -143,8 +142,11 @@ public class ContainerHandle extends FlowProcess {
 
     }
 
-    
+   
 
+    public void setOnRenderRequest(Consumer<H> onRenderRequest){
+        this.renderRequester = onRenderRequest;
+    }  
     public BitFlagStateMachine getStateMachine() {
         return stateMachine;
     }
@@ -185,102 +187,152 @@ public class ContainerHandle extends FlowProcess {
         return stateMachine.hasState(Container.STATE_DESTROYED);
     }
     
-    /**
-     * Create a builder for ContainerHandle
+
+       /**
+     * Check if container is ready to render
+     * 
+     * All conditions that must be true for rendering:
+     * - Has a renderable
+     * - Container is active (STATE_ACTIVE)
+     * - Render stream is ready
+     * - Renderable needs render
+     * 
+     * @return true if ready to render
      */
-    public static Builder builder(String name, ContainerType containerType) {
-        return new Builder(name, containerType);
+    public boolean isReadyToRender() {
+        // Must have renderable
+        if (currentRenderable == null) {
+            return false;
+        }
+
+        // Must be active
+        if (!stateMachine.hasState(Container.STATE_ACTIVE)) {
+            return false;
+        }
+        
+        // Stream must be ready
+        if (!isRenderStreamReady()) {
+            return false;
+        }
+        
+        return true;
     }
-    
-    /**
-     * Quick constructor with defaults (for simple cases)
-     */
-    public static ContainerHandle create(String name, ContainerType type) {
-        return builder(name, type).build();
-    }
+   
+
+
 
     /**
      * Builder for ContainerHandle
      */
-    public static class Builder {
+    /**
+     * Base Builder with self-referential generics
+     * 
+     * @param <B> BatchBuilder type
+     * @param <E> RenderElement type
+     * @param <H> Handle type being built
+     * @param <BLD> Builder type (self-reference)
+     */
+    public static abstract class Builder<
+        B extends BatchBuilder,
+        E extends RenderElement<B>,
+        H extends ContainerHandle<B, E, H, BLD>,
+        BLD extends Builder<B, E, H, BLD>
+    > {
         public String name;
         public String title;
-        public ContainerType containerType = null;
+        public ContainerType containerType;
         public NoteBytes rendererId = null;
         public ContainerConfig containerConfig = new ContainerConfig();
         public ContextPath renderingServicePath = CoreConstants.RENDERING_SERVICE_PATH;
         public boolean autoFocus = true;
         
-     
-        public Builder(String name, ContainerType containerType){
+        protected Builder(String name, ContainerType containerType) {
             this.name = name;
             this.title = name;
             this.containerType = containerType;
         }
+        
         /**
-         * Set the process name (required)
+         * Return self for method chaining
+         * Subclasses override to return their concrete builder type
          */
-        public Builder name(String name) {
-            this.name = name;
-            return this;
+        @SuppressWarnings("unchecked")
+        protected BLD self() {
+            return (BLD) this;
         }
         
         /**
-         * Set the display title (optional, defaults to name)
+         * Set the process name
          */
-        public Builder title(String title) {
+        public BLD name(String name) {
+            this.name = name;
+            return self();
+        }
+        
+        /**
+         * Set the display title
+         */
+        public BLD title(String title) {
             this.title = title;
-            return this;
+            return self();
         }
         
         /**
          * Set the container type
          */
-        public Builder type(ContainerType type) {
+        public BLD type(ContainerType type) {
             this.containerType = type;
-            return this;
+            return self();
         }
         
         /**
          * Set the container configuration
          */
-        public Builder config(ContainerConfig config) {
+        public BLD config(ContainerConfig config) {
             this.containerConfig = config;
-            return this;
+            return self();
         }
         
         /**
-         * Set the rendering service path (default: CoreConstants.RENDERING_SERVICE_PATH)
+         * Set the rendering service path
          */
-        public Builder renderingService(ContextPath path) {
+        public BLD renderingService(ContextPath path) {
             this.renderingServicePath = path;
-            return this;
+            return self();
         }
-
-        public Builder render(NoteBytes rendererId) {
+        
+        /**
+         * Set renderer ID
+         */
+        public BLD render(NoteBytes rendererId) {
             this.rendererId = rendererId;
-            return this;
+            return self();
         }
         
         /**
-         * Set auto-focus (default: false)
+         * Set auto-focus
          */
-        public Builder autoFocus(boolean autoFocus) {
+        public BLD autoFocus(boolean autoFocus) {
             this.autoFocus = autoFocus;
-            return this;
+            return self();
         }
         
         /**
-         * Build the ContainerHandle
+         * Build the handle
+         * Subclasses must implement to create their specific handle type
          */
-        public ContainerHandle build() {
+        public abstract H build();
+        
+        /**
+         * Validate common builder state
+         */
+        protected void validate() {
             if (name == null || name.isEmpty()) {
                 throw new IllegalStateException("name is required");
             }
-            if(containerType == null){
+            if (containerType == null) {
                 throw new IllegalStateException("containerType is required");
             }
-            return new ContainerHandle(this);
         }
     }
 
@@ -515,6 +567,8 @@ public class ContainerHandle extends FlowProcess {
 
     protected void processRoutedEvent(NoteBytes eventBytes) {
         try{
+            Log.logNoteBytes("[ContainerHandle.processRoutedEvent]", eventBytes);
+
             RoutedEvent event = EventsFactory.from(containerPath, eventBytes);
             eventHandlerRegistry.dispatch(event);
         }catch(Exception ex){
@@ -635,15 +689,7 @@ public class ContainerHandle extends FlowProcess {
     */
     protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command, long generation) {
         return CompletableFuture.runAsync(() -> {
-
-            BitFlagStateMachine.StateSnapshot snap = stateMachine.getSnapshot();
-            
-            // STATE CHECK - don't send if not active
-            if (!snap.hasState(Container.STATE_ACTIVE)) {
-                Log.logMsg("[ContainerHandle:" + containerId + "] Skipping render - container not active yet");
-                return;
-            }
-
+            Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command);
             // GENERATION CHECK - prevents stale renders
             if (!isRenderGenerationCurrent(generation)) {
                 return;
@@ -694,7 +740,7 @@ public class ContainerHandle extends FlowProcess {
      * Render manager calls this to check if worth polling
      */
     public boolean isDirty() {
-        return this.stateMachine.hasState(Container.STATE_UPDATE_REQUESTED);
+        return this.stateMachine.hasState(Container.STATE_RENDER_REQUESTED);
     }
 
     /**
@@ -703,12 +749,15 @@ public class ContainerHandle extends FlowProcess {
      * Render manager calls this after successful render
      */
     public void clearDirtyFlag() {
-        this.stateMachine.removeState(Container.STATE_UPDATE_REQUESTED);
+        this.stateMachine.removeState(Container.STATE_RENDER_REQUESTED);
     }
 
 
     public void invalidate() {
-        stateMachine.addState(Container.STATE_UPDATE_REQUESTED);
+        stateMachine.addState(Container.STATE_RENDER_REQUESTED);
+        if(renderRequester != null){
+            renderRequester.accept(self());
+        }
     }
 
     // ===== SERVICE COMMUNICATION =====
@@ -802,7 +851,7 @@ public class ContainerHandle extends FlowProcess {
      * @param ioDaemonPath Path to IODaemon process
      * @return CompletableFuture with ClientSession
      */
-    protected CompletableFuture<ClientSession> connectToIODaemon(ContextPath ioDaemonPath) {
+    public CompletableFuture<ClientSession> connectToIODaemon(ContextPath ioDaemonPath) {
         if (ioDaemonSession != null) {
             Log.logMsg("[ContainerHandle] Already connected to IODaemon");
             return CompletableFuture.completedFuture(ioDaemonSession);
@@ -872,7 +921,7 @@ public class ContainerHandle extends FlowProcess {
      * Disconnect from IODaemon session
      * Releases all claimed devices and destroys session
      */
-    protected CompletableFuture<Void> disconnectFromIODaemon() {
+    public CompletableFuture<Void> disconnectFromIODaemon() {
         if (ioDaemonSession == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -920,7 +969,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Get current IODaemon session (if any)
      */
-    protected ClientSession getIODaemonSession() {
+    public ClientSession getIODaemonSession() {
         return ioDaemonSession;
     }
     
@@ -934,7 +983,7 @@ public class ContainerHandle extends FlowProcess {
      * @param mode "parsed" or "raw"
      * @return CompletableFuture that completes when device is claimed
      */
-    protected CompletableFuture<ContextPath> claimDevice(String deviceId, String mode) {
+    public CompletableFuture<ContextPath> claimDevice(String deviceId, String mode) {
         if (ioDaemonSession == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Not connected to IODaemon"));
@@ -952,7 +1001,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Release a claimed device
      */
-    protected CompletableFuture<Void> releaseDevice(String deviceId) {
+    public CompletableFuture<Void> releaseDevice(String deviceId) {
         if (ioDaemonSession == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -995,11 +1044,11 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Check if connected to IODaemon session
      */
-    protected boolean hasActiveIODaemonSession() {
+    public boolean hasActiveIODaemonSession() {
         return ioDaemonSession != null && ioDaemonSession.isAlive();
     }
 
-    protected EventHandlerRegistry getClaimedDeviceRegistry(String deviceId){
+    public EventHandlerRegistry getClaimedDeviceRegistry(String deviceId){
         ClaimedDevice device = ioDaemonSession.getClaimedDevice(deviceId);
         if(device != null){
             return device.getEventHandlerRegistry();
@@ -1017,7 +1066,7 @@ public class ContainerHandle extends FlowProcess {
      * Now getDefaultEventRegistry(ItemTypes.KEYBOARD) will return
      * the event registry for that specific keyboard device
      */
-    protected void setDefaultDevice(NoteBytesReadOnly itemType, String deviceId) {
+    public void setDefaultDevice(NoteBytesReadOnly itemType, String deviceId) {
         if (ioDaemonSession == null) {
             throw new IllegalStateException("Not connected to IODaemon");
         }
@@ -1034,7 +1083,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Remove default device for an item type
      */
-    protected void clearDefaultDevice(NoteBytesReadOnly itemType) {
+    public void clearDefaultDevice(NoteBytesReadOnly itemType) {
         String removed = defaultEventHandlers.remove(itemType);
         if (removed != null) {
             Log.logMsg("[ContainerHandle] Cleared default " + itemType + ": " + removed);
@@ -1044,7 +1093,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Get the default device ID for an item type
      */
-    protected String getDefaultDevice(NoteBytesReadOnly itemType) {
+    public String getDefaultDevice(NoteBytesReadOnly itemType) {
         return defaultEventHandlers.get(itemType);
     }
 
@@ -1059,7 +1108,7 @@ public class ContainerHandle extends FlowProcess {
      * Set default keyboard device
      * Convenience wrapper for setDefaultDevice(ItemTypes.KEYBOARD, deviceId)
      */
-    protected boolean setDefaultKeyboard(String deviceId) {
+    public boolean setDefaultKeyboard(String deviceId) {
         try {
             setDefaultDevice(ItemTypes.KEYBOARD, deviceId);
             return true;
@@ -1073,14 +1122,14 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Clear default keyboard
      */
-    protected void clearDefaultKeyboard() {
+    public void clearDefaultKeyboard() {
         clearDefaultDevice(ItemTypes.KEYBOARD);
     }
 
     /**
      * Get default keyboard device ID
      */
-    protected String getDefaultKeyboardId() {
+    public String getDefaultKeyboardId() {
         return getDefaultDevice(ItemTypes.KEYBOARD);
     }
 
@@ -1121,7 +1170,7 @@ public class ContainerHandle extends FlowProcess {
     /**
      * Set default mouse device
      */
-    protected boolean setDefaultMouse(String deviceId) {
+    public boolean setDefaultMouse(String deviceId) {
         try {
             setDefaultDevice(ItemTypes.MOUSE, deviceId);
             return true;
@@ -1151,29 +1200,29 @@ public class ContainerHandle extends FlowProcess {
         return defaultRegistry.unregister(EventBytes.EVENT_KEY_DOWN);
     }
     
-    protected void handleContainerResized(RoutedEvent event){
+    public void handleContainerResized(RoutedEvent event){
         if(event instanceof ContainerResizeEvent resizeEvent){
             onContainerResized(resizeEvent);
         }
     }
 
-    protected void handleContainerClosed(RoutedEvent event){
+    public void handleContainerClosed(RoutedEvent event){
         onContainerClosed();
     }
 
-    protected void handleContainerShown(RoutedEvent event){
+    public void handleContainerShown(RoutedEvent event){
         onContainerShown();
     }
-    protected void handleContainerHidden(RoutedEvent event){
+    public void handleContainerHidden(RoutedEvent event){
         onContainerHidden();
     }
-    protected void handleContainerFocusGained(RoutedEvent event){
+    public void handleContainerFocusGained(RoutedEvent event){
         onContainerFocusGained();
     }
-    protected void handleContainerFocusLost(RoutedEvent event){
+    public void handleContainerFocusLost(RoutedEvent event){
         onContainerFocusLost();
     }
-    protected void handleContainerMove(RoutedEvent event){
+    public void handleContainerMove(RoutedEvent event){
         if(event instanceof ContainerMoveEvent moveEvent){
             onContainerMove(moveEvent);
         }
@@ -1212,6 +1261,7 @@ public class ContainerHandle extends FlowProcess {
         stateMachine.addState(Container.STATE_VISIBLE);
         stateMachine.removeState(Container.STATE_HIDDEN);
         Log.logMsg("[ContainerHandle:" + containerId + "] Container shown (server confirmed)");
+
     }
 
     protected void onContainerHidden() {
@@ -1236,6 +1286,8 @@ public class ContainerHandle extends FlowProcess {
     protected void onContainerMove(ContainerMoveEvent moveEvent){
 
     }
+
+
     
     // ===== GETTERS =====
     
@@ -1259,17 +1311,82 @@ public class ContainerHandle extends FlowProcess {
         return renderingServicePath;
     }
     
-    private boolean readyCache = false;
+
+     public void setRenderable(Renderable<B, E> renderable) {
+        this.currentRenderable = renderable;
+    }
+
+    public Renderable<B, E> getRenderable() {
+        return currentRenderable;
+    }
+   
+    public CompletableFuture<Void> render() {
+        if (currentRenderable == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        if (!isRenderStreamReady()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Render stream not ready")
+            );
+        }
+        
+        long gen = getCurrentRenderGeneration();
+        RenderState<B, E> state = currentRenderable.getRenderState();
+        B batch = state.toBatch(self(), gen);
+        
+        return executeBatch(batch)
+            .thenRun(() -> {
+                clearDirtyFlag();
+                currentRenderable.clearRenderFlag();
+            });
+    }
+    
+    @SuppressWarnings("unchecked")
+	public H self() {
+        return (H) this;
+    }
+
+
+       /**
+     * Execute a batch of commands
+     * 
+     * This sends the entire batch as a single command over the stream,
+     * waits for completion, and returns a single future.
+     * 
+     * @param batch The batch builder with commands
+     * @return CompletableFuture that completes when batch is done
+     */
+    public CompletableFuture<Void> executeBatch(B batch) {
+        if (batch.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        // Check generation before sending
+        if (!isRenderGenerationCurrent(batch.getGeneration())) {
+            Log.logMsg("[TerminalContainerHandle] Skipping batch - stale generation: " + 
+                batch.getGeneration() + " (current: " + getCurrentRenderGeneration() + ")");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        NoteBytesMap batchCommand = batch.build();
+        return sendRenderCommand(batchCommand, batch.getGeneration());
+    }
+
+    public abstract B batch();
+
+    public abstract B batch(long generation);
+
 
     public boolean isRenderStreamReady() {
-        if(!readyCache){
-            readyCache = renderStream != null && 
+        if(!renderReadyCache){
+            renderReadyCache = renderStream != null && 
                 renderStream.getReadyFuture().isDone() &&
                 !renderStream.getReadyFuture().isCompletedExceptionally();
-            return readyCache;
+            return renderReadyCache;
         }else{
-            readyCache = readyCache && renderStream != null;
-            return readyCache;
+            renderReadyCache = renderReadyCache && renderStream != null;
+            return renderReadyCache;
         }
     }
 

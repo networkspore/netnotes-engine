@@ -9,6 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.containers.ContainerEventSerializer;
@@ -90,16 +91,19 @@ public abstract class Container<T extends Container<T>> {
     // Error states (bits 24-25)
     public static final int STATE_ERROR          = 24;
     public static final int STATE_RECOVERING     = 25;
-
+    public static final int STATE_RENDER_ERROR   = 26;
 
     // Request states (bits 26-30)
-    public static final int STATE_FOCUS_REQUESTED    = 26;
+    
     public static final int STATE_SHOW_REQUESTED     = 27;
     public static final int STATE_HIDE_REQUESTED     = 28;
     public static final int STATE_MAXIMIZE_REQUESTED = 29;
     public static final int STATE_RESTORE_REQUESTED  = 30;
     public static final int STATE_DESTROY_REQUESTED  = 31;
     public static final int STATE_UPDATE_REQUESTED  = 32;
+    public static final int STATE_FOCUS_REQUESTED    = 33;
+    public static final int STATE_RENDER_REQUESTED  = 34;
+
     
     // ===== CORE IDENTITY =====
     protected final ContainerId id;
@@ -120,6 +124,7 @@ public abstract class Container<T extends Container<T>> {
     // ===== STREAM CHANNELS =====
     protected StreamChannel renderStreamChannel = null;
     protected StreamChannel eventStream = null;
+    private volatile boolean isEventReadyCache = false;
     protected NoteBytesWriter eventWriter;
     protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
     
@@ -128,6 +133,11 @@ public abstract class Container<T extends Container<T>> {
     protected final HashMap<NoteBytes, MessageExecutor> batchMsgMap = new HashMap<>();
 
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
+
+
+
+
+    protected Consumer<Container<?>> onRequestMade = null;
 
     //HandlerFutures
     protected CompletableFuture<Void> showFuture = null;
@@ -189,7 +199,14 @@ public abstract class Container<T extends Container<T>> {
     // ===== BASE STATE TRANSITIONS =====
     
     private void setupBaseStateTransitions() {
-        // INITIALIZED: Container ready to use
+        stateMachine.onStateAdded(STATE_RENDER_ERROR, (old, now, bit) -> {
+            Log.logError("[Container:" + id + "] Render error - will retry after cooldown");
+        });
+
+        stateMachine.onStateRemoved(STATE_RENDER_ERROR, (old, now, bit) -> {
+            Log.logMsg("[Container:" + id + "] Render error cleared - recovered");
+        });
+
         stateMachine.onStateAdded(STATE_INITIALIZED, (old, now, bit) -> {
             stateMachine.removeState(STATE_CREATING);
         });
@@ -223,7 +240,9 @@ public abstract class Container<T extends Container<T>> {
         
         // ACTIVE: Container is actively rendering
         stateMachine.onStateAdded(STATE_ACTIVE, (old, now, bit) -> {
-
+            if(stateMachine.hasState(STATE_ERROR)){
+                stateMachine.removeState(STATE_ACTIVE);
+            }
         });
         
         stateMachine.onStateRemoved(STATE_ACTIVE, (old, now, bit) -> {
@@ -247,6 +266,17 @@ public abstract class Container<T extends Container<T>> {
             stateMachine.removeState(STATE_VISIBLE);
 
         });
+
+        stateMachine.onStateAdded(STATE_ERROR, (old, now, bit) -> {
+            Log.logError("[Container:" + id + "] FATAL ERROR - manual recovery required");
+            // Stop accepting updates when in error state
+            stateMachine.removeState(STATE_ACTIVE);
+        });
+
+        stateMachine.onStateRemoved(STATE_ERROR, (old, now, bit) -> {
+            Log.logMsg("[Container:" + id + "] Error state cleared - manual recovery applied");
+        });
+
         
         // DESTROYED: Container fully destroyed
         stateMachine.onStateAdded(STATE_DESTROYED, (old, now, bit) -> {
@@ -354,6 +384,20 @@ public abstract class Container<T extends Container<T>> {
         this.eventStream = channel;
         this.eventWriter = new NoteBytesWriter(channel.getQueuedOutputStream());
     }
+
+   
+
+    public boolean isEventStreamReady() {
+        if(!isEventReadyCache){
+            isEventReadyCache = eventStream != null && 
+                eventStream.getReadyFuture().isDone() &&
+                !eventStream.getReadyFuture().isCompletedExceptionally();
+            return isEventReadyCache;
+        }else{
+            isEventReadyCache = isEventReadyCache && eventStream != null;
+            return isEventReadyCache;
+        }
+    }
     
     protected void dispatchCommand(NoteBytesMap command) {
         NoteBytes cmd = command.get(Keys.CMD);
@@ -389,7 +433,7 @@ public abstract class Container<T extends Container<T>> {
             Log.logNoteBytes("[Container:" + id + "] Cannot emit event - no event stream", event);
             return;
         }
-        
+        Log.logNoteBytes("[Container.emitEvent]", event);
         try {
             eventWriter.write(event);
         } catch (IOException e) {
@@ -429,6 +473,7 @@ public abstract class Container<T extends Container<T>> {
      * Grant focus - renderer calls this to approve focus request
      */
     public CompletableFuture<Void> grantFocus() {
+        Log.logMsg("[Container].grantFocus");
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_FOCUS_REQUESTED);
             stateMachine.addState(STATE_FOCUSED);
@@ -648,14 +693,26 @@ public abstract class Container<T extends Container<T>> {
 		emitEvent(ContainerEventSerializer.createShownEvent());
 	}
 
-    
+    public void setOnRequestMade(Consumer<Container<?>> notifier) {
+        this.onRequestMade = notifier;
+    }
 
+    /**
+     * Notify render manager of pending request
+     */
+    protected void notifyRequestMade() {
+        if (onRequestMade != null) {
+
+            onRequestMade.accept(this);
+        }
+    }
     // ===== MESSAGE HANDLERS =====
    
     public CompletableFuture<Void> handleShowContainer(NoteBytesMap command) {
         if(showFuture == null) {
             showFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_SHOW_REQUESTED));
+            notifyRequestMade();
         }
         return showFuture;
     }
@@ -665,6 +722,7 @@ public abstract class Container<T extends Container<T>> {
         if(hideFuture == null) {
             hideFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_HIDE_REQUESTED));
+            notifyRequestMade();
         }
         return hideFuture;
     }
@@ -673,6 +731,7 @@ public abstract class Container<T extends Container<T>> {
          if(destroyFuture == null) {
             destroyFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_DESTROY_REQUESTED));
+            notifyRequestMade();
         }
         return destroyFuture;
     }
@@ -682,6 +741,7 @@ public abstract class Container<T extends Container<T>> {
         if (destroyFuture == null) {
             destroyFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_DESTROY_REQUESTED));
+            notifyRequestMade();
         }
     
         return destroyFuture;
@@ -692,6 +752,7 @@ public abstract class Container<T extends Container<T>> {
         if(focusFuture == null) {
             focusFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_FOCUS_REQUESTED));
+            notifyRequestMade();
         }
         return focusFuture;
     }
@@ -700,6 +761,8 @@ public abstract class Container<T extends Container<T>> {
         if(focusFuture == null) {
             focusFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_FOCUS_REQUESTED));
+            Log.logMsg("[Container " +id+ "].requestFocus" );
+            notifyRequestMade();
         }
         return focusFuture;
     }
@@ -709,6 +772,7 @@ public abstract class Container<T extends Container<T>> {
         if(maximizeFuture == null) {
             maximizeFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_MAXIMIZE_REQUESTED));
+            notifyRequestMade();
         }
         return maximizeFuture;
     }
@@ -718,6 +782,7 @@ public abstract class Container<T extends Container<T>> {
         if(restoreFuture == null) {
             restoreFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_RESTORE_REQUESTED));
+            notifyRequestMade();
         }   
         return restoreFuture;
     }
@@ -762,6 +827,8 @@ public abstract class Container<T extends Container<T>> {
             return info.toNoteBytes();
   
     }
+
+
     
     // ===== HELPERS =====
     

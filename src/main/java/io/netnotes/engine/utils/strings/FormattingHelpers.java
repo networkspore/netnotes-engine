@@ -1,22 +1,7 @@
 package io.netnotes.engine.utils.strings;
 
-import java.util.concurrent.CompletionException;
-
 public class FormattingHelpers {
     
-    public static String getMessageFromError(Throwable ex){
-        Throwable cause = ex;
-        while (cause instanceof CompletionException && cause.getCause() != null) {
-            cause = cause.getCause();
-        }
-        
-        String errorMsg = cause.getMessage();
-        
-        return errorMsg == null || errorMsg.isEmpty() 
-            ? cause.getClass().getSimpleName() : errorMsg;
-    }
-
-
     public static String formatStringLineLength(String str, int len){
         return str.replaceAll("(.{"+len+"})", "$1\n");
     }

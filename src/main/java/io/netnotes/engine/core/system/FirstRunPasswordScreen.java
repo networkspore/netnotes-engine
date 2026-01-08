@@ -2,7 +2,8 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+
 
 /**
  * FirstRunPasswordScreen - Create password for new system
@@ -12,8 +13,8 @@ class FirstRunPasswordScreen extends TerminalScreen {
     
     private PasswordPrompt passwordPrompt;
     
-    public FirstRunPasswordScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
+    public FirstRunPasswordScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -23,15 +24,15 @@ class FirstRunPasswordScreen extends TerminalScreen {
      * We return empty state
      */
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder().build();
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder().build();
     }
     
     // ===== LIFECYCLE =====
     
     @Override
     public CompletableFuture<Void> onShow() {
-        passwordPrompt = new PasswordPrompt(terminal)
+        passwordPrompt = new PasswordPrompt(systemApplication)
             .withTitle("Welcome to Netnotes")
             .withPrompt("Enter password:")
             .withConfirmation("Confirm password:")
@@ -49,25 +50,25 @@ class FirstRunPasswordScreen extends TerminalScreen {
     }
     
     private void handlePassword(io.netnotes.engine.noteBytes.NoteBytesEphemeral password) {
-        terminal.clear()
-            .thenCompose(v -> terminal.printSuccess("Creating system..."))
-            .thenCompose(v -> terminal.createNewSystem(password))
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printSuccess("Creating system..."))
+            .thenCompose(v -> systemApplication.createNewSystem(password))
             .thenRun(() -> {
                 password.close();
-                terminal.printSuccess("System created successfully!");
+                systemApplication.getTerminal().printSuccess("System created successfully!");
             })
             .exceptionally(ex -> {
                 password.close();
-                terminal.printError("Failed to create system: " + ex.getMessage());
+                systemApplication.getTerminal().printError("Failed to create system: " + ex.getMessage());
                 return null;
             });
     }
     
     private void handleTimeout() {
-        terminal.clear()
-            .thenCompose(v -> terminal.printError("Setup timeout"))
-            .thenCompose(v -> terminal.printAt(10, 10, "Press any key to retry..."))
-            .thenRun(() -> terminal.waitForKeyPress(() -> onShow()));
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printError("Setup timeout"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, "Press any key to retry..."))
+            .thenRun(() -> systemApplication.getTerminal().waitForKeyPress(() -> onShow()));
     }
     
     private void handleMismatch() {

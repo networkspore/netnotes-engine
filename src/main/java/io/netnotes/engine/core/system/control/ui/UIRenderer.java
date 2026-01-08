@@ -276,7 +276,7 @@ public abstract class UIRenderer <T extends Container<?>> {
     
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(RendererStates.CREATING_CONTAINER);
-        
+        Log.logMsg("[UIRenderer "+rendererName+"] creating container...");
         try {
             // Parse common parameters
             NoteBytes containerIdBytes = msg.get(ContainerCommands.CONTAINER_ID);
@@ -325,34 +325,25 @@ public abstract class UIRenderer <T extends Container<?>> {
                         state.addState(RendererStates.HAS_CONTAINERS);
                     }
                     
-                    // Handle focus
-                    if (autoFocus || focusedContainerId == null) {
-                 
-                        
-                        if (!state.hasState(RendererStates.HAS_FOCUSED_CONTAINER)) {
-                            state.addState(RendererStates.HAS_FOCUSED_CONTAINER);
-                        }
-                        
-                    
-                        return container.initialize()
-                            .thenCompose(v -> container.requestFocus());
-                    }
-                    
-                    return container.initialize();
+                    return container.initialize()
+                        .thenCompose(v->onContainerCreated(containerId, msg))
+                        .thenAccept(response -> {
+                            state.removeState(RendererStates.CREATING_CONTAINER);
+                            reply(packet, response);
+                        })
+                        .thenRun(()->{
+                            if (autoFocus || focusedContainerId == null) {
+                                container.requestFocus();                            
+                            }
+                        });
                 })
-                .thenCompose(v -> onContainerCreated(containerId, msg))
-                .thenAccept(response -> {
-                    state.removeState(RendererStates.CREATING_CONTAINER);
-                    reply(packet, response);
-                })
-                .exceptionally(ex -> {
+                .exceptionally((ex)->{
                     state.removeState(RendererStates.CREATING_CONTAINER);
                     String errorMsg = ex.getCause() != null ? 
                         ex.getCause().getMessage() : ex.getMessage();
                     
                     Log.logError("[" + rendererName + "] Create container error: " + errorMsg);
                     replyError(packet, errorMsg);
-                    
                     return null;
                 });
                 

@@ -2,11 +2,10 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
@@ -22,9 +21,9 @@ class MainMenuScreen extends TerminalScreen {
     
     private final MenuNavigator menuNavigator;
     
-    public MainMenuScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
-        menuNavigator = new MenuNavigator(terminal).withParent(this);
+    public MainMenuScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -34,8 +33,8 @@ class MainMenuScreen extends TerminalScreen {
      * We return empty state
      */
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder()
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             // Future: Add header/status bar here
             .add(menuNavigator.asRenderElement())
@@ -67,8 +66,8 @@ class MainMenuScreen extends TerminalScreen {
     // ===== MENU BUILDING =====
     
     private MenuContext buildMainMenu() {
-        RuntimeAccess access = terminal.getSystemAccess();
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "main");
+        RuntimeAccess access = systemApplication.getSystemAccess();
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "main");
         
         MenuContext menu = new MenuContext(
             menuPath, 
@@ -83,7 +82,7 @@ class MainMenuScreen extends TerminalScreen {
             access != null ? "Manage installed nodes" : "Not available",
             () -> {
                 if (access != null) {
-                    terminal.showScreen("node-manager");
+                    systemApplication.showScreen("node-manager");
                 } else {
                     showError("Node manager requires system access");
                 }
@@ -101,14 +100,14 @@ class MainMenuScreen extends TerminalScreen {
             "Settings", 
             "System configuration", 
             () -> {
-                terminal.showScreen("settings");
+                systemApplication.showScreen("settings");
             });
         
         menu.addItem("lock", 
             "Lock System", 
             "Lock terminal", 
             () -> {
-                terminal.lock();
+                systemApplication.lock();
             });
         
         menu.addSeparator("System");
@@ -117,17 +116,17 @@ class MainMenuScreen extends TerminalScreen {
             "Close Terminal", 
             "Hide terminal window", 
             () -> {
-                terminal.close();
+                systemApplication.close();
             });
         
         return menu;
     }
 
     private void showError(String message) {
-       Renderable errorRenderable = () -> {
-            return RenderState.builder()
+       TerminalRenderable errorRenderable = () -> {
+            return TerminalRenderState.builder()
                 .add(batch -> {
-                    int row = terminal.getRows() / 2;
+                    int row = systemApplication.getTerminal().getRows() / 2;
                     batch.printAt(row, 10, message, TextStyle.ERROR);
                     batch.printAt(row + 2, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
                     batch.showCursor();
@@ -136,12 +135,12 @@ class MainMenuScreen extends TerminalScreen {
                 .build();
         };
         
-        terminal.setRenderable(errorRenderable);
-        terminal.invalidate();
+        systemApplication.setRenderable(errorRenderable);
+        systemApplication.invalidate();
         
-        terminal.waitForKeyPress()
+        systemApplication.getTerminal().waitForKeyPress()
             .thenRun(() -> {
-                terminal.setRenderable(this);
+                systemApplication.setRenderable(this);
                 invalidate();
             });
     }

@@ -11,6 +11,7 @@ import io.netnotes.engine.core.system.control.containers.ContainerHandle;
 import io.netnotes.engine.core.system.control.containers.ContainerType;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
+import io.netnotes.engine.core.system.control.ui.Renderable;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
@@ -26,16 +27,20 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalContainerHandle - Terminal-style container with keyboard utilities
+ * 
+ * QUEUE-BASED RENDERING:
+ * - Container signals render need via consumer (set by manager)
+ * - Only requests render when actually ready (all conditions met)
+ * - Automatically re-requests when transitions to ready state
  */
-public class TerminalContainerHandle extends ContainerHandle {
+public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilder, TerminalRenderElement, TerminalContainerHandle, TerminalContainerHandle.TerminalBuilder> {
     
     // Temporary key wait state
     private CompletableFuture<RoutedEvent> keyWaitFuture = null;
     private CompletableFuture<Void> anyKeyFuture = null;
     private NoteBytesReadOnly handlerId = null;
-   
-    private volatile Renderable currentRenderable;
-    
+    protected Consumer<TerminalContainerHandle> onRenderRequest;
+
 
     /**
      * Constructor - creates terminal-style container
@@ -49,7 +54,6 @@ public class TerminalContainerHandle extends ContainerHandle {
             this.setDimensions(config.getWidth(), config.getHeight()); 
         }
     }
-
 
     @Override
     protected void setupStateTransitions() {
@@ -75,45 +79,63 @@ public class TerminalContainerHandle extends ContainerHandle {
         // ACTIVE: Container is actively rendering
         stateMachine.onStateAdded(Container.STATE_ACTIVE, (old, now, bit) -> {
             Log.logMsg("[ContainerHandle:" + containerId + "] Now active (ready to render)");
+            Log.logMsg(String.format("[ContainerHandle:%s] STATE_ACTIVE added - checking render: isDirty=%s, hasRenderable=%s, streamReady=%s",
+                containerId, 
+                isDirty(), 
+                currentRenderable != null,
+                isRenderStreamReady()
+            ));
+            
+            // Request render now that we're active
+            // This handles case where renderable was set before container became active
+            if (isDirty()) {
+                Log.logMsg("[ContainerHandle:" + containerId + "] Container is dirty, calling render()");
+                render();
+            } else {
+                Log.logMsg("[ContainerHandle:" + containerId + "] Container not dirty, skipping render()");
+            }
         });
         
         stateMachine.onStateRemoved(Container.STATE_ACTIVE, (old, now, bit) -> {
             Log.logMsg("[ContainerHandle:" + containerId + "] No longer active");
         });
-        
-  
-    
     }
 
     public TerminalContainerHandle(String name) {
-        super(TerminalContainerHandle.builder(name));
+        super(new TerminalBuilder(name));
     }
-    
-    public static TerminalBuilder builder(String name) {
-        return new TerminalBuilder(name);
-    }
-    
+
+ 
+  
 
     /**
      * Set active renderable for this container
      * 
-     * Simply stores the renderable. Render manager will poll it.
+     * Container signals manager when it needs 
+     * rendering.
      * 
      * Usage:
      * <pre>
      * MyScreen screen = new MyScreen();
      * terminal.setRenderable(screen);
-     * terminal.invalidate(); // Signal change
+     * caller signals when to render
      * </pre>
      */
-    public void setRenderable(Renderable renderable) {
-        Renderable old = this.currentRenderable;
+    public void setRenderable(Renderable<TerminalBatchBuilder, TerminalRenderElement> renderable) {
+        
+        Log.logMsg(String.format("[TerminalContainerHandle:%s] setRenderable() called: old=%s, new=%s",
+            getId(), 
+            currentRenderable != null ? currentRenderable.getClass().getSimpleName() : "null",
+            renderable != null ? renderable.getClass().getSimpleName() : "null"
+        ));
+        
+        Renderable<TerminalBatchBuilder, TerminalRenderElement> old = currentRenderable;
+
         this.currentRenderable = renderable;
         
         if (old != renderable) {
-            // New renderable - increment generation
+            // New renderable - increment generation (layout change)
             nextRenderGeneration();
-            invalidate();
             
             Log.logMsg(String.format(
                 "[TerminalContainerHandle:%s] Renderable changed (gen=%d)",
@@ -125,7 +147,7 @@ public class TerminalContainerHandle extends ContainerHandle {
     /**
      * Get current renderable (for render manager to poll)
      */
-    public Renderable getRenderable() {
+    public Renderable<TerminalBatchBuilder, TerminalRenderElement> getRenderable() {
         return currentRenderable;
     }
 
@@ -136,12 +158,16 @@ public class TerminalContainerHandle extends ContainerHandle {
         this.currentRenderable = null;
         clearDirtyFlag();
     }
+    
 
-   
+
+    public static TerminalBuilder builder(String name) {
+        return new TerminalBuilder(name);
+    }
 
     // ===== BUILDER =====
     
-    public static class TerminalBuilder extends ContainerHandle.Builder {
+    public static class TerminalBuilder extends ContainerHandle.Builder<TerminalBatchBuilder, TerminalRenderElement, TerminalContainerHandle, TerminalBuilder> {
         
         public TerminalBuilder(String name) {
             super(name, ContainerType.TERMINAL);
@@ -256,9 +282,12 @@ public class TerminalContainerHandle extends ContainerHandle {
     public CompletableFuture<Void> run() {
  
         return super.run().thenAccept(v -> {
-            // Start render manager after stream is ready
-  
-            Log.logMsg("[TerminalContainerHandle] ClientRenderManager started (gen=1)");
+            // Stream is now ready - request render if we're dirty
+            Log.logMsg("[TerminalContainerHandle] Stream ready");
+            
+            if (isDirty()) {
+                render();
+            }
         });
     }
 
@@ -272,6 +301,7 @@ public class TerminalContainerHandle extends ContainerHandle {
         
         // Invalidate to trigger re-render
         invalidate();
+        
     }
 
     /**
@@ -788,40 +818,19 @@ public class TerminalContainerHandle extends ContainerHandle {
      * });
      * </pre>
      */
-    public BatchBuilder batch() {
-        return new BatchBuilder(getId(), rendererId, getCurrentRenderGeneration());
+    @Override
+    public TerminalBatchBuilder batch() {
+        return new TerminalBatchBuilder(getId(), rendererId, getCurrentRenderGeneration());
     }
 
     /**
      * Create batch with specific generation
      */
-    public BatchBuilder batch(long generation) {
-        return new BatchBuilder(getId(), rendererId, generation);
+    @Override
+    public TerminalBatchBuilder batch(long generation) {
+        return new TerminalBatchBuilder(getId(), rendererId, generation);
     }
 
-    /**
-     * Execute a batch of commands
-     * 
-     * This sends the entire batch as a single command over the stream,
-     * waits for completion, and returns a single future.
-     * 
-     * @param batch The batch builder with commands
-     * @return CompletableFuture that completes when batch is done
-     */
-    public CompletableFuture<Void> executeBatch(BatchBuilder batch) {
-        if (batch.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        // Check generation before sending
-        if (!isRenderGenerationCurrent(batch.getGeneration())) {
-            Log.logMsg("[TerminalContainerHandle] Skipping batch - stale generation: " + 
-                batch.getGeneration() + " (current: " + getCurrentRenderGeneration() + ")");
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        NoteBytesMap batchCommand = batch.build();
-        return sendRenderCommand(batchCommand, batch.getGeneration());
-    }
+
 
 }

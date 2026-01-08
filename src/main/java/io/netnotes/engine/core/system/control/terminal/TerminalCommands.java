@@ -17,8 +17,7 @@ public class TerminalCommands {
         new NoteBytesReadOnly("box_style");
 
 
-    public static final NoteBytesReadOnly BATCH_COMMANDS = 
-        new NoteBytesReadOnly( "batch_cmds");
+
     public static final NoteBytesReadOnly TERMINAL_CLEAR = 
         new NoteBytesReadOnly("terminal_clear");
     public static final NoteBytesReadOnly TERMINAL_PRINT = 
@@ -43,8 +42,7 @@ public class TerminalCommands {
         new NoteBytesReadOnly("terminal_draw_box");
     public static final NoteBytesReadOnly TERMINAL_DRAW_HLINE = 
         new NoteBytesReadOnly("terminal_draw_hline");
-    public static final NoteBytesReadOnly  TERMINAL_BATCH = 
-        new NoteBytesReadOnly("terminal_batch");
+
     
     public static final NoteBytesReadOnly TERMINAL_RESIZE = 
         new NoteBytesReadOnly("terminal_resize");

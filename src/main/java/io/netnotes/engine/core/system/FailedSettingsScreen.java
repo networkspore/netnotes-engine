@@ -11,8 +11,9 @@ import java.util.concurrent.CompletionException;
 import javax.crypto.SecretKey;
 
 import io.netnotes.engine.core.SettingsData;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -38,6 +39,8 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - Try to extract salt keys (critical for decryption)
  * - If salt recovered, can recreate bcrypt with new password using same salt
  * - If salt lost, data is unrecoverable → must delete and start fresh
+ * 
+ * TODO: Lots of fixes needed should create RenderableStates
  */
 class FailedSettingsScreen extends TerminalScreen {
     
@@ -74,25 +77,25 @@ class FailedSettingsScreen extends TerminalScreen {
         }
     }
     
-    public FailedSettingsScreen(String name, SystemTerminalContainer terminal) {
+    public FailedSettingsScreen(String name, SystemApplication terminal) {
         super(name, terminal);
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         // If menu is active, return empty (MenuNavigator handles rendering)
         if (menuNavigator != null && menuNavigator.hasMenu()) {
-            return RenderState.builder().build();
+            return TerminalRenderState.builder().build();
         }
         
         // Otherwise, build our own state
-        RenderState.Builder builder = RenderState.builder();
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> {
             term.clear();
-            term.printAt(1, (FailedSettingsScreen.this.terminal.getCols() - 14) / 2, "Settings Error", TextStyle.BOLD);
+            term.printAt(1, (FailedSettingsScreen.this.systemApplication.getTerminal().getCols() - 14) / 2, "Settings Error", TextStyle.BOLD);
         });
         
         switch (currentState) {
@@ -164,22 +167,22 @@ class FailedSettingsScreen extends TerminalScreen {
             //  TODO: render(); should mark dirty
         } else {
             // No settings, no data - safe to start fresh
-            terminal.printAt(7, 10, "No existing data found. Redirecting to setup...")
+            systemApplication.getTerminal().printAt(7, 10, "No existing data found. Redirecting to setup...")
                 .thenRunAsync(() -> TimeHelpers.timeDelay(2))
-                .thenRun(() -> terminal.showScreen("first-run-password"));
+                .thenRun(() -> systemApplication.showScreen("first-run-password"));
         }
     }
     
     private void diagnoseCorruptFile() {
-        terminal.printAt(7, 10, "Analyzing settings file...")
+        systemApplication.getTerminal().printAt(7, 10, "Analyzing settings file...")
             .thenCompose(v -> SettingsData.loadSettingsMap())
             .thenAccept(map -> {
                 // File loaded successfully - shouldn't be here
-                terminal.printAt(9, 10, "Settings file is valid. Retrying authentication...")
+                systemApplication.getTerminal().printAt(9, 10, "Settings file is valid. Retrying authentication...")
                     .thenRunAsync(() -> TimeHelpers.timeDelay(2))
                     .thenRun(() -> {
-                        terminal.getStateMachine().removeState(SystemTerminalContainer.FAILED_SETTINGS);
-                        terminal.getStateMachine().addState(SystemTerminalContainer.AUTHENTICATING);
+                        systemApplication.getStateMachine().removeState(SystemApplication.FAILED_SETTINGS);
+                        systemApplication.getStateMachine().addState(SystemApplication.AUTHENTICATING);
                     });
             })
             .exceptionally(ex -> {
@@ -192,16 +195,16 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showCorruptFileScreen() {
-        return terminal.printAt(5, 10, "Settings file is corrupted")
-            .thenCompose(v -> terminal.printAt(7, 10, "Error: " + truncateError(errorDetails)))
-            .thenCompose(v -> terminal.printAt(9, 10, "Choose an option below:"))
+        return systemApplication.getTerminal().printAt(5, 10, "Settings file is corrupted")
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "Error: " + truncateError(errorDetails)))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(9, 10, "Choose an option below:"))
             .thenRun(() -> showCorruptFileMenu());
     }
     
     private void showCorruptFileMenu() {
-        menuNavigator = new MenuNavigator(terminal);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal());
         
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "corrupt-file");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "corrupt-file");
         MenuContext menu = new MenuContext(menuPath, "Recovery Options");
         
         menu.addItem("recover", "Attempt Recovery", 
@@ -382,8 +385,8 @@ class FailedSettingsScreen extends TerminalScreen {
         boolean hasLengthMismatch = recoveredData.values().stream()
             .anyMatch(d -> d.lengthMismatch);
         
-        return terminal.printAt(5, 10, "Recovery Status: Partial Success")
-            .thenCompose(v -> terminal.printAt(7, 10, "Recovered data:"))
+        return systemApplication.getTerminal().printAt(5, 10, "Recovery Status: Partial Success")
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "Recovered data:"))
             .thenCompose(v -> {
                 int row = 9;
                 CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
@@ -395,29 +398,29 @@ class FailedSettingsScreen extends TerminalScreen {
                     
                     final int currentRow = row++;
                     chain = chain.thenCompose(x -> 
-                        terminal.printAt(currentRow, 12, "• " + keyName + status));
+                        systemApplication.getTerminal().printAt(currentRow, 12, "• " + keyName + status));
                 }
                 
                 return chain;
             })
             .thenCompose(v -> {
                 if (hasLengthMismatch) {
-                    return terminal.printAt(11, 10, "⚠ Warning: File appears manually edited");
+                    return systemApplication.getTerminal().printAt(11, 10, "⚠ Warning: File appears manually edited");
                 }
                 return CompletableFuture.completedFuture(null);
             })
             .thenCompose(v -> {
                 if (recoveredData.containsKey(SettingsData.SALT_KEY)) {
-                    return terminal.printAt(13, 10, "Salt recovered! You can recreate your password.")
-                        .thenCompose(x -> terminal.printAt(14, 10, "Using the same salt preserves data access."))
-                        .thenCompose(x -> terminal.printAt(16, 10, "Enter new password to recover system:"))
-                        .thenCompose(x -> terminal.moveCursor(16, 45))
+                    return systemApplication.getTerminal().printAt(13, 10, "Salt recovered! You can recreate your password.")
+                        .thenCompose(x -> systemApplication.getTerminal().printAt(14, 10, "Using the same salt preserves data access."))
+                        .thenCompose(x -> systemApplication.getTerminal().printAt(16, 10, "Enter new password to recover system:"))
+                        .thenCompose(x -> systemApplication.getTerminal().moveCursor(16, 45))
                         .thenRun(this::startPasswordRecovery);
                 } else {
-                    return terminal.printAt(13, 10, "⚠ Critical: Salt not recovered")
-                        .thenCompose(x -> terminal.printAt(14, 10, "Cannot decrypt existing data."))
-                        .thenCompose(x -> terminal.printAt(16, 10, "Press any key to see options..."))
-                        .thenRun(() -> terminal.waitForKeyPress(() -> {
+                    return systemApplication.getTerminal().printAt(13, 10, "⚠ Critical: Salt not recovered")
+                        .thenCompose(x -> systemApplication.getTerminal().printAt(14, 10, "Cannot decrypt existing data."))
+                        .thenCompose(x -> systemApplication.getTerminal().printAt(16, 10, "Press any key to see options..."))
+                        .thenRun(() -> systemApplication.getTerminal().waitForKeyPress(() -> {
                             currentState = DiagnosisState.UNRECOVERABLE;
                             //  TODO: render(); should mark dirty
                         }));
@@ -426,7 +429,7 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void startPasswordRecovery() {
-        passwordReader = new PasswordReader(terminal.getPasswordEventHandlerRegistry());
+        passwordReader = new PasswordReader(systemApplication.getPasswordEventHandlerRegistry());
 
         passwordReader.setOnPassword(password -> {
             passwordReader.close();
@@ -455,10 +458,10 @@ class FailedSettingsScreen extends TerminalScreen {
                 : null;
         } catch (Exception e) {
             password.close();
-            terminal.printError("Recovery failed: " + e.getMessage())
-                .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
+            systemApplication.getTerminal().printError("Recovery failed: " + e.getMessage())
+                .thenCompose(x -> systemApplication.getTerminal().printAt(20, 10, "Press any key..."))
 
-                .thenRun(() -> terminal.waitForKeyPress( () ->{
+                .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () ->{
                     //  TODO: render(); should mark dirty
                 }));
             return;
@@ -495,24 +498,24 @@ class FailedSettingsScreen extends TerminalScreen {
             }
         });
 
-        terminal.printAt(18, 10, "Recreating settings with recovered salt...")
+        systemApplication.getTerminal().printAt(18, 10, "Recreating settings with recovered salt...")
             .thenCompose(v -> rebuildFuture)
             .thenCompose(sd -> {
                 cleanup();
-                return terminal.clear() 
-                    .thenCompose(v-> terminal.printSuccess("Recovery successful!"))
-                    .thenCompose(x -> terminal.printAt(20, 10, "The system is now accessible."))
-                    .thenCompose(x -> terminal.printAt(21, 10, "Press any key to continue..."))
-                    .thenRun(() -> terminal.waitForKeyPress( ()->terminal.recoverSystem(sd)));
+                return systemApplication.getTerminal().clear() 
+                    .thenCompose(v-> systemApplication.getTerminal().printSuccess("Recovery successful!"))
+                    .thenCompose(x -> systemApplication.getTerminal().printAt(20, 10, "The system is now accessible."))
+                    .thenCompose(x -> systemApplication.getTerminal().printAt(21, 10, "Press any key to continue..."))
+                    .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( ()->systemApplication.recoverSystem(sd)));
              
             })
             .exceptionallyCompose(ex -> {
                 password.close();
                 Throwable root = unwrapCompletionException(ex);
 
-                return terminal.printError("Recovery failed: " + root.getMessage())
-                    .thenCompose(x -> terminal.printAt(20, 10, "Press any key..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> {
+                return systemApplication.getTerminal().printError("Recovery failed: " + root.getMessage())
+                    .thenCompose(x -> systemApplication.getTerminal().printAt(20, 10, "Press any key..."))
+                    .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> {
                         //  TODO: render(); should mark dirty
                     }));
             });
@@ -530,32 +533,32 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showRecoveryFailedScreen() {
-        return terminal.printAt(5, 10, "Recovery Failed")
-            .thenCompose(v -> terminal.printAt(7, 10, "Could not recover critical data from settings file."))
-            .thenCompose(v -> terminal.printAt(8, 10, "Error: " + truncateError(errorDetails)))
-            .thenCompose(v -> terminal.printAt(10, 10, "Recovered keys:"))
+        return systemApplication.getTerminal().printAt(5, 10, "Recovery Failed")
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "Could not recover critical data from settings file."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(8, 10, "Error: " + truncateError(errorDetails)))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, "Recovered keys:"))
             .thenCompose(v -> {
                 if (recoveredData.isEmpty()) {
-                    return terminal.printAt(11, 12, "• None");
+                    return systemApplication.getTerminal().printAt(11, 12, "• None");
                 } else {
                     int row = 11;
                     CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
                     for (NoteBytes key : recoveredData.keySet()) {
                         final int currentRow = row++;
                         chain = chain.thenCompose(x -> 
-                            terminal.printAt(currentRow, 12, "• " + getKeyName(key)));
+                            systemApplication.getTerminal().printAt(currentRow, 12, "• " + getKeyName(key)));
                     }
                     return chain;
                 }
             })
-            .thenCompose(v -> terminal.printAt(13, 10, "Choose an option below:"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(13, 10, "Choose an option below:"))
             .thenRun(this::showRecoveryFailedMenu);
     }
     
     private void showRecoveryFailedMenu() {
-        menuNavigator = new MenuNavigator( terminal );
+        menuNavigator = new MenuNavigator( systemApplication.getTerminal() );
         
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "recovery-failed");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "recovery-failed");
         MenuContext menu = new MenuContext(menuPath, "Recovery Failed");
         
         menu.addItem("delete", "Delete All Data and Start Fresh",
@@ -574,22 +577,35 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showMissingFileScreen() {
-        return terminal.printAt(5, 10, "Settings File Missing")
-            .thenCompose(v -> terminal.printAt(7, 10, "⚠ WARNING: Existing encrypted data detected!"))
-            .thenCompose(v -> terminal.printAt(9, 10, "The settings file containing encryption keys"))
-            .thenCompose(v -> terminal.printAt(10, 10, "is missing, but encrypted data exists."))
-            .thenCompose(v -> terminal.printAt(12, 10, "Without the original settings file, this data"))
-            .thenCompose(v -> terminal.printAt(13, 10, "CANNOT be recovered."))
-            .thenCompose(v -> terminal.printAt(15, 10, "If you have a backup of settings.dat, restore it"))
-            .thenCompose(v -> terminal.printAt(16, 10, "to the data directory and restart."))
-            .thenCompose(v -> terminal.printAt(18, 10, "Choose an option below:"))
+         /*/
+        //return terminal.getTerminal().batch().
+        RenderState.builder().add((terminal)->{
+            terminal.printAt(5, 10, "Settings File Missing");
+            terminal.printAt(7, 10, "⚠ WARNING: Existing encrypted data detected!");
+            terminal.printAt(9, 10, "The settings file containing encryption keys");
+            terminal.printAt(10, 10, "is missing, but encrypted data exists.");
+            terminal.printAt(12, 10, "Without the original settings file, this data");
+            terminal.printAt(13, 10, "CANNOT be recovered.");
+            terminal.printAt(15, 10, "If you have a backup of settings.dat, restore it");
+            terminal.printAt(16, 10, "to the data directory and restart.");
+            terminal.printAt(18, 10, "Choose an option below:");
+        }).build();*/
+        return systemApplication.getTerminal().printAt(5, 10, "Settings File Missing")
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "⚠ WARNING: Existing encrypted data detected!"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(9, 10, "The settings file containing encryption keys"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, "is missing, but encrypted data exists."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(12, 10, "Without the original settings file, this data"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(13, 10, "CANNOT be recovered."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(15, 10, "If you have a backup of settings.dat, restore it"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(16, 10, "to the data directory and restart."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(18, 10, "Choose an option below:"))
             .thenRun(this::showMissingFileMenu);
     }
     
     private void showMissingFileMenu() {
-        menuNavigator = new MenuNavigator( terminal);
+        menuNavigator = new MenuNavigator( systemApplication.getTerminal());
         
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "missing-file");
+        ContextPath menuPath = systemApplication.getContextPath().append("menu", "missing-file");
         MenuContext menu = new MenuContext(menuPath, "Missing Settings");
         
         menu.addItem("delete", "Delete Encrypted Data and Start Fresh",
@@ -607,30 +623,30 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> showUnrecoverableScreen() {
-        return terminal.printAt(5, 10, "Unrecoverable Corruption")
-            .thenCompose(v -> terminal.printAt(7, 10, "The settings file is corrupted beyond recovery."))
-            .thenCompose(v -> terminal.printAt(8, 10, "Critical encryption data cannot be extracted."))
-            .thenCompose(v -> terminal.printAt(10, 10, "All encrypted data will be lost."))
-            .thenCompose(v -> terminal.printAt(12, 10, "Press any key to delete data and start fresh..."))
-            .thenRun(() -> terminal.waitForKeyPress( this::deleteDataAndStartFresh));
+        return systemApplication.getTerminal().printAt(5, 10, "Unrecoverable Corruption")
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "The settings file is corrupted beyond recovery."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(8, 10, "Critical encryption data cannot be extracted."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, "All encrypted data will be lost."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(12, 10, "Press any key to delete data and start fresh..."))
+            .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( this::deleteDataAndStartFresh));
     }
     
     private void confirmDeleteAndStartFresh() {
-        terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Confirm Data Deletion"))
-            .thenCompose(v -> terminal.printAt(7, 10, "⚠ WARNING ⚠"))
-            .thenCompose(v -> terminal.printAt(9, 10, "This will permanently delete:"))
-            .thenCompose(v -> terminal.printAt(10, 12, "• All encrypted data"))
-            .thenCompose(v -> terminal.printAt(11, 12, "• All settings"))
-            .thenCompose(v -> terminal.printAt(12, 12, "• The entire data directory"))
-            .thenCompose(v -> terminal.printAt(14, 10, "This action CANNOT be undone."))
-            .thenCompose(v -> terminal.printAt(16, 10, "Type 'DELETE' to confirm: "))
-            .thenCompose(v -> terminal.moveCursor(16, 37))
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printTitle("Confirm Data Deletion"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "⚠ WARNING ⚠"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(9, 10, "This will permanently delete:"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(10, 12, "• All encrypted data"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(11, 12, "• All settings"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(12, 12, "• The entire data directory"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(14, 10, "This action CANNOT be undone."))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(16, 10, "Type 'DELETE' to confirm: "))
+            .thenCompose(v -> systemApplication.getTerminal().moveCursor(16, 37))
             .thenRun(this::waitForDeleteConfirmation);
     }
     
     private void waitForDeleteConfirmation() {
-        inputReader = new TerminalInputReader(terminal, 16, 37, 10);
+        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 16, 37, 10);
         
         inputReader.setOnComplete(input -> {
           
@@ -640,7 +656,7 @@ class FailedSettingsScreen extends TerminalScreen {
             if ("DELETE".equals(input)) {
                 deleteDataAndStartFresh();
             } else {
-                terminal.printAt(18, 10, "Deletion cancelled. Must type 'DELETE' exactly.")
+                systemApplication.getTerminal().printAt(18, 10, "Deletion cancelled. Must type 'DELETE' exactly.")
                     .thenRunAsync(() -> TimeHelpers.timeDelay(2))
                     .thenRun(() -> {
                         //  TODO: render(); should mark dirty
@@ -651,9 +667,9 @@ class FailedSettingsScreen extends TerminalScreen {
     }
     
     private void deleteDataAndStartFresh() {
-        terminal.clear()
-            .thenCompose(v -> terminal.printTitle("Deleting Data"))
-            .thenCompose(v -> terminal.printAt(7, 10, "Removing data directory..."))
+        systemApplication.getTerminal().clear()
+            .thenCompose(v -> systemApplication.getTerminal().printTitle("Deleting Data"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "Removing data directory..."))
             .thenCompose(v -> CompletableFuture.runAsync(() -> {
                 try {
                     File dataDir = SettingsData.getDataDir();
@@ -665,17 +681,17 @@ class FailedSettingsScreen extends TerminalScreen {
                     throw new RuntimeException("Failed to delete data: " + e.getMessage());
                 }
             }))
-            .thenCompose(v -> terminal.printSuccess("Data deleted successfully"))
-            .thenCompose(v -> terminal.printAt(9, 10, "Redirecting to setup..."))
+            .thenCompose(v -> systemApplication.getTerminal().printSuccess("Data deleted successfully"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(9, 10, "Redirecting to setup..."))
             .thenRunAsync(() -> TimeHelpers.timeDelay(2))
             .thenRun(() -> {
-                terminal.getStateMachine().removeState(SystemTerminalContainer.FAILED_SETTINGS);
-                terminal.getStateMachine().addState(SystemTerminalContainer.FIRST_RUN);
+                systemApplication.getStateMachine().removeState(SystemApplication.FAILED_SETTINGS);
+                systemApplication.getStateMachine().addState(SystemApplication.FIRST_RUN);
             })
             .exceptionally(ex -> {
-                terminal.printError("Failed to delete data: " + ex.getMessage())
-                    .thenCompose(v -> terminal.printAt(11, 10, "Press any key to exit..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> System.exit(1)));
+                systemApplication.getTerminal().printError("Failed to delete data: " + ex.getMessage())
+                    .thenCompose(v -> systemApplication.getTerminal().printAt(11, 10, "Press any key to exit..."))
+                    .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> System.exit(1)));
                 return null;
             });
     }

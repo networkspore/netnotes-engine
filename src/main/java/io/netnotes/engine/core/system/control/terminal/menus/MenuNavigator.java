@@ -4,11 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 
-import io.netnotes.engine.core.system.control.terminal.BatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalBatchBuilder;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.Invalidatable;
@@ -56,7 +56,7 @@ import java.util.function.Consumer;
  * }
  * </pre>
  */
-public class MenuNavigator implements Renderable {
+public class MenuNavigator implements TerminalRenderable {
 
     private final BitFlagStateMachine state;
     private final TerminalContainerHandle terminal;
@@ -162,12 +162,12 @@ public class MenuNavigator implements Renderable {
      * This is FAST - just builds data structures, doesn't render
      */
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         if (currentMenu == null) {
-            return RenderState.builder().build();
+            return TerminalRenderState.builder().build();
         }
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(asRenderElement())
             .build();
     }
@@ -176,7 +176,7 @@ public class MenuNavigator implements Renderable {
      * Convert MenuNavigator to RenderElement
      * This is the KEY for composition - parent screens use this
      */
-    public RenderElement asRenderElement() {
+    public TerminalRenderElement asRenderElement() {
         if (currentMenu == null) {
             return batch -> {}; // No-op
         }
@@ -246,7 +246,7 @@ public class MenuNavigator implements Renderable {
     
     // ===== BATCH RENDERING HELPERS =====
     
-    private void addHeaderToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
+    private void addHeaderToBatch(TerminalBatchBuilder batch, MenuContext menu, MenuDimensions dims) {
         String title = menu.getTitle();
         
         batch.drawBox(0, dims.boxCol, dims.boxWidth, 3, title, BoxStyle.SINGLE);
@@ -256,7 +256,7 @@ public class MenuNavigator implements Renderable {
         batch.printAt(titleRow, titleCol, title, TextStyle.BOLD);
     }
     
-    private void addBreadcrumbToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
+    private void addBreadcrumbToBatch(TerminalBatchBuilder batch, MenuContext menu, MenuDimensions dims) {
         List<String> trail = new ArrayList<>();
         MenuContext current = menu;
         
@@ -271,7 +271,7 @@ public class MenuNavigator implements Renderable {
         batch.printAt(3, textCol, breadcrumb, TextStyle.INFO);
     }
     
-    private void addDescriptionToBatch(BatchBuilder batch, MenuContext menu, MenuDimensions dims) {
+    private void addDescriptionToBatch(TerminalBatchBuilder batch, MenuContext menu, MenuDimensions dims) {
         String description = menu.getDescription();
         String[] lines = description.split("\n");
         int descRow = 5;
@@ -285,7 +285,7 @@ public class MenuNavigator implements Renderable {
     }
     
     private void addMenuItemsToBatch(
-            BatchBuilder batch, 
+            TerminalBatchBuilder batch, 
             MenuContext menu, 
             MenuDimensions dims,
             int selectedIdx,
@@ -346,7 +346,7 @@ public class MenuNavigator implements Renderable {
     }
     
     private void addMenuItemToBatch(
-            BatchBuilder batch,
+            TerminalBatchBuilder batch,
             MenuContext.MenuItem item,
             int row,
             boolean isSelected,
@@ -407,7 +407,7 @@ public class MenuNavigator implements Renderable {
     }
     
     private void addFooterToBatch(
-            BatchBuilder batch, 
+            TerminalBatchBuilder batch, 
             MenuContext menu, 
             MenuDimensions dims,
             boolean hasParent) {

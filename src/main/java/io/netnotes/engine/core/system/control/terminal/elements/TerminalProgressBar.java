@@ -2,10 +2,10 @@ package io.netnotes.engine.core.system.control.terminal.elements;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderElement;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 
 /**
@@ -39,7 +39,7 @@ import io.netnotes.engine.core.system.control.terminal.TextStyle;
  * - ▓▓▓▓▓▓░░░░ 60%    (SHADED)
  * - >>>>>>>--- 70%    (ARROWS)
  */
-public class TerminalProgressBar implements Renderable {
+public class TerminalProgressBar implements TerminalRenderable {
     
     private final TerminalContainerHandle terminal;
     private final int row;
@@ -55,7 +55,7 @@ public class TerminalProgressBar implements Renderable {
     private volatile boolean needsRender = false;
     
     // PARENT RENDERABLE (for composition pattern)
-    private Renderable parentRenderable = null;
+    private TerminalRenderable parentRenderable = null;
     
     public enum Style {
         /** |10%|=====-------| */
@@ -89,7 +89,7 @@ public class TerminalProgressBar implements Renderable {
      * Set parent renderable (for composition pattern)
      * When progress bar is part of another renderable, invalidate parent instead
      */
-    public TerminalProgressBar withParent(Renderable parent) {
+    public TerminalProgressBar withParent(TerminalRenderable parent) {
         this.parentRenderable = parent;
         return this;
     }
@@ -101,8 +101,8 @@ public class TerminalProgressBar implements Renderable {
      * Thread-safe read-only state capture
      */
     @Override
-    public RenderState getRenderState() {
-        return RenderState.builder()
+    public TerminalRenderState getRenderState() {
+        return TerminalRenderState.builder()
             .add(asRenderElement())
             .build();
     }
@@ -146,7 +146,7 @@ public class TerminalProgressBar implements Renderable {
      * Convert this ProgressBar to a RenderElement
      * Allows embedding in other components' RenderState
      */
-    public RenderElement asRenderElement() {
+    public TerminalRenderElement asRenderElement() {
         // Capture current state for rendering (thread-safe snapshot)
         final double percent = this.currentPercent;
         final String message = this.currentMessage;

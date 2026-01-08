@@ -33,6 +33,7 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
     public static final NoteBytesReadOnly AUTO_FOCUS = new NoteBytesReadOnly( "auto_focus");
     public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
+    public static final NoteBytesReadOnly BATCH_COMMANDS = new NoteBytesReadOnly( "batch_cmds");
     
     // ===== LIFECYCLE COMMANDS =====
     public static final NoteBytesReadOnly CREATE_CONTAINER = 
@@ -60,7 +61,8 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly LIST_CONTAINERS = 
         new NoteBytesReadOnly("list_containers");
     
-    
+        public static final NoteBytesReadOnly  CONAINER_BATCH = 
+        new NoteBytesReadOnly("container_batch");
   
 
     public static final NoteBytesReadOnly UPDATE_CONTAINER = 

@@ -2,8 +2,8 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.elements.Invalidatable;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
@@ -17,26 +17,26 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - ClientRenderManager polls needsRender()
  * - clearRenderFlag() called after successful render
  */
-abstract class TerminalScreen implements Renderable, Invalidatable {
+abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
     protected final String name;
-    protected SystemTerminalContainer terminal;
+    protected SystemApplication systemApplication;
     protected TerminalScreen parent;
     private volatile boolean isShowing = false;
     
     // DIRTY FLAG for rendering
     private volatile boolean needsRender = false;
     
-    public TerminalScreen(String name, SystemTerminalContainer terminal) {
+    public TerminalScreen(String name, SystemApplication terminal) {
         this.name = name;
-        this.terminal = terminal;
+        this.systemApplication = terminal;
     }
     
     public String getName() {
         return name;
     }
     
-    public void setTerminal(SystemTerminalContainer terminal) {
-        this.terminal = terminal;
+    public void setSystemApplication(SystemApplication systemApplication) {
+        this.systemApplication = systemApplication;
     }
     
     public void setParent(TerminalScreen parent) {
@@ -64,7 +64,7 @@ abstract class TerminalScreen implements Renderable, Invalidatable {
         isShowing = true;
 
         // Make this screen the active renderable
-        terminal.setRenderable(this);
+        systemApplication.setRenderable(this);
         
         // Mark for initial render
         invalidate();
@@ -96,7 +96,7 @@ abstract class TerminalScreen implements Renderable, Invalidatable {
      * Don't modify state here - just read and return.
      */
     @Override
-    public abstract RenderState getRenderState();
+    public abstract TerminalRenderState getRenderState();
     
     /**
      * Check if needs rendering
@@ -125,7 +125,7 @@ abstract class TerminalScreen implements Renderable, Invalidatable {
     public void invalidate() {
         this.needsRender = true;
         // Notify container that renderable needs update
-        terminal.invalidate();
+        systemApplication.invalidate();
     }
     
     /**

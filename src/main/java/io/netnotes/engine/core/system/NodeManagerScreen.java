@@ -2,8 +2,8 @@ package io.netnotes.engine.core.system;
 
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
-import io.netnotes.engine.core.system.control.terminal.Renderable;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
@@ -41,18 +41,18 @@ class NodeManagerScreen extends TerminalScreen {
     private RunningInstancesScreen instancesScreen;
     private BrowsePackagesScreen browseScreen;
 
-    public NodeManagerScreen(String name, SystemTerminalContainer terminal) {
-        super(name, terminal);
+    public NodeManagerScreen(String name, SystemApplication systemApplication) {
+        super(name, systemApplication);
         this.basePath = ContextPath.of("node-manager");
         
 
-        this.menuNavigator = new MenuNavigator(terminal).withParent(this);
+        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
     }
     
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentState) {
             case AUTHENTICATING -> buildAuthenticatingState();
             case SHOWING_MENU -> buildMenuState();
@@ -63,11 +63,11 @@ class NodeManagerScreen extends TerminalScreen {
     /**
      * PasswordPrompt is active - show status message
      */
-    private RenderState buildAuthenticatingState() {
-        int centerRow = terminal.getRows() / 2;
-        int centerCol = terminal.getCols() / 2;
+    private TerminalRenderState buildAuthenticatingState() {
+        int centerRow = systemApplication.getTerminal().getRows() / 2;
+        int centerCol = systemApplication.getTerminal().getCols() / 2;
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(batch -> {
                 batch.clear();
                 batch.printAt(centerRow, centerCol - 15, 
@@ -80,10 +80,10 @@ class NodeManagerScreen extends TerminalScreen {
     /**
      * MenuNavigator is active - compose its render element
      */
-    private RenderState buildMenuState() {
+    private TerminalRenderState buildMenuState() {
         // THIS IS THE KEY: MenuNavigator is now a COMPONENT
         // We compose it into our RenderState
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear()) // Clear screen first
             .add(menuNavigator.asRenderElement()) // Add menu rendering
             .build();
@@ -93,10 +93,10 @@ class NodeManagerScreen extends TerminalScreen {
      * Sub-screen is active - it handles its own rendering
      * Return empty state since sub-screen is the active renderable
      */
-    private RenderState buildSubScreenState() {
+    private TerminalRenderState buildSubScreenState() {
         // Sub-screens are standalone renderables
         // They manage their own rendering lifecycle
-        return RenderState.builder().build();
+        return TerminalRenderState.builder().build();
     }
     
     // ===== LIFECYCLE =====
@@ -127,13 +127,13 @@ class NodeManagerScreen extends TerminalScreen {
     // ===== AUTHENTICATION =====
     
     private CompletableFuture<Void> promptForPassword() {
-        passwordPrompt = new PasswordPrompt(terminal)
+        passwordPrompt = new PasswordPrompt(systemApplication)
             .withTitle("Node Manager Authentication")
             .withPrompt("Enter password:")
             .withTimeout(30)
             .onPassword(this::handlePassword)
             .onTimeout(this::handleTimeout)
-            .onCancel(() -> terminal.goBack());
+            .onCancel(() -> systemApplication.goBack());
         
         return passwordPrompt.show();
     }
@@ -143,11 +143,11 @@ class NodeManagerScreen extends TerminalScreen {
         currentState = State.AUTHENTICATING;
         invalidate();
         
-        terminal.getSystemAccess().getAsymmetricPairs(password)
+        systemApplication.getSystemAccess().getAsymmetricPairs(password)
             .thenAccept(pairs -> {
                 password.close();
                 
-                this.nodeCommands = new NodeCommands(terminal, pairs);
+                this.nodeCommands = new NodeCommands(systemApplication, pairs);
                 currentState = State.SHOWING_MENU;
                 
                 showMainMenu();
@@ -161,9 +161,9 @@ class NodeManagerScreen extends TerminalScreen {
 
     private void showAuthError(String errorMsg) {
         // Create temporary error renderable
-        Renderable errorRenderable = () -> {
-            int row = terminal.getRows() / 2;
-            return RenderState.builder()
+        TerminalRenderable errorRenderable = () -> {
+            int row = systemApplication.getTerminal().getRows() / 2;
+            return TerminalRenderState.builder()
                 .add(batch -> {
                     batch.clear();
                     batch.printAt(row, 10, 
@@ -180,37 +180,37 @@ class NodeManagerScreen extends TerminalScreen {
         };
         
         // Temporarily show error (don't change our state)
-        terminal.setRenderable(errorRenderable);
-        terminal.invalidate();
+        systemApplication.setRenderable(errorRenderable);
+        systemApplication.invalidate();
         
-        terminal.waitForKeyPress()
+        systemApplication.getTerminal().waitForKeyPress()
             .thenRun(() -> {
                 // Restore this screen as active
-                terminal.setRenderable(this);
+                systemApplication.getTerminal().setRenderable(this);
                 promptForPassword();
             });
     }
 
    private void handleTimeout() {
-        Renderable timeoutRenderable = () -> {
-            return RenderState.builder()
+        TerminalRenderable timeoutRenderable = () -> {
+            return TerminalRenderState.builder()
                 .add(batch -> {
                     batch.clear();
-                    batch.printAt(terminal.getRows() / 2, 10, 
+                    batch.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                         "Authentication timeout", 
                         TextStyle.ERROR);
-                    batch.printAt(terminal.getRows() / 2 + 2, 10, 
+                    batch.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                         "Press any key...", 
                         TextStyle.NORMAL);
                 })
                 .build();
         };
         
-        terminal.setRenderable(timeoutRenderable);
-        terminal.invalidate();
+        systemApplication.getTerminal().setRenderable(timeoutRenderable);
+        systemApplication.getTerminal().invalidate();
         
-        terminal.waitForKeyPress()
-            .thenRun(() -> terminal.goBack());
+        systemApplication.getTerminal().waitForKeyPress()
+            .thenRun(() -> systemApplication.goBack());
     }
     
     // ===== MAIN MENU =====
@@ -250,7 +250,7 @@ class NodeManagerScreen extends TerminalScreen {
         if (installedScreen == null && nodeCommands != null) {
             installedScreen = new InstalledPackagesScreen(
                 "installed-packages",
-                terminal,
+                systemApplication,
                 nodeCommands
             );
             installedScreen.setOnBack(() -> {
@@ -258,7 +258,7 @@ class NodeManagerScreen extends TerminalScreen {
                 currentState = State.SHOWING_MENU;
                 
                 // PATCH: Restore this screen as active renderable
-                terminal.setRenderable(this);
+                systemApplication.setRenderable(this);
                 showMainMenu();
             });
         }
@@ -275,7 +275,7 @@ class NodeManagerScreen extends TerminalScreen {
         if (instancesScreen == null && nodeCommands != null) {
             instancesScreen = new RunningInstancesScreen(
                 "running-instances",
-                terminal,
+                systemApplication,
                 nodeCommands
             );
             instancesScreen.setOnBack(() -> {
@@ -283,7 +283,7 @@ class NodeManagerScreen extends TerminalScreen {
                 currentState = State.SHOWING_MENU;
                 
                 // PATCH: Restore this screen as active renderable
-                terminal.setRenderable(this);
+                systemApplication.setRenderable(this);
                 showMainMenu();
             });
         }
@@ -299,7 +299,7 @@ class NodeManagerScreen extends TerminalScreen {
         if (browseScreen == null && nodeCommands != null) {
             browseScreen = new BrowsePackagesScreen(
                 "browse-packages",
-                terminal,
+                systemApplication,
                 nodeCommands
             );
             browseScreen.setOnBack(() -> {
@@ -307,7 +307,7 @@ class NodeManagerScreen extends TerminalScreen {
                 currentState = State.SHOWING_MENU;
                 
                 // PATCH: Restore this screen as active renderable
-                terminal.setRenderable(this);
+                systemApplication.setRenderable(this);
                 showMainMenu();
             });
         }
@@ -318,7 +318,7 @@ class NodeManagerScreen extends TerminalScreen {
     }
         
     private void goBack() {
-        terminal.goBack();
+        systemApplication.goBack();
     }
     
     // ===== CLEANUP =====

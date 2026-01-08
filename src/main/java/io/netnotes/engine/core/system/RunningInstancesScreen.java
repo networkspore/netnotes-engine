@@ -7,7 +7,8 @@ import io.netnotes.engine.core.system.control.PasswordReader;
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
 import io.netnotes.engine.core.system.control.nodes.NodeState;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState.TerminalStateBuilder;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -44,10 +45,10 @@ class RunningInstancesScreen extends TerminalScreen {
     
     public RunningInstancesScreen(
         String name, 
-        SystemTerminalContainer terminal, 
+        SystemApplication systemApplication, 
         NodeCommands nodeCommands
     ){
-        super(name, terminal);
+        super(name, systemApplication);
         this.nodeCommands = nodeCommands;
     }
     
@@ -58,8 +59,8 @@ class RunningInstancesScreen extends TerminalScreen {
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
-        RenderState.Builder builder = RenderState.builder();
+    public TerminalRenderState getRenderState() {
+        TerminalStateBuilder builder = TerminalRenderState.builder();
         
         // Clear screen
         builder.add((term) -> term.clear());
@@ -111,7 +112,7 @@ class RunningInstancesScreen extends TerminalScreen {
                 if (instances.isEmpty()) {
                     // No instances - show message and wait for key
                     invalidate();
-                    terminal.waitForKeyPress(this::goBack);
+                    systemApplication.getTerminal().waitForKeyPress(this::goBack);
                 } else {
                     // Show instances and menu
                     invalidate();
@@ -119,17 +120,17 @@ class RunningInstancesScreen extends TerminalScreen {
                 }
             })
             .exceptionally(ex -> {
-                terminal.printError("Failed to load instances: " + ex.getMessage())
-                    .thenCompose(v -> terminal.printAt(7, 10, "Press any key to go back..."))
-                    .thenRun(() -> terminal.waitForKeyPress(this::goBack));
+                systemApplication.getTerminal().printError("Failed to load instances: " + ex.getMessage())
+                    .thenCompose(v -> systemApplication.getTerminal().printAt(7, 10, "Press any key to go back..."))
+                    .thenRun(() -> systemApplication.getTerminal().waitForKeyPress(this::goBack));
                 return null;
             });
     }
     
-    private void buildInstanceListState(RenderState.Builder builder) {
+    private void buildInstanceListState(TerminalStateBuilder builder) {
         // Title
         builder.add((term) -> 
-            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 23) / 2, "Running Node Instances", TextStyle.BOLD));
+            term.printAt(1, (RunningInstancesScreen.this.systemApplication.getTerminal().getCols() - 23) / 2, "Running Node Instances", TextStyle.BOLD));
         
         if (cachedInstances == null || cachedInstances.isEmpty()) {
             builder.add((term) -> {
@@ -141,7 +142,7 @@ class RunningInstancesScreen extends TerminalScreen {
         }
     }
     
-    private void buildInstanceTableState(RenderState.Builder builder, List<NodeInstance> instances, int startRow) {
+    private void buildInstanceTableState(TerminalStateBuilder builder, List<NodeInstance> instances, int startRow) {
         // Header
         builder.add((term) -> {
             term.printAt(startRow, 10, "Package", TextStyle.BOLD);
@@ -178,7 +179,7 @@ class RunningInstancesScreen extends TerminalScreen {
     }
     
     private void showInstanceListMenu(List<NodeInstance> instances) {
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "instances");
+        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("menu", "instances");
         MenuContext menu = new MenuContext(menuPath, "Instance Actions");
         
         // Add menu item for each instance
@@ -200,7 +201,7 @@ class RunningInstancesScreen extends TerminalScreen {
         });
         menu.addItem("back", "Back to Node Manager", this::goBack);
         
-        menuNavigator = new MenuNavigator(terminal);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal());
         menuNavigator.showMenu(menu);
     }
     
@@ -214,7 +215,7 @@ class RunningInstancesScreen extends TerminalScreen {
         showInstanceDetailsMenu();
     }
     
-    private void buildInstanceDetailsState(RenderState.Builder builder) {
+    private void buildInstanceDetailsState(TerminalStateBuilder builder) {
         if (selectedInstance == null) {
             currentView = View.INSTANCE_LIST;
             buildInstanceListState(builder);
@@ -224,7 +225,7 @@ class RunningInstancesScreen extends TerminalScreen {
         InstalledPackage pkg = selectedInstance.getPackage();
         
         builder.add((term) -> {
-            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 16) / 2, "Instance Details", TextStyle.BOLD);
+            term.printAt(1, (RunningInstancesScreen.this.systemApplication.getTerminal().getCols() - 16) / 2, "Instance Details", TextStyle.BOLD);
             term.printAt(5, 10, "Package: " + pkg.getName(), TextStyle.NORMAL);
             term.printAt(6, 10, "Version: " + pkg.getVersion(), TextStyle.NORMAL);
             term.printAt(7, 10, "Description: " + pkg.getDescription(), TextStyle.NORMAL);
@@ -240,7 +241,7 @@ class RunningInstancesScreen extends TerminalScreen {
     }
     
     private void showInstanceDetailsMenu() {
-        ContextPath menuPath = terminal.getSessionPath().append("menu", "instance-details");
+        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("menu", "instance-details");
         MenuContext menu = new MenuContext(menuPath, "Instance Actions");
         
         // Only allow stopping if instance is running
@@ -265,7 +266,7 @@ class RunningInstancesScreen extends TerminalScreen {
             }
         });
         
-        menuNavigator = new MenuNavigator(terminal);
+        menuNavigator = new MenuNavigator(systemApplication.getTerminal());
         menuNavigator.showMenu(menu);
     }
     
@@ -278,7 +279,7 @@ class RunningInstancesScreen extends TerminalScreen {
         startStopConfirmation();
     }
     
-    private void buildConfirmStopState(RenderState.Builder builder) {
+    private void buildConfirmStopState(TerminalStateBuilder builder) {
         if (selectedInstance == null) {
             currentView = View.INSTANCE_LIST;
             buildInstanceListState(builder);
@@ -286,7 +287,7 @@ class RunningInstancesScreen extends TerminalScreen {
         }
         
         builder.add((term) -> {
-            term.printAt(1, (RunningInstancesScreen.this.terminal.getCols() - 20) / 2, "Confirm Stop Instance", TextStyle.BOLD);
+            term.printAt(1, (RunningInstancesScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Confirm Stop Instance", TextStyle.BOLD);
             term.printAt(5, 10, "⚠ WARNING ⚠", TextStyle.WARNING);
             term.printAt(7, 10, "Stop instance: " + selectedInstance.getPackage().getName(), TextStyle.NORMAL);
             term.printAt(8, 10, "Process ID: " + selectedInstance.getProcessId(), TextStyle.NORMAL);
@@ -300,7 +301,7 @@ class RunningInstancesScreen extends TerminalScreen {
     }
 
     private void startStopConfirmation() {
-        TerminalInputReader inputReader = new TerminalInputReader(terminal, 15, 30, 20);
+        TerminalInputReader inputReader = new TerminalInputReader(systemApplication.getTerminal(), 15, 30, 20);
 
         
         inputReader.setOnComplete(input -> {
@@ -309,9 +310,9 @@ class RunningInstancesScreen extends TerminalScreen {
             if ("STOP".equals(input)) {
                 performStop();
             } else {
-                terminal.printError("Confirmation failed")
-                    .thenCompose(x -> terminal.printAt(17, 10, "Press any key to try again..."))
-                    .thenRun(() -> terminal.waitForKeyPress( () -> {
+                systemApplication.getTerminal().printError("Confirmation failed")
+                    .thenCompose(x -> systemApplication.getTerminal().printAt(17, 10, "Press any key to try again..."))
+                    .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> {
                         currentView = View.CONFIRM_STOP;
                         invalidate();
                     }));
@@ -331,10 +332,10 @@ class RunningInstancesScreen extends TerminalScreen {
         
     
     private CompletableFuture<Void> performStop() {
-        return terminal.printAt(17, 10, "Stopping instance...                    ")
+        return systemApplication.getTerminal().printAt(17, 10, "Stopping instance...                    ")
             .thenCompose(v -> nodeCommands.unloadNode(selectedInstance.getInstanceId()))
-            .thenCompose(v -> terminal.printSuccess("Instance stopped successfully"))
-            .thenCompose(v -> terminal.printAt(19, 10, "Returning to instance list..."))
+            .thenCompose(v -> systemApplication.getTerminal().printSuccess("Instance stopped successfully"))
+            .thenCompose(v -> systemApplication.getTerminal().printAt(19, 10, "Returning to instance list..."))
             .thenRunAsync(() -> TimeHelpers.timeDelay(2))
             .thenRun(() -> {
                 selectedInstance = null;
@@ -344,9 +345,9 @@ class RunningInstancesScreen extends TerminalScreen {
                 loadInstancesAndShow();
             })
             .exceptionally(ex -> {
-                terminal.printError("Failed to stop: " + ex.getMessage())
-                .thenCompose(x -> terminal.printAt(21, 10, "Press any key..."))
-                .thenRun(() -> terminal.waitForKeyPress( () -> {
+                systemApplication.getTerminal().printError("Failed to stop: " + ex.getMessage())
+                .thenCompose(x -> systemApplication.getTerminal().printAt(21, 10, "Press any key..."))
+                .thenRun(() -> systemApplication.getTerminal().waitForKeyPress( () -> {
                     selectedInstance = null;
                     currentView = View.INSTANCE_LIST;
                     invalidate();

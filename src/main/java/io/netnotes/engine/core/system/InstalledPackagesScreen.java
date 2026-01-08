@@ -5,7 +5,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.core.system.control.nodes.InstalledPackage;
 import io.netnotes.engine.core.system.control.nodes.NodeInstance;
-import io.netnotes.engine.core.system.control.terminal.ClientTerminalRenderManager.RenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.input.TerminalInputReader;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -49,13 +49,13 @@ class InstalledPackagesScreen extends TerminalScreen {
     
     public InstalledPackagesScreen(
         String name, 
-        SystemTerminalContainer terminal, 
+        SystemApplication systemApplication, 
         NodeCommands nodeCommands
     ) {
-        super(name, terminal);
+        super(name, systemApplication);
         this.menuBasePath = ContextPath.of("installed-packages");
         this.nodeCommands = nodeCommands;
-        this.menuNavigator = new MenuNavigator(terminal).withParent(this);
+        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
     }
     
     public void setOnBack(Runnable callback) {
@@ -65,7 +65,7 @@ class InstalledPackagesScreen extends TerminalScreen {
     // ===== RENDERABLE INTERFACE =====
     
     @Override
-    public RenderState getRenderState() {
+    public TerminalRenderState getRenderState() {
         return switch (currentView) {
             case LOADING -> buildLoadingState();
             case PACKAGE_LIST, PACKAGE_DETAILS -> buildMenuState();
@@ -78,8 +78,8 @@ class InstalledPackagesScreen extends TerminalScreen {
         };
     }
     
-    private RenderState buildLoadingState() {
-        return RenderState.builder()
+    private TerminalRenderState buildLoadingState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Installed Packages", TextStyle.BOLD);
                 term.printAt(5, 10, "Loading...", TextStyle.INFO);
@@ -87,16 +87,16 @@ class InstalledPackagesScreen extends TerminalScreen {
             .build();
     }
     
-    private RenderState buildMenuState() {
+    private TerminalRenderState buildMenuState() {
         // MenuNavigator is active
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             .add(menuNavigator.asRenderElement())
             .build();
     }
     
-    private RenderState buildLoadingInstanceState() {
-        return RenderState.builder()
+    private TerminalRenderState buildLoadingInstanceState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Loading Package", TextStyle.BOLD);
                 if (selectedPackage != null) {
@@ -108,12 +108,12 @@ class InstalledPackagesScreen extends TerminalScreen {
             .build();
     }
     
-    private RenderState buildDetailedViewState() {
+    private TerminalRenderState buildDetailedViewState() {
         if (selectedPackage == null) {
             return buildErrorState();
         }
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Package Details", TextStyle.BOLD);
                 term.printAt(5, 10, "Name: " + selectedPackage.getName());
@@ -141,12 +141,12 @@ class InstalledPackagesScreen extends TerminalScreen {
             .build();
     }
     
-    private RenderState buildConfirmUninstallState() {
+    private TerminalRenderState buildConfirmUninstallState() {
         if (selectedPackage == null) {
             return buildErrorState();
         }
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Confirm Uninstall", TextStyle.BOLD);
                 term.printAt(5, 10, "⚠️ Uninstall package?", TextStyle.WARNING);
@@ -159,8 +159,8 @@ class InstalledPackagesScreen extends TerminalScreen {
             .build();
     }
     
-    private RenderState buildUninstallingState() {
-        return RenderState.builder()
+    private TerminalRenderState buildUninstallingState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
                 term.printAt(0, 0, "Uninstalling", TextStyle.BOLD);
                 term.printAt(5, 10, "Uninstalling package...", TextStyle.INFO);
@@ -168,26 +168,26 @@ class InstalledPackagesScreen extends TerminalScreen {
             .build();
     }
     
-    private RenderState buildSuccessState() {
-        return RenderState.builder()
+    private TerminalRenderState buildSuccessState() {
+        return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(terminal.getRows() / 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
                     TextStyle.SUCCESS);
-                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
     }
     
-    private RenderState buildErrorState() {
+    private TerminalRenderState buildErrorState() {
         String message = errorMessage != null ? errorMessage : "An error occurred";
         
-        return RenderState.builder()
+        return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(terminal.getRows() / 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
                     message, TextStyle.ERROR);
-                term.printAt(terminal.getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
@@ -229,7 +229,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(this::goBack);
             } else {
                 currentView = View.PACKAGE_LIST;
@@ -241,7 +241,7 @@ class InstalledPackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
 
-            terminal.waitForKeyPress()
+            systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(this::goBack);
             
             return null;
@@ -336,7 +336,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.SUCCESS;
                 invalidate();
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(this::loadPackages);
             })
             .exceptionally(ex -> {
@@ -344,7 +344,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
                 
-                terminal.waitForKeyPress()
+                systemApplication.getTerminal().waitForKeyPress()
                     .thenRun(() -> {
                         currentView = View.PACKAGE_DETAILS;
                         showPackageDetails(selectedPackage);
@@ -359,7 +359,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         // Launch PackageConfigurationScreen
         PackageConfigurationScreen configScreen = new PackageConfigurationScreen(
             "package-config",
-            terminal,
+            systemApplication,
             selectedPackage,
             nodeCommands
         );
@@ -379,7 +379,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         invalidate();
 
         
-        terminal.waitForKeyPress()
+        systemApplication.getTerminal().waitForKeyPress()
             .thenRun(() -> {
                 currentView = View.PACKAGE_DETAILS;
                 showPackageDetails(selectedPackage);
@@ -396,7 +396,7 @@ class InstalledPackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            terminal.waitForKeyPress()
+            systemApplication.getTerminal().waitForKeyPress()
                 .thenRun(() -> {
                     currentView = View.PACKAGE_DETAILS;
                     showPackageDetails(selectedPackage);
@@ -407,7 +407,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         // Launch PackageUninstallScreen
         PackageUninstallScreen uninstallScreen = new PackageUninstallScreen(
             "package-uninstall",
-            terminal,
+            systemApplication,
             selectedPackage,
             nodeCommands
         );
