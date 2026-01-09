@@ -3,7 +3,6 @@ package io.netnotes.engine.core.system.control.terminal;
 import io.netnotes.engine.core.system.control.containers.ContainerId;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.ui.BatchBuilder;
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
@@ -64,8 +63,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Clear screen
      */
     public TerminalBatchBuilder clear() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
+        NoteBytesMap cmd = TerminalCommands.clear();
         return addCommand(cmd);
     }
     
@@ -80,10 +78,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Print styled text
      */
     public TerminalBatchBuilder print(String text, TextStyle style) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
-        cmd.put(Keys.TEXT, text);
-        cmd.put(Keys.STYLE, style.toNoteBytes());
+        NoteBytesMap cmd = TerminalCommands.print(text, style);
         return addCommand(cmd);
     }
     
@@ -98,10 +93,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Print styled line
      */
     public TerminalBatchBuilder println(String text, TextStyle style) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
-        cmd.put(Keys.TEXT, text);
-        cmd.put(Keys.STYLE, style.toNoteBytes());
+        NoteBytesMap cmd = TerminalCommands.println(text, style);
         return addCommand(cmd);
     }
     
@@ -116,12 +108,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Print styled text at position
      */
     public TerminalBatchBuilder printAt(int row, int col, String text, TextStyle style) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT_AT);
-        cmd.put(Keys.ROW, row);
-        cmd.put(Keys.COL, col);
-        cmd.put(Keys.TEXT, text);
-        cmd.put(Keys.STYLE, style.toNoteBytes());
+        NoteBytesMap cmd = TerminalCommands.printAt(row, col, text, style);
         return addCommand(cmd);
     }
     
@@ -129,10 +116,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Move cursor
      */
     public TerminalBatchBuilder moveCursor(int row, int col) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
-        cmd.put(Keys.ROW, row);
-        cmd.put(Keys.COL, col);
+        NoteBytesMap cmd = TerminalCommands.moveCursor(row, col);
         return addCommand(cmd);
     }
     
@@ -140,8 +124,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Show cursor
      */
     public TerminalBatchBuilder showCursor() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
+        NoteBytesMap cmd = TerminalCommands.showCursor();
         return addCommand(cmd);
     }
     
@@ -149,8 +132,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Hide cursor
      */
     public TerminalBatchBuilder hideCursor() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
+        NoteBytesMap cmd = TerminalCommands.hideCursor();
         return addCommand(cmd);
     }
     
@@ -158,18 +140,15 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Clear line at cursor
      */
     public TerminalBatchBuilder clearLine() {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
+        NoteBytesMap cmd = TerminalCommands.clearLine();
         return addCommand(cmd);
     }
     
     /**
      * Clear specific line
      */
-    public TerminalBatchBuilder clearLine(int row) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
-        cmd.put(Keys.ROW, row);
+    public TerminalBatchBuilder clearLineAt(int row) {
+        NoteBytesMap cmd = TerminalCommands.clearLineAt(row);
         return addCommand(cmd);
     }
     
@@ -177,12 +156,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Clear region
      */
     public TerminalBatchBuilder clearRegion(int startRow, int startCol, int endRow, int endCol) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
-        cmd.put(TerminalCommands.START_ROW, startRow);
-        cmd.put(TerminalCommands.START_COL, startCol);
-        cmd.put(TerminalCommands.END_ROW, endRow);
-        cmd.put(TerminalCommands.END_COL, endCol);
+        NoteBytesMap cmd = TerminalCommands.clearRegion(startRow, startCol, endRow, endCol);
         return addCommand(cmd);
     }
     
@@ -195,14 +169,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
         String title,
         BoxStyle boxStyle
     ) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_BOX);
-        cmd.put(TerminalCommands.START_ROW, startRow);
-        cmd.put(TerminalCommands.START_COL, startCol);
-        cmd.put(Keys.WIDTH, width);
-        cmd.put(Keys.HEIGHT, height);
-        cmd.put(Keys.TITLE, title != null ? title : "");
-        cmd.put(TerminalCommands.BOX_STYLE, boxStyle.name());
+        NoteBytesMap cmd = TerminalCommands.drawBox(startRow, startCol, width, height, title, boxStyle);
         return addCommand(cmd);
     }
     
@@ -221,11 +188,7 @@ public class TerminalBatchBuilder extends BatchBuilder {
      * Draw horizontal line
      */
     public TerminalBatchBuilder drawHLine(int row, int startCol, int length) {
-        NoteBytesMap cmd = new NoteBytesMap();
-        cmd.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
-        cmd.put(Keys.ROW, row);
-        cmd.put(TerminalCommands.START_COL, startCol);
-        cmd.put(Keys.LENGTH, length);
+        NoteBytesMap cmd = TerminalCommands.drawHLine(row, startCol, length);
         return addCommand(cmd);
     }
 }

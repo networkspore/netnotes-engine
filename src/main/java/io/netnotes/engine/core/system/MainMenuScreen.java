@@ -23,7 +23,7 @@ class MainMenuScreen extends TerminalScreen {
     
     public MainMenuScreen(String name, SystemApplication systemApplication) {
         super(name, systemApplication);
-        menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        menuNavigator = new MenuNavigator(systemApplication).withParent(this);
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -126,7 +126,7 @@ class MainMenuScreen extends TerminalScreen {
        TerminalRenderable errorRenderable = () -> {
             return TerminalRenderState.builder()
                 .add(batch -> {
-                    int row = systemApplication.getTerminal().getRows() / 2;
+                    int row = systemApplication.getHeight() / 2;
                     batch.printAt(row, 10, message, TextStyle.ERROR);
                     batch.printAt(row + 2, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
                     batch.showCursor();
@@ -138,7 +138,7 @@ class MainMenuScreen extends TerminalScreen {
         systemApplication.setRenderable(errorRenderable);
         systemApplication.invalidate();
         
-        systemApplication.getTerminal().waitForKeyPress()
+        systemApplication.waitForKeyPress()
             .thenRun(() -> {
                 systemApplication.setRenderable(this);
                 invalidate();

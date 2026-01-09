@@ -4,24 +4,12 @@ package io.netnotes.engine.core.system.control.terminal;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.containers.Container;
-import io.netnotes.engine.core.system.control.containers.ContainerCommands;
 import io.netnotes.engine.core.system.control.containers.ContainerConfig;
 import io.netnotes.engine.core.system.control.containers.ContainerHandle;
 import io.netnotes.engine.core.system.control.containers.ContainerType;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
-import io.netnotes.engine.core.system.control.ui.Renderable;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
-import io.netnotes.engine.io.input.events.KeyDownEvent;
-import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -33,12 +21,16 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - Only requests render when actually ready (all conditions met)
  * - Automatically re-requests when transitions to ready state
  */
-public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilder, TerminalRenderElement, TerminalContainerHandle, TerminalContainerHandle.TerminalBuilder> {
+public class TerminalContainerHandle extends ContainerHandle
+<
+    TerminalBatchBuilder, 
+    TerminalRenderElement, 
+    TerminalRenderable, 
+    TerminalContainerHandle, 
+    TerminalContainerHandle.TerminalBuilder
+> {
     
-    // Temporary key wait state
-    private CompletableFuture<RoutedEvent> keyWaitFuture = null;
-    private CompletableFuture<Void> anyKeyFuture = null;
-    private NoteBytesReadOnly handlerId = null;
+
     protected Consumer<TerminalContainerHandle> onRenderRequest;
 
 
@@ -47,118 +39,28 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      */
     protected TerminalContainerHandle(TerminalBuilder builder) {
         super(builder);
-        
-        // Set initial size from config if provided
-        ContainerConfig config = builder.containerConfig;
-        if (config.getWidth() != null) {
-            this.setDimensions(config.getWidth(), config.getHeight()); 
-        }
     }
-
-    @Override
-    protected void setupStateTransitions() {
-        // VISIBLE: Container is visible
-        stateMachine.onStateAdded(Container.STATE_VISIBLE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now visible");
-        });
-        
-        // HIDDEN: Container is hidden
-        stateMachine.onStateAdded(Container.STATE_HIDDEN, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now hidden");
-        });
-        
-        // FOCUSED: Container has input focus
-        stateMachine.onStateAdded(Container.STATE_FOCUSED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now focused");
-        });
-        
-        stateMachine.onStateRemoved(Container.STATE_FOCUSED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Focus lost");
-        });
-        
-        // ACTIVE: Container is actively rendering
-        stateMachine.onStateAdded(Container.STATE_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now active (ready to render)");
-            Log.logMsg(String.format("[ContainerHandle:%s] STATE_ACTIVE added - checking render: isDirty=%s, hasRenderable=%s, streamReady=%s",
-                containerId, 
-                isDirty(), 
-                currentRenderable != null,
-                isRenderStreamReady()
-            ));
-            
-            // Request render now that we're active
-            // This handles case where renderable was set before container became active
-            if (isDirty()) {
-                Log.logMsg("[ContainerHandle:" + containerId + "] Container is dirty, calling render()");
-                render();
-            } else {
-                Log.logMsg("[ContainerHandle:" + containerId + "] Container not dirty, skipping render()");
-            }
-        });
-        
-        stateMachine.onStateRemoved(Container.STATE_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] No longer active");
-        });
-    }
-
+    /**
+     * Constructor - creates terminal-style container without builder
+     * 
+     * @param name
+     */
     public TerminalContainerHandle(String name) {
         super(new TerminalBuilder(name));
     }
 
- 
-  
 
-    /**
-     * Set active renderable for this container
-     * 
-     * Container signals manager when it needs 
-     * rendering.
-     * 
-     * Usage:
-     * <pre>
-     * MyScreen screen = new MyScreen();
-     * terminal.setRenderable(screen);
-     * caller signals when to render
-     * </pre>
-     */
-    public void setRenderable(Renderable<TerminalBatchBuilder, TerminalRenderElement> renderable) {
-        
-        Log.logMsg(String.format("[TerminalContainerHandle:%s] setRenderable() called: old=%s, new=%s",
-            getId(), 
-            currentRenderable != null ? currentRenderable.getClass().getSimpleName() : "null",
-            renderable != null ? renderable.getClass().getSimpleName() : "null"
-        ));
-        
-        Renderable<TerminalBatchBuilder, TerminalRenderElement> old = currentRenderable;
-
-        this.currentRenderable = renderable;
-        
-        if (old != renderable) {
-            // New renderable - increment generation (layout change)
-            nextRenderGeneration();
-            
-            Log.logMsg(String.format(
-                "[TerminalContainerHandle:%s] Renderable changed (gen=%d)",
-                getId(), getCurrentRenderGeneration()
-            ));
-        }
+    @Override
+    protected void setupStateTransitions() {
+     
     }
 
-    /**
-     * Get current renderable (for render manager to poll)
-     */
-    public Renderable<TerminalBatchBuilder, TerminalRenderElement> getRenderable() {
-        return currentRenderable;
-    }
 
-    /**
-     * Clear renderable
-     */
-    public void clearRenderable() {
-        this.currentRenderable = null;
-        clearDirtyFlag();
+
+
+    public static TerminalBuilder builder() {
+        return new TerminalBuilder();
     }
-    
 
 
     public static TerminalBuilder builder(String name) {
@@ -167,10 +69,14 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
 
     // ===== BUILDER =====
     
-    public static class TerminalBuilder extends ContainerHandle.Builder<TerminalBatchBuilder, TerminalRenderElement, TerminalContainerHandle, TerminalBuilder> {
+    public static class TerminalBuilder extends ContainerHandle.Builder<TerminalBatchBuilder, TerminalRenderElement,TerminalRenderable, TerminalContainerHandle, TerminalBuilder> {
         
         public TerminalBuilder(String name) {
             super(name, ContainerType.TERMINAL);
+        }
+
+        public TerminalBuilder() {
+            super(ContainerType.TERMINAL);
         }
         
         @Override
@@ -224,59 +130,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
     
     // ===== KEYBOARD WAITING UTILITY =====
     
-    /**
-     * Wait for any key press, then execute action
-     * 
-     * This temporarily removes ALL keyboard event handlers,
-     * waits for a single key press, then restores handlers
-     * and executes the provided action.
-     * 
-     * Usage:
-     * <pre>
-     * terminal.println("Press any key to continue...")
-     *     .thenCompose(v -> terminal.waitForKeyPress())
-     *     .thenRun(() -> showNextScreen());
-     * </pre>
-     * 
-     * @return CompletableFuture<KeyDownEvent> that completes when key pressed
-     */
-    public CompletableFuture<Void> waitForKeyPress() {
-        if (anyKeyFuture != null) {
-            // Already waiting, return existing future
-            return anyKeyFuture;
-        }
-        Log.logMsg("[TerminalContainerHandle] waitForKeyPress");
-
-        anyKeyFuture = new CompletableFuture<>();
-          
-        
-        // Create temporary handler that captures ANY key press
-        Consumer<RoutedEvent> consumer = event -> {
-            if (event instanceof KeyDownEvent) {
-                handleKeyWaitComplete();
-            }else if( event instanceof EphemeralKeyDownEvent){
-                handleKeyWaitComplete();
-            }
-        };
-        
-        // Register temporary handler
-        handlerId = addKeyDownHandler(consumer);
-        
-        return anyKeyFuture;
-    }
-    
-    /**
-     * Wait for key press, then execute action
-     * 
-     * Convenience method that chains the action after key press.
-     * 
-     * @param action Action to execute after key press
-     * @return CompletableFuture that completes when action done
-     */
-    public CompletableFuture<Void> waitForKeyPress(Runnable action) {
-        return waitForKeyPress()
-            .thenRun(action);
-    }
+ 
     
     @Override
     public CompletableFuture<Void> run() {
@@ -292,17 +146,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
     }
 
 
-    @Override
-    protected void onContainerResized(ContainerResizeEvent event) {
-        setDimensions(event.getWidth(), event.getHeight());
-        
-        // Increment generation on resize (layout change)
-        nextRenderGeneration();
-        
-        // Invalidate to trigger re-render
-        invalidate();
-        
-    }
+    
 
     /**
      * Check if has active renderable
@@ -317,141 +161,6 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
         super.onStop();
     }
 
-    /**
-     * Wait for SPECIFIC key press
-     * 
-     * Only completes when the specified key is pressed.
-     * Other keys are ignored.
-     * 
-     * @param keyCode Keyboard.KeyCodeBytes
-     * @return CompletableFuture<KeyDownEvent> that completes when key pressed
-     */
-    public CompletableFuture<RoutedEvent> waitForKey(NoteBytes keyCodeBytes) {
-        if (keyWaitFuture != null) {
-            // Already waiting, return existing future
-            return keyWaitFuture;
-        }
-        
-        keyWaitFuture = new CompletableFuture<>();
-        
-   
-        
-        // Create temporary handler that captures key presses
-        Consumer<RoutedEvent> consumer = event -> {
-            if (event instanceof KeyDownEvent keyDown) {
-                if(keyDown.getKeyCodeBytes().equals(keyCodeBytes)){
-                    handleKeyWaitComplete(event);
-                }
-            }else if(event instanceof EphemeralKeyDownEvent keyDown){
-                if(keyDown.getKeyCodeBytes().equals(keyCodeBytes)){
-                    handleKeyWaitComplete(event);
-                }
-            }
-        };
-        
-        // Register temporary handler
-        handlerId = addKeyDownHandler(consumer);
-        
-        return keyWaitFuture;
-    }
-    
-    /**
-     * Wait for Enter key
-     * 
-     * Common case - wait for Enter.
-     */
-    public CompletableFuture<Void> waitForEnter() {
-        return waitForKey(KeyCodeBytes.ENTER)
-            .thenAccept(k -> {
-                if(k instanceof EphemeralRoutedEvent ephemeralRoutedEvent){
-                    ephemeralRoutedEvent.close();
-                }
-            }); // Convert to Void
-    }
-    
-    /**
-     * Wait for Escape key
-     */
-    public CompletableFuture<Void> waitForEscape() {
-        return waitForKey(KeyCodeBytes.ESCAPE)
-            .thenAccept(k -> {
-                 if(k instanceof EphemeralRoutedEvent ephemeralRoutedEvent){
-                    ephemeralRoutedEvent.close();
-                }
-            });
-    }
-    
-    /**
-     * Handle key wait completion
-     */
-    private void handleKeyWaitComplete(RoutedEvent event) {
-        if (keyWaitFuture == null) {
-            return;
-        }
-        
-        // Remove temporary handler
-        if (handlerId != null) {
-            removeKeyDownHandler(handlerId);
-            handlerId = null;
-        }
-        
-        // Complete the future
-        if (keyWaitFuture != null && !keyWaitFuture.isDone()) {
-            keyWaitFuture.complete(event);
-        }
-        
-        keyWaitFuture = null;
-    }
-
-    private void handleKeyWaitComplete() {
-        if (anyKeyFuture == null) {
-            return;
-        }
-         Log.logMsg("[TerminalContainerHandle] waitComplete");
-        // Remove temporary handler
-        if (handlerId != null) {
-            removeKeyDownHandler(handlerId);
-            handlerId = null;
-        }
-        
-        // Complete the future
-        if (anyKeyFuture != null && !anyKeyFuture.isDone()) {
-            anyKeyFuture.complete(null);
-        }
-        
-        anyKeyFuture = null;
-    }
-    
-    /**
-     * Cancel key wait (if needed)
-     */
-    public void cancelKeyWait() {
-        if (anyKeyFuture == null) {
-            return;
-        }
-        
-        // Remove temporary handler
-        if (handlerId != null) {
-            removeKeyDownHandler(handlerId);
-            handlerId = null;
-        }
-        
-        // Cancel the future
-        if (keyWaitFuture != null && !keyWaitFuture.isDone()) {
-            keyWaitFuture.cancel(false);
-        }
-        
-        keyWaitFuture = null;
-    }
-
-
-    /**
-     * Check if currently waiting for key press
-     */
-    public boolean isWaitingForKeyPress() {
-        return keyWaitFuture != null;
-    }
-    
     // ===== TERMINAL COMMANDS =====
     
     /**
@@ -459,10 +168,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      */
     public CompletableFuture<Void> clear(long generation) {
         
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.clear();
         return sendRenderCommand(command, generation);
     }
 
@@ -484,13 +190,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Print styled text at current cursor position
      */
     public CompletableFuture<Void> print(String text, TextStyle style, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
-
+        NoteBytesMap command = TerminalCommands.print(text, style);
         return sendRenderCommand(command, generation);
     }
     
@@ -505,12 +205,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Print styled text + newline
      */
     public CompletableFuture<Void> println(String text, TextStyle style, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINTLN);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.println(text, style);
         return sendRenderCommand(command, generation);
     }
 
@@ -525,6 +220,30 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
         return printAt(row, col, text, TextStyle.NORMAL);
     }
 
+     public CompletableFuture<Void> printAtCenterRowSpan(int rowEnd, int col, String text) {
+        return sendRenderCommand(TerminalCommands.printAtCenterRowSpan(rowEnd, col, text));
+    }
+
+
+    public CompletableFuture<Void> printAtCenterRowSpan(int rowStart, int rowEnd, int col, String text) {
+        return sendRenderCommand(TerminalCommands.printAtCenterRowSpan(rowStart, rowEnd, col, text));
+    }
+
+    public CompletableFuture<Void> printAtCenterColSpan(int row, int colEnd, String text) {
+        return sendRenderCommand(TerminalCommands.printAtCenterColSpan(row, colEnd, text));
+    }
+
+    public CompletableFuture<Void> printAtCenterColSpan(int row, int colStart,  int colEnd, String text) {
+       
+        return sendRenderCommand(TerminalCommands.printAtCenterColSpan(row, colStart, colEnd, text));
+    }
+
+
+    public CompletableFuture<Void> printAtCenterSpan(int rowStart, int rowEnd, int colStart,  int colEnd, String text) {
+       
+        return sendRenderCommand(TerminalCommands.printAtCenterSpan(rowStart, rowEnd, colStart, colEnd, text));
+    }
+
     /**
      * Print text at specific screen position
      */
@@ -536,19 +255,11 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
         return printAt(row, col, text, style, getCurrentRenderGeneration());
     }
 
- 
     /**
      * Print styled text at specific position
      */
     public CompletableFuture<Void> printAt(int row, int col, String text, TextStyle style, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_PRINT_AT);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(Keys.COL, col);
-        command.put(Keys.TEXT, text);
-        command.put(Keys.STYLE, style.toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.printAt(row, col, text, style);
         return sendRenderCommand(command, generation);
     }
     
@@ -556,14 +267,10 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Move cursor to position
      */
     public CompletableFuture<Void> moveCursor(int row, int col, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_MOVE_CURSOR);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(Keys.COL, col);
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.moveCursor(row, col);
         return sendRenderCommand(command, generation);
     }
+
     public CompletableFuture<Void> moveCursor(int row, int col) {
         return moveCursor(row, col, getCurrentRenderGeneration());
     }
@@ -571,10 +278,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Show cursor
      */
     public CompletableFuture<Void> showCursor(long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_SHOW_CURSOR);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.showCursor();
         return sendRenderCommand(command, generation);
     }
     
@@ -582,10 +286,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Hide cursor
      */
     public CompletableFuture<Void> hideCursor(long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_HIDE_CURSOR);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.hideCursor();
         return sendRenderCommand(command, generation);
     }
     
@@ -593,10 +294,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Clear from cursor to end of line
      */
     public CompletableFuture<Void> clearLine(long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.clearLine();
         return sendRenderCommand(command, generation);
     }
     
@@ -604,11 +302,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Clear specific line
      */
     public CompletableFuture<Void> clearLine(int row, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_LINE_AT);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.clearLineAt(row);
         return sendRenderCommand(command, generation);
     }
     
@@ -616,14 +310,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * Clear rectangular region
      */
     public CompletableFuture<Void> clearRegion(int startRow, int startCol, int endRow, int endCol, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_CLEAR_REGION);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(TerminalCommands.START_ROW, startRow);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(TerminalCommands.END_ROW, endRow);
-        command.put(TerminalCommands.END_COL, endCol);
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.clearRegion(startRow, startCol, endRow, endCol);
         return sendRenderCommand(command, generation);
     }
     
@@ -669,16 +356,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
         BoxStyle boxStyle,
         long generation
     ) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_BOX);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(TerminalCommands.START_ROW, startRow);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(Keys.WIDTH, width);
-        command.put(Keys.HEIGHT, height);
-        command.put(Keys.TITLE, title != null ? title : "");
-        command.put(TerminalCommands.BOX_STYLE, boxStyle.name());
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.drawBox(startRow, startCol, width, height, title, boxStyle);
         return sendRenderCommand(command, generation);
     }
     
@@ -736,13 +414,7 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
      * DrawHLine with generation
      */
     public CompletableFuture<Void> drawHLine(int row, int startCol, int length, long generation) {
-        NoteBytesMap command = new NoteBytesMap();
-        command.put(Keys.CMD, TerminalCommands.TERMINAL_DRAW_HLINE);
-        command.put(ContainerCommands.CONTAINER_ID, getId().toNoteBytes());
-        command.put(Keys.ROW, row);
-        command.put(TerminalCommands.START_COL, startCol);
-        command.put(Keys.LENGTH, length);
-        command.put(ContainerCommands.RENDERER_ID, rendererId);
+        NoteBytesMap command = TerminalCommands.drawHLine(row, startCol, length);
         return sendRenderCommand(command, generation);
     }
 
@@ -750,36 +422,17 @@ public class TerminalContainerHandle extends ContainerHandle<TerminalBatchBuilde
         return drawHLine(row, startCol, length, getCurrentRenderGeneration());
     }
     
-    /**
-     * Get terminal rows
-     */
-    public int getRows() {
-        return height;
-    }
-    
-    /**
-     * Get terminal columns
-     */
-    public int getCols() {
-        return width;
-    }
-    
+ 
     // ===== HIGH-LEVEL HELPERS =====
     
     /**
      * Print status line at bottom
      */
-    public CompletableFuture<Void> printStatusLine(String text) {
-        return printAt(getRows() - 1, 0, text, TextStyle.INVERSE);
+    public CompletableFuture<Void> printStatusLine(int row, String text) {
+        return printAt(row, 0, text, TextStyle.INVERSE);
     }
     
-    /**
-     * Print title at top
-     */
-    public CompletableFuture<Void> printTitle(String text) {
-        return printAt(0, (getCols() - text.length()) / 2, text, TextStyle.BOLD);
-    }
-    
+
     /**
      * Print error message
      */

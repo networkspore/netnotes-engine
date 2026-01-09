@@ -21,7 +21,7 @@ public class RenderState<B extends BatchBuilder, E extends RenderElement<B>> {
         this.elements = List.copyOf(elements);
     }
     
-     public <H extends ContainerHandle<B, E, H, ?>> B toBatch(H handle, long generation) {
+     public <H extends ContainerHandle<B, E, ?, H, ?>> B toBatch(H handle, long generation) {
         B batch = handle.batch(generation);
         
         for (E element : elements) {

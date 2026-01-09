@@ -93,7 +93,7 @@ class PackageUninstallScreen extends TerminalScreen {
         if (runningInstances.isEmpty() && statusMessage == null) {
             // Still checking
             builder.add((term) -> 
-                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 17) / 2, "Uninstall Package", 
+                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 17) / 2, "Uninstall Package", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -104,7 +104,7 @@ class PackageUninstallScreen extends TerminalScreen {
         } else {
             // Has instances - show warning
             builder.add((term) -> 
-                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 17) / 2, "Cannot Uninstall", 
+                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 17) / 2, "Cannot Uninstall", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -146,7 +146,7 @@ class PackageUninstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 17) / 2, "Uninstall Options", 
+            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 17) / 2, "Uninstall Options", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -191,7 +191,7 @@ class PackageUninstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 17) / 2, "Confirm Uninstall", 
+            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 17) / 2, "Confirm Uninstall", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -219,7 +219,7 @@ class PackageUninstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Uninstalling Package", 
+            term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 20) / 2, "Uninstalling Package", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -240,7 +240,7 @@ class PackageUninstallScreen extends TerminalScreen {
         
         if (errorMessage != null) {
             builder.add((term) -> 
-                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Uninstall Failed", 
+                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 18) / 2, "Uninstall Failed", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -249,7 +249,7 @@ class PackageUninstallScreen extends TerminalScreen {
                 term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR));
         } else {
             builder.add((term) -> 
-                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Uninstall Complete", 
+                term.printAt(0, (PackageUninstallScreen.this.systemApplication.getWidth() - 18) / 2, "Uninstall Complete", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -339,13 +339,13 @@ class PackageUninstallScreen extends TerminalScreen {
                 statusMessage = "✓ All instances stopped";
                 invalidate();
                 
-                systemApplication.getTerminal().waitForKeyPress(() -> transitionTo(Step.SHOW_OPTIONS));
+                systemApplication.waitForKeyPress(() -> transitionTo(Step.SHOW_OPTIONS));
             })
             .exceptionally(ex -> {
                 errorMessage = "Failed to stop instances: " + ex.getMessage();
                 invalidate();
                 
-                systemApplication.getTerminal().waitForKeyPress(() -> transitionTo(Step.CHECK_INSTANCES));
+                systemApplication.waitForKeyPress(() -> transitionTo(Step.CHECK_INSTANCES));
                 return null;
             });
     }
@@ -380,7 +380,7 @@ class PackageUninstallScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         removeKeyDownHandler();
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 13, 36, 20);
+        inputReader = new TerminalInputReader(systemApplication, 13, 36, 20);
         
         inputReader.setOnComplete(input -> {
             inputReader.close();
@@ -391,7 +391,7 @@ class PackageUninstallScreen extends TerminalScreen {
             } else {
                 errorMessage = "Confirmation failed";
                 invalidate();
-                systemApplication.getTerminal().waitForKeyPress(() -> {
+                systemApplication.waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.PASSWORD_CONFIRM);
                 });
@@ -428,7 +428,7 @@ class PackageUninstallScreen extends TerminalScreen {
     
     private void setupCompleteInput() {
         removeKeyDownHandler();
-        systemApplication.getTerminal().waitForKeyPress(() -> {
+        systemApplication.waitForKeyPress(() -> {
             if (onCompleteCallback != null) {
                 onCompleteCallback.run();
             }
@@ -445,7 +445,7 @@ class PackageUninstallScreen extends TerminalScreen {
     
     private void setupKeyHandler(KeyRunTable keys) {
         removeKeyDownHandler();
-        keyDownHandlerId = systemApplication.getTerminal().addKeyDownHandler(event -> {
+        keyDownHandlerId = systemApplication.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -460,7 +460,7 @@ class PackageUninstallScreen extends TerminalScreen {
     
     private void removeKeyDownHandler() {
         if (keyDownHandlerId != null) {
-            systemApplication.getTerminal().removeKeyDownHandler(keyDownHandlerId);
+            systemApplication.removeKeyDownHandler(keyDownHandlerId);
             keyDownHandlerId = null;
         }
     }

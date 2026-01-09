@@ -6,6 +6,7 @@ import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
 import io.netnotes.engine.core.system.control.terminal.elements.Invalidatable;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -52,8 +53,6 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
      * 
      * Default implementation makes this screen active in ClientRenderManager.
      * Override to add custom initialization (event handlers, data loading, etc.)
-     * 
-     * IMPORTANT: Always call super.onShow() or manually set as active renderable
      */
     public CompletableFuture<Void> onShow() {
         if (isShowing) {
@@ -61,12 +60,16 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
             return CompletableFuture.completedFuture(null);
         }
         
+        Log.logMsg("[" + name + "] onShow() called - setting as renderable");
+        
         isShowing = true;
 
         // Make this screen the active renderable
         systemApplication.setRenderable(this);
         
         // Mark for initial render
+        // This is CRITICAL - without this, nothing renders
+        Log.logMsg("[" + name + "] onShow() calling invalidate()");
         invalidate();
         
         return CompletableFuture.completedFuture(null);
@@ -77,6 +80,7 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
      * Override to cleanup (unregister handlers, release resources, etc.)
      */
     public void onHide() {
+        Log.logMsg("[" + name + "] onHide() called");
         isShowing = false;
         needsRender = false; // Clear dirty flag on hide
     }
@@ -113,6 +117,7 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
      */
     @Override
     public void clearRenderFlag() {
+        Log.logMsg("[" + name + "] onHide() called");
         this.needsRender = false;
     }
     
@@ -123,9 +128,17 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
      * Public so component renderables can call it
      */
     public void invalidate() {
+        Log.logMsg("[" + name + "] invalidate() called - needsRender: " + needsRender + " -> true");
+        
         this.needsRender = true;
+        
         // Notify container that renderable needs update
-        systemApplication.invalidate();
+        if (systemApplication != null) {
+            Log.logMsg("[" + name + "] Calling systemApplication.invalidate()");
+            systemApplication.invalidate();
+        } else {
+            Log.logError("[" + name + "] Cannot invalidate - systemApplication is null!");
+        }
     }
     
     /**
@@ -134,5 +147,9 @@ abstract class TerminalScreen implements TerminalRenderable, Invalidatable {
      */
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         return CompletableFuture.completedFuture(null);
+    }
+
+    public void handleEvent(NoteBytesMap packet) {
+        
     }
 }

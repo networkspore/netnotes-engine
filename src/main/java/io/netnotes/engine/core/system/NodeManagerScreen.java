@@ -46,7 +46,7 @@ class NodeManagerScreen extends TerminalScreen {
         this.basePath = ContextPath.of("node-manager");
         
 
-        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        this.menuNavigator = new MenuNavigator(systemApplication).withParent(this);
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -64,8 +64,8 @@ class NodeManagerScreen extends TerminalScreen {
      * PasswordPrompt is active - show status message
      */
     private TerminalRenderState buildAuthenticatingState() {
-        int centerRow = systemApplication.getTerminal().getRows() / 2;
-        int centerCol = systemApplication.getTerminal().getCols() / 2;
+        int centerRow = systemApplication.getHeight() / 2;
+        int centerCol = systemApplication.getWidth() / 2;
         
         return TerminalRenderState.builder()
             .add(batch -> {
@@ -162,7 +162,7 @@ class NodeManagerScreen extends TerminalScreen {
     private void showAuthError(String errorMsg) {
         // Create temporary error renderable
         TerminalRenderable errorRenderable = () -> {
-            int row = systemApplication.getTerminal().getRows() / 2;
+            int row = systemApplication.getHeight() / 2;
             return TerminalRenderState.builder()
                 .add(batch -> {
                     batch.clear();
@@ -183,7 +183,7 @@ class NodeManagerScreen extends TerminalScreen {
         systemApplication.setRenderable(errorRenderable);
         systemApplication.invalidate();
         
-        systemApplication.getTerminal().waitForKeyPress()
+        systemApplication.waitForKeyPress()
             .thenRun(() -> {
                 // Restore this screen as active
                 systemApplication.getTerminal().setRenderable(this);
@@ -196,10 +196,10 @@ class NodeManagerScreen extends TerminalScreen {
             return TerminalRenderState.builder()
                 .add(batch -> {
                     batch.clear();
-                    batch.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                    batch.printAt(systemApplication.getHeight() / 2, 10, 
                         "Authentication timeout", 
                         TextStyle.ERROR);
-                    batch.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                    batch.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                         "Press any key...", 
                         TextStyle.NORMAL);
                 })
@@ -209,7 +209,7 @@ class NodeManagerScreen extends TerminalScreen {
         systemApplication.getTerminal().setRenderable(timeoutRenderable);
         systemApplication.getTerminal().invalidate();
         
-        systemApplication.getTerminal().waitForKeyPress()
+        systemApplication.waitForKeyPress()
             .thenRun(() -> systemApplication.goBack());
     }
     

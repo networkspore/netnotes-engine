@@ -25,12 +25,14 @@ import java.util.concurrent.CompletableFuture;
  */
 public class IODaemonManager {
 
-    private final SystemApplication systemApplication;
+
     private final ProcessRegistryInterface registry;
+    private volatile String ioDaemonSocketPath;
     
-    public IODaemonManager(SystemApplication sysApp, ProcessRegistryInterface registry) {
-        this.systemApplication = sysApp;
+    public IODaemonManager(ProcessRegistryInterface registry, String ioDaemonSocketPath) {
+   
         this.registry = registry;
+        this.ioDaemonSocketPath = ioDaemonSocketPath;
     }
     
     // ===== DETECTION =====
@@ -124,10 +126,14 @@ public class IODaemonManager {
                                     new RuntimeException("Failed to start IODaemon service"));
                             }
                         })
-                        .thenCompose(v -> registerAndStart(result.socketPath));
+                        .thenCompose(v -> {
+                            ioDaemonSocketPath = result.socketPath;
+                            return registerAndStart();
+                        });
                 } else if (result.processRunning) {
+                    ioDaemonSocketPath = result.socketPath;
                     // Already running, just register
-                    return registerAndStart(result.socketPath);
+                    return registerAndStart();
                 } else {
                     // Not running and no service - user needs to start manually
                     return CompletableFuture.failedFuture(
@@ -141,9 +147,8 @@ public class IODaemonManager {
     /**
      * Register IODaemon in process tree and start it
      */
-    private CompletableFuture<ContextPath> registerAndStart(String socketPath) {
-        String actualSocketPath = (socketPath != null) ? 
-            socketPath : systemApplication.getIODaemonSocketPath();
+    private CompletableFuture<ContextPath> registerAndStart() {
+        String actualSocketPath = ioDaemonSocketPath;
         
         Log.logMsg("[IODaemonManager] Registering IODaemon at: " + actualSocketPath);
         
@@ -199,8 +204,13 @@ public class IODaemonManager {
         return (IODaemon) registry.getProcess(path);
     }
     
-    // ===== CONFIGURATION =====
+    public String getIODaemonSocketPath() {
+        return ioDaemonSocketPath;
+    }
     
+     public void setIODaemonSocketPath(String socketPath) {
+        ioDaemonSocketPath = socketPath;
+    }
     /**
      * Reconfigure socket path
      * 
@@ -227,6 +237,8 @@ public class IODaemonManager {
                     "Cannot reconfigure while sessions are active. " +
                     "Close all connections first."));
         }
+
+        ioDaemonSocketPath = newSocketPath;
         
         Log.logMsg("[IODaemonManager] Reconfiguring socket path to: " + newSocketPath);
         daemon.kill();
@@ -242,7 +254,7 @@ public class IODaemonManager {
         })
         .thenCompose(v -> {
             // Register and start new daemon with new path
-            return registerAndStart(newSocketPath);
+            return registerAndStart();
         })
         .thenRun(() -> {
             Log.logMsg("[IODaemonManager] IODaemon reconfigured successfully");

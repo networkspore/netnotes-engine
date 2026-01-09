@@ -98,7 +98,7 @@ class PackageInstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 15) / 2, "Install Package", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 15) / 2, "Install Package", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -145,7 +145,7 @@ class PackageInstallScreen extends TerminalScreen {
         List<PathCapability> capabilities = policy.getRequestedCapabilities();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 15) / 2, "Security Review", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 15) / 2, "Security Review", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -200,7 +200,7 @@ class PackageInstallScreen extends TerminalScreen {
         NoteBytesReadOnly defaultNs = getDefaultNamespace(nsReq);
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 31) / 2, 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 31) / 2, 
                 "Choose Installation Namespace", TextStyle.BOLD));
         
         if (nsReq.mode() == PackageManifest.NamespaceMode.DEFAULT) {
@@ -226,7 +226,7 @@ class PackageInstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Confirm Installation", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 20) / 2, "Confirm Installation", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -246,7 +246,7 @@ class PackageInstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Installing Package", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 18) / 2, "Installing Package", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -266,7 +266,7 @@ class PackageInstallScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Installation Complete", 
+            term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 21) / 2, "Installation Complete", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -292,7 +292,7 @@ class PackageInstallScreen extends TerminalScreen {
         
         if (errorMessage != null) {
             builder.add((term) -> 
-                term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 18) / 2, "Installation Failed", 
+                term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 18) / 2, "Installation Failed", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -301,7 +301,7 @@ class PackageInstallScreen extends TerminalScreen {
                 term.printAt(7, 10, "Error: " + errorMessage, TextStyle.ERROR));
         } else {
             builder.add((term) -> 
-                term.printAt(0, (PackageInstallScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Installation Complete", 
+                term.printAt(0, (PackageInstallScreen.this.systemApplication.getWidth() - 21) / 2, "Installation Complete", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -399,7 +399,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         removeKeyPressHandler();
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 10, 36, 20);
+        inputReader = new TerminalInputReader(systemApplication, 10, 36, 20);
         
         inputReader.setOnComplete(input -> {
             inputReader.close();
@@ -410,7 +410,7 @@ class PackageInstallScreen extends TerminalScreen {
             } else {
                 errorMessage = "Installation cancelled";
                 invalidate();
-                systemApplication.getTerminal().waitForKeyPress(() -> {
+                systemApplication.waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.PASSWORD_CONFIRM);
                 });
@@ -463,7 +463,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void setupCompleteInput() {
         removeKeyPressHandler();
-        systemApplication.getTerminal().waitForKeyPress(() -> {
+        systemApplication.waitForKeyPress(() -> {
             if (onCompleteCallback != null) {
                 onCompleteCallback.run();
             }
@@ -472,7 +472,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void setupKeyHandler(KeyRunTable keys) {
         removeKeyPressHandler();
-        keyPressHandlerId = systemApplication.getTerminal().addKeyDownHandler(event -> {
+        keyPressHandlerId = systemApplication.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -573,7 +573,7 @@ class PackageInstallScreen extends TerminalScreen {
     
     private void removeKeyPressHandler() {
         if (keyPressHandlerId != null) {
-            systemApplication.getTerminal().removeKeyDownHandler(keyPressHandlerId);
+            systemApplication.removeKeyDownHandler(keyPressHandlerId);
             keyPressHandlerId = null;
         }
     }

@@ -58,8 +58,8 @@ class LoginScreen extends TerminalScreen {
      * Show processing indicator
      */
     private TerminalRenderState buildProcessingState() {
-        int row = systemApplication.getTerminal().getRows() / 2;
-        int col = systemApplication.getTerminal().getCols() / 2 - 15;
+        int row = systemApplication.getHeight() / 2;
+        int col = systemApplication.getWidth() / 2 - 15;
         
         return TerminalRenderState.builder()
             .add((term) -> {
@@ -73,7 +73,7 @@ class LoginScreen extends TerminalScreen {
      * Show error message
      */
     private TerminalRenderState buildErrorState() {
-        int errorRow = systemApplication.getTerminal().getRows() / 2;
+        int errorRow = systemApplication.getHeight() / 2;
         int promptRow = errorRow + 2;
         
         String message = errorMessage != null ? errorMessage : "Authentication failed";
@@ -151,7 +151,7 @@ class LoginScreen extends TerminalScreen {
                 invalidate();
                 
                 // Wait for keypress, then retry
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> {
                         currentState = State.SHOWING_PROMPT;
                         onShow();
@@ -169,7 +169,7 @@ class LoginScreen extends TerminalScreen {
         systemApplication.getTerminal().setRenderable(this);
         invalidate();
         
-        systemApplication.getTerminal().waitForKeyPress()
+        systemApplication.waitForKeyPress()
             .thenRun(() -> {
                 if (systemApplication.isAuthenticated()) {
                     // Was unlocking → back to locked screen

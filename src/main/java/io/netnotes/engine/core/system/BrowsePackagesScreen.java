@@ -68,7 +68,7 @@ class BrowsePackagesScreen extends TerminalScreen {
         this.installedPackages = new ArrayList<>();
         this.nodeCommands = nodeCommands;
 
-        menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        menuNavigator = new MenuNavigator(systemApplication).withParent(this);
     }
     
     public void setOnBack(Runnable onBack) {
@@ -171,10 +171,10 @@ class BrowsePackagesScreen extends TerminalScreen {
     private TerminalRenderState buildInstallingState() {
         return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2, 10, 
                     "Installing package...", TextStyle.INFO);
                 if (statusMessage != null) {
-                    term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                    term.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                         statusMessage, TextStyle.NORMAL);
                 }
             })
@@ -187,10 +187,10 @@ class BrowsePackagesScreen extends TerminalScreen {
     private TerminalRenderState buildSuccessState() {
         return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
                     TextStyle.SUCCESS);
-                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                     "Returning to package list...", TextStyle.NORMAL);
             })
             .build();
@@ -204,9 +204,9 @@ class BrowsePackagesScreen extends TerminalScreen {
         
         return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2, 10, 
                     message, TextStyle.ERROR);
-                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
@@ -259,7 +259,7 @@ class BrowsePackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate(); // PATCH: Added invalidate
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(this::goBack);
                 return null;
             });
@@ -273,7 +273,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            systemApplication.getTerminal().waitForKeyPress()
+            systemApplication.waitForKeyPress()
                 .thenRun(this::goBack);
             return;
         }
@@ -424,7 +424,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     }
     
     private void readCustomNamespace() {
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 11, 46, 20);
+        inputReader = new TerminalInputReader(systemApplication, 11, 46, 20);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -482,7 +482,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     }
     
     private void readAutoloadChoice() {
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 9, 54, 3);
+        inputReader = new TerminalInputReader(systemApplication, 9, 54, 3);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -513,7 +513,7 @@ class BrowsePackagesScreen extends TerminalScreen {
     }
     
     private void startConfirmation() {
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 17, 38, 20);
+        inputReader = new TerminalInputReader(systemApplication, 17, 38, 20);
         
         inputReader.setOnComplete(input -> {
             if (inputReader != null) {
@@ -528,7 +528,7 @@ class BrowsePackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> {
                         currentView = View.CONFIRM_INSTALL;
                         systemApplication.getTerminal().setRenderable(this);
@@ -598,7 +598,7 @@ class BrowsePackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            systemApplication.getTerminal().waitForKeyPress()
+            systemApplication.waitForKeyPress()
                 .thenRun(() -> {
                     selectedPackage = null;
                     installConfig = null;

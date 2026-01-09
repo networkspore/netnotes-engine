@@ -123,8 +123,8 @@ public class PasswordPrompt implements TerminalRenderable {
      */
     private TerminalRenderState buildPromptState() {
         // Calculate box position - if position specified, use as top-left; otherwise center
-        int boxRow = promptRow >= 0 ? promptRow : systemApplicatoin.getTerminal().getRows() / 2 - 5;
-        int boxCol = promptCol >= 0 ? promptCol : systemApplicatoin.getTerminal().getCols() / 2 - 25;
+        int boxRow = promptRow >= 0 ? promptRow : systemApplicatoin.getHeight() / 2 - 5;
+        int boxCol = promptCol >= 0 ? promptCol : systemApplicatoin.getWidth() / 2 - 25;
         
         // Build text box for prompt
         TerminalTextBox promptBox = TerminalTextBox.builder()
@@ -173,8 +173,8 @@ public class PasswordPrompt implements TerminalRenderable {
      * Build processing state
      */
     private TerminalRenderState buildProcessingState() {
-        int row = systemApplicatoin.getTerminal().getRows() / 2;
-        int col = systemApplicatoin.getTerminal().getCols() / 2 - 15;
+        int row = systemApplicatoin.getHeight() / 2;
+        int col = systemApplicatoin.getWidth() / 2 - 15;
         
         return TerminalRenderState.builder()
             .add((term) -> {
@@ -187,11 +187,11 @@ public class PasswordPrompt implements TerminalRenderable {
      * Build footer element
      */
     private TerminalRenderElement buildFooter(String text) {
-        int row = systemApplicatoin.getTerminal().getRows() - 2;
-        int col = systemApplicatoin.getTerminal().getCols() / 2 - text.length() / 2;
+        int row = systemApplicatoin.getHeight() - 2;
+        int col = systemApplicatoin.getWidth() / 2 - text.length() / 2;
         
         return (term) -> {
-            term.drawHLine(row - 1, 0, systemApplicatoin.getTerminal().getCols());
+            term.drawHLine(row - 1, 0, systemApplicatoin.getWidth());
             term.printAt(row, col, text, TextStyle.INFO);
         };
     }

@@ -55,7 +55,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         super(name, systemApplication);
         this.menuBasePath = ContextPath.of("installed-packages");
         this.nodeCommands = nodeCommands;
-        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        this.menuNavigator = new MenuNavigator(systemApplication).withParent(this);
     }
     
     public void setOnBack(Runnable callback) {
@@ -171,10 +171,10 @@ class InstalledPackagesScreen extends TerminalScreen {
     private TerminalRenderState buildSuccessState() {
         return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2, 10, 
                     "✓ " + (statusMessage != null ? statusMessage : "Success!"), 
                     TextStyle.SUCCESS);
-                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
@@ -185,9 +185,9 @@ class InstalledPackagesScreen extends TerminalScreen {
         
         return TerminalRenderState.builder()
             .add((term) -> {
-                term.printAt(systemApplication.getTerminal().getRows() / 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2, 10, 
                     message, TextStyle.ERROR);
-                term.printAt(systemApplication.getTerminal().getRows() / 2 + 2, 10, 
+                term.printAt(systemApplication.getHeight() / 2 + 2, 10, 
                     "Press any key to continue...", TextStyle.NORMAL);
             })
             .build();
@@ -229,7 +229,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(this::goBack);
             } else {
                 currentView = View.PACKAGE_LIST;
@@ -241,7 +241,7 @@ class InstalledPackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
 
-            systemApplication.getTerminal().waitForKeyPress()
+            systemApplication.waitForKeyPress()
                 .thenRun(this::goBack);
             
             return null;
@@ -336,7 +336,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.SUCCESS;
                 invalidate();
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(this::loadPackages);
             })
             .exceptionally(ex -> {
@@ -344,7 +344,7 @@ class InstalledPackagesScreen extends TerminalScreen {
                 currentView = View.ERROR;
                 invalidate();
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> {
                         currentView = View.PACKAGE_DETAILS;
                         showPackageDetails(selectedPackage);
@@ -379,7 +379,7 @@ class InstalledPackagesScreen extends TerminalScreen {
         invalidate();
 
         
-        systemApplication.getTerminal().waitForKeyPress()
+        systemApplication.waitForKeyPress()
             .thenRun(() -> {
                 currentView = View.PACKAGE_DETAILS;
                 showPackageDetails(selectedPackage);
@@ -396,7 +396,7 @@ class InstalledPackagesScreen extends TerminalScreen {
             currentView = View.ERROR;
             invalidate();
             
-            systemApplication.getTerminal().waitForKeyPress()
+            systemApplication.waitForKeyPress()
                 .thenRun(() -> {
                     currentView = View.PACKAGE_DETAILS;
                     showPackageDetails(selectedPackage);

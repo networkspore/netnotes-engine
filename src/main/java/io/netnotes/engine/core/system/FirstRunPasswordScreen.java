@@ -68,7 +68,7 @@ class FirstRunPasswordScreen extends TerminalScreen {
         systemApplication.getTerminal().clear()
             .thenCompose(v -> systemApplication.getTerminal().printError("Setup timeout"))
             .thenCompose(v -> systemApplication.getTerminal().printAt(10, 10, "Press any key to retry..."))
-            .thenRun(() -> systemApplication.getTerminal().waitForKeyPress(() -> onShow()));
+            .thenRun(() -> systemApplication.waitForKeyPress(() -> onShow()));
     }
     
     private void handleMismatch() {

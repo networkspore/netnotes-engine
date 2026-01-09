@@ -95,7 +95,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         
         // Title
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 22) / 2, "Package Configuration", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 22) / 2, "Package Configuration", 
                 TextStyle.BOLD));
         
         // Package info
@@ -126,7 +126,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 16) / 2, "Change ProcessId", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 16) / 2, "Change ProcessId", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -147,7 +147,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 33) / 2, 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 33) / 2, 
                 "Confirm Configuration Changes", TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -178,7 +178,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         TerminalStateBuilder builder = TerminalRenderState.builder();
         
         builder.add((term) -> 
-            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 22) / 2, "Saving Configuration", 
+            term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 22) / 2, "Saving Configuration", 
                 TextStyle.BOLD));
         
         builder.add((term) -> 
@@ -194,14 +194,14 @@ class PackageConfigurationScreen extends TerminalScreen {
         
         if (errorMessage != null) {
             builder.add((term) -> 
-                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 20) / 2, "Configuration Failed", 
+                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 20) / 2, "Configuration Failed", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
                 term.printAt(5, 10, errorMessage, TextStyle.ERROR));
         } else {
             builder.add((term) -> 
-                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getTerminal().getCols() - 21) / 2, "Configuration Updated", 
+                term.printAt(0, (PackageConfigurationScreen.this.systemApplication.getWidth() - 21) / 2, "Configuration Updated", 
                     TextStyle.BOLD));
             
             builder.add((term) -> 
@@ -279,7 +279,7 @@ class PackageConfigurationScreen extends TerminalScreen {
         );
         
         removeKeyDownHandler();
-        handlerId = systemApplication.getTerminal().addKeyDownHandler(event -> {
+        handlerId = systemApplication.addKeyDownHandler(event -> {
             if (event instanceof EphemeralRoutedEvent ephemeral) {
                 try (ephemeral) {
                     if (ephemeral instanceof EphemeralKeyDownEvent ekd) {
@@ -294,7 +294,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startProcessIdInput() {
         removeKeyDownHandler();
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 10, 25, 64);
+        inputReader = new TerminalInputReader(systemApplication, 10, 25, 64);
         
         inputReader.setOnComplete(newProcessId -> {
             inputReader.close();
@@ -314,7 +314,7 @@ class PackageConfigurationScreen extends TerminalScreen {
                 errorMessage = "Invalid ProcessId: " + e.getMessage();
                 // Show error briefly then return to input
                 invalidate();
-                systemApplication.getTerminal().waitForKeyPress(() -> {
+                systemApplication.waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.CONFIGURE_PROCESS_ID);
                 });
@@ -330,7 +330,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void startConfirmationEntry() {
         removeKeyDownHandler();
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 15, 36, 20);
+        inputReader = new TerminalInputReader(systemApplication, 15, 36, 20);
         
         inputReader.setOnComplete(input -> {
             inputReader.close();
@@ -341,7 +341,7 @@ class PackageConfigurationScreen extends TerminalScreen {
             } else {
                 errorMessage = "Confirmation failed";
                 invalidate();
-                systemApplication.getTerminal().waitForKeyPress(() -> {
+                systemApplication.waitForKeyPress(() -> {
                     errorMessage = null;
                     transitionTo(Step.PASSWORD_CONFIRM);
                 });
@@ -373,7 +373,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void setupCompleteInput() {
         removeKeyDownHandler();
-        systemApplication.getTerminal().waitForKeyPress(() -> {
+        systemApplication.waitForKeyPress(() -> {
             if (onCompleteCallback != null) {
                 onCompleteCallback.run();
             }
@@ -395,7 +395,7 @@ class PackageConfigurationScreen extends TerminalScreen {
     
     private void removeKeyDownHandler() {
         if (handlerId != null) {
-            systemApplication.getTerminal().removeKeyDownHandler(handlerId);
+            systemApplication.removeKeyDownHandler(handlerId);
             handlerId = null;
         }
     }

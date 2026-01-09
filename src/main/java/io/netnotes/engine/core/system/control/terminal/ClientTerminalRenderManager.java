@@ -4,7 +4,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import io.netnotes.engine.core.system.control.containers.ContainerId;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
@@ -13,7 +12,7 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 public class ClientTerminalRenderManager extends FlowProcess {
 
-    private final ConcurrentHashMap<ContainerId, TerminalContainerHandle> handles = new ConcurrentHashMap<>();
+   // private final ConcurrentHashMap<ContainerId, TerminalContainerHandle> handles = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<TerminalContainerHandle, RenderSlot> slots =
         new ConcurrentHashMap<>();
@@ -39,7 +38,7 @@ public class ClientTerminalRenderManager extends FlowProcess {
                 registerChild(handle);
                 
                 // Track handle
-                handles.put(handle.getId(), handle);
+             //   handles.put(handle.getId(), handle);
                 
                 // Give handle a way to request rendering
                 handle.setOnRenderRequest(ClientTerminalRenderManager.this::requestRender);
@@ -97,7 +96,7 @@ public class ClientTerminalRenderManager extends FlowProcess {
             }
 
 
-            if (handle.isReadyToRender()) {
+            if (!handle.isReadyToRender()) {
                 // Not ready yet — request again later
                 renderRequested.set(true);
                 return;
@@ -130,6 +129,6 @@ public class ClientTerminalRenderManager extends FlowProcess {
      */
 	@Override
 	public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-		throw new UnsupportedOperationException("Unimplemented method 'handleStreamChannel'");
+		throw new UnsupportedOperationException("Process is not stream capable");
 	}
 }

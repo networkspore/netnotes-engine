@@ -25,7 +25,7 @@ import java.util.concurrent.CompletionException;
  * - Implements Renderable via TerminalScreen
  * - States stored as fields (not in state machine)
  * - getRenderState() builds UI from current state
- * - invalidate() triggers redraws
+ * - transitionTo() ensures invalidate() called on EVERY state change
  * - MenuNavigator handles menu rendering (already pull-based)
  * - TerminalInputReader handles input rendering
  * 
@@ -60,12 +60,24 @@ public class SystemSetupScreen extends TerminalScreen {
     
     public SystemSetupScreen(String id, SystemApplication systemApplication) {
         super(id, systemApplication);
-        this.menuNavigator = new MenuNavigator(systemApplication.getTerminal()).withParent(this);
+        this.menuNavigator = new MenuNavigator(systemApplication).withParent(this);
         this.isFirstRun = !systemApplication.isAuthenticated();
         Log.logMsg("[SystemSetupScreen] created: " + id + ": terminal: " + systemApplication.getTerminal().getId());
         if (!isFirstRun) {
             currentState = SetupState.DETECTING;
         }
+    }
+    
+    /**
+     * Change state and invalidate
+     * 
+     * Helper method to ensure we ALWAYS invalidate after state changes
+     * CRITICAL: Use this instead of setting currentState directly
+     */
+    private void transitionTo(SetupState newState) {
+        Log.logMsg("[SystemSetupScreen] State transition: " + currentState + " -> " + newState);
+        currentState = newState;
+        invalidate(); // ALWAYS invalidate after state change
     }
     
     // ===== RENDERABLE INTERFACE =====
@@ -89,21 +101,21 @@ public class SystemSetupScreen extends TerminalScreen {
     private TerminalRenderState buildWelcomeState() {
         TerminalTextBox welcomeBox = TerminalTextBox.builder()
             .position(0, 2)
-            .size(systemApplication.getTerminal().getWidth() - 4, 5)
+            .size(systemApplication.getWidth() - 4, 5)
             .title("Welcome to Netnotes", TerminalTextBox.TitlePlacement.INSIDE_CENTER)
             .style(BoxStyle.DOUBLE)
             .titleStyle(TextStyle.BOLD)
             .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
             .build();
         
-        int msgRow = Math.max(systemApplication.getTerminal().getRows() / 2 + 2, 8);
+        int msgRow = Math.max(systemApplication.getHeight() / 2 + 2, 8);
         String msg = "Initial Setup";
-        int msgCol = Math.max(0, systemApplication.getTerminal().getCols() / 2 - msg.length() / 2);
+        int msgCol = Math.max(0, systemApplication.getWidth() / 2 - msg.length() / 2);
         int lineCol = Math.max(0, msgCol - 1);
         
-        int promptRow = systemApplication.getTerminal().getRows() / 2 + 5;
+        int promptRow = systemApplication.getHeight() / 2 + 5;
         String prompt = TerminalCommands.PRESS_ANY_KEY;
-        int promptCol = Math.max(0, systemApplication.getTerminal().getCols() / 2 - prompt.length() / 2);
+        int promptCol = Math.max(0, systemApplication.getWidth() / 2 - prompt.length() / 2);
         
         return TerminalRenderState.builder()
             .add((term)-> term.clear())
@@ -122,8 +134,8 @@ public class SystemSetupScreen extends TerminalScreen {
      * Build detecting screen state
      */
     private TerminalRenderState buildDetectingState() {
-        int row = systemApplication.getTerminal().getRows() / 2;
-        int col = Math.max(0, systemApplication.getTerminal().getCols() / 2 - 15);
+        int row = systemApplication.getHeight() / 2;
+        int col = Math.max(0, systemApplication.getWidth() / 2 - 15);
         
         return TerminalRenderState.builder()
             .add((term) -> {
@@ -193,7 +205,7 @@ public class SystemSetupScreen extends TerminalScreen {
         String errorText = "Setup error: " + 
             (errorMessage != null ? errorMessage : "Unknown error");
         
-        int errorRow = systemApplication.getTerminal().getRows() / 2;
+        int errorRow = systemApplication.getHeight() / 2;
         int promptRow = errorRow + 2;
         
         return TerminalRenderState.builder()
@@ -211,22 +223,20 @@ public class SystemSetupScreen extends TerminalScreen {
     public CompletableFuture<Void> onShow() {
         Log.logMsg("[SystemSetupScreen] Showing setup");
         
-        // Make this screen active
+        // Make this screen active (calls super which sets renderable + invalidates)
         super.onShow();
         
         // Start the flow
         if (currentState == SetupState.WELCOME) {
             // Wait for keypress, then move to detecting
-            return systemApplication.getTerminal().waitForKeyPress()
+            return systemApplication.waitForKeyPress()
                 .thenRun(() -> {
-                    currentState = SetupState.DETECTING;
-                    invalidate();
+                    transitionTo(SetupState.DETECTING); // Will invalidate
                     detectIODaemon();
                 });
         } else {
             // Skip welcome, go straight to detecting
-            currentState = SetupState.DETECTING;
-            invalidate();
+            transitionTo(SetupState.DETECTING); // Will invalidate
             return detectIODaemon();
         }
     }
@@ -238,6 +248,7 @@ public class SystemSetupScreen extends TerminalScreen {
             inputReader.close();
             inputReader = null;
         }
+        super.onHide();
     }
     
     // ===== IODaemon DETECTION =====
@@ -282,7 +293,7 @@ public class SystemSetupScreen extends TerminalScreen {
             })
             .thenRun(() -> {
                 // Detection complete - show main menu
-                currentState = SetupState.MAIN_MENU;
+                transitionTo(SetupState.MAIN_MENU); // Will invalidate
                 showMainSetupMenu();
             })
             .exceptionally(ex -> {
@@ -300,11 +311,10 @@ public class SystemSetupScreen extends TerminalScreen {
                     errorMessage = cause.getClass().getSimpleName();
                 }
                 
-                currentState = SetupState.ERROR;
-                invalidate();
+                transitionTo(SetupState.ERROR); // Will invalidate
                 
                 // Wait for keypress, then go back
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> systemApplication.goBack());
                 
                 return null;
@@ -312,7 +322,7 @@ public class SystemSetupScreen extends TerminalScreen {
     }
     
     private CompletableFuture<Void> discoverKeyboards() {
-        return systemApplication.getTerminal().connectToIODaemon()
+        return systemApplication.connectToIODaemon()
             .thenCompose(session -> session.discoverDevices())
             .thenAccept(devices -> {
                 availableKeyboards = devices.stream()
@@ -333,7 +343,7 @@ public class SystemSetupScreen extends TerminalScreen {
     // ===== MAIN SETUP MENU =====
     
     private void showMainSetupMenu() {
-        currentState = SetupState.MAIN_MENU;
+        // State already set by transitionTo()
         
         ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("system-setup");
         String description = buildSetupDescription();
@@ -386,6 +396,9 @@ public class SystemSetupScreen extends TerminalScreen {
         
         // MenuNavigator becomes the active renderable
         menuNavigator.showMenu(menu);
+        
+        // Invalidate after menu setup to trigger render
+        invalidate();
     }
     
     private String buildSetupDescription() {
@@ -424,7 +437,7 @@ public class SystemSetupScreen extends TerminalScreen {
     // ===== KEYBOARD SELECTION =====
     
     private void showKeyboardSelectionMenu(boolean forPassword) {
-        currentState = SetupState.KEYBOARD_SELECTION;
+        transitionTo(SetupState.KEYBOARD_SELECTION); // Will invalidate
         
         ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("keyboard-selection");
         
@@ -437,7 +450,7 @@ public class SystemSetupScreen extends TerminalScreen {
         if (availableKeyboards == null || availableKeyboards.isEmpty()) {
             menu.addInfoItem("no-keyboards", "No keyboards detected");
             menu.addItem("back", "Back", () -> {
-                currentState = SetupState.MAIN_MENU;
+                transitionTo(SetupState.MAIN_MENU); // Will invalidate
                 showMainSetupMenu();
             });
         } else {
@@ -461,12 +474,15 @@ public class SystemSetupScreen extends TerminalScreen {
             menu.addSeparator("");
             menu.addItem("refresh", "Refresh Device List", this::refreshKeyboards);
             menu.addItem("back", "Back", () -> {
-                currentState = SetupState.MAIN_MENU;
+                transitionTo(SetupState.MAIN_MENU); // Will invalidate
                 showMainSetupMenu();
             });
         }
         
         menuNavigator.showMenu(menu);
+        
+        // Invalidate after menu setup
+        invalidate();
     }
     
     private void selectKeyboard(String deviceId, boolean forPassword) {
@@ -478,7 +494,7 @@ public class SystemSetupScreen extends TerminalScreen {
                     if (isFirstRun) {
                         completeSetup();
                     } else {
-                        currentState = SetupState.MAIN_MENU;
+                        transitionTo(SetupState.MAIN_MENU); // Will invalidate
                         showMainSetupMenu();
                     }
                 });
@@ -487,13 +503,15 @@ public class SystemSetupScreen extends TerminalScreen {
     
     private void refreshKeyboards() {
         discoverKeyboards()
-            .thenRun(() -> showKeyboardSelectionMenu(true))
+            .thenRun(() -> {
+                showKeyboardSelectionMenu(true);
+                // invalidate() called in showKeyboardSelectionMenu()
+            })
             .exceptionally(ex -> {
                 errorMessage = "Failed to refresh: " + ex.getMessage();
-                currentState = SetupState.ERROR;
-                invalidate();
+                transitionTo(SetupState.ERROR); // Will invalidate
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> showKeyboardSelectionMenu(true));
                 return null;
             });
@@ -502,8 +520,6 @@ public class SystemSetupScreen extends TerminalScreen {
     // ===== CONFIGURATION OPTIONS =====
     
     private void configureGUIOnly() {
-        // This transitions to a different screen
-        // We don't render here - just update state and navigate
         systemApplication.completeBootstrap(null)
             .thenRun(() -> {
                 if (isFirstRun) {
@@ -515,11 +531,10 @@ public class SystemSetupScreen extends TerminalScreen {
     }
     
     private void configureSocketPath() {
-        currentState = SetupState.SOCKET_CONFIG;
-        invalidate();
+        transitionTo(SetupState.SOCKET_CONFIG); // Will invalidate
         
         // Create input reader
-        inputReader = new TerminalInputReader(systemApplication.getTerminal(), 7, 7, 60);
+        inputReader = new TerminalInputReader(systemApplication, 7, 7, 60);
         inputReader.setText(socketPath);
         
         inputReader.setOnComplete(newPath -> {
@@ -531,7 +546,7 @@ public class SystemSetupScreen extends TerminalScreen {
                 inputReader.close();
                 inputReader = null;
             }
-            currentState = SetupState.MAIN_MENU;
+            transitionTo(SetupState.MAIN_MENU); // Will invalidate
             showMainSetupMenu();
         });
     }
@@ -543,17 +558,16 @@ public class SystemSetupScreen extends TerminalScreen {
         }
         
         if (newPath == null || newPath.trim().isEmpty()) {
-            currentState = SetupState.MAIN_MENU;
+            transitionTo(SetupState.MAIN_MENU); // Will invalidate
             showMainSetupMenu();
             return;
         }
         
         if (!newPath.startsWith("/")) {
             errorMessage = "Socket path must be absolute (start with /)";
-            currentState = SetupState.ERROR;
-            invalidate();
+            transitionTo(SetupState.ERROR); // Will invalidate
             
-            systemApplication.getTerminal().waitForKeyPress()
+            systemApplication.waitForKeyPress()
                 .thenRun(this::configureSocketPath);
             return;
         }
@@ -573,7 +587,7 @@ public class SystemSetupScreen extends TerminalScreen {
                 }
             })
             .thenRun(() -> {
-                currentState = SetupState.MAIN_MENU;
+                transitionTo(SetupState.MAIN_MENU); // Will invalidate
                 showMainSetupMenu();
             })
             .exceptionally(ex -> {
@@ -582,12 +596,11 @@ public class SystemSetupScreen extends TerminalScreen {
                 systemApplication.completeBootstrap(systemApplication.getPasswordKeyboardId());
                 
                 errorMessage = "Failed to apply new path: " + ex.getMessage();
-                currentState = SetupState.ERROR;
-                invalidate();
+                transitionTo(SetupState.ERROR); // Will invalidate
                 
-                systemApplication.getTerminal().waitForKeyPress()
+                systemApplication.waitForKeyPress()
                     .thenRun(() -> {
-                        currentState = SetupState.MAIN_MENU;
+                        transitionTo(SetupState.MAIN_MENU); // Will invalidate
                         showMainSetupMenu();
                     });
                 return null;
@@ -597,18 +610,16 @@ public class SystemSetupScreen extends TerminalScreen {
     private void showInstallationInfo() {
         // This would be another screen or a large text box
         // For now, just go back
-        currentState = SetupState.MAIN_MENU;
+        transitionTo(SetupState.MAIN_MENU); // Will invalidate
         showMainSetupMenu();
     }
     
     private void retryDetection() {
-        currentState = SetupState.DETECTING;
-        invalidate();
+        transitionTo(SetupState.DETECTING); // Will invalidate
         
         detectIODaemon()
             .thenRun(() -> {
-                currentState = SetupState.MAIN_MENU;
-                showMainSetupMenu();
+                // transitionTo already called in detectIODaemon
             });
     }
     

@@ -23,7 +23,7 @@ class LockedScreen extends TerminalScreen {
         return TerminalRenderState.builder()
             .add((term) -> {
                 term.clear();
-                term.printAt(1, (LockedScreen.this.systemApplication.getTerminal().getCols() - 13) / 2, "System Locked", TextStyle.BOLD);
+                term.printAt(1, (LockedScreen.this.systemApplication.getWidth() - 13) / 2, "System Locked", TextStyle.BOLD);
                 term.printAt(5, 10, TerminalCommands.PRESS_ANY_KEY, TextStyle.NORMAL);
                 term.moveCursor(5, 35);
             })
@@ -35,7 +35,7 @@ class LockedScreen extends TerminalScreen {
     @Override
     public CompletableFuture<Void> onShow() {
         // Set up key press handler
-        return systemApplication.getTerminal().waitForKeyPress(() -> {
+        return systemApplication.waitForKeyPress(() -> {
             // Transition to AUTHENTICATING → claims password keyboard, shows login
             systemApplication.getStateMachine().removeState(SystemApplication.LOCKED);
             systemApplication.getStateMachine().addState(SystemApplication.AUTHENTICATING);
@@ -45,6 +45,6 @@ class LockedScreen extends TerminalScreen {
     @Override
     public void onHide() {
         // Cancel any pending key wait
-        systemApplication.getTerminal().cancelKeyWait();
+        systemApplication.cancelKeyWait();
     }
 }

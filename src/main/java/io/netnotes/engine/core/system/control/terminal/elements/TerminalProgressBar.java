@@ -164,7 +164,7 @@ public class TerminalProgressBar implements TerminalRenderable {
             if (message != null && !message.isEmpty()) {
                 // Clear the line first to remove old message
                 int messageRow = currentRow + 1;
-                batch.clearLine(messageRow);
+                batch.clearLineAt(messageRow);
                 batch.printAt(messageRow, currentCol, message, TextStyle.NORMAL);
             }
         };
@@ -387,7 +387,7 @@ public class TerminalProgressBar implements TerminalRenderable {
             return terminal.executeBatch(
                 terminal.batch()
                     .printAt(row, col, bar, TextStyle.NORMAL)
-                    .clearLine(row + 1)
+                    .clearLineAt(row + 1)
                     .printAt(row + 1, col, currentMessage, TextStyle.NORMAL)
             );
         } else {
@@ -401,8 +401,8 @@ public class TerminalProgressBar implements TerminalRenderable {
     @Deprecated
     public CompletableFuture<Void> clear() {
         return terminal.executeBatch(terminal.batch()
-            .clearLine(row)
-            .clearLine(row + 1));
+            .clearLineAt(row)
+            .clearLineAt(row + 1));
     }
     
     // ===== GETTERS =====

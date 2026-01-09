@@ -34,7 +34,7 @@ class SettingsScreen extends TerminalScreen {
     
     @Override
     public CompletableFuture<Void> onShow() {
-        menuNavigator = new MenuNavigator(systemApplication.getTerminal());
+        menuNavigator = new MenuNavigator(systemApplication);
         
         MenuContext menu = buildSettingsMenu();
         menuNavigator.showMenu(menu);

@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 
+import io.netnotes.engine.core.system.TerminalApplication;
 import io.netnotes.engine.core.system.control.terminal.TerminalBatchBuilder;
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TerminalRenderElement;
 import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
 import io.netnotes.engine.core.system.control.terminal.TerminalRenderable;
@@ -59,7 +59,7 @@ import java.util.function.Consumer;
 public class MenuNavigator implements TerminalRenderable {
 
     private final BitFlagStateMachine state;
-    private final TerminalContainerHandle terminal;
+    private final TerminalApplication<?> terminalApplication;
     private int horizontalScrollOffset = 0;
     
     // Navigation state
@@ -104,8 +104,8 @@ public class MenuNavigator implements TerminalRenderable {
     // PARENT RENDERABLE (for composition pattern)
     private Invalidatable parentRenderable = null;
     
-    public MenuNavigator(TerminalContainerHandle terminal) {
-        this.terminal = terminal;
+    public MenuNavigator(TerminalApplication<?> terminal) {
+        this.terminalApplication = terminal;
         this.state = new BitFlagStateMachine("menu-navigator");
         
         this.keyboardConsumer = this::handleKeyboardEvent;
@@ -126,31 +126,31 @@ public class MenuNavigator implements TerminalRenderable {
     
     private void setupStateTransitions() {
         state.onStateAdded(IDLE, (old, now, bit) -> {
-            terminal.removeKeyDownHandler(keyboardConsumer);
-            terminal.removeResizeHandler(resizeConsumer);
+            terminalApplication.removeKeyDownHandler(keyboardConsumer);
+            terminalApplication.removeResizeHandler(resizeConsumer);
         });
         
         state.onStateAdded(DISPLAYING_MENU, (old, now, bit) -> {
-            terminal.addKeyDownHandler(keyboardConsumer);
-            terminal.addResizeHandler(resizeConsumer);
+            terminalApplication.addKeyDownHandler(keyboardConsumer);
+            terminalApplication.addResizeHandler(resizeConsumer);
             
             if (currentMenu != null) {
                 // STANDALONE MODE: Make menu the active renderable
                 // COMPONENT MODE: Parent will include us via asRenderElement()
                 if (parentRenderable == null) {
-                    terminal.setRenderable(this);
+                    terminalApplication.setRenderable(this);
                 }
                 invalidate(); // Initial render
             }
         });
         
         state.onStateAdded(WAITING_PASSWORD, (old, now, bit) -> {
-            terminal.removeKeyDownHandler(keyboardConsumer);
+            terminalApplication.removeKeyDownHandler(keyboardConsumer);
         });
         
         state.onStateRemoved(WAITING_PASSWORD, (old, now, bit) -> {
             if (state.hasState(DISPLAYING_MENU)) {
-                terminal.addKeyDownHandler(keyboardConsumer);
+                terminalApplication.addKeyDownHandler(keyboardConsumer);
             }
         });
     }
@@ -240,7 +240,7 @@ public class MenuNavigator implements TerminalRenderable {
             parentRenderable.invalidate();
         } else {
             // We're standalone - invalidate terminal directly
-            terminal.invalidate();
+            terminalApplication.invalidate();
         }
     }
     
@@ -412,7 +412,7 @@ public class MenuNavigator implements TerminalRenderable {
             MenuDimensions dims,
             boolean hasParent) {
         
-        int footerRow = terminal.getRows() - 2;
+        int footerRow = terminalApplication.getHeight() - 2;
         
         String help = hasParent || menu.hasParent()
             ? "↑↓: Navigate  ←→: Scroll Text  Enter: Select  ESC: Back  Home/End: Jump"
@@ -626,9 +626,9 @@ public class MenuNavigator implements TerminalRenderable {
         }
         
         int contentWidth = maxTextLength + 8;
-        int maxAllowedWidth = terminal.getCols() - 8;
+        int maxAllowedWidth = terminalApplication.getHeight() - 8;
         int boxWidth = Math.max(40, Math.min(contentWidth, maxAllowedWidth));
-        int boxCol = (terminal.getCols() - boxWidth) / 2;
+        int boxCol = (terminalApplication.getHeight() - boxWidth) / 2;
         int itemContentWidth = boxWidth - 4;
         
         return new MenuDimensions(boxWidth, boxCol, itemContentWidth);
@@ -703,12 +703,12 @@ public class MenuNavigator implements TerminalRenderable {
     }
     
     public void cleanup() {
-        terminal.removeKeyDownHandler(keyboardConsumer);
-        terminal.removeResizeHandler(resizeConsumer);
+        terminalApplication.removeKeyDownHandler(keyboardConsumer);
+        terminalApplication.removeResizeHandler(resizeConsumer);
         
         // Only clear if we're standalone
         if (parentRenderable == null) {
-            terminal.clearRenderable();
+            terminalApplication.clearRenderable();
         }
     }
     
@@ -719,7 +719,7 @@ public class MenuNavigator implements TerminalRenderable {
     public boolean hasMenu() { return currentMenu != null; }
     public boolean isDisplayingMenu() { return state.hasState(DISPLAYING_MENU); }
     public boolean isWaitingForPassword() { return state.hasState(WAITING_PASSWORD); }
-    public TerminalContainerHandle getTerminal() { return terminal; }
+    public TerminalApplication<?> getTerminalApplication() { return terminalApplication; }
     
     // ===== INNER CLASSES =====
     

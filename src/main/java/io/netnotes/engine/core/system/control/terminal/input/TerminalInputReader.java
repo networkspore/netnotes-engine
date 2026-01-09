@@ -2,7 +2,7 @@ package io.netnotes.engine.core.system.control.terminal.input;
 
 import java.util.function.Consumer;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
+import io.netnotes.engine.core.system.TerminalApplication;
 import io.netnotes.engine.io.input.KeyRunTable;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharEvent;
@@ -39,7 +39,7 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
 public class TerminalInputReader {
     public static final int DEFAULT_MAX_LENGTH = 256;
     
-    private final TerminalContainerHandle terminal;
+    private final TerminalApplication<?> terminal;
     private final int displayRow;
     private final int displayCol;
     private final int maxLength;
@@ -55,7 +55,7 @@ public class TerminalInputReader {
     /**
      * Create input reader with default max length
      */
-    public TerminalInputReader(TerminalContainerHandle terminal, int row, int col) {
+    public TerminalInputReader(TerminalApplication<?> terminal, int row, int col) {
         this(terminal, row, col, DEFAULT_MAX_LENGTH);
 
     }
@@ -68,7 +68,7 @@ public class TerminalInputReader {
      * @param col Display column for input start
      * @param maxLength Maximum input length (in codepoints)
      */
-    public TerminalInputReader(TerminalContainerHandle terminal, int row, int col, int maxLength) {
+    public TerminalInputReader(TerminalApplication<?> terminal, int row, int col, int maxLength) {
         this.terminal = terminal;
         this.displayRow = row;
         this.displayCol = col;
@@ -294,11 +294,10 @@ public class TerminalInputReader {
      */
     private void redraw() {
         // Clear the line
-        terminal.clearLine(displayRow);
-        
+        terminal.getTerminal().clearLine(displayRow);
         // Print the current buffer
         String text = buffer.toString();
-        terminal.printAt(displayRow, displayCol, text);
+        terminal.getTerminal().printAt(displayRow, displayCol, text);
         
         // Position cursor
         updateCursorPosition();
@@ -311,7 +310,7 @@ public class TerminalInputReader {
     private void updateCursorPosition() {
         // Calculate display width up to cursor position
         int displayWidth = buffer.getDisplayWidth(cursorPos);
-        terminal.moveCursor(displayRow, displayCol + displayWidth);
+        terminal.getTerminal().moveCursor(displayRow, displayCol + displayWidth);
     }
     
     /**

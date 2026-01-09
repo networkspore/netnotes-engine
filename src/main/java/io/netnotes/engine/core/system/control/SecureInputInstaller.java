@@ -1,5 +1,6 @@
 package io.netnotes.engine.core.system.control;
 
+import io.netnotes.engine.core.system.TerminalApplication;
 import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.menus.MenuContext;
@@ -45,7 +46,7 @@ public class SecureInputInstaller extends FlowProcess {
     private static final GitHubInfo GITHUB_INFO = new GitHubInfo("networkspore", "NoteDaemon");
     
     private final String os;
-    private final TerminalContainerHandle terminal;
+    private final TerminalApplication<?> terminalApp;
     private final BitFlagStateMachine state;
     
     private MenuNavigator menuNavigator;
@@ -73,11 +74,11 @@ public class SecureInputInstaller extends FlowProcess {
     public SecureInputInstaller(
         String name, 
         String os, 
-        TerminalContainerHandle terminal
+        TerminalApplication<?> terminal
     ) {
         super(name, ProcessType.SINK);
         this.os = os;
-        this.terminal = terminal;
+        this.terminalApp = terminal;
         this.state = new BitFlagStateMachine(name);
         
         setupStateTransitions();
@@ -118,7 +119,7 @@ public class SecureInputInstaller extends FlowProcess {
         state.addState(IDLE);
         
         // Create menu navigator
-        menuNavigator = new MenuNavigator(terminal);
+        menuNavigator = new MenuNavigator(terminalApp);
         state.removeState(IDLE);
         state.addState(FETCHING_RELEASES);
 
@@ -135,10 +136,10 @@ public class SecureInputInstaller extends FlowProcess {
     // ===== MENU CONSTRUCTION =====
     
     private CompletableFuture<GitHubAsset[]> fetchReleases() {
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Fetching available releases from GitHub...", 
+        terminalApp.getTerminal().clear()
+            .thenCompose(v -> terminalApp.getTerminal().println("Fetching available releases from GitHub...", 
                 TextStyle.INFO))
-            .thenCompose(v -> terminal.println(""));
+            .thenCompose(v -> terminalApp.getTerminal().println(""));
         
         GitHubAPI api = new GitHubAPI(GITHUB_INFO);
         
@@ -151,21 +152,21 @@ public class SecureInputInstaller extends FlowProcess {
                     .toArray(GitHubAsset[]::new);
             })
             .exceptionally(ex -> {
-                terminal.clear()
-                    .thenCompose(v -> terminal.printError(
+                terminalApp.getTerminal().clear()
+                    .thenCompose(v -> terminalApp.getTerminal().printError(
                         "Failed to fetch releases: " + ex.getMessage()))
-                    .thenCompose(v -> terminal.println(""))
-                    .thenCompose(v -> terminal.println("Press ESC to exit"));
+                    .thenCompose(v -> terminalApp.getTerminal().println(""))
+                    .thenCompose(v -> terminalApp.getTerminal().println("Press ESC to exit"));
                 return new GitHubAsset[0];
             });
     }
     
     private CompletableFuture<Void> showReleaseSelectionMenu() {
         if (availableReleases.length == 0) {
-            terminal.clear()
-                .thenCompose(v -> terminal.printError("No releases found"))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println("Press any key to exit"))
+            terminalApp.getTerminal().clear()
+                .thenCompose(v -> terminalApp.getTerminal().printError("No releases found"))
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println("Press any key to exit"))
                 .thenRun(() -> complete());
             return CompletableFuture.completedFuture(null);
         }
@@ -174,10 +175,10 @@ public class SecureInputInstaller extends FlowProcess {
         MenuContext menu = new MenuContext(menuPath, "Select NoteDaemon Release");
         
         // Show description
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Available Releases:", 
+        terminalApp.getTerminal().clear()
+            .thenCompose(v -> terminalApp.getTerminal().println("Available Releases:", 
                 TextStyle.BOLD))
-            .thenCompose(v -> terminal.println(""));
+            .thenCompose(v -> terminalApp.getTerminal().println(""));
         
         // Add menu items for each release
         for (int i = 0; i < availableReleases.length; i++) {
@@ -193,8 +194,8 @@ public class SecureInputInstaller extends FlowProcess {
         
         // Add cancel option
         menu.addItem("cancel", "Cancel Installation", () -> {
-            terminal.clear()
-                .thenCompose(v -> terminal.println("Installation cancelled", 
+            terminalApp.getTerminal().clear()
+                .thenCompose(v -> terminalApp.getTerminal().println("Installation cancelled", 
                     TextStyle.WARNING))
                 .thenRun(() -> complete());
         });
@@ -235,23 +236,23 @@ public class SecureInputInstaller extends FlowProcess {
         MenuContext menu = new MenuContext(menuPath, "Confirm Installation");
         
         // Show detailed info
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Ready to install NoteDaemon " + selectedVersion, 
+        terminalApp.getTerminal().clear()
+            .thenCompose(v -> terminalApp.getTerminal().println("Ready to install NoteDaemon " + selectedVersion, 
                 TextStyle.BOLD))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("File: " + selectedAsset.getName()))
-            .thenCompose(v -> terminal.println("Size: " + formatSize(selectedAsset.getSize())))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("This will:"))
-            .thenCompose(v -> terminal.println("- Install system dependencies"))
-            .thenCompose(v -> terminal.println("- Download and build NoteDaemon"))
-            .thenCompose(v -> terminal.println("- Create system user and group"))
-            .thenCompose(v -> terminal.println("- Install systemd service"))
-            .thenCompose(v -> terminal.println("- Configure udev rules"))
-            .thenCompose(v -> terminal.println(""))
-            .thenCompose(v -> terminal.println("Root access required.", 
+            .thenCompose(v -> terminalApp.getTerminal().println(""))
+            .thenCompose(v -> terminalApp.getTerminal().println("File: " + selectedAsset.getName()))
+            .thenCompose(v -> terminalApp.getTerminal().println("Size: " + formatSize(selectedAsset.getSize())))
+            .thenCompose(v -> terminalApp.getTerminal().println(""))
+            .thenCompose(v -> terminalApp.getTerminal().println("This will:"))
+            .thenCompose(v -> terminalApp.getTerminal().println("- Install system dependencies"))
+            .thenCompose(v -> terminalApp.getTerminal().println("- Download and build NoteDaemon"))
+            .thenCompose(v -> terminalApp.getTerminal().println("- Create system user and group"))
+            .thenCompose(v -> terminalApp.getTerminal().println("- Install systemd service"))
+            .thenCompose(v -> terminalApp.getTerminal().println("- Configure udev rules"))
+            .thenCompose(v -> terminalApp.getTerminal().println(""))
+            .thenCompose(v -> terminalApp.getTerminal().println("Root access required.", 
                 TextStyle.WARNING))
-            .thenCompose(v -> terminal.println(""));
+            .thenCompose(v -> terminalApp.getTerminal().println(""));
         
         menu.addItem("install", "Install Now", () -> {
             startInstallation();
@@ -274,10 +275,10 @@ public class SecureInputInstaller extends FlowProcess {
         // Reset progress
         currentStep = 0;
         
-        terminal.clear()
-            .thenCompose(v -> terminal.println("Starting installation...", 
+        terminalApp.getTerminal().clear()
+            .thenCompose(v -> terminalApp.getTerminal().println("Starting installation...", 
                 TextStyle.BOLD))
-            .thenCompose(v -> terminal.println(""));
+            .thenCompose(v -> terminalApp.getTerminal().println(""));
         
         performInstallation()
             .thenRun(() -> {
@@ -313,36 +314,36 @@ public class SecureInputInstaller extends FlowProcess {
             success ? "Installation Complete" : "Installation Failed");
         
         if (success) {
-            terminal.clear()
-                .thenCompose(v -> terminal.println("NoteDaemon " + selectedVersion + 
+            terminalApp.getTerminal().clear()
+                .thenCompose(v -> terminalApp.getTerminal().println("NoteDaemon " + selectedVersion + 
                     " installed successfully!", TextStyle.SUCCESS))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println("Service Status: Active"))
-                .thenCompose(v -> terminal.println("Socket: /var/run/io-daemon.sock"))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println("Installation completed in " + 
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println("Service Status: Active"))
+                .thenCompose(v -> terminalApp.getTerminal().println("Socket: /var/run/io-daemon.sock"))
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println("Installation completed in " + 
                     currentStep + " steps."))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println(
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println(
                     "You may need to log out and back in for group membership to take effect.",
                     TextStyle.WARNING))
-                .thenCompose(v -> terminal.println("Or run: newgrp netnotes"))
-                .thenCompose(v -> terminal.println(""));
+                .thenCompose(v -> terminalApp.getTerminal().println("Or run: newgrp netnotes"))
+                .thenCompose(v -> terminalApp.getTerminal().println(""));
             
             menu.addItem("finish", "Finish", () -> {
                 complete();
             });
             
         } else {
-            terminal.clear()
-                .thenCompose(v -> terminal.printError(
+            terminalApp.getTerminal().clear()
+                .thenCompose(v -> terminalApp.getTerminal().printError(
                     "Installation failed at step " + currentStep + " of " + totalSteps + "!"))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println("Error: " + 
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println("Error: " + 
                     (errorMessage != null ? errorMessage : "Unknown error")))
-                .thenCompose(v -> terminal.println(""))
-                .thenCompose(v -> terminal.println("Please check the logs for details."))
-                .thenCompose(v -> terminal.println(""));
+                .thenCompose(v -> terminalApp.getTerminal().println(""))
+                .thenCompose(v -> terminalApp.getTerminal().println("Please check the logs for details."))
+                .thenCompose(v -> terminalApp.getTerminal().println(""));
             
             menu.addItem("retry", "Retry Installation", () -> {
                 state.removeState(FAILED);
@@ -668,7 +669,7 @@ public class SecureInputInstaller extends FlowProcess {
         Log.logMsg("[" + step + "/" + totalSteps + "] " + message);
         
         // Update terminal with progress
-        terminal.println(String.format("[%d/%d] %s (%d%%)", 
+        terminalApp.getTerminal().println(String.format("[%d/%d] %s (%d%%)", 
             step, totalSteps, message, percent));
     }
     
@@ -683,7 +684,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 Log.logMsg("  " + line);
-                terminal.println("  " + line, TextStyle.INFO);
+                terminalApp.getTerminal().println("  " + line, TextStyle.INFO);
             }
         }
         
@@ -705,7 +706,7 @@ public class SecureInputInstaller extends FlowProcess {
             String line;
             while ((line = reader.readLine()) != null) {
                 Log.logMsg("  " + line);
-                terminal.println("  " + line, TextStyle.INFO);
+                terminalApp.getTerminal().println("  " + line, TextStyle.INFO);
             }
         }
         
