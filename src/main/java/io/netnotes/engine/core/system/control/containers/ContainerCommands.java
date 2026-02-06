@@ -1,6 +1,5 @@
 package io.netnotes.engine.core.system.control.containers;
 
-import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBoolean;
@@ -24,6 +23,11 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
     public static final NoteBytesReadOnly X = new NoteBytesReadOnly("x");
     public static final NoteBytesReadOnly Y = new NoteBytesReadOnly("y");
+    
+    public static final NoteBytesReadOnly COORDINATES = new NoteBytesReadOnly(   "coordinates");
+    public static final NoteBytesReadOnly DIMENSIONS = new NoteBytesReadOnly("dimensions");
+    public static final NoteBytesReadOnly REGION = new NoteBytesReadOnly("region");
+    
     public static final NoteBytesReadOnly RESIZABLE = new NoteBytesReadOnly("resizable");
     public static final NoteBytesReadOnly CLOSABLE = new NoteBytesReadOnly("closable");
     public static final NoteBytesReadOnly MOVABLE = new NoteBytesReadOnly("movable");
@@ -34,7 +38,8 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly AUTO_FOCUS = new NoteBytesReadOnly( "auto_focus");
     public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
     public static final NoteBytesReadOnly BATCH_COMMANDS = new NoteBytesReadOnly( "batch_cmds");
-    
+
+
     // ===== LIFECYCLE COMMANDS =====
     public static final NoteBytesReadOnly CREATE_CONTAINER = 
         new NoteBytesReadOnly("create_container");
@@ -45,6 +50,8 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly HIDE_CONTAINER = 
         new NoteBytesReadOnly("hide_container");
     
+
+
     // ===== UPDATE COMMANDS =====
     public static final NoteBytesReadOnly UPDATE_TITLE = 
         new NoteBytesReadOnly("update_title");
@@ -78,6 +85,11 @@ public class ContainerCommands {
         new NoteBytesReadOnly("restore_container");
 
 
+
+    public static final NoteBytesReadOnly REQUEST_CONTAINER_REGION = 
+        new NoteBytesReadOnly("container_request_region");
+
+
     
     /**
      * Create a new container
@@ -85,19 +97,19 @@ public class ContainerCommands {
     public static NoteBytesReadOnly createContainer(
         ContainerId containerId,
         String title,
-        ContainerType type,
-        ContextPath ownerPath,
+        NoteBytesReadOnly rendererId,
+        NoteBytes ownerPath,
         ContainerConfig config,
         boolean autoFocus
     ) {
         config = config == null ? new ContainerConfig() : config;
-
+        
         NoteBytesObject msg = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.CMD, CREATE_CONTAINER),
             new NoteBytesPair(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes()),
             new NoteBytesPair(Keys.TITLE, new NoteBytes(title)),
-            new NoteBytesPair(Keys.TYPE, new NoteBytes(type.name())),
-            new NoteBytesPair(Keys.PATH, ownerPath.getSegments()),
+            new NoteBytesPair(ContainerCommands.RENDERER_ID, rendererId),
+            new NoteBytesPair(Keys.PATH, ownerPath),
             new NoteBytesPair(AUTO_FOCUS, autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE),
             new NoteBytesPair(Keys.CONFIG, config.toNoteBytes())
         });
@@ -164,6 +176,25 @@ public class ContainerCommands {
         msg.put(RENDERER_ID, rendererId);
         return msg;
     }
+
+
+    /**
+     * Hide container (minimize)
+     */
+    public static NoteBytesMap requestContainerRegion(
+        ContainerId containerId, 
+        NoteBytes rendererId,
+        NoteBytes region
+    ) {
+        NoteBytesMap msg = new NoteBytesMap();
+        msg.put(Keys.CMD, REQUEST_CONTAINER_REGION);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
+        msg.put(RENDERER_ID, rendererId);
+        msg.put(REGION, region);
+        return msg;
+    }
+
+    
     
     /**
      * Hide container (minimize)
@@ -252,7 +283,7 @@ public class ContainerCommands {
         int height
     ) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZED);
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_REGION_CHANGED);
         msg.put(ContainerCommands.CONTAINER_ID, containerId);
         msg.put(Keys.PAYLOAD, new NoteBytesArrayReadOnly(new NoteBytes[]{
             new NoteBytes(width),

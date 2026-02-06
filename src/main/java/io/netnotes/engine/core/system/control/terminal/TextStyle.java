@@ -80,6 +80,15 @@ public class TextStyle {
         return this;
     }
 
+     public TextStyle withForeground(Color foreground) {
+		this.foreground = foreground;
+        return this;
+	}
+
+    public TextStyle withBackground(Color background) {
+		this.background = background;
+        return this;
+	}
 
     public void setForeground(Color foreground) {
 		this.foreground = foreground;

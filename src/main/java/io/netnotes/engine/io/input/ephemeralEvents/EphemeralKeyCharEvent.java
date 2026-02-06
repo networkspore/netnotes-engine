@@ -11,7 +11,7 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
  * EphemeralKeyCharEvent - Character event with ephemeral codepoint
  * SECURITY CRITICAL: Never convert to int - keep as bytes
  */
-public class EphemeralKeyCharEvent extends EphemeralRoutedEvent {
+public class EphemeralKeyCharEvent extends EphemeralKeyboardEvent {
     private final NoteBytesEphemeral codepointBytes;
 
     private NoteBytes utf8Cache = null;

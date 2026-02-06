@@ -13,8 +13,8 @@ import java.util.concurrent.ExecutorService;
 
 import com.google.gson.stream.JsonWriter;
 
-import io.netnotes.engine.noteFiles.FileStreamUtils;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.files.FileStreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
 

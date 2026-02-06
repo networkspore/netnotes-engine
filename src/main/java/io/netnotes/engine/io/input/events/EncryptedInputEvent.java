@@ -4,7 +4,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 
-public class EncryptedInputEvent implements RoutedEvent {
+public class EncryptedInputEvent extends RoutedEvent {
     
     private final ContextPath sourcePath;
     private final NoteBytes encryptedPacket;

@@ -3,21 +3,41 @@ package io.netnotes.engine.core.system.control.containers;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
-import io.netnotes.engine.core.CoreConstants;
 import io.netnotes.engine.core.system.control.ui.BatchBuilder;
-import io.netnotes.engine.core.system.control.ui.RenderElement;
-import io.netnotes.engine.core.system.control.ui.RenderState;
+import io.netnotes.engine.core.system.control.ui.FloatingLayerManager;
 import io.netnotes.engine.core.system.control.ui.Renderable;
+import io.netnotes.engine.core.system.control.ui.RenderableLayoutManager;
+import io.netnotes.engine.core.system.control.ui.SpatialPoint;
+import io.netnotes.engine.core.system.control.ui.SpatialRegion;
+import io.netnotes.engine.core.system.control.ui.layout.LayoutCallback;
+import io.netnotes.engine.core.system.control.ui.layout.LayoutContext;
+import io.netnotes.engine.core.system.control.ui.layout.LayoutData;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.daemon.ClientSession;
+import io.netnotes.engine.io.daemon.IODaemon.SESSION_CMDS;
+import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
+import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.io.input.events.EventFilter;
+import io.netnotes.engine.io.input.events.EventFilterList;
+import io.netnotes.engine.io.input.events.EventFilterList.FilterMode;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
+import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.io.input.events.containerEvents.RoutedContainerEvent;
+import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
+import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
@@ -25,151 +45,434 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.engine.noteBytes.NoteBoolean;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.NoteUUID;
 
 /**
- * ContainerHandle - Base container with generic rendering and builder support
+ * ContainerHandle - Client-side container handle with event filtering
  * 
- * @param <B> BatchBuilder type for this container
- * @param <E> RenderElement type for this container
- * @param <H> The concrete handle type (self-reference for builder)
- * @param <BLD> The concrete builder type
+ * EVENT FILTERING:
+ * - Filter events before they reach the Renderable chain
+ * - System-level security: only accept events from specific sources
+ * - Performance: drop unwanted events early
+ * - Flexibility: combine multiple filters with AND/OR logic
+ * 
+ * FILTERING LEVELS:
+ * 1. ContainerHandle level (this class) - system-wide filtering
+ * 2. EventHandlerRegistry level - per-handler filtering
+ * 3. Handler level - manual filtering in handler code
+ * 
+ * USAGE:
+ * <pre>
+ * // Accept only password keyboard events
+ * EventFilter filter = EventFilter.forSource(passwordKeyboardPath);
+ * handle.setEventFilter(filter);
+ * 
+ * // Accept keyboard events from any source EXCEPT password keyboard
+ * handle.setEventFilter(event -> 
+ *     !event.getSourcePath().equals(passwordKeyboardPath));
+ * 
+ * // Combine filters
+ * handle.setEventFilter(EventFilter.forSource(keyboardPath)
+ *     .and(EventFilter.forType(EventBytes.EVENT_KEY_DOWN)));
+ * </pre>
  */
-public abstract class ContainerHandle
-<
-    B extends BatchBuilder, 
-    E extends RenderElement<B>,
-    R extends Renderable<B, E>,
-    H extends ContainerHandle<B, E, R, H, BLD>,
-    BLD extends ContainerHandle.Builder<B, E, R, H, BLD>
+public abstract class ContainerHandle<
+    B extends BatchBuilder<S>,
+    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,BLD>,
+    P extends SpatialPoint<P>,
+    R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
+    S extends SpatialRegion<P,S>,
+    DM extends DeviceManager<H,DM>,
+    RM extends RenderableLayoutManager<B,R,P,S,LC,LD,LCB,?,?,?,?,?>,
+    FLM extends FloatingLayerManager<B,R,P,S,LC,LD,LCB>,
+    LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
+    LD extends LayoutData<B,R,S,LD,?>,
+    LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
+    BLD extends ContainerHandle.Builder<H,BLD>
 > extends FlowProcess {
     
-    // ===== CREATION PARAMETERS (set at construction) =====
+    // ===== CREATION PARAMETERS =====
     protected final ContainerId containerId;
-    private final ContainerType containerType;
-    private final ContainerConfig containerConfig;
-    private final ContextPath renderingServicePath;
-    private final String title;
-    private final BLD builder;
-    // ===== RUNTIME STATE =====
-  
-    protected volatile R currentRenderable = null;
+    protected final ContainerConfig containerConfig;
+    protected final ContextPath renderingServicePath;
+    protected final String title;
+    protected final BLD builder;
+    protected final ContextPath ioDaemonPath;
+    protected final RM renderableLayoutManager;
+    protected final FLM floatingLayerManager;
+
+
+    protected Throwable streamError = null;
+
+    private ClientSession ioSession = null;
+    private final Map<String, DM> deviceManagers = new HashMap<>();
     
-    protected NoteBytesReadOnly rendererId = null;
+    // ===== RUNTIME STATE =====
+
+
+    protected R rootRenderable = null;
+    protected final NoteBytesReadOnly rendererId;
 
     // Stream TO Container (for render commands)
     protected StreamChannel renderStream;
     protected NoteBytesWriter renderWriter;
-    private volatile boolean renderReadyCache = false;
-    protected final AtomicLong renderGeneration = new AtomicLong();
+    private boolean renderReadySnapshot = false;
 
     // Stream FROM Container (for events)
     protected StreamChannel eventChannel = null;
     protected CompletableFuture<Void> eventStreamReadyFuture = new CompletableFuture<>();
-    protected Consumer<NoteBytes> onContainerEvent = null;
+    protected Consumer<RoutedEvent> onContainerEvent = null;
 
-    // MsgMap allows commands to be sent to the container handle
+    // Message handling
     protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new ConcurrentHashMap<>();
     protected final EventHandlerRegistry eventHandlerRegistry = new EventHandlerRegistry();
+   
+    protected NoteBytesReadOnly traversalKey = KeyCodeBytes.TAB;
+    protected FocusTraversalStrategy strategy = FocusTraversalStrategy.TAB_INDEX_THEN_TREE;
+    protected R focused = null;
+    protected boolean manageFocus = true;
 
+    // Event filtering
+    private EventFilterList filterList = new EventFilterList();
+
+    public static class ContainerPredicate implements Predicate<RoutedEvent>{
+        @Override
+        public boolean test(RoutedEvent event) {
+            return !(event instanceof RoutedContainerEvent );
+        }
+    }
+
+    private Predicate<RoutedEvent> containerPredicate = new ContainerPredicate();
+
+    protected final ConcurrentBitFlagStateMachine stateMachine;
+
+    protected SerializedVirtualExecutor uiExecutor = VirtualExecutors.getUiExecutor();
+
+    // Dimensions
+    protected S allocatedRegion = null;
+
+    protected boolean dimensionsInitialized = false;
 
     
-    //<NoteMessaging.ItemTypes, id>
-    private Map<NoteBytesReadOnly, String> defaultEventHandlers = new ConcurrentHashMap<>();
-    private Consumer<H> renderRequester;
-    protected final BitFlagStateMachine stateMachine;
+    @FunctionalInterface
+    public interface EventDispatcher {
+        void dispatchEvent(RoutedEvent event);
+    }
 
-    // Event map allows events from the Container to reach the handle
-    protected volatile int initialWidth;
-	protected volatile int initialHeight;
+
+    protected Consumer<H> notifyOnStreamReady = null;
+    protected BiConsumer<H,Throwable> notifyOnStreamError = null;
+    protected Consumer<H> notifyOnVisible = null;
+    protected Consumer<H> notifyOnHidden = null;
+    protected Consumer<H> notifyOnFocused = null;
+    protected Consumer<H> notifyOnFocusLost = null;
+    protected Consumer<H> notifyOnResize = null;
+    protected Consumer<H> notifyOnMove = null;
+    protected Consumer<R> onRenderableRegistered = null;
+    protected Consumer<R> onRenderableUnregistered = null;
+    
+    protected BiConsumer<R,R> onRenderableChanged = null;
+    protected Consumer<H> notifyOnClosed = null;
+    protected BiConsumer<H,Boolean> notifyOnRenderingChanged = null;
+    protected Consumer<H> layoutCallback = null;
+    protected Consumer<H> notifyOnInitialized = null; 
+    protected volatile boolean applyingLayout = false;
     /**
      * Private constructor - use Builder
      */
     protected ContainerHandle(BLD builder) {
         super(builder.name, ProcessType.BIDIRECTIONAL);
-        this.containerId = ContainerId.generate();  // Always generate new ID
-
+        this.containerId = ContainerId.generate();
+        this.rendererId = builder.rendererId;
         this.title = builder.title != null ? builder.title : builder.name;
-        this.containerType = builder.containerType;
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
+        this.ioDaemonPath = builder.ioDaemonPath;
         this.builder = builder;
-        this.stateMachine = new BitFlagStateMachine("ContainerHandle:" + containerId);
+        
+        this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
+        //runs state changes on UI executor, deffers if during layout
+        this.stateMachine.setSerialExecutor(uiExecutor);
+ 
+        //this.ioDaemonPath = builder.ioDaemonPath == null ? CoreConstants.IO_DAEMON_PATH : builder.ioDaemonPath;
+        this.filterList = builder.filterList;
+        this.floatingLayerManager = createFloatingLayerManager();
+        this.renderableLayoutManager = createRenderableLayoutManager(floatingLayerManager);
+        this.renderableLayoutManager.setFocusRequester(this::requestFocusInternal);
+        setupRoutedMessageMap();
+        setupEventHandlers();
         setupBaseStateHandler();
         setupStateTransitions();
     }
 
-    private void setupBaseStateHandler(){
-        stateMachine.onStateAdded(Container.STATE_ACTIVE, (old, now, bit) -> {
-             Log.logMsg(String.format("[ContainerHandle:%s] STATE_ACTIVE added - checking render: isDirty=%s, hasRenderable=%s, streamReady=%s",
-                containerId, 
-                isDirty(), 
-                currentRenderable != null,
-                isRenderStreamReady()
-            ));
+    public enum FocusTraversalStrategy {
+        TAB_INDEX_THEN_TREE,
+        TAB_INDEX_THEN_SCREEN
+    }
 
-            invalidate();
+    protected abstract FLM createFloatingLayerManager();
+
+    protected abstract RM createRenderableLayoutManager(FLM manager);
+
+
+    public void addFloating(R element, LCB callback, R anchor) {
+        element.makeFloating(anchor);
+        renderableLayoutManager.registerFloating(element, callback, anchor);
+    }
+
+    public void removeFloating(R element) {
+        renderableLayoutManager.unregisterFloating(element);
+        element.makeStatic();
+    }
+
+    public FloatingLayerManager<B,R,P,S,LC,LD,LCB> getFloatingLayerManager() {
+        return floatingLayerManager;
+    }
+
+    /**
+     * Setup base state transitions
+     */
+    private void setupBaseStateHandler() {
+
+        stateMachine.onStateAdded(Container.STATE_INITIALIZED, (old, now, bit) -> {
+            updatedInitialzation();
+            handleInitialized();
         });
 
-
-        stateMachine.onStateRemoved(Container.STATE_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] No longer active");
+        stateMachine.onStateAdded(Container.STATE_STREAM_READY,  (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Stream now READY");
+            stateMachine.removeState(Container.STATE_STREAM_ERROR);
+            updateIsRendering();
+            handleOnStreamReady();
+        
+        });
+        stateMachine.onStateRemoved(Container.STATE_STREAM_READY,  (old, now, bit) -> {
+            updateIsRendering();
         });
 
-        stateMachine.onStateAdded(Container.STATE_DESTROYED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] destroyed");
-            if(stateMachine.hasState(Container.STATE_DESTROYING)){
-                stateMachine.removeState(Container.STATE_DESTROYING);
-            }   
-        });
-
-        stateMachine.onStateAdded(Container.STATE_DESTROYING, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] destroyed");
-            if(stateMachine.hasState(Container.STATE_DESTROYED)){
-                stateMachine.removeState(Container.STATE_DESTROYING);
-            }   
+        stateMachine.onStateAdded(Container.STATE_STREAM_ERROR,  (old, now, bit) -> {
+            Log.logError("[ContainerHandle:" + containerId + "]", "Stream ERROR", streamError);
+            stateMachine.removeState(Container.STATE_STREAM_READY);
+            updateIsRendering();
+            handleOnStreamError();
         });
 
         stateMachine.onStateAdded(Container.STATE_VISIBLE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now visible");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now VISIBLE");
+            stateMachine.removeState(Container.STATE_HIDDEN);
+            updateIsRendering();
+            handleOnVisible();
         });
         
-        // HIDDEN: Container is hidden
-        stateMachine.onStateAdded(Container.STATE_HIDDEN, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now hidden");
+        stateMachine.onStateRemoved(Container.STATE_VISIBLE, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now HIDDEN");
+            stateMachine.removeState(Container.STATE_FOCUSED);
+            stateMachine.addState(Container.STATE_HIDDEN);
+            updateIsRendering();
+            handleOnHidden();
         });
         
-        // FOCUSED: Container has input focus
         stateMachine.onStateAdded(Container.STATE_FOCUSED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now focused");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now FOCUSED");
+            handleOnFocused();
         });
         
         stateMachine.onStateRemoved(Container.STATE_FOCUSED, (old, now, bit) -> {
             Log.logMsg("[ContainerHandle:" + containerId + "] Focus lost");
+            handleOnFocusLost();
         });
         
+        stateMachine.onStateAdded(Container.STATE_DESTROYED, (old, now, bit) -> {
+            Log.logMsg("[ContainerHandle:" + containerId + "] DESTROYED");
+            if (stateMachine.hasState(Container.STATE_DESTROYING)) {
+                stateMachine.removeState(Container.STATE_DESTROYING);
+            }
+        });
+    }
+
+    protected void handleInitialized(){
+        if (notifyOnInitialized != null) {
+            notifyOnInitialized.accept(self());
+        }
+    }
+
+    protected void handleOnClosed(){
+        if (notifyOnClosed != null) {
+            notifyOnClosed.accept(self());
+        }
+    }
+
+    protected void handleOnStreamError(){
+        if (notifyOnStreamError != null) {
+            notifyOnStreamError.accept(self(), streamError);
+        }
+    }
+
+    protected void handleOnStreamReady(){
+        if (notifyOnStreamReady != null) {
+            notifyOnStreamReady.accept(self());
+        }
+    }
+
+    protected void handleOnVisible() {
+        if (notifyOnVisible != null) {
+            notifyOnVisible.accept(self());
+        }
+    }
+
+    public void setOnVisible(Consumer<H> onVisible) {
+        this.notifyOnVisible = onVisible;
+    }
+
+    protected void handleOnHidden() {
+        if (notifyOnHidden != null) {
+            notifyOnHidden.accept(self());
+        }
+    }
+
+    public void setOnRenderingChanged(BiConsumer<H,Boolean> onRenderingChanged) {
+        this.notifyOnRenderingChanged = onRenderingChanged;
+    }
+
+    public void setOnHidden(Consumer<H> onHidden) {
+        this.notifyOnHidden = onHidden;
+    }
+
+    protected void handleOnFocused() {
+        if (notifyOnFocused != null) {
+            notifyOnFocused.accept(self());
+        }
+    }
+
+    public void setOnRenderStreamReady(Consumer<H> onStreamReady) {
+        this.notifyOnStreamReady = onStreamReady;
+    }
+
+
+    public void setOnRenderStreamError(BiConsumer<H,Throwable> onStreamError) {
+        this.notifyOnStreamError = onStreamError;
+    }
+
+    public void setOnFocused(Consumer<H> onFocused) {
+        this.notifyOnFocused = onFocused;
+    }
+
+    protected void handleOnFocusLost() {
+        if (notifyOnFocusLost != null) {
+            notifyOnFocusLost.accept(self());
+        }
+    }
+
+    public void setOnFocusLost(Consumer<H> onFocusLost) {
+        this.notifyOnFocusLost = onFocusLost;
+    }
+
+    public void setOnResize(Consumer<H> listener) {
+        this.notifyOnResize = listener;
+    }
+
+     public void setOnMove(Consumer<H> onMove) {
+        this.notifyOnMove = onMove;
+    }
+
+    /**
+     * Called by LayoutManager during registration
+     * This establishes the handle → layout manager connection
+     * 
+     * @param callback Callback to trigger layout recalculation
+     */
+    public void setLayoutCallback(Consumer<H> callback) {
+        this.layoutCallback = callback;
+    }
+
+   
+    /**
+     * Request layout recalculation
+     * Called by resize handler or when renderable changes
+     */
+    protected void requestLayout() {
+        // Don't request layout if we're currently applying layout
+        // (prevents infinite recursion)
+        if (applyingLayout) {
+            return;
+        }
+        
+        if (layoutCallback != null) {
+            layoutCallback.accept(self());
+        }
+    }
+
+    /**
+     * Called by LayoutManager before applying layout
+     * Prevents recursive layout requests
+     */
+    public void beginLayoutApplication() {
+        applyingLayout = true;
+    }
+
+    /**
+     * Called by LayoutManager after applying layout
+     * Re-enables layout requests
+     */
+    public void endLayoutApplication() {
+        applyingLayout = false;
+    }
+
+
+  
+
+    public void setRenderableChangeListener(BiConsumer<R,R> listener) {
+        this.onRenderableChanged = listener;
+    }
+
+    protected void updatedInitialzation(){
+        dimensionsInitialized = true;
+        if(rootRenderable != null){    
+            applyRegionToRenderable(rootRenderable, allocatedRegion);
+        }
+    }
+    
+    protected abstract void applyRegionToRenderable(R currentRenderable, S allocatedRegion);
+
+    protected void updateIsRendering() {
+        boolean prev = renderReadySnapshot;
+
+        renderReadySnapshot = renderStream != null && 
+            stateMachine.hasState(Container.STATE_STREAM_READY) &&
+            !stateMachine.hasState(Container.STATE_STREAM_ERROR) &&
+            stateMachine.hasState(Container.STATE_VISIBLE) &&
+            !stateMachine.hasState(Container.STATE_HIDDEN);
+
+        if(renderReadySnapshot != prev){
+            notifyOnRenderingChanged.accept(self(), renderReadySnapshot);
+            if(rootRenderable != null && rootRenderable.needsRender()){
+                render();
+            }
+        }
+    
     }
 
     protected abstract void setupStateTransitions();
 
-   
-    public void setOnContainerEvent(Consumer<NoteBytes> onContainerEvent) {
-        this.onContainerEvent = onContainerEvent;
+    public boolean isDimensionsInitialized() {
+        return dimensionsInitialized;
     }
-
-    public void setOnRenderRequest(Consumer<H> onRenderRequest){
-        this.renderRequester = onRenderRequest;
-    }  
-    public BitFlagStateMachine getStateMachine() {
+    
+    public ConcurrentBitFlagStateMachine getStateMachine() {
         return stateMachine;
     }
 
@@ -177,313 +480,328 @@ public abstract class ContainerHandle
         return stateMachine.getSnapshot();
     }
 
-     /**
-     * Check if container is visible (server-confirmed)
+    // ===== EVENT FILTERING =====
+    
+    
+    public CompletableFuture<Boolean> filterListIsEnableOnAdd(){ 
+        return uiExecutor.submit(()->{
+            return filterList.isEnableOnAdd(); 
+        });
+   
+    }
+
+    public CompletableFuture<Void> filterListSetEnableOnAdd(boolean enableOnAdd) {
+        return uiExecutor.submit(()->{
+            this.filterList.setEnableOnAdd(enableOnAdd);
+            return null;
+        });
+    }
+
+    public CompletableFuture<Void> filterListSetEnabled(boolean enabled){ 
+        return uiExecutor.submit(()->{
+            this.filterList.setEnabled(enabled); 
+            return null;
+        });
+    }
+
+    public CompletableFuture<Boolean> filterListRemoveEventFilterById(String id) {
+        return uiExecutor.submit(()->{
+            return this.filterList.removeEventFilterById(id);
+        });
+    }
+
+    public CompletableFuture<EventFilter> filterListGetEventFilterById(String id){
+        return uiExecutor.submit(()->{
+            return this.filterList.getEventFilterById(id);
+        });
+    }
+
+    public CompletableFuture<Boolean> filterListAddPredicate(Predicate<RoutedEvent> filter) {
+        return uiExecutor.submit(()->{
+            return this.filterList.addPredicate(filter);
+        });
+    }
+
+    public CompletableFuture<Boolean> filterListAddPredicateIfNotExists(EventFilter filter) {
+        return uiExecutor.submit(()->{
+            return this.filterList.addPredicateIfNotExists(filter);
+        });
+    }
+
+    public CompletableFuture<Boolean> filterListRemovePredicate(Predicate<RoutedEvent>  filter) {
+        return uiExecutor.submit(()->{
+            return this.filterList.removePredicate(filter);
+        });
+    }
+
+   
+    public CompletableFuture<Boolean> filterListIsEmpty() {
+        return uiExecutor.submit(()->{
+            return filterList.isEmpty();
+        });
+    }
+
+    public CompletableFuture<Void> filterListSetMode(FilterMode mode) {
+        return uiExecutor.submit(()->{
+            filterList.setMode(mode);
+            return null;
+        });
+    }
+
+    public CompletableFuture< FilterMode> filterListGetMode() {
+        return uiExecutor.submit(()->{
+            return filterList.getMode();
+        });
+    }
+
+    public CompletableFuture<Void> filterListClear(){
+        return uiExecutor.submit(()->{
+            filterList.clear();
+            return null;
+        });
+    }
+
+    /**
+     * Test if an event would be accepted by current filter
+     * 
+     * @param event Event to test
+     * @return true if event would be accepted, false if it would be dropped
      */
+    public boolean testEventFilter(RoutedEvent event) {
+
+        return filterList.test(event);
+    }
+
+    // ===== STATE CHECKS =====
+
     public boolean isContainerVisible() {
         return stateMachine.hasState(Container.STATE_VISIBLE);
     }
     
-    /**
-     * Check if container is hidden
-     */
     public boolean isContainerHidden() {
         return stateMachine.hasState(Container.STATE_HIDDEN);
     }
     
-    /**
-     * Check if container is focused
-     */
     public boolean isContainerFocused() {
         return stateMachine.hasState(Container.STATE_FOCUSED);
     }
     
-    /**
-     * Check if container is active (ready to render)
-     */
-    public boolean isContainerActive() {
-        return stateMachine.hasState(Container.STATE_ACTIVE);
-    }
-    
-    public boolean isDestroyed(){
+    public boolean isDestroyed() {
         return stateMachine.hasState(Container.STATE_DESTROYED);
     }
-    
 
-    /**
-     * Check if container is ready to render
-     * 
-     * All conditions that must be true for rendering:
-     * - Has a renderable
-     * - Renderable needs render
-     * - Container is active (STATE_ACTIVE)
-     * - Render stream is ready
-     * 
-     * @return true if ready to render
-     */
     public boolean isReadyToRender() {
-        // Must have renderable
-        if (currentRenderable == null || !currentRenderable.needsRender()) {
-            return false;
-        }
-
-        // Must be active
-        if (!stateMachine.hasState(Container.STATE_ACTIVE)) {
-            return false;
-        }
-        
-        // Stream must be ready
-        if (!isRenderStreamReady()) {
-            return false;
-        }
-        
-        return true;
+        return stateMachine.hasState(Container.STATE_STREAM_READY);
     }
-   
 
+    public boolean hasRenderable() {
+        return rootRenderable != null;
+    }
 
+    // ===== BUILDER =====
 
-    /**
-     * Builder for ContainerHandle
-     */
-    /**
-     * Base Builder with self-referential generics
-     * 
-     * @param <B> BatchBuilder type
-     * @param <E> RenderElement type
-     * @param <H> Handle type being built
-     * @param <BLD> Builder type (self-reference)
-     */
     public static abstract class Builder<
-        B extends BatchBuilder,
-        E extends RenderElement<B>,
-        R extends Renderable<B, E>,
-        H extends ContainerHandle<B, E, R, H, BLD>,
-        BLD extends Builder<B, E, R, H, BLD>
+        H extends ContainerHandle<?,H,?,?,?,?,?,?,?,?,?,BLD>,
+        BLD extends ContainerHandle.Builder<H,BLD>
     > {
         public String name;
         public String title;
-        public ContainerType containerType;
-        public NoteBytes rendererId = null;
+        public final NoteBytesReadOnly rendererId;
         public ContainerConfig containerConfig = new ContainerConfig();
-        public ContextPath renderingServicePath = CoreConstants.RENDERING_SERVICE_PATH;
+        public final ContextPath renderingServicePath;
         public boolean autoFocus = true;
-        
-        protected Builder(String name, ContainerType containerType) {
+        public EventFilterList filterList = null;
+        public ContextPath ioDaemonPath = null;
+
+        protected Builder(String name, ContextPath renderingServicePath, NoteBytesReadOnly rendererId) {
             this.name = name;
             this.title = name;
-            this.containerType = containerType;
+            this.rendererId = rendererId;
+            this.renderingServicePath = renderingServicePath;
         }
 
-        protected Builder(ContainerType containerType) {
-            this.containerType = containerType;
-        }
-        
-        /**
-         * Return self for method chaining
-         * Subclasses override to return their concrete builder type
-         */
         @SuppressWarnings("unchecked")
         protected BLD self() {
             return (BLD) this;
         }
+
+        public BLD ioDaemonPath(ContextPath ioDaemonPath){
+            this.ioDaemonPath = ioDaemonPath;
+            return self();
+        }
         
-        /**
-         * Set the process name
-         */
         public BLD name(String name) {
             this.name = name;
             return self();
         }
         
-        /**
-         * Set the display title
-         */
         public BLD title(String title) {
             this.title = title;
             return self();
         }
         
-        /**
-         * Set the container type
-         */
-        public BLD type(ContainerType type) {
-            this.containerType = type;
-            return self();
-        }
-        
-        /**
-         * Set the container configuration
-         */
+      
         public BLD config(ContainerConfig config) {
             this.containerConfig = config;
             return self();
         }
-        
-        /**
-         * Set the rendering service path
-         */
-        public BLD renderingService(ContextPath path) {
-            this.renderingServicePath = path;
-            return self();
-        }
-        
-        /**
-         * Set renderer ID
-         */
-        public BLD render(NoteBytes rendererId) {
-            this.rendererId = rendererId;
-            return self();
-        }
-        
-        /**
-         * Set auto-focus
-         */
+
         public BLD autoFocus(boolean autoFocus) {
             this.autoFocus = autoFocus;
             return self();
         }
         
         /**
-         * Build the handle
-         * Subclasses must implement to create their specific handle type
+         * Set event filterList for the container
+         * 
+         * @param filterList list of event filters to enable
          */
-        public abstract H build();
+        public BLD eventFilterList(EventFilterList filterList) {
+            this.filterList = filterList;
+            return self();
+        }
         
         /**
-         * Validate common builder state
+         * Add an event filter to the list 
+         * @param filter filter to add
          */
+        public BLD eventFilter(EventFilter filter) {
+            if(filterList == null){
+                filterList = new EventFilterList();
+            }
+            filterList.addPredicate(filter);
+            return self();
+        }
+        
+        public abstract H build();
+        
         protected void validate() {
             if (name == null || name.isEmpty()) {
                 throw new IllegalStateException("name is required");
             }
-            if (containerType == null) {
-                throw new IllegalStateException("containerType is required");
-            }
         }
     }
-
 
     protected Map<NoteBytesReadOnly, RoutedMessageExecutor> getRoutedMsgMap() {
         return m_msgMap;
     }
 
-    public NoteBytes getRendererId(){
+    public NoteBytes getRendererId() {
         return rendererId;
     }
-    
-
   
     @Override
     public CompletableFuture<Void> run() {
         Log.logMsg("[ContainerHandle] Started, auto-creating container: " + containerId);
         
+        return create();
+    }
+
+    public boolean isCreating(){
+        return stateMachine.hasState(Container.STATE_CREATING);
+    }
+
+    public boolean isRenderStreamReady(){
+        return stateMachine.hasState(Container.STATE_STREAM_READY);
+    }
+
+    public boolean isRenderStreamError(){
+        return stateMachine.hasState(Container.STATE_STREAM_ERROR);
+    }
+
+    public boolean canCreate(){
+        return !isCreating() && !isRenderStreamReady() && !isRenderStreamError();
+    }
+
+    public CompletableFuture<Void> create(){
+        if(!canCreate()){
+            if(isRenderStreamError()){
+                return CompletableFuture.failedFuture(streamError);
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        stateMachine.addState(Container.STATE_CREATING);
         registry.connect(contextPath, renderingServicePath);
         registry.connect(renderingServicePath, contextPath);
 
-        // Build CREATE_CONTAINER command with all our parameters
         NoteBytesMap createCmd = new NoteBytesMap();
         createCmd.put(Keys.CMD, ContainerCommands.CREATE_CONTAINER);
         createCmd.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
-        createCmd.put(Keys.TITLE, new NoteBytes(title));
-        createCmd.put(Keys.TYPE, new NoteBytes(containerType.name()));
+        createCmd.put(Keys.TITLE, title);
         createCmd.put(Keys.PATH, getParentPath().toNoteBytes());
         createCmd.put(Keys.CONFIG, containerConfig.toNoteBytes());
+        createCmd.put(ContainerCommands.RENDERER_ID, rendererId);
         createCmd.put(ContainerCommands.AUTO_FOCUS, builder.autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE);
         
-        if(builder.rendererId != null){
-            createCmd.put(ContainerCommands.RENDERER_ID, builder.rendererId);
-        }
-        
-        // Send CREATE_CONTAINER to RenderingService
+
         return request(renderingServicePath, createCmd.toNoteBytesReadOnly(), Duration.ofMillis(500))
             .thenCompose(response -> {
-                // Verify creation succeeded
                 NoteBytesMap responseMap = response.getPayload().getAsNoteBytesMap();
                 NoteBytesReadOnly status = responseMap.getReadOnly(Keys.STATUS);
-                
                 if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
                     String errorMsg = ProtocolObjects.getErrMsg(responseMap);
                     throw new RuntimeException("Container creation failed: " + errorMsg);
                 }
-                NoteBytes rendererId = responseMap.get(ContainerCommands.RENDERER_ID);
-                NoteBytes widthBytes = responseMap.get(Keys.WIDTH);
-                NoteBytes heightBytes = responseMap.get(Keys.HEIGHT);
-                
-                this.rendererId = rendererId.readOnly();
-                if(widthBytes != null){
-                    initialWidth = widthBytes.getAsInt();
-                }
-                if(heightBytes != null){
-                    initialHeight = heightBytes.getAsInt();
-                }
+            
+                allocatedRegion = extractRegionFromResponse(responseMap);
+                dimensionsInitialized = true;
                 Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
-                
-                // Request render stream TO RenderingService
+                uiExecutor.executeFireAndForget(()->{
+              
+                    stateMachine.addState(Container.STATE_INITIALIZED);
+                });
                 return requestStreamChannel(renderingServicePath);
-            })
-            .thenAccept(channel -> {
+            }).thenAccept(channel -> {
                 Log.logMsg("[ContainerHandle] Render stream established");
                 this.renderStream = channel;
-                this.renderWriter = new NoteBytesWriter(
-                    channel.getChannelStream()
-                );
+                this.renderWriter = new NoteBytesWriter(channel.getChannelStream());
+
+                channel.getReadyFuture().whenComplete((v,ex)->{
+                    uiExecutor.execute(()->{
+                        if(ex != null){
+                            stateMachine.addState(Container.STATE_STREAM_READY);
+                        }else{
+                            stateMachine.addState(Container.STATE_STREAM_ERROR);
+                            streamError = ex;
+                        }
+                        stateMachine.removeState(Container.STATE_CREATING);
+                    });
+                });
             })
-            .exceptionally(ex -> {
-                Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
-                stateMachine.setState(Container.STATE_DESTROYED);
-                return null;
+            .whenComplete((v, ex) -> {
+                if(ex != null){
+                    uiExecutor.executeFireAndForget(()->{
+                        stateMachine.removeState(Container.STATE_CREATING);
+                        stateMachine.addState(Container.STATE_STREAM_ERROR);
+                        Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
+                        streamError = ex;
+                        stateMachine.setState(Container.STATE_DESTROYED);
+                    });
+                }
             });
     }
 
-    public int getInitialWidth() {
-		return initialWidth;
-	}
-
-	public int getInitialHeight() {
-		return initialHeight;
-	}
-
     /**
-     * Get next generation ID
-     * Call this when starting a new screen/state
+     * Extract spatial region from container creation response
+     * Concrete implementations translate renderer-specific format
+     * 
+     * @param responseMap Response from renderer
+     * @return Initial region in renderer's coordinate system
      */
-    public long nextRenderGeneration() {
-        long gen = renderGeneration.incrementAndGet();
-        Log.logMsg("[ContainerHandle] New render generation: " + gen);
-        return gen;
-    }
+    protected abstract S extractRegionFromResponse(NoteBytesMap responseMap);
 
-    /**
-     * Get render generation
-     */
-    public AtomicLong getRenderGeneration() {
-        return renderGeneration;
-    }
+ 
 
-    /**
-     * Get current generation
-     */
-    public long getCurrentRenderGeneration() {
-        return renderGeneration.get();
-    }
 
-    /**
-     * Check if generation is still current
-     */
-    public boolean isRenderGenerationCurrent(long generation) {
-        return renderGeneration.get() == generation;
-    }
+
    
-    /**
-     * Override onStop to cleanup IODaemon connection
-     */
     @Override
     public void onStop() {
-        Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + containerId);
+        Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + 
+            containerId);
         stateMachine.setState(Container.STATE_DESTROYED);
         
-        // Close render stream
         if (renderStream != null) {
             try {
                 renderStream.close();
@@ -492,20 +810,18 @@ public abstract class ContainerHandle
                     "] Error closing render stream: " + e.getMessage());
             }
         }
-
-        defaultEventHandlers.clear();
         
-     
         super.onStop();
+
+        if (registry != null) {
+            registry.unregisterProcess(contextPath);
+        }
     }
 
     public CompletableFuture<Void> getEventStreamReadyFuture() { 
         return eventStreamReadyFuture; 
     }
 
-    /**
-     * Handle incoming messages (container events from RenderingService)
-     */
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         NoteBytesMap message = packet.getPayload().getAsNoteBytesMap();
@@ -520,6 +836,7 @@ public abstract class ContainerHandle
         
         if (msgExec != null) {
             return msgExec.execute(message, packet);
+               
         }
 
         return CompletableFuture.completedFuture(null);
@@ -527,7 +844,7 @@ public abstract class ContainerHandle
 
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        if(fromPath == null){
+        if (fromPath == null) {
             throw new NullPointerException("[ContainerHandle] handleStreamChannel from path is null");
         }
         
@@ -535,26 +852,25 @@ public abstract class ContainerHandle
             Log.logMsg("[ContainerHandle] Event stream received");
         
             this.eventChannel = channel;
-            Log.logMsg("[ContainerHandle] Event stream read thread starting");
-            // Setup reader on virtual thread
+            
             VirtualExecutors.getVirtualExecutor().execute(() -> {
                 Log.logMsg("[ContainerHandle] Event stream read thread started");
                 try (
                     NoteBytesReader reader = new NoteBytesReader(
-                        new PipedInputStream(channel.getChannelStream(),  StreamUtils.PIPE_BUFFER_SIZE)
+                        new PipedInputStream(channel.getChannelStream(), 
+                            StreamUtils.PIPE_BUFFER_SIZE)
                     );
                 ) {
-                    // Signal ready
                     channel.getReadyFuture().complete(null);
                     eventStreamReadyFuture.complete(null);
                     Log.logMsg("[ContainerHandle] Event stream reader active");
                     
-                    // Read and dispatch events
                     NoteBytes nextBytes = reader.nextNoteBytes();
                     
                     while (nextBytes != null && isAlive()) {
                         if (nextBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            processRoutedEvent(nextBytes);
+                            RoutedEvent event = createRoutedEvent(nextBytes);
+                            dispatchEvent(event);
                         }
                         nextBytes = reader.nextNoteBytes();
                     }
@@ -565,104 +881,130 @@ public abstract class ContainerHandle
                     throw new CompletionException(e);
                 }
             });
-            
         }
     }
-    
 
-    protected void processRoutedEvent(NoteBytes eventBytes) {
-        try{
-            Log.logNoteBytes("[ContainerHandle.processRoutedEvent]", eventBytes);
+   
 
-            if (onContainerEvent != null) {
-                onContainerEvent.accept(eventBytes);
-            } else {
-                Log.logMsg("[ContainerHandle] No event handler set, event ignored");
+    protected abstract RoutedEvent createRoutedEvent(NoteBytes eventBytes) throws IOException;
+        
+
+    private ArrayList<EventDispatcher> dispatchers = new ArrayList<>();
+
+    public CompletableFuture<EventDispatcher> addEventDispatcher(){
+        EventDispatcher dispatcher = (event)->{
+            dispatchEvent(event);
+        };
+        return uiExecutor.submit(()->{
+            dispatchers.add(dispatcher);
+            return dispatcher;
+        });
+    }
+
+    public CompletableFuture<Boolean> removeEventDispatcher(EventDispatcher dispatcher){
+        return uiExecutor.submit(()->{
+            return dispatchers.remove(dispatcher);
+        });
+    }
+
+    public CompletableFuture<Boolean> clearEventDispatchers(EventDispatcher dispatcher){
+        return uiExecutor.submit(()->{
+            dispatchers.clear();
+            return null;
+        });
+    }
+
+
+    public void dispatchEvent(RoutedEvent event) {
+        uiExecutor.executeFireAndForget(()->{
+       
+            if(containerPredicate == null || !containerPredicate.test(event)){
+                eventHandlerRegistry.dispatch(event);
             }
-        } catch(Exception ex){
-            Log.logError("[ContainerHandle] Failed to process routed event: " + ex.getMessage());
-        }
+        
+            if (event.isConsumed() || rootRenderable == null) {
+                return;
+            }
+
+            if (filterList.isEnabled()) {
+                if (!filterList.test(event)) {
+                    // Event filtered out
+                    Log.logMsg("[ContainerHandle:" + containerId + 
+                        "] Event filtered: " + 
+                        EventBytes.getEventName(event.getEventTypeBytes()) +
+                        " from " + event.getSourcePath());
+                    return;
+                }
+            }
+
+            if(manageFocus){
+                handleTraversalKey(event);
+
+                
+                if (shouldRouteToFocused(event)) {
+                    dispatchToFocused(event);
+                    return;
+                }
+            }
+
+            rootRenderable.dispatchEvent(event);
+        
+        });
+    }
+
+    public CompletableFuture<Void> setContainerEventPredicate(Predicate<RoutedEvent> containerFilter){
+        return uiExecutor.submit(()->{
+            this.containerPredicate = containerFilter;
+            return null;
+        });
+    }
+
+    public SerializedVirtualExecutor getUiExecutor() {
+        return uiExecutor;
     }
     
     // ===== CONTAINER OPERATIONS =====
  
-    /**
-     * Show container (unhide/restore)
-     */
     public CompletableFuture<Void> show() {
-        if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
         NoteBytesMap msg = ContainerCommands.showContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
-    /**
-     * Hide container (minimize)
-     */
     public CompletableFuture<Void> hide() {
-        if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
+        
         NoteBytesMap msg = ContainerCommands.hideContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
-    /**
-     * Focus container (bring to front)
-     */
     public CompletableFuture<Void> focus() {
-         if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
+        
         NoteBytesMap msg = ContainerCommands.focusContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
-    /**
-     * Maximize container
-     */
     public CompletableFuture<Void> maximize() {
-         if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
+        
         NoteBytesMap msg = ContainerCommands.maximizeContainer(containerId, rendererId);
         return sendToService(msg);
     }
     
-    /**
-     * Restore container (un-maximize)
-     */
     public CompletableFuture<Void> restore() {
-         if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
+        
         NoteBytesMap msg = ContainerCommands.restoreContainer(containerId, rendererId);
         return sendToService(msg);
     }
-    
-    
 
-    /**
-     * Destroy container
-     */
-    public CompletableFuture<Void> destroy() {
-        if (isDestroyed()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
+    public CompletableFuture<Void> close() {
+      
+        if (rendererId == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("[ContainerHandle] container not yet created"));
         }
         NoteBytesMap msg = ContainerCommands.destroyContainer(containerId, rendererId);
-        if(!isDestroying()){
-            return sendToService(msg)
-                .thenRun(() -> {
-                    // Self-cleanup after destroy
-                    if (registry != null) {
-                        registry.unregisterProcess(contextPath);
-                    }
-                });
-        }else{
+        if (!isDestroying()) {
+            stateMachine.addState(Container.STATE_DESTROYING);
+            return sendToService(msg);
+        } else {
             if (registry != null) {
                 registry.unregisterProcess(contextPath);
             }
@@ -670,13 +1012,8 @@ public abstract class ContainerHandle
         }
     }
     
-    /**
-     * Query container info
-     */
     public CompletableFuture<RoutedPacket> queryContainer() {
-        if(rendererId == null){
-            return CompletableFuture.failedFuture(new IllegalStateException( "[ContainerHandle] container is not yet created / rendererId is null"));
-        }
+       
         NoteBytesMap msg = ContainerCommands.queryContainer(containerId, rendererId);
         return request(renderingServicePath, msg.toNoteBytesReadOnly(), 
             Duration.ofSeconds(1));
@@ -684,103 +1021,27 @@ public abstract class ContainerHandle
     
     // ===== RENDER COMMAND SENDING =====
     
-
-
-   /**
-    * Send render command with generation check
-    * 
-    * @param command Render command to send
-    * @param generation Checks generation before writing
-    * @return
-    */
-    protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command, long generation) {
+    protected CompletableFuture<Void> sendRenderCommand(NoteBytes command) {
         return CompletableFuture.runAsync(() -> {
             Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command);
-            // GENERATION CHECK - prevents stale renders
-            if (!isRenderGenerationCurrent(generation)) {
-                return;
-            }
-            // Check if destroyed
-            if (isDestroyed()) {
-                throw new CompletionException(
-                    new IllegalStateException("Container already destroyed")
-                );
-            }
             
-            // Check if stream ready
-            if (!isRenderStreamReady()) {
-                throw new CompletionException(
-                    new IllegalStateException("Render stream not initialized")
-                );
-            }
-            
-            // Check if stream active
             if (!renderStream.isActive() || renderStream.isClosed()) {
                 Log.logMsg("[ContainerHandle] Render stream is closed, skipping");
                 return;
             }
             
-            
-            
             try {
-                NoteBytes noteBytes = command.toNoteBytes();
-                renderWriter.write(noteBytes);
+                renderWriter.write(command);
                 renderWriter.flush();
             } catch (IOException ex) {
                 throw new CompletionException(ex);
             }
             
-        }, renderStream.getWriteExecutor()); // Single-threaded executor ensures ordering
+        }, renderStream.getWriteExecutor());
     }
 
-    /**
-     * Convenience method: send with current generation
-     */
-    protected CompletableFuture<Void> sendRenderCommand(NoteBytesMap command) {
-        return sendRenderCommand(command, getCurrentRenderGeneration());
-    }
     
-     /**
-     * Check if container needs rendering
-     * 
-     * Render manager calls this to check if worth polling
-     */
-    public boolean isDirty() {
-        return this.stateMachine.hasState(Container.STATE_RENDER_REQUESTED);
-    }
-
-    /**
-     * Clear dirty flag
-     * 
-     * Render manager calls this after successful render
-     */
-    public void clearDirtyFlag() {
-        this.stateMachine.removeState(Container.STATE_RENDER_REQUESTED);
-    }
-
-
-    public void invalidate() {
-        stateMachine.addState(Container.STATE_RENDER_REQUESTED);
-        
-        // Always try to notify render requester
-        if(renderRequester != null){
-            try {
-                renderRequester.accept(self());
-            } catch (Exception ex) {
-                Log.logError("[ContainerHandle:" + containerId + "] Render requester failed: " + ex.getMessage());
-            }
-        } else {
-            // No render requester set - log warning in debug mode
-            Log.logMsg("[ContainerHandle:" + containerId + "] invalidate() called but no renderRequester set");
-        }
-    }
-
-    // ===== SERVICE COMMUNICATION =====
-    
-    /**
-     * Send command to RenderingService
-     */
-    private CompletableFuture<Void> sendToService(NoteBytesMap command) {
+    protected CompletableFuture<Void> sendToService(NoteBytesMap command) {
         if (isDestroyed()) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Container already destroyed")
@@ -799,16 +1060,10 @@ public abstract class ContainerHandle
                 }
             });
     }
-    
 
-
-
-
-    public boolean isDestroying(){
+    public boolean isDestroying() {
         return stateMachine.hasState(Container.STATE_DESTROYING);
     }
-
-
     
     // ===== GETTERS =====
     
@@ -820,10 +1075,6 @@ public abstract class ContainerHandle
         return title;
     }
     
-    public ContainerType getType() {
-        return containerType;
-    }
-    
     public ContainerConfig getConfig() {
         return containerConfig;
     }
@@ -831,139 +1082,614 @@ public abstract class ContainerHandle
     public ContextPath getRenderingServicePath() {
         return renderingServicePath;
     }
-    
-    
-    public void setRenderable(R renderable) {
-        Log.logMsg(String.format("[ContainerHandle:%s] setRenderable() called: old=%s, new=%s",
-            containerId, 
-            currentRenderable != null ? currentRenderable.getClass().getSimpleName() : "null",
-            renderable != null ? renderable.getClass().getSimpleName() : "null"
-        ));
 
-        R old = currentRenderable;
+    protected void executeFireAndForget(Runnable run) {
+        uiExecutor.executeFireAndForget(run);
+    }
 
-        this.currentRenderable = renderable;
+    protected CompletableFuture<Void> execute(Runnable run) {
+        return uiExecutor.execute(run);
+    }
 
-        if (old != renderable && old != null) {
-            // New renderable - increment generation (layout change)
-            nextRenderGeneration();
+    public CompletableFuture<Void> setRenderable(R renderable) {
+        return setRenderable(renderable, null);
+    }
+
+    public CompletableFuture<Void> setRenderable(R renderable, LCB callback) {
+        return uiExecutor.execute(() -> {
+            R old = rootRenderable;
+            if(old == renderable){
+                return;
+            }
+            if (old != null) {
+                old.unregisterRenderable();
+                old.setRenderRequest(null);
+                if (onRenderableUnregistered != null) {
+                    onRenderableUnregistered.accept(old);
+                }
+            }
             
-            Log.logMsg(String.format(
-                "[TerminalContainerHandle:%s] Renderable changed (gen=%d)",
-                getId(), getCurrentRenderGeneration()
-            ));
+            this.rootRenderable = renderable;
+            resetFocusInternal();
+
+            if (onRenderableChanged != null && old != renderable) {
+                onRenderableChanged.accept(old, renderable);
+            }
+            
+            if (renderable != null && old != renderable) {
+                renderable.setRenderRequest(this::renderableRequestRender);
+                
+                renderableLayoutManager.registerRenderable(renderable, callback);
+                
+                if (dimensionsInitialized && allocatedRegion != null) {
+                    applyRegionToRenderable(renderable, allocatedRegion);
+                }
+                
+                if (onRenderableRegistered != null) {
+                    onRenderableRegistered.accept(renderable);
+                }
+            }
+        });
+    }
+
+        
+    protected void renderableRequestRender(R renderable) {
+        uiExecutor.executeFireAndForget(()->renderableRequestRenderInternal(renderable));
+    }
+
+    private void renderableRequestRenderInternal(R renderable){
+        if (rootRenderable != renderable) {
+                return; // Stale request from old renderable
+            }
+            
+            if (!renderReadySnapshot) {
+                return; // Not ready to render yet
+            }
+            
+            if (!rootRenderable.needsRender()) {
+                return; // Already rendered
+            }
+            
+            render();
+    }
+
+    public CompletableFuture<R> getRenderable() {
+        return uiExecutor.submit(this::getRenderableInternal);
+    }
+
+    private R getRenderableInternal(){
+        return rootRenderable;
+    }
+
+    public CompletableFuture<Void> clearRenderable() {
+        return uiExecutor.execute(this::clearRenderableInternal);
+      
+        
+    }
+
+    private Void clearRenderableInternal(){
+          if (this.rootRenderable != null) {
+            // Async unregister
+            renderableLayoutManager.unregisterRenderableTree(rootRenderable);
+            rootRenderable.setRenderRequest(null);
+            
+            if (onRenderableUnregistered != null) {
+                onRenderableUnregistered.accept(rootRenderable);
+            }
         }
+        this.rootRenderable = null;
+        return null;
     }
 
-    public R getRenderable() {
-        return currentRenderable;
+    public void setOnRenderableRegistered(Consumer<R> callback) {
+        this.onRenderableRegistered = callback;
     }
 
-     /**
-     * Clear renderable
-     */
-    public void clearRenderable() {
-        this.currentRenderable = null;
-        clearDirtyFlag();
+    public void setOnRenderableUnregistered(Consumer<R> callback) {
+        this.onRenderableUnregistered = callback;
     }
-    
+
+
+
+    protected abstract B createBatch();
    
-    public CompletableFuture<Void> render() {
-        if (currentRenderable == null) {
-            return CompletableFuture.completedFuture(null);
+
+    private void render(){
+        uiExecutor.executeFireAndForget(this::renderInternal);
+    }
+
+    /**
+     * Perform actual render - runs on serialExec
+     */
+    private void renderInternal() {
+       
+        B batch = createBatch();
+        rootRenderable.toBatch(batch);
+        
+        if (batch.isEmpty()) {
+            rootRenderable.clearRenderFlag();
+            return;
         }
         
-        if (!isRenderStreamReady()) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("Render stream not ready")
-            );
-        }
+        NoteBytes batchCommand = batch.build();
         
-        long gen = getCurrentRenderGeneration();
-        RenderState<B, E> state = currentRenderable.getRenderState();
-        B batch = state.toBatch(self(), gen);
+        // Send async on stream executor (don't block serialExec)
+        renderStream.getWriteExecutor().execute(() -> {
+            try {
+                renderWriter.write(batchCommand);
+                renderWriter.flush();
+            } catch (IOException ex) {
+                Log.logError("[ContainerHandle:" + containerId + 
+                    "] Render write failed", ex);
+            }
+        });
         
-        return executeBatch(batch)
-            .thenRun(() -> {
-                clearDirtyFlag();
-                currentRenderable.clearRenderFlag();
-            });
+        rootRenderable.clearRenderFlag();
+      
     }
     
     @SuppressWarnings("unchecked")
-	public H self() {
+    public H self() {
         return (H) this;
     }
-
-
-       /**
-     * Execute a batch of commands
-     * 
-     * This sends the entire batch as a single command over the stream,
-     * waits for completion, and returns a single future.
-     * 
-     * @param batch The batch builder with commands
-     * @return CompletableFuture that completes when batch is done
+    /*
+     * Add handlers to the flow process message router
      */
-    public CompletableFuture<Void> executeBatch(B batch) {
-        if (batch.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        // Check generation before sending
-        if (!isRenderGenerationCurrent(batch.getGeneration())) {
-            Log.logMsg("[TerminalContainerHandle] Skipping batch - stale generation: " + 
-                batch.getGeneration() + " (current: " + getCurrentRenderGeneration() + ")");
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        NoteBytesMap batchCommand = batch.build();
-        return sendRenderCommand(batchCommand, batch.getGeneration());
+    protected abstract void setupRoutedMessageMap();
+
+    private void setupEventHandlers() {
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RENDERED, 
+            this::handleContainerRendered);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_REGION_CHANGED, 
+            this::handleContainerResized);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSED, 
+            this::handleContainerClosed);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_SHOWN, 
+            this::handleContainerShown);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_HIDDEN, 
+            this::handleContainerHidden);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, 
+            this::handleContainerFocusGained);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_FOCUS_LOST, 
+            this::handleContainerFocusLost);
     }
 
-    public abstract B batch();
+    private void handleContainerRendered(RoutedEvent event) {
+        onContainerRendered(event);
+    }
+    
+    private void handleContainerResized(RoutedEvent event) {
+        onContainerResized(event);
+    }
+    
+    private void handleContainerClosed(RoutedEvent event) {
+        onContainerClosed();
+    }
+    
+    private void handleContainerShown(RoutedEvent event) {
+        onContainerShown();
+    }
+    
+    private void handleContainerHidden(RoutedEvent event) {
+        onContainerHidden();
+    }
+    
+    private void handleContainerFocusGained(RoutedEvent event) {
+        onContainerFocusGained();
+    }
+    
+    private void handleContainerFocusLost(RoutedEvent event) {
+        onContainerFocusLost();
+    }
+    
+ 
+    protected abstract void onContainerRendered(RoutedEvent event);
+    protected abstract void onContainerResized(RoutedEvent event);
 
-    public abstract B batch(long generation);
+
+    /**
+     * Extract region from resize event
+     * Concrete implementations interpret event data
+     */
+    protected abstract S extractRegionFromResizeEvent(RoutedEvent event);
+
+    public abstract CompletableFuture<Void> requestContainerRegion(S region);
+    /**
+     * Check if two regions are equal
+     */
+    protected abstract boolean regionsEqual(S a, S b);
 
 
-    public boolean isRenderStreamReady() {
-        if(!renderReadyCache){
-            renderReadyCache = renderStream != null && 
-                renderStream.getReadyFuture().isDone() &&
-                !renderStream.getReadyFuture().isCompletedExceptionally();
-            return renderReadyCache;
-        }else{
-            renderReadyCache = renderReadyCache && renderStream != null;
-            return renderReadyCache;
+    public S getAllocatedRegion() { 
+        return allocatedRegion != null ? allocatedRegion.copy() : null; 
+    }
+
+
+    protected void onContainerShown() {
+        stateMachine.addState(Container.STATE_VISIBLE);
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container shown");
+    }
+
+    public boolean isVisible() {
+        return stateMachine.hasState(Container.STATE_VISIBLE);
+    }
+    
+    protected void onContainerHidden() {
+        stateMachine.removeState(Container.STATE_VISIBLE);
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container hidden");
+    }
+    
+    protected void onContainerFocusGained() {
+        stateMachine.addState(Container.STATE_FOCUSED);
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container focused");
+    }
+    
+    protected void onContainerFocusLost() {
+        stateMachine.removeState(Container.STATE_FOCUSED);
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container focus lost");
+    }
+
+
+
+    void setTraversalKeyInternal(NoteBytesReadOnly key) {
+        traversalKey = key != null ? key : KeyCodeBytes.TAB;
+    }
+
+    NoteBytesReadOnly getTraversalKeyInternal() {
+        return traversalKey;
+    }
+
+    void setTraversalStrategyInternal(FocusTraversalStrategy strategy) {
+        if (strategy != null) {
+            this.strategy = strategy;
         }
     }
 
-    public CompletableFuture<Void> waitUntilReady() {
-        if (renderStream == null) {
-            // Stream hasn't been created yet, wait for it
-            Log.logMsg("[ContainerHandle] waiting for ready");
-            return CompletableFuture.runAsync(() -> {
-                while (renderStream == null && !isDestroyed()) {
+    FocusTraversalStrategy getTraversalStrategyInternal() {
+        return strategy;
+    }
+
+    void resetFocusInternal() {
+        if (focused != null) {
+            focused.clearFocus();
+        }
+        focused = null;
+    }
+
+    void requestFocusInternal(R renderable) {
+        if (renderable == null) {
+            return;
+        }
+        if (!renderable.isFocusable()) {
+            return;
+        }
+        setFocusedInternal(renderable);
+    }
+
+
+    void handleTraversalKey(RoutedEvent event) {
+        
+        NoteBytes keyBytes = getKeyBytes(event);
+        if (keyBytes == null) {
+            return;
+        }
+
+        NoteBytesReadOnly key = traversalKey;
+        if (key != null && keyBytes.equals(key)) {
+            boolean reverse = (event.getStateFlags() & EventBytes.StateFlags.MOD_SHIFT) != 0;
+            if (focusNextInternal(reverse)) {
+                event.setConsumed(true);
+                if (event instanceof AutoCloseable closable) {
                     try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException(e);
+                        closable.close();
+                    } catch (Exception ex) {
+                        Log.logError("[ContainerHandle] Focus event close failed", ex);
                     }
                 }
-                if (isDestroyed()) {
-                    throw new IllegalStateException("Container destroyed before ready");
-                }
-            }, VirtualExecutors.getVirtualExecutor()).thenCompose(v -> {
-                Log.logMsg("[ContainerHandle] remderStrea null waiting finished, returning ready future");
-                return renderStream.getReadyFuture();
-            });
+            }
         }
-        
-        // Stream exists, just return its ready future
-        Log.logMsg("[ContainerHandle] returning ready future");
-        return renderStream.getReadyFuture();
     }
 
- 
+    boolean shouldRouteToFocused(RoutedEvent event) {
+        return isKeyboardEvent(event) && getFocusedRenderableInternal() != null;
+    }
+
+    void dispatchToFocused(RoutedEvent event) {
+        R target = getFocusedRenderableInternal();
+        if (target != null) {
+            target.dispatchEvent(event);
+        }
+    }
+
+    protected boolean focusNextInternal(boolean reverse) {
+        List<R> focusables = getOrderedFocusables();
+        if (focusables.isEmpty()) {
+            return false;
+        }
+
+        int size = focusables.size();
+        int currentIndex = focused != null ? focusables.indexOf(focused) : -1;
+        int nextIndex;
+        if (currentIndex == -1) {
+            nextIndex = reverse ? size - 1 : 0;
+        } else if (reverse) {
+            nextIndex = (currentIndex - 1 + size) % size;
+        } else {
+            nextIndex = (currentIndex + 1) % size;
+        }
+
+        setFocusedInternal(focusables.get(nextIndex));
+        return true;
+    }
+
+    private void setFocusedInternal(R next) {
+        if (next == focused) {
+            return;
+        }
+
+        if (focused != null) {
+            focused.clearFocus();
+        }
+
+        focused = next;
+        if (focused != null) {
+            focused.focus();
+        }
+    }
+
+    protected R getFocusedRenderableInternal() {
+        if (focused != null && !focused.isFocusable()) {
+            focused.clearFocus();
+            focused = null;
+        }
+        return focused;
+    }
+
+    protected List<R> getOrderedFocusables()
+    {
+        if (rootRenderable == null) {
+            return Collections.emptyList();
+        }
+
+        List<R> focusables = rootRenderable.getFocusableDescendants();
+        if (strategy == FocusTraversalStrategy.TAB_INDEX_THEN_SCREEN) {
+            focusables.sort(this::compareByScreenPosition);
+        }
+        return focusables;
+    }
+
+
+    protected abstract int compareByScreenPosition(R a, R b);
+
+    protected int compareFocusIndex(R a, R b) {
+        int ai = a.getFocusIndex();
+        int bi = b.getFocusIndex();
+        boolean aSet = ai >= 0;
+        boolean bSet = bi >= 0;
+        if (aSet && bSet) {
+            return Integer.compare(ai, bi);
+        }
+        if (aSet) {
+            return -1;
+        }
+        if (bSet) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private NoteBytes getKeyBytes(RoutedEvent event) {
+        if (event instanceof KeyDownEvent kd) {
+            return kd.getKeyCodeBytes();
+        }
+        if (event instanceof EphemeralKeyDownEvent ek) {
+            return ek.getKeyCodeBytes();
+        }
+        return null;
+    }
+
+    private boolean isKeyboardEvent(RoutedEvent event) {
+        NoteBytes type = event.getEventTypeBytes();
+        return EventBytes.EVENT_KEY_DOWN.equals(type)
+            || EventBytes.EVENT_KEY_UP.equals(type)
+            || EventBytes.EVENT_KEY_REPEAT.equals(type)
+            || EventBytes.EVENT_KEY_CHAR.equals(type);
+    }
+
+    
+    public RM getRenderableLayoutManager(){
+        return renderableLayoutManager;
+    }
+
+    public CompletableFuture<Void> focusNext() {
+        return uiExecutor.execute(() -> {
+            focusNextInternal(false);
+        });
+    }
+
+    public CompletableFuture<Void> focusPrevious() {
+        return uiExecutor.execute(() -> {
+            focusNextInternal(true);
+        });
+    }
+
+    public CompletableFuture<Void> setFocusTraversalKey(NoteBytesReadOnly key) {
+        return uiExecutor.execute(() -> {
+            setTraversalKeyInternal(key);
+        });
+    }
+
+    public CompletableFuture<Void> setFocusTraversalStrategy(FocusTraversalStrategy strategy) {
+        return uiExecutor.execute(() -> {
+            setTraversalStrategyInternal(strategy);
+        });
+    }
+
+    public CompletableFuture<NoteBytesReadOnly> getFocusTraversalKey() {
+        return uiExecutor.submit(() -> getTraversalKeyInternal());
+    }
+
+    public CompletableFuture<FocusTraversalStrategy> getFocusTraversalStrategy() {
+        return uiExecutor.submit(() -> getTraversalStrategyInternal());
+    }
+
+    protected void onContainerClosed() {
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container closed");
+        stateMachine.removeState(Container.STATE_STREAM_READY);
+        
+        CompletableFuture.allOf(
+            deviceManagers.values().stream()
+                .map(DM::detach)
+                .toArray(CompletableFuture[]::new)
+        )
+        .thenCompose(v -> {
+            deviceManagers.clear();
+            return closeIOSession();
+        })
+        .thenRun(() -> {
+            if (rootRenderable != null) {
+                renderableLayoutManager.unregisterRenderableTree(rootRenderable);
+            }
+            // Shutdown handles executor cleanup
+            renderableLayoutManager.shutdown();
+        })
+        .thenRun(this::kill)
+        .exceptionally(ex -> {
+            Log.logError("[ContainerHandle:" + containerId + "] Cleanup error", ex);
+            kill();
+            return null;
+        });
+        
+        handleOnClosed();
+    }
+
+    /**
+     * Connect this handle to IODaemon
+     * Called automatically when device managers need it
+     */
+    /**
+     * Ensure IODaemon session exists for this handle
+     * Called automatically by DeviceManagers
+     */
+    public CompletableFuture<ClientSession> ensureIOSession() {
+        if(ioDaemonPath == null){
+            return CompletableFuture.failedFuture(new IllegalStateException("IoDaemon Path not set"));
+        }
+        return getIODaemonSession()
+            .thenCompose(clientSession->{
+                if (clientSession != null && clientSession.isAlive()) {
+                    return CompletableFuture.completedFuture(clientSession);
+                }
+
+                String sessionId = NoteUUID.createSafeUUID128();
+                int pid = (int) ProcessHandle.current().pid();
+                
+                return registry.request(
+                    ioDaemonPath,
+                    new NoteBytesObject(
+                        new NoteBytesPair(Keys.CMD, SESSION_CMDS.CREATE_SESSION),
+                        new NoteBytesPair(Keys.SESSION_ID, sessionId),
+                        new NoteBytesPair(Keys.PID, pid)
+                    ).readOnly(),
+                    Duration.ofSeconds(2)
+                )
+                .thenCompose(reply -> {
+                    NoteBytesReadOnly status = reply.getPayload().getAsNoteBytesMap()
+                        .getReadOnly(Keys.STATUS);
+                    
+                    if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
+                        String errorMsg = reply.getPayload().getAsNoteBytesMap()
+                            .get(Keys.MSG).getAsString();
+                        throw new RuntimeException("Failed to create session: " + errorMsg);
+                    }
+                    
+                    NoteBytes pathBytes = reply.getPayload().getAsNoteBytesMap().get(Keys.PATH);
+                    ContextPath sessionPath = ContextPath.fromNoteBytes(pathBytes);
+                    
+                    ioSession = (ClientSession) registry.getProcess(sessionPath);
+                    
+                    Log.logMsg("[ContainerHandle:" + containerId + 
+                        "] IODaemon session created: " + sessionPath);
+                    
+                    return setIdoDaemonSession(ioSession);
+                       
+                });
+        });
+        
+    }
+
+    private CompletableFuture<ClientSession> setIdoDaemonSession(ClientSession session){
+        return uiExecutor.submit(()->{
+            this.ioSession = session;
+            return session;
+        });
+    }
+
+    public CompletableFuture<ClientSession> getIODaemonSession(){
+        return uiExecutor.submit(()->{
+            return this.ioSession;
+        });
+    }
+    
+  
+    /**
+     * Close IODaemon session
+     */
+    private CompletableFuture<Void> closeIOSession() {
+        
+        return getIODaemonSession()
+            .thenCompose(ioSession->{
+                if (ioSession == null) {
+                    return CompletableFuture.completedFuture(null);
+                }
+                
+                ClientSession session = ioSession;
+                ioSession = null;
+                
+                return session.shutdown()
+                    .thenRun(() -> {
+                        Log.logMsg("[ContainerHandle:" + containerId + 
+                            "] IODaemon session closed");
+                    })
+                    .exceptionally(ex -> {
+                        Log.logError("[ContainerHandle:" + containerId + 
+                            "] Session close error: " + ex.getMessage());
+                        return null;
+                    });
+             });
+    }
+   
+
+
+    /**
+     * Register a device manager with this handle
+     */
+    public CompletableFuture<DM> addDeviceManager(String id, DM manager) {
+        return uiExecutor.submit(() -> {
+            deviceManagers.put(id, manager);
+            manager.attachToHandle(self());
+            return manager;
+        });
+    }
+
+     public CompletableFuture<DM> getDeviceManager(String id) {
+        return uiExecutor.submit(() -> {
+            return deviceManagers.get(id);
+        });
+    }
+
+
+    /**
+     * Remove a device manager
+     */
+    public CompletableFuture<Void> removeDeviceManager(String id) {
+        return uiExecutor.submit(() -> deviceManagers.remove(id)).thenCompose(manager->{
+            if(manager != null){
+                Log.logMsg("[ContainerHandle:" + containerId + "] Device manager removed: " + id);
+                return manager.detach();
+            }
+            return CompletableFuture.completedFuture(null);
+        });
+    }
+
 }

@@ -12,7 +12,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * These events contain sensitive data that must be wiped after use
  * SECURITY CRITICAL: Always use try-with-resources
  */
-public abstract class EphemeralRoutedEvent implements RoutedEvent, AutoCloseable {
+public abstract class EphemeralRoutedEvent extends RoutedEvent implements AutoCloseable {
     private final ContextPath sourcePath;
     protected final NoteBytesEphemeral eventType;
     protected final int[] flag = new int[1];

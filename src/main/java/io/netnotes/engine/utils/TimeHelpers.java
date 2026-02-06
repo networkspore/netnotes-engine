@@ -22,6 +22,23 @@ public class TimeHelpers {
         return instant.toEpochMilli();
     }
 
+    public static String formatTimeAmount(long timeAmount) {
+        long seconds = timeAmount / 1000;
+        long minutes = seconds / 60;
+        long hours = minutes / 60;
+        long days = hours / 24;
+        
+        if (days > 0) {
+            return String.format("%dd %dh", days, hours % 24);
+        } else if (hours > 0) {
+            return String.format("%dh %dm", hours, minutes % 60);
+        } else if (minutes > 0) {
+            return String.format("%dm %ds", minutes, seconds % 60);
+        } else {
+            return String.format("%ds", seconds);
+        }
+    }
+
     /**
      * Format timestamp for display
      */

@@ -88,7 +88,7 @@ public final class EphemeralEventsFactory {
             NoteBytesPairEphemeral flagsPair = body.get(Keys.STATE_FLAGS);
             NoteBytesPairEphemeral payloadPair = body.get(Keys.PAYLOAD);
         ) {
-            NoteBytesEphemeral typeBytes = typePair.getValue();
+            NoteBytesEphemeral typeBytes = typePair.getValue().copy();
             
             // Extract state flags (optional)
             int flags = flagsPair != null ? flags = flagsPair.getValue().getAsInt() :0;
@@ -102,6 +102,7 @@ public final class EphemeralEventsFactory {
             
       
             // Lookup constructor for event type (payload ownership transferred to event)
+            @SuppressWarnings("unlikely-arg-type")
             EphemeralEventDeserializer constructor = REGISTRY.get(typeBytes);
 
             if (constructor == null) {

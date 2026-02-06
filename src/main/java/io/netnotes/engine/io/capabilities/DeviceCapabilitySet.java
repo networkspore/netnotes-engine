@@ -68,10 +68,10 @@ public class DeviceCapabilitySet {
             int bitLength = changedBits.bitLength();
             for (int i = 0; i < bitLength; i++) {
                 if (changedBits.testBit(i)) {
-                    long bitValue = 1L << i;
-                    String capName = REGISTRY.getNameForBit(bitValue);
+                   
+                    String capName = REGISTRY.getNameForBit(i);
                     
-                    if (capName != null && !availableCapabilities.hasFlag(bitValue)) {
+                    if (capName != null && !availableCapabilities.hasFlag(i)) {
                         Log.logError("Warning: Enabled unavailable capability: " + capName);
                     }
                 }
@@ -131,7 +131,7 @@ public class DeviceCapabilitySet {
             throw new IllegalArgumentException("Unknown capability: " + capability);
         }
         
-        long bit = REGISTRY.getBitForName(capability);
+        int bit = REGISTRY.getBitForName(capability);
         availableCapabilities.addState(bit);
     }
     
@@ -143,7 +143,7 @@ public class DeviceCapabilitySet {
             return false;
         }
         
-        long bit = REGISTRY.getBitForName(capability);
+        int bit = REGISTRY.getBitForName(capability);
         return availableCapabilities.hasFlag(bit);
     }
     
@@ -156,7 +156,7 @@ public class DeviceCapabilitySet {
             throw new IllegalArgumentException("Unknown capability: " + capability);
         }
         
-        long bit = REGISTRY.getBitForName(capability);
+        int bit = REGISTRY.getBitForName(capability);
         
         // Check constraints
         if (!constraints.canEnable(capability, this)) {
@@ -185,7 +185,7 @@ public class DeviceCapabilitySet {
             return;
         }
         
-        long bit = REGISTRY.getBitForName(capability);
+        int bit = REGISTRY.getBitForName(capability);
         enabledCapabilities.removeState(bit);
     }
     
@@ -197,7 +197,7 @@ public class DeviceCapabilitySet {
             return false;
         }
         
-        long bit = REGISTRY.getBitForName(capability);
+        int bit = REGISTRY.getBitForName(capability);
         return enabledCapabilities.hasFlag(bit);
     }
     
@@ -329,25 +329,24 @@ public class DeviceCapabilitySet {
         
         // Serialize children
         if (!children.isEmpty()) {
-            NoteBytesArray childArray = new NoteBytesArray();
-            for (DeviceCapabilitySet child : children) {
-                childArray.add(child.toNoteBytes());
-            }
-            obj.add("children", childArray);
+            NoteBytes[] childrenArray = children.stream()
+                .map(value->value.toNoteBytes())
+                .toArray(NoteBytes[]::new);
+
+            obj.add("children", new NoteBytesArray(childrenArray));
         }
         
-        // Add human-readable capability names for debugging
-        NoteBytesArray availableNames = new NoteBytesArray();
-        for (String cap : getAvailableCapabilities()) {
-            availableNames.add(new NoteBytesReadOnly(cap));
-        }
-        obj.add("available_names", availableNames);
+        NoteBytes[] availableCapabilityNames = getAvailableCapabilities().stream()
+            .map(value->new NoteBytes(value))
+            .toArray(NoteBytes[]::new);
+
+        obj.add("available_names", new NoteBytesArray(availableCapabilityNames));
         
-        NoteBytesArray enabledNames = new NoteBytesArray();
-        for (String cap : getEnabledCapabilities()) {
-            enabledNames.add(new NoteBytesReadOnly(cap));
-        }
-        obj.add("enabled_names", enabledNames);
+        NoteBytes[] enabledNames = getEnabledCapabilities().stream()
+            .map(value->new NoteBytes(value))
+            .toArray(NoteBytes[]::new);
+
+        obj.add("enabled_names", new NoteBytesArray(enabledNames));
         
         return obj;
     }
@@ -380,6 +379,7 @@ public class DeviceCapabilitySet {
         NoteBytes childrenBytes = map.get(Keys.CHILDREN);
         if (childrenBytes != null) {
             NoteBytesArray childArray = childrenBytes.getAsNoteBytesArray();
+            
             for (NoteBytes childBytes : childArray.getAsArray()) {
                 DeviceCapabilitySet child = fromNoteBytes(childBytes.getAsNoteBytesObject());
                 caps.children.add(child);

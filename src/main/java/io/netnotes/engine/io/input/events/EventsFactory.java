@@ -4,16 +4,23 @@ import java.util.HashMap;
 import java.util.Map;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.events.containers.ContainerCloseEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerFocusGainedEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerFocusLostEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerHiddenEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerMaximizeEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerMinimizeEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerMoveEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerResizeEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerRestoreEvent;
-import io.netnotes.engine.io.input.events.containers.ContainerShownEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerCloseEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerFocusGainedEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerFocusLostEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerHiddenEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerMaximizeEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerMinimizeEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerMoveEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerResizeEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerRestoreEvent;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerShownEvent;
+import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
+import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.io.input.events.keyboardEvents.KeyRepeatEvent;
+import io.netnotes.engine.io.input.events.keyboardEvents.KeyUpEvent;
+import io.netnotes.engine.io.input.events.mouseEvents.MouseButtonDownEvent;
+import io.netnotes.engine.io.input.events.mouseEvents.MouseButtonUpEvent;
+import io.netnotes.engine.io.input.events.mouseEvents.MouseScrollEvent;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.NoteBytes;
@@ -53,7 +60,7 @@ public final class EventsFactory {
             ));
 
         REGISTRY.put(EventBytes.EVENT_MOUSE_SCROLL, (src, type, flags, p) ->
-            new ScrollEvent(src,
+            new MouseScrollEvent(src,
                 type,
                 flags,
                 p[0].getAsDouble(),
@@ -112,7 +119,7 @@ public final class EventsFactory {
         REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_LOST, (src, type, flags, p) ->
             new ContainerFocusLostEvent(src, type, flags));
 
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESIZED, (src, type, flags, p) ->{
+        REGISTRY.put(EventBytes.EVENT_CONTAINER_REGION_CHANGED, (src, type, flags, p) ->{
             if(p == null){
                 throw new IllegalStateException("Invalid ContainerMoveEvent: missing payload");
             }

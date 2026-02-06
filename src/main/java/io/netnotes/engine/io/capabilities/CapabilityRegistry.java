@@ -17,10 +17,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class CapabilityRegistry {
     
     // Capability name → bit position
-    private final Map<String, Long> capabilityBits = new ConcurrentHashMap<>();
+    private final Map<String, Integer> capabilityBits = new ConcurrentHashMap<>();
     
     // Bit position → capability name
-    private final Map<Long, String> bitToCapability = new ConcurrentHashMap<>();
+    private final Map<Integer, String> bitToCapability = new ConcurrentHashMap<>();
     
     // Capability name → user-friendly name
     private final Map<String, String> userFriendlyNames = new ConcurrentHashMap<>();
@@ -100,7 +100,7 @@ public class CapabilityRegistry {
             return; // Already registered
         }
         
-        long bit = 1L << nextBit.getAndIncrement();
+        int bit = nextBit.getAndIncrement();
         
         capabilityBits.put(name, bit);
         bitToCapability.put(bit, name);
@@ -114,8 +114,8 @@ public class CapabilityRegistry {
     /**
      * Get bit flag for capability name
      */
-    public long getBitForName(String name) {
-        Long bit = capabilityBits.get(name);
+    public int getBitForName(String name) {
+        Integer bit = capabilityBits.get(name);
         if (bit == null) {
             throw new IllegalArgumentException("Unknown capability: " + name);
         }
@@ -125,7 +125,7 @@ public class CapabilityRegistry {
     /**
      * Get capability name for bit flag
      */
-    public String getNameForBit(long bit) {
+    public String getNameForBit(int bit) {
         return bitToCapability.get(bit);
     }
     
@@ -134,9 +134,9 @@ public class CapabilityRegistry {
      */
     public Set<String> getNamesForState(BigInteger state) {
         Set<String> names = new HashSet<>();
-        for (Map.Entry<String, Long> entry : capabilityBits.entrySet()) {
-            long bit = entry.getValue();
-            if (state.testBit(Long.numberOfTrailingZeros(bit))) {
+        for (Map.Entry<String, Integer> entry : capabilityBits.entrySet()) {
+            Integer bit = entry.getValue();
+            if (state.testBit(bit)) {
                 names.add(entry.getKey());
             }
         }

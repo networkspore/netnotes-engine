@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -14,7 +13,6 @@ import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
@@ -24,7 +22,7 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
-
+import io.netnotes.engine.core.system.control.containers.ContainerHandle.EventDispatcher;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
@@ -211,19 +209,37 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         m_onCreateEvent = onCreateEvent;
     }
     
+    private EventDispatcher eventDispatcher = null;
+
+    public void setEventDispatcher(EventDispatcher dispatcher){
+        this.eventDispatcher = dispatcher;
+    }
+
     private void createEvent(NoteBytes event)
     {
         if(m_onCreateEvent == null){
             if(event instanceof NoteBytesEphemeral ephemeralEvent){
                 EphemeralRoutedEvent ephemeralRoutedEvent = EphemeralEventsFactory.from(getContextPath(), ephemeralEvent);
-                this.eventHandlerRegistry.dispatch(ephemeralRoutedEvent);
+                if(eventDispatcher != null){
+                    eventDispatcher.dispatchEvent(ephemeralRoutedEvent);
+                }else{
+                    this.eventHandlerRegistry.dispatch(ephemeralRoutedEvent);
+                }
             }else{
                 RoutedEvent routedEvent = EventsFactory.from(getContextPath(), event);
-                this.eventHandlerRegistry.dispatch(routedEvent);
+                if(eventDispatcher != null){
+                    eventDispatcher.dispatchEvent(routedEvent);
+                }else{
+                    this.eventHandlerRegistry.dispatch(routedEvent);
+                }
             }
         }else{
             RoutedEvent routedEvent = m_onCreateEvent.createEvent(event);
-            this.eventHandlerRegistry.dispatch(routedEvent);
+            if(eventDispatcher != null){
+                eventDispatcher.dispatchEvent(routedEvent);
+            }else{
+                this.eventHandlerRegistry.dispatch(routedEvent);
+            }
         }
     }
 

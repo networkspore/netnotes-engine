@@ -6,13 +6,13 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -78,12 +78,13 @@ public class BitFlagStateMachine {
 
     private final AtomicLong m_version = new AtomicLong(0);
     private final String m_id;
-    private final AtomicReference<BigInteger> m_state = new AtomicReference<>();
+    private BigInteger m_state = BigInteger.ZERO;
     private final Map<BigInteger, List<StateTransition>> m_transitions;
     private final Map<BigInteger, List<BiConsumer<BigInteger, BigInteger>>> m_stateListeners;
     private final List<BiConsumer<BigInteger, BigInteger>> m_globalListeners;
     private final List<StateConstraint> m_constraints;
     private BiConsumer<Exception, BiConsumer<BigInteger, BigInteger>> m_errorHandler;
+    private SerializedVirtualExecutor serialExec = null;
 
     public BitFlagStateMachine(String id) {
         this(id, BigInteger.ZERO);
@@ -91,12 +92,29 @@ public class BitFlagStateMachine {
 
     public BitFlagStateMachine(String id, BigInteger initialState) {
         this.m_id = id;
-        this.m_state.set(initialState);
+        this.m_state = initialState;
         this.m_transitions = new ConcurrentHashMap<>();
         this.m_stateListeners = new ConcurrentHashMap<>();
         this.m_globalListeners = new CopyOnWriteArrayList<>();
         this.m_constraints = new CopyOnWriteArrayList<>();
     }
+
+     public void setSerialExecutor(SerializedVirtualExecutor serialExec){
+        this.serialExec = serialExec;
+    }
+
+    public SerializedVirtualExecutor getSerialExecutor(){
+        return this.serialExec;
+    }
+
+    protected void execute(Runnable run){
+        if(serialExec == null){
+            run.run();
+        }else{
+            serialExec.executeFireAndForget(run);
+        }
+    }
+
 
     // Convenience constructor for long-based initial states
     public BitFlagStateMachine(String id, long initialState) {
@@ -175,7 +193,7 @@ public class BitFlagStateMachine {
     }
 
     public BigInteger getState() {
-        return m_state.get();
+        return m_state;
     }
 
     public String getId() {
@@ -185,21 +203,21 @@ public class BitFlagStateMachine {
     // ========== State Mutations ==========
 
     public boolean addState(BigInteger stateBit) {
-        while (true) {
-            BigInteger oldState = m_state.get();
-            if (oldState.and(stateBit).equals(stateBit)) {
-                return false;
-            }
+        
+        BigInteger oldState = m_state;
 
-            BigInteger newState = oldState.or(stateBit);
-            validateStateConstraints(newState);
-
-            if (m_state.compareAndSet(oldState, newState)) {
-                notifyStateChange(oldState, newState, stateBit, true);
-                checkTransitions(stateBit, true, newState, oldState);
-                return true;
-            }
+        if (oldState.and(stateBit).equals(stateBit)) {
+            return false;
         }
+
+        BigInteger newState = oldState.or(stateBit);
+        validateStateConstraints(newState);
+
+        m_state = newState;
+
+        notifyStateChange(oldState, newState, stateBit, true);
+        checkTransitions(stateBit, true, newState, oldState);
+        return true;
     }
 
     public boolean addState(int bitPosition) {
@@ -211,20 +229,18 @@ public class BitFlagStateMachine {
     }
 
     public boolean removeState(BigInteger stateBit) {
-        while (true) {
-            BigInteger oldState = m_state.get();
-            if (!oldState.and(stateBit).equals(stateBit)) {
-                return false;
-            }
 
-            BigInteger newState = oldState.andNot(stateBit);
-
-            if (m_state.compareAndSet(oldState, newState)) {
-                notifyStateChange(oldState, newState, stateBit, false);
-                checkTransitions(stateBit, false, newState, oldState);
-                return true;
-            }
+        BigInteger oldState = m_state;
+        if (!oldState.and(stateBit).equals(stateBit)) {
+            return false;
         }
+
+        BigInteger newState = oldState.andNot(stateBit);
+
+        m_state = newState;
+        notifyStateChange(oldState, newState, stateBit, false);
+        checkTransitions(stateBit, false, newState, oldState);
+        return true;
     }
 
     public boolean removeState(int bitPosition) {
@@ -254,8 +270,9 @@ public class BitFlagStateMachine {
     public void setState(BigInteger newState) {
         validateStateConstraints(newState);
 
-        BigInteger oldState = m_state.getAndSet(newState);
+        BigInteger oldState = m_state;
         if (oldState.equals(newState)) return;
+        m_state = newState;
 
         notifyStateChange(oldState, newState, BigInteger.ZERO, false);
 
@@ -406,20 +423,23 @@ public class BitFlagStateMachine {
         addTransition(BigInteger.valueOf(fromState), BigInteger.valueOf(toState), action);
     }
 
-    private void checkTransitions(BigInteger triggerBit, boolean isAdd, BigInteger newState, BigInteger oldState) {
-        List<StateTransition> transitions = m_transitions.get(triggerBit);
-        if (transitions == null) return;
-        
-        //BigInteger newState = getState();
-        for (StateTransition transition : transitions) {
-            if (transition.onAdd == isAdd) {
-                if (transition.guard == null || transition.guard.canTransition(oldState, newState, triggerBit)) {
-                    if (transition.action != null) {
-                        transition.action.onTransition(oldState, newState, triggerBit);
+   private void checkTransitions(BigInteger triggerBit, boolean isAdd, BigInteger newState, BigInteger oldState) {
+        execute(() -> {
+            List<StateTransition> transitions = m_transitions.get(triggerBit);
+            if (transitions == null) return;
+            
+            //BigInteger newState = getState();
+            for (StateTransition transition : transitions) {
+                if (transition.onAdd == isAdd) {
+                    if (transition.guard == null || transition.guard.canTransition(oldState, newState, triggerBit)) {
+                        if (transition.action != null) {
+                            transition.action.onTransition(oldState, newState, triggerBit);
+                        }
                     }
                 }
             }
-        }
+        });
+        
     }
 
     // ========== Listeners ==========
@@ -498,45 +518,47 @@ public class BitFlagStateMachine {
     }
 
     private void notifyStateChange(BigInteger oldState, BigInteger newState, BigInteger changedBit, boolean targetedChange) {
-        for (BiConsumer<BigInteger, BigInteger> listener : m_globalListeners) {
-            try {
-                listener.accept(oldState, newState);
-            } catch (Exception e) {
-                handleListenerError(e, listener);
-            }
-        }
-
-        if (targetedChange && !changedBit.equals(BigInteger.ZERO)) {
-            List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(changedBit);
-            if (listeners != null) {
-                for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
-                    try {
-                        listener.accept(oldState, newState);
-                    } catch (Exception e) {
-                        handleListenerError(e, listener);
-                    }
+        execute(()->{
+            for (BiConsumer<BigInteger, BigInteger> listener : m_globalListeners) {
+                try {
+                    listener.accept(oldState, newState);
+                } catch (Exception e) {
+                    handleListenerError(e, listener);
                 }
             }
-        } else {
-            BigInteger changed = oldState.xor(newState);
-            int bitLength = Math.max(oldState.bitLength(), newState.bitLength());
-            
-            for (int i = 0; i < bitLength; i++) {
-                if (changed.testBit(i)) {
-                    BigInteger bitValue = bit(i);
-                    List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(bitValue);
-                    if (listeners != null) {
-                        for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
-                            try {
-                                listener.accept(oldState, newState);
-                            } catch (Exception e) {
-                                handleListenerError(e, listener);
+
+            if (targetedChange && !changedBit.equals(BigInteger.ZERO)) {
+                List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(changedBit);
+                if (listeners != null) {
+                    for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
+                        try {
+                            listener.accept(oldState, newState);
+                        } catch (Exception e) {
+                            handleListenerError(e, listener);
+                        }
+                    }
+                }
+            } else {
+                BigInteger changed = oldState.xor(newState);
+                int bitLength = Math.max(oldState.bitLength(), newState.bitLength());
+                
+                for (int i = 0; i < bitLength; i++) {
+                    if (changed.testBit(i)) {
+                        BigInteger bitValue = bit(i);
+                        List<BiConsumer<BigInteger, BigInteger>> listeners = m_stateListeners.get(bitValue);
+                        if (listeners != null) {
+                            for (BiConsumer<BigInteger, BigInteger> listener : listeners) {
+                                try {
+                                    listener.accept(oldState, newState);
+                                } catch (Exception e) {
+                                    handleListenerError(e, listener);
+                                }
                             }
                         }
                     }
                 }
             }
-        }
+        });
     }
 
     // ========== NoteBytes Serialization ==========
@@ -559,20 +581,21 @@ public class BitFlagStateMachine {
     }
 
     public void update(UnaryOperator<BigInteger> updater) {
-        while (true) {
-            BigInteger oldState = m_state.get();
-            BigInteger newState = updater.apply(oldState);
+    
+        BigInteger oldState = m_state;
+        BigInteger newState = updater.apply(oldState);
 
-            if (oldState.equals(newState)) return;
+        if (oldState.equals(newState)) return;
 
-            validateStateConstraints(newState);
+        validateStateConstraints(newState);
 
-            if (m_state.compareAndSet(oldState, newState)) {
-                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
-                replayTransitions(oldState, newState);
-                return;
-            }
-        }
+        m_state = newState;
+
+        notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+        replayTransitions(oldState, newState);
+        return;
+        
+        
     }
 
     private void replayTransitions(BigInteger oldState, BigInteger newState) {
@@ -793,7 +816,7 @@ public class BitFlagStateMachine {
         
         do {
             v1 = m_version.get();
-            state = m_state.get();
+            state = m_state;
             v2 = m_version.get();
         } while (v1 != v2); // Retry if version changed during read
         
@@ -830,7 +853,7 @@ public class BitFlagStateMachine {
                 return false; // Version changed - conflict
             }
             
-            BigInteger oldState = m_state.get();
+            BigInteger oldState = m_state;
             BigInteger newState = updater.apply(oldState);
             
             if (oldState.equals(newState)) {
@@ -838,14 +861,11 @@ public class BitFlagStateMachine {
             }
             
             validateStateConstraints(newState);
-            
-            if (m_state.compareAndSet(oldState, newState)) {
-                m_version.incrementAndGet();
-                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
-                replayTransitions(oldState, newState);
-                return true;
-            }
-            // CAS failed, loop and recheck version
+            m_state = newState;
+            m_version.incrementAndGet();
+            notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+            replayTransitions(oldState, newState);
+            return true;
         }
     }
 
@@ -855,27 +875,27 @@ public class BitFlagStateMachine {
      */
     public boolean updateIfState(BigInteger expectedState, 
                                   Function<BigInteger, BigInteger> updater) {
-        while (true) {
-            BigInteger oldState = m_state.get();
-            if (!oldState.equals(expectedState)) {
-                return false; // State changed - conflict
-            }
-            
-            BigInteger newState = updater.apply(oldState);
-            
-            if (oldState.equals(newState)) {
-                return true; // No change needed
-            }
-            
-            validateStateConstraints(newState);
-            
-            if (m_state.compareAndSet(oldState, newState)) {
-                m_version.incrementAndGet();
-                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
-                replayTransitions(oldState, newState);
-                return true;
-            }
+    
+        BigInteger oldState = m_state;
+        if (!oldState.equals(expectedState)) {
+            return false; // State changed - conflict
         }
+        
+        BigInteger newState = updater.apply(oldState);
+        
+        if (oldState.equals(newState)) {
+            return true; // No change needed
+        }
+        
+        validateStateConstraints(newState);
+        
+        m_state = newState;
+        m_version.incrementAndGet();
+        notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+        replayTransitions(oldState, newState);
+        return true;
+    
+        
     }
 
     /**
@@ -892,27 +912,26 @@ public class BitFlagStateMachine {
      */
     public boolean updateIf(Predicate<BigInteger> condition,
                             Function<BigInteger, BigInteger> updater) {
-        while (true) {
-            BigInteger oldState = m_state.get();
-            if (!condition.test(oldState)) {
-                return false; // Condition no longer true
-            }
-            
-            BigInteger newState = updater.apply(oldState);
-            
-            if (oldState.equals(newState)) {
-                return true; // No change needed
-            }
-            
-            validateStateConstraints(newState);
-            
-            if (m_state.compareAndSet(oldState, newState)) {
-                m_version.incrementAndGet();
-                notifyStateChange(oldState, newState, BigInteger.ZERO, false);
-                replayTransitions(oldState, newState);
-                return true;
-            }
+    
+        BigInteger oldState = m_state;
+        if (!condition.test(oldState)) {
+            return false; // Condition no longer true
         }
+        
+        BigInteger newState = updater.apply(oldState);
+        
+        if (oldState.equals(newState)) {
+            return true; // No change needed
+        }
+        
+        validateStateConstraints(newState);
+        
+        m_state = newState;
+        m_version.incrementAndGet();
+        notifyStateChange(oldState, newState, BigInteger.ZERO, false);
+        replayTransitions(oldState, newState);
+        return true;
+        
     }
 
     // ========== Batch Operations ==========
@@ -1043,14 +1062,14 @@ public class BitFlagStateMachine {
 
     // ========== Serialization Update ==========
 
-    /**
-     * Updated toNoteBytes to include version
-     */
+
     public NoteBytesObject toNoteBytes() {
+        StateSnapshot snapshot = getSnapshot();
+
         return new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.ID, new NoteString(m_id)),
-            new NoteBytesPair(Keys.STATE, new NoteBytes(m_state.get())),
-            new NoteBytesPair(Keys.VERSION, new NoteLong(m_version.get()))
+            new NoteBytesPair(Keys.STATE, new NoteBytes(snapshot.state)),
+            new NoteBytesPair(Keys.VERSION, new NoteLong(snapshot.version))
         });
     }
 
@@ -1079,6 +1098,8 @@ public class BitFlagStateMachine {
 
         throw new IllegalArgumentException("Cannot create state machine from notebytes");
     }
+
+   
 
     // ========== Debug/Monitoring ==========
 

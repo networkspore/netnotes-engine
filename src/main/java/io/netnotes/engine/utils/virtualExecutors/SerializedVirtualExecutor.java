@@ -7,7 +7,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -20,37 +19,42 @@ import java.util.List;
  */
 public final class SerializedVirtualExecutor {
 
-    private static final class Task<T> {
-        final Callable<T> callable;
-        final CompletableFuture<T> future;
+    
 
-        Task(Callable<T> callable, CompletableFuture<T> future) {
-            this.callable = callable;
-            this.future = future;
-        }
-    }
 
-    private final BlockingQueue<Task<?>> queue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<SerializedTask<?>> queue = new LinkedBlockingQueue<>();
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final AtomicBoolean terminated = new AtomicBoolean(false);
     private final Thread dispatcher;
 
+    private final ThreadLocal<Boolean> onDispatcherThread = ThreadLocal.withInitial(() -> false);
+    
+    private final ThreadLocal<Integer> deferDepth = ThreadLocal.withInitial(() -> 0);
+    private final BlockingQueue<Runnable> deferredQueue = new LinkedBlockingQueue<>();
+    private final AtomicBoolean drainScheduled = new AtomicBoolean(false);
+
     public SerializedVirtualExecutor() {
         dispatcher = Thread.ofVirtual().name("SerialVT-Dispatcher").start(this::dispatchLoop);
+    }
+
+    public boolean isCurrentThread(){
+        return onDispatcherThread.get();
     }
 
     /**
      * Dispatch loop runs tasks serially - each task completes before the next starts.
      */
     private void dispatchLoop() {
+        onDispatcherThread.set(true);
         try {
             while (!Thread.currentThread().isInterrupted()) {
-                Task<?> task = queue.take();
+                SerializedTask<?> task = queue.take();
                 runTask(task);
             }
         } catch (InterruptedException e) {
             // Expected during shutdown
         } finally {
+            onDispatcherThread.set(false);
             terminated.set(true);
             synchronized (this) {
                 this.notifyAll();
@@ -58,36 +62,108 @@ public final class SerializedVirtualExecutor {
         }
     }
 
-    private <T> void runTask(Task<T> task) {
-        if (task.future.isCancelled()) {
+
+    private <T> void runTask(SerializedTask<T> task) {
+        CompletableFuture<T> f = task.getFuture();
+        if(f != null && f.isCancelled()){
             return;
         }
-
         try {
-            T result = task.callable.call();
-            task.future.complete(result);
+            T result = task.call();
+            if(f != null){
+                f.complete(result);
+            }
         } catch (Throwable t) {
-            task.future.completeExceptionally(t);
+            if(f != null){
+                f.completeExceptionally(t);
+            }
         }
     }
 
     /**
      * Submits a Runnable task for serial execution.
+     * If already on dispatcher thread, executes immediately (reentrant).
      * 
      * @param runnable the task to execute
      * @return a CompletableFuture that completes when the task finishes
      */
     public CompletableFuture<Void> execute(Runnable runnable) {
+
+        if (onDispatcherThread.get()) {
+            /* Only defer fire and forget methods
+                if (deferDepth.get() > 0) {
+                CompletableFuture<Void> future = new CompletableFuture<>();
+                deferredQueue.add(() -> {
+                    try {
+                        runnable.run();
+                        future.complete(null);
+                    } catch (Throwable t) {
+                        future.completeExceptionally(t);
+                    }
+                });
+                return future;
+            }*/
+
+
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            try {
+                runnable.run();
+                future.complete(null);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+
+            return future;
+        }
+        
+
         return submit(runnable, null);
     }
 
-    /**
-     * Submits a Callable task for serial execution.
-     * 
-     * @param callable the task to execute
-     * @return a CompletableFuture that will contain the task's result
-     */
+   
+     public void executeFireAndForget(Runnable runnable) {
+        if (onDispatcherThread.get()) {
+            if (deferDepth.get() > 0) {
+                deferredQueue.add(runnable);
+            } else {
+                runnable.run();
+            }
+            return;
+        }
+        
+        if (shutdown.get()) {
+            return; // Just drop it
+        }
+        
+        queue.add(new SimpleTask(runnable));
+    }
+
     public <T> CompletableFuture<T> submit(Callable<T> callable) {
+ 
+        if (onDispatcherThread.get()) {
+            /* don't defer methods with return values 
+                if (deferDepth.get() > 0) {
+                CompletableFuture<T> future = new CompletableFuture<>();
+                deferredQueue.add(() -> {
+                    try {
+                        future.complete(callable.call());
+                    } catch (Throwable t) {
+                        future.completeExceptionally(t);
+                    }
+                });
+                return future;
+            }*/
+            CompletableFuture<T> future = new CompletableFuture<>();
+            try {
+                T result = callable.call();
+                future.complete(result);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+            return future;
+        }
+        
+ 
         CompletableFuture<T> future = new CompletableFuture<>();
 
         if (shutdown.get()) {
@@ -96,22 +172,84 @@ public final class SerializedVirtualExecutor {
             return future;
         }
 
-        queue.add(new Task<>(callable, future));
+        queue.add(new SerializedTask<T>(callable, future));
         return future;
     }
 
-    /**
-     * Submits a Runnable task with a result value.
-     * 
-     * @param runnable the task to execute
-     * @param result the result to return upon successful completion
-     * @return a CompletableFuture that will contain the result
-     */
     public <T> CompletableFuture<T> submit(Runnable runnable, T result) {
+
+        if (onDispatcherThread.get()) {
+            CompletableFuture<T> future = new CompletableFuture<>();
+            try {
+                runnable.run();
+                future.complete(result);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+            return future;
+        }
+        
         return submit(() -> {
             runnable.run();
             return result;
         });
+    }
+
+    public void executeBatch(List<Runnable> tasks) {
+        execute(() -> {
+            for (Runnable task : tasks) {
+                task.run();
+            }
+        });
+    }
+
+    public void beginDeferredSection() {
+        if (!onDispatcherThread.get()) {
+            throw new IllegalStateException("Deferred section must be on dispatcher thread");
+        }
+        deferDepth.set(deferDepth.get() + 1);
+    }
+
+    public void endDeferredSection() {
+        if (!onDispatcherThread.get()) {
+            throw new IllegalStateException("Deferred section must be on dispatcher thread");
+        }
+
+
+        int depth = deferDepth.get() - 1;
+        deferDepth.set(depth);
+
+
+        if (depth == 0 && !deferredQueue.isEmpty()) {
+            scheduleDrainIfNeeded();
+        }
+    }
+
+    private void scheduleDrainIfNeeded() {
+        if (drainScheduled.compareAndSet(false, true)) {
+            queue.add(new SimpleTask(this::drainDeferredQueue));
+        }
+    }
+
+    private void drainDeferredQueue() {
+        long start = System.nanoTime();
+        long maxNanos = 2_000_000;
+
+
+        try {
+            while (System.nanoTime() - start < maxNanos) {
+                Runnable task = deferredQueue.poll();
+                if (task == null) break;
+                task.run();
+            }
+        } finally {
+            drainScheduled.set(false);
+        }
+
+
+        if (!deferredQueue.isEmpty()) {
+            scheduleDrainIfNeeded();
+        }
     }
 
     /**
@@ -127,25 +265,19 @@ public final class SerializedVirtualExecutor {
      * 
      * @return list of tasks that were awaiting execution
      */
-    public List<Runnable> shutdownNow() {
+    public void shutdownNow() {
         shutdown.set(true);
 
-        // Cancel all queued tasks
-        List<Runnable> notExecuted = new ArrayList<>();
-        queue.forEach(t -> {
-            t.future.cancel(true);
-            notExecuted.add(() -> {
-                try {
-                    t.callable.call();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+     
+         queue.forEach(t->{
+            if(t != null){
+                t.cancel();
+            }
         });
+
         queue.clear();
 
         dispatcher.interrupt();
-        return notExecuted;
     }
 
     /**

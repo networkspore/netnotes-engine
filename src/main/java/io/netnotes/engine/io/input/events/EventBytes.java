@@ -79,7 +79,7 @@ public class EventBytes {
         public static final NoteBytesReadOnly EVENT_CONTAINER_FOCUS_LOST =
                 new NoteBytesReadOnly("container_focus_lost");
 
-        public static final NoteBytesReadOnly EVENT_CONTAINER_RESIZED =
+        public static final NoteBytesReadOnly EVENT_CONTAINER_REGION_CHANGED =
                 new NoteBytesReadOnly("container_resize");
 
         public static final NoteBytesReadOnly EVENT_CONTAINER_MOVE =
@@ -103,7 +103,8 @@ public class EventBytes {
         public static final NoteBytesReadOnly EVENT_CONTAINER_HIDDEN =
                 new NoteBytesReadOnly("container_hidden");
 
-
+        public static final NoteBytesReadOnly EVENT_CONTAINER_RENDERED = 
+                new NoteBytesReadOnly("container_rendered");
 
         // ===== SPECIAL INPUT  =====
         public static final NoteBytesReadOnly EVENT_RAW_HID =
@@ -148,8 +149,11 @@ public class EventBytes {
 
 
         // ===== PROTOCOL CONTROL =====
+        public static final NoteBytesReadOnly TYPE_UNKNOWN =
+        new NoteBytesReadOnly("unknown");
+
         public static final NoteBytesReadOnly TYPE_ERROR =
-        new NoteBytesReadOnly("error");
+                new NoteBytesReadOnly("error");
 
         public static final NoteBytesReadOnly TYPE_DISCONNECTED =
                 new NoteBytesReadOnly("disconnected");
@@ -306,7 +310,7 @@ public class EventBytes {
         // Container events
         register(EVENT_CONTAINER_FOCUS_GAINED, "focus_gained", "Container gained focus", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_FOCUS_LOST, "focus_lost", "Container lost focus", EventCategory.CONTAINER);
-        register(EVENT_CONTAINER_RESIZED, "resize", "Container resized", EventCategory.CONTAINER);
+        register(EVENT_CONTAINER_REGION_CHANGED, "resize", "Container resized", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_MOVE, "move", "Container moved", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_CLOSED, "close", "Container closed", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_MINIMIZE, "minimize", "Container minimized", EventCategory.CONTAINER);

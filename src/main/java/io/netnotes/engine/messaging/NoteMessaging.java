@@ -179,12 +179,23 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly COLS          = new NoteBytesReadOnly("cols");
         public static final NoteBytesReadOnly WIDTH         = new NoteBytesReadOnly("width");
         public static final NoteBytesReadOnly HEIGHT        = new NoteBytesReadOnly("height");
+        public static final NoteBytesReadOnly REGION = new NoteBytesReadOnly("region");
         public static final NoteBytesReadOnly LENGTH        = new NoteBytesReadOnly("length");
         public static final NoteBytesReadOnly BOLD          = new NoteBytesReadOnly("bold");
         public static final NoteBytesReadOnly INVERSE       = new NoteBytesReadOnly("inverse");
         public static final NoteBytesReadOnly UNDERLINE     = new NoteBytesReadOnly("underline");
         public static final NoteBytesReadOnly FOREGROUND    = new NoteBytesReadOnly("foreground");
         public static final NoteBytesReadOnly BACKGROUND    = new NoteBytesReadOnly("background");
+        public static final NoteBytesReadOnly X    = new NoteBytesReadOnly("x");
+        public static final NoteBytesReadOnly Y    = new NoteBytesReadOnly("y");
+        public static final NoteBytesReadOnly TOP = new NoteBytesReadOnly("top");
+        public static final NoteBytesReadOnly RIGHT = new NoteBytesReadOnly("right");
+        public static final NoteBytesReadOnly BOTTOM = new NoteBytesReadOnly("bottom");
+        public static final NoteBytesReadOnly LEFT = new NoteBytesReadOnly("left");
+
+        public static final NoteBytesReadOnly PROPERTY = new NoteBytesReadOnly("property");
+        public static final NoteBytesReadOnly VALUE = new NoteBytesReadOnly("value");
+        
         // Payload
         public static final NoteBytesReadOnly PAYLOAD       = new NoteBytesReadOnly("payload");
         public static final NoteBytesReadOnly STATE_FLAGS   = new NoteBytesReadOnly("state_flags");
@@ -340,14 +351,6 @@ public class NoteMessaging {
         public static final String DECRYPT_FAIL  = "Decrypt_Failed";
         public static final String NOT_PERMITTED = "Not_Permitted";
     }
-
-    public static class Modes {
-        public static final NoteBytesReadOnly RAW           = new NoteBytesReadOnly("raw");
-        public static final NoteBytesReadOnly PARSED        = new NoteBytesReadOnly("parsed");
-        public static final NoteBytesReadOnly PASSTHROUGH   = new NoteBytesReadOnly("passthrough");
-        public static final NoteBytesReadOnly FILTERED      = new NoteBytesReadOnly("filtered");
-    }
-
 
     public static class Logging{
         public static final String FULL = "Full";

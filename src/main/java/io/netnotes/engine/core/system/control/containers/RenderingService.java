@@ -49,7 +49,6 @@ public class RenderingService extends FlowProcess {
     // ===== RENDERER MANAGEMENT =====
     private final Map<NoteBytesReadOnly, UIRenderer<?>> renderers = new ConcurrentHashMap<>();
     private final NoteBytesReadOnly systemDefaultRendererId;
-    private final Map<ContainerType, NoteBytesReadOnly> typeDefaultRenderers = new ConcurrentHashMap<>();
     
     // ===== MESSAGE DISPATCH =====
     private final HashMap<NoteBytes, RoutedMessageExecutor> msgExecMap = new HashMap<>();
@@ -81,31 +80,11 @@ public class RenderingService extends FlowProcess {
         renderers.put(rendererId, renderer);
         
         Log.logMsg(String.format(
-            "[RenderingService] Registered renderer '%s': %s (supports: %s)",
-            rendererId, renderer.getDescription(), renderer.getSupportedTypes()
+            "[RenderingService] Registered renderer '%s': %s",
+            rendererId, renderer.getDescription()
         ));
     }
     
-    public void setDefaultRendererForType(ContainerType type, NoteBytesReadOnly rendererId) {
-        UIRenderer<?> renderer = renderers.get(rendererId);
-        if (renderer == null) {
-            throw new IllegalArgumentException("Renderer not found: " + rendererId);
-        }
-        
-        if (!renderer.supports(type)) {
-            throw new IllegalArgumentException(String.format(
-                "Renderer '%s' does not support container type %s",
-                rendererId.toString(), type
-            ));
-        }
-        
-        typeDefaultRenderers.put(type, rendererId);
-        
-        Log.logMsg(String.format(
-            "[RenderingService] Default renderer for %s: %s",
-            type, rendererId
-        ));
-    }
     
     public void unregisterRenderer(NoteBytes rendererId) {
         if (rendererId.equals(systemDefaultRendererId)) {
@@ -120,7 +99,7 @@ public class RenderingService extends FlowProcess {
         }
         
         renderers.remove(rendererId);
-        typeDefaultRenderers.entrySet().removeIf(entry -> entry.getValue().equals(rendererId));
+ 
         
         Log.logMsg("[RenderingService] Unregistered renderer: " + rendererId);
     }
@@ -131,32 +110,16 @@ public class RenderingService extends FlowProcess {
      * 2. Type-specific default (if configured)
      * 3. System default (always available)
      */
-    public NoteBytes selectRendererId(NoteBytes explicitRendererId, ContainerType containerType) {
+    public NoteBytes selectRendererId(NoteBytes rendererId) {
         // TIER 1: Explicit renderer
-        if (explicitRendererId != null && !explicitRendererId.isEmpty()) {
-            UIRenderer<?> renderer = renderers.get(explicitRendererId);
+        if (rendererId != null && !rendererId.isEmpty()) {
+            UIRenderer<?> renderer = renderers.get(rendererId);
             
             if (renderer == null) {
-                throw new IllegalArgumentException("Renderer not found: " + explicitRendererId);
+                throw new IllegalArgumentException("Renderer not found: " + rendererId);
             }
             
-            if (!renderer.supports(containerType)) {
-                throw new IllegalArgumentException(String.format(
-                    "Renderer '%s' does not support container type %s (supports: %s)",
-                    explicitRendererId.toString(), containerType, renderer.getSupportedTypes()
-                ));
-            }
-            
-            return explicitRendererId;
-        }
-        
-        // TIER 2: Type-specific default
-        NoteBytesReadOnly typeDefaultId = typeDefaultRenderers.get(containerType);
-        if (typeDefaultId != null) {
-            UIRenderer<?> renderer = renderers.get(typeDefaultId);
-            if (renderer != null) {
-                return typeDefaultId;
-            }
+            return rendererId;
         }
         
         // TIER 3: System default
@@ -262,19 +225,11 @@ public class RenderingService extends FlowProcess {
         // select renderer based on type and explicit ID
 
         NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
-        NoteBytes typeBytes = msg.get(Keys.TYPE);
         
-      
-        ContainerType type = typeBytes != null ? 
-            ContainerType.valueOf(typeBytes.getAsString()) : 
-            ContainerType.TERMINAL;
+        NoteBytes rendererId = selectRendererId(rendererIdBytes);
         
-         NoteBytes rendererId = selectRendererId(rendererIdBytes, type);
-        
-        // Add selected renderer ID to message
-        msg.put(ContainerCommands.RENDERER_ID, rendererId);
 
-        UIRenderer<?> renderer = renderers.get(rendererId);
+        UIRenderer<?> renderer = rendererId != null ? renderers.get(rendererId) : null;
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
@@ -411,7 +366,7 @@ public class RenderingService extends FlowProcess {
     /**
      * Get renderer by ID
      */
-    public UIRenderer<?> getRenderer(String rendererId) {
+    public UIRenderer<?> getRenderer(NoteBytesReadOnly rendererId) {
         return renderers.get(rendererId);
     }
     
@@ -440,20 +395,7 @@ public class RenderingService extends FlowProcess {
         return info;
     }
     
-    /**
-     * Get default renderer for type
-     */
-    public NoteBytesReadOnly getDefaultRendererForType(ContainerType type) {
-        return typeDefaultRenderers.getOrDefault(type, systemDefaultRendererId);
-    }
-    
-    /**
-     * Check if renderer supports type
-     */
-    public boolean rendererSupportsType(String rendererId, ContainerType type) {
-        UIRenderer<?> renderer = renderers.get(rendererId);
-        return renderer != null && renderer.supports(type);
-    }
+   
     
     /**
      * Get total container count across all renderers
@@ -521,7 +463,6 @@ public class RenderingService extends FlowProcess {
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
             .thenRun(() -> {
                 renderers.clear();
-                typeDefaultRenderers.clear();
                 
                 state.removeState(RenderingServiceStates.SHUTTING_DOWN);
                 state.removeState(RenderingServiceStates.READY);

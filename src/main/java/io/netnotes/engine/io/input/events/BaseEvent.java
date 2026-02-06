@@ -3,7 +3,7 @@ package io.netnotes.engine.io.input.events;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.noteBytes.NoteBytes;
 
-public class BaseEvent implements RoutedEvent {
+public class BaseEvent extends RoutedEvent {
     private final ContextPath sourcePath;
     private final NoteBytes typeBytes;
     private int flags;

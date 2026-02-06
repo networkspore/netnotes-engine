@@ -14,7 +14,7 @@ import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.crypto.CryptoService;
 import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteFiles.FileStreamUtils;
+import io.netnotes.engine.utils.files.FileStreamUtils;
 
 public final class AESBackedOutputStream extends OutputStream {
 

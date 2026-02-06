@@ -281,7 +281,6 @@ public abstract class UIRenderer <T extends Container<?>> {
             // Parse common parameters
             NoteBytes containerIdBytes = msg.get(ContainerCommands.CONTAINER_ID);
             NoteBytes titleBytes = msg.get(Keys.TITLE);
-            NoteBytes typeBytes = msg.get(Keys.TYPE);
             NoteBytes pathBytes = msg.get(Keys.PATH);
             NoteBytes configBytes = msg.get(Keys.CONFIG);
             NoteBytes autoFocusBytes = msg.get(ContainerCommands.AUTO_FOCUS);
@@ -301,8 +300,7 @@ public abstract class UIRenderer <T extends Container<?>> {
             
             ContainerId containerId = ContainerId.fromNoteBytes(containerIdBytes);
             String title = titleBytes != null ? titleBytes.getAsString() : "Untitled";
-            ContainerType type = typeBytes != null ? 
-                ContainerType.valueOf(typeBytes.getAsString()) : ContainerType.TERMINAL;
+           
             ContextPath ownerPath = pathBytes != null ? 
                 ContextPath.fromNoteBytes(pathBytes) : null;
             ContainerConfig config = configBytes != null ? 
@@ -311,7 +309,7 @@ public abstract class UIRenderer <T extends Container<?>> {
             String rendererId = rendererIdBytes.getAsString();
             
             // Delegate to subclass
-            return doCreateContainer(containerId, title, type, ownerPath, config, rendererId)
+            return doCreateContainer(containerId, title, ownerPath, config, rendererId)
                 .thenCompose(container -> {
                     // Track container
                     containers.put(containerId, container);
@@ -547,7 +545,6 @@ public abstract class UIRenderer <T extends Container<?>> {
     protected abstract CompletableFuture<T> doCreateContainer(
         ContainerId id,
         String title,
-        ContainerType type,
         ContextPath ownerPath,
         ContainerConfig config,
         String rendererId
@@ -563,17 +560,6 @@ public abstract class UIRenderer <T extends Container<?>> {
     );
     
 
-
-     /**
-     * Check if renderer supports a container type
-     */
-    public abstract boolean supports(ContainerType type);
-    
-    /**
-     * Get all supported container types
-     */
-    public abstract Set<ContainerType> getSupportedTypes();
-    
     /**
      * Get renderer description
      */

@@ -1,65 +1,99 @@
 package io.netnotes.engine.core.system.control.ui;
 
-
 import io.netnotes.engine.core.system.control.containers.ContainerCommands;
-import io.netnotes.engine.core.system.control.containers.ContainerId;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
+import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 
 /**
  * BatchBuilder - Build atomic batches of container commands
  * 
+ * Generic over spatial region type to support 2D and future renderers
+ * 
+ * @param <S> SpatialRegion type (UIRectangle for 2D)
  */
-public class BatchBuilder {
-    
-    protected final ContainerId containerId;
-    protected final NoteBytes rendererId;
+public abstract class BatchBuilder
+    <S extends SpatialRegion<?,S>
+> {
+
     protected final NoteBytesArray commands;
-    protected final long generation;
+    protected final Deque<S> clipStack;
     
-    public BatchBuilder(ContainerId containerId, NoteBytes rendererId, long generation) {
-        this.containerId = containerId;
-        this.rendererId = rendererId;
-        this.generation = generation;
+    protected BatchBuilder() {
         this.commands = new NoteBytesArray();
+        this.clipStack = new ArrayDeque<>();
+    }
+    
+    /**
+     * Push a clip region onto the stack
+     * All subsequent rendering operations should respect this clip region
+     */
+    public void pushClipRegion(S region) {
+        clipStack.push(region);
+    }
+    
+    /**
+     * Pop the current clip region
+     */
+    public void popClipRegion() {
+        if (!clipStack.isEmpty()) {
+            clipStack.pop();
+        }
+    }
+    
+    /**
+     * Get the current clip region (null if none)
+     */
+    public S getCurrentClipRegion() {
+        return clipStack.isEmpty() ? null : clipStack.peek();
+    }
+    
+    /**
+     * Check if a region intersects the current clip region
+     * Returns true if no clip region is set
+     */
+    protected boolean intersectsClip(S region) {
+        if (clipStack.isEmpty()) return true;
+        return clipStack.peek().intersects(region);
+    }
+    
+    /**
+     * Check if fully outside current clip region
+     */
+    protected boolean outsideClip(S region) {
+        if (clipStack.isEmpty()) return false;
+        return !clipStack.peek().intersects(region);
     }
     
     /**
      * Build final batch command
      */
-    public NoteBytesMap build() {
-        NoteBytesMap batchCommand = new NoteBytesMap();
-        batchCommand.put(Keys.CMD, ContainerCommands.CONAINER_BATCH);
-        batchCommand.put(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes());
-        batchCommand.put(ContainerCommands.RENDERER_ID, rendererId);
-        batchCommand.put(ContainerCommands.GENERATION, generation);
-        batchCommand.put(ContainerCommands.BATCH_COMMANDS, commands);
-        return batchCommand;
+    public NoteBytesObject build() {
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.CMD, ContainerCommands.CONAINER_BATCH),
+            new NoteBytesPair(ContainerCommands.BATCH_COMMANDS, commands)
+        });
     }
     
     /**
      * Add raw command to batch
      */
-    public BatchBuilder addCommand(NoteBytesMap cmd) {
+    public void addCommand(NoteBytesMap cmd) {
         commands.add(cmd.toNoteBytes());
-        return this;
     }
     
     /**
      * Add raw command bytes to batch
      */
-    public BatchBuilder addCommand(NoteBytes cmd) {
+    public void addCommand(NoteBytes cmd) {
         commands.add(cmd);
-        return this;
-    }
-    
-    /**
-     * Get generation this batch is for
-     */
-    public long getGeneration() {
-        return generation;
     }
     
     /**
@@ -76,4 +110,11 @@ public class BatchBuilder {
         return commands.isEmpty();
     }
     
+    /**
+     * Clear all commands and clip regions
+     */
+    public void clear() {
+        commands.clear();
+        clipStack.clear();
+    }
 }

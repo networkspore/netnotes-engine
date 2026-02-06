@@ -14,16 +14,16 @@ import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 public class ContainerInfo {
     private final ContainerId id;
     private final String title;
-    private final ContainerType type;
     private final BigInteger state;
     private final ContextPath ownerPath;
     private final ContainerConfig config;
     private final long createdTime;
+    private final String rendererId;
     
     public ContainerInfo(
         ContainerId id,
         String title,
-        ContainerType type,
+        String rendererId,
         BigInteger state,
         ContextPath ownerPath,
         ContainerConfig config,
@@ -31,7 +31,7 @@ public class ContainerInfo {
     ) {
         this.id = id;
         this.title = title;
-        this.type = type;
+        this.rendererId = rendererId;
         this.state = state;
         this.ownerPath = ownerPath;
         this.config = config;
@@ -40,7 +40,7 @@ public class ContainerInfo {
     
     public ContainerId getId() { return id; }
     public String getTitle() { return title; }
-    public ContainerType getType() { return type; }
+    public String getRendererId() { return rendererId; }
     public BigInteger getState() { return state; }
     public ContextPath getOwnerPath() { return ownerPath; }
     public ContainerConfig getConfig() { return config; }
@@ -50,7 +50,7 @@ public class ContainerInfo {
         NoteBytesMap map = new NoteBytesMap();
         map.put("id", id.toNoteBytes());
         map.put("title", title);
-        map.put("type", type.name());
+        map.put("rendererId", rendererId);
         map.put("state", state);
         map.put("owner_path", ownerPath.toNoteBytes());
         map.put("config", config.toNoteBytes());

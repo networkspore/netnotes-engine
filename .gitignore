@@ -4,7 +4,7 @@
 **/.bloop/
 **/.metals/
 **/.scala-build/
-dependency-reduced-pom.xml
+**/*.xml
 netnotes-log.txt
 **/*.sh
 **/*.erg

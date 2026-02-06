@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 public class GitHubAPI {
 
@@ -78,8 +79,54 @@ public class GitHubAPI {
         return getAssets(true, execService);
     }
 
+    public CompletableFuture<GitHubAsset[]> getAssetsAllLatestRelease(SerializedVirtualExecutor exec){
+        return getAssets(true, exec);
+    }
+
     public CompletableFuture<GitHubAsset[]> getAssetsLatestRelease(ExecutorService execService){
          return getAssets(false, execService);
+    }
+
+    public CompletableFuture<GitHubAsset[]> getAssetsLatestRelease(SerializedVirtualExecutor exec){
+         return getAssets(false, exec);
+    }
+
+    public CompletableFuture<GitHubAsset[]> getAssets(boolean isAllReleases, SerializedVirtualExecutor exec) {
+        String urlString = isAllReleases ? getUrlAllReleases() : getUrlLatestRelease();
+
+        return exec.submit(() -> {
+            List<GitHubAsset> assets = new ArrayList<>();
+
+            try {
+                HttpURLConnection conn = UrlStreamHelpers.getHttpUrlConnection(urlString);
+
+                try (JsonReader reader = new JsonReader(new InputStreamReader(conn.getInputStream()))) {
+                    reader.beginObject();
+                    while (reader.hasNext()) {
+                        String name = reader.nextName();
+                        switch (name) {
+                            case "assets":
+                                reader.beginArray();
+                                while (reader.hasNext()) {
+                                    GitHubAsset asset = GitHubAsset.read(reader);
+                                    if (asset != null) {
+                                        assets.add(asset);
+                                    }
+                                }
+                                reader.endArray();
+                            break;
+                            default:
+                            reader.skipValue();
+                        }
+                    }
+                    reader.endObject();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to fetch assets from latest release", e);
+            }
+
+            return assets.toArray(new GitHubAsset[0]);
+        });
     }
 
     public CompletableFuture<GitHubAsset[]> getAssets(boolean isAllReleases, ExecutorService execService) {

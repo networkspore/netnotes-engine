@@ -1,8 +1,8 @@
 package io.netnotes.engine.io.daemon;
 
+import io.netnotes.engine.io.daemon.ClientSession.Modes;
 import io.netnotes.engine.messaging.NoteMessaging.ItemTypes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.Modes;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.noteBytes.*;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
@@ -64,10 +64,10 @@ public class IODaemonProtocol {
          */
         public static boolean isValid(NoteBytesReadOnly mode) {
             return mode != null && (
-                mode.equals(Modes.RAW) ||
-                mode.equals(Modes.PARSED) ||
-                mode.equals(Modes.PASSTHROUGH) ||
-                mode.equals(Modes.FILTERED)
+                mode.equals(ClientSession.Modes.RAW) ||
+                mode.equals(ClientSession.Modes.PARSED) ||
+                mode.equals(ClientSession.Modes.PASSTHROUGH) ||
+                mode.equals(ClientSession.Modes.FILTERED)
             );
         }
         
@@ -75,7 +75,7 @@ public class IODaemonProtocol {
          * Get default mode
          */
         public static NoteBytesReadOnly getDefault() {
-            return Modes.PARSED;
+            return ClientSession.Modes.PARSED;
         }
         
         /**
@@ -83,12 +83,12 @@ public class IODaemonProtocol {
          */
         public static boolean isCompatible(NoteBytesReadOnly deviceType, NoteBytesReadOnly mode) {
             // Raw mode works with everything
-            if (mode.equals(Modes.RAW)) {
+            if (mode.equals(ClientSession.Modes.RAW)) {
                 return true;
             }
             
             // Parsed mode requires known device type
-            if (mode.equals(Modes.PARSED)) {
+            if (mode.equals(ClientSession.Modes.PARSED)) {
                 return !deviceType.equals(ItemTypes.UNKNOWN);
             }
             

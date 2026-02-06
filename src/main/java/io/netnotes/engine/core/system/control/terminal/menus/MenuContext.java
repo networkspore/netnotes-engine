@@ -116,42 +116,6 @@ public class MenuContext {
     
     // ===== DISPLAY =====
     
-    /**
-     * Display this menu via UI protocol
-     
-    public CompletableFuture<NoteBytesMap> display() {
-        // Convert items to protocol format
-        List<UIProtocol.MenuItem> uiItems = new ArrayList<>();
-        
-        for (MenuItem item : items.values()) {
-            UIProtocol.MenuItem uiItem = new UIProtocol.MenuItem(
-                item.name,
-                item.description,
-                convertType(item.type),
-                item.type == MenuItemType.PROTECTED_SUBMENU
-            );
-            uiItems.add(uiItem);
-        }
-        
-        // Build command
-        NoteBytesMap menuCmd = UIProtocol.showMenu(
-            title,
-            currentPath.toString(),
-            uiItems,
-            parent != null
-        );
-        
-        // Add description if present
-        if (description != null && !description.isEmpty()) {
-            menuCmd.put("description", new io.netnotes.engine.noteBytes.NoteBytes(description));
-        }
-        
-        // Add breadcrumb trail
-        menuCmd.put("breadcrumb", new io.netnotes.engine.noteBytes.NoteBytes(getBreadcrumb()));
-        
-        // Render and wait for user selection
-        return uiRenderer.render(menuCmd);
-    }*/
 
           /**
      * Build display command (caller will send through container)

@@ -12,13 +12,12 @@ public class VirtualExecutors {
     
     // Traditional executors (for compatibility)
     private static final ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private static final ScheduledExecutorService virtualScheduled = 
-        Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
+    private static final ScheduledExecutorService virtualScheduled = Executors.newScheduledThreadPool(0, Thread.ofVirtual().factory());
     
     // Serialized virtual executors (for ordered execution)
     private static final SerializedVirtualExecutor serializedVirtual = new SerializedVirtualExecutor();
-    private static final SerializedScheduledVirtualExecutor serializedScheduledVirtual = 
-        new SerializedScheduledVirtualExecutor();
+    private static final SerializedVirtualExecutor serializedIo = new SerializedVirtualExecutor();
+    private static final SerializedScheduledVirtualExecutor serializedScheduledVirtual = new SerializedScheduledVirtualExecutor();
 
     /**
      * Get the shared virtual thread executor.
@@ -42,8 +41,18 @@ public class VirtualExecutors {
      * 
      * @return the shared SerializedVirtualExecutor
      */
-    public static SerializedVirtualExecutor getSerializedVirtualExecutor() {
+    public static SerializedVirtualExecutor getUiExecutor() {
         return serializedVirtual;
+    }
+
+    /**
+     * Get the shared serialized IO executor.
+     * Use for IO-bound work that should not run on the UI executor.
+     *
+     * @return the shared SerializedVirtualExecutor for IO
+     */
+    public static SerializedVirtualExecutor getIoExecutor() {
+        return serializedIo;
     }
     
     /**

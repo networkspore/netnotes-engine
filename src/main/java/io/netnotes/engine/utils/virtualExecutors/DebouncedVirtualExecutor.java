@@ -81,6 +81,32 @@ public final class DebouncedVirtualExecutor<T> {
         this.errorHandler = errorHandler;
     }
 
+    public CompletableFuture<T> submit(Runnable task, long debounceDelay, TimeUnit debounceUnit) {
+        return submit(() -> {
+            task.run();
+            return null;
+        }, debounceDelay, debounceUnit);
+    }
+
+    /**
+     * Submit a task for debounced execution according to the configured strategy.
+     */
+    public CompletableFuture<T> submit(Callable<T> task, long debounceDelay, TimeUnit debounceUnit) {
+        long now = System.nanoTime();
+        long debounceNanos = debounceUnit.toNanos(debounceDelay);
+        boolean inCooldown = (now - lastExecutionTime) < debounceNanos;
+
+        switch (strategy) {
+            case LEADING:
+                return submitLeading(task, inCooldown, now, debounceNanos);
+            case HYBRID:
+                return submitHybrid(task, inCooldown, now, debounceNanos);
+            case TRAILING:
+            default:
+                return submitTrailing(task);
+        }
+    }
+
     /**
      * Submit a task for debounced execution according to the configured strategy.
      */

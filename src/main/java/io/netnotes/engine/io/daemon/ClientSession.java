@@ -39,6 +39,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class ClientSession extends FlowProcess {
     
+    public static class Modes {
+        public static final NoteBytesReadOnly RAW           = new NoteBytesReadOnly("raw");
+        public static final NoteBytesReadOnly PARSED        = new NoteBytesReadOnly("parsed");
+        public static final NoteBytesReadOnly PASSTHROUGH   = new NoteBytesReadOnly("passthrough");
+        public static final NoteBytesReadOnly FILTERED      = new NoteBytesReadOnly("filtered");
+    }
+
     public final String sessionId;
     public final int clientPid;
     public final BitFlagStateMachine state;

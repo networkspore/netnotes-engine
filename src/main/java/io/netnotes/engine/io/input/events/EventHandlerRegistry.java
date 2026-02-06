@@ -12,25 +12,28 @@ import io.netnotes.engine.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
- * EventHandlerRegistry - Efficient multi-handler event dispatch system
+ * EventHandlerRegistry - Efficient multi-handler event dispatch with filtering
  * 
  * Features:
  * - Type-safe handlers via generics
  * - Multiple handlers per event type
+ * - Event filtering by type and source
  * - O(1) lookup via ConcurrentHashMap
  * - Thread-safe registration/unregistration
- * - Handler priority support (optional)
+ * - Handler priority support
  * 
  * Usage:
  * <pre>
  * EventHandlerRegistry registry = new EventHandlerRegistry();
  * 
- * // Register handlers
- * registry.register(EventBytes.EVENT_CONTAINER_RESIZE, this::handleResize);
- * registry.register(EventBytes.EVENT_KEY_DOWN, this::handleKeyDown);
+ * // Register handlers with filters
+ * EventFilter filter = EventFilter.forSource(keyboardPath);
+ * registry.register(EventBytes.EVENT_KEY_DOWN, this::handleKeyDown, filter);
  * 
- * // Dispatch events
- * ContainerResizeEvent event = new ContainerResizeEvent(path, 80, 24);
+ * // Register without filter (accepts all matching event types)
+ * registry.register(EventBytes.EVENT_CONTAINER_RESIZE, this::handleResize);
+ * 
+ * // Dispatch events - filtering happens automatically
  * registry.dispatch(event);
  * </pre>
  */
@@ -38,28 +41,35 @@ public class EventHandlerRegistry {
     
     /**
      * Map of event types to lists of handlers
-     * ConcurrentHashMap for thread-safe registration
-     * ArrayList for fast iteration during dispatch
      */
     private final Map<NoteBytesReadOnly, List<RoutedEventHandler>> handlers = 
         new ConcurrentHashMap<>();
     
     /**
-     * Event handler wrapper with priority support
+     * Event handler wrapper with priority and filtering
      */
     public static class RoutedEventHandler {
         final NoteBytesReadOnly id = NoteUUID.createLocalUUID64();
         final Consumer<RoutedEvent> handler;
         final int priority;
+        final EventFilter filter;
         boolean added = false;
         
-        public RoutedEventHandler(Consumer<RoutedEvent> handler, int priority) {
+        public RoutedEventHandler(
+                Consumer<RoutedEvent> handler, 
+                int priority,
+                EventFilter filter) {
             this.handler = handler;
             this.priority = priority;
+            this.filter = filter != null ? filter : EventFilter.acceptAll();
         }
 
         public RoutedEventHandler(Consumer<RoutedEvent> handler) {
-            this(handler, 0);
+            this(handler, 0, null);
+        }
+        
+        public RoutedEventHandler(Consumer<RoutedEvent> handler, EventFilter filter) {
+            this(handler, 0, filter);
         }
 
         public NoteBytesReadOnly getId() {
@@ -73,54 +83,77 @@ public class EventHandlerRegistry {
         public int getPriority() {
             return priority;
         }
+        
+        public EventFilter getFilter() {
+            return filter;
+        }
 
-        public boolean isAdded(){
+        public boolean isAdded() {
             return this.added;
         }
+        
+        /**
+         * Test if this handler accepts the event
+         */
+        public boolean accepts(RoutedEvent event) {
+            return filter.test(event);
+        }
     }
-
-   
     
     /**
-     * Register a handler for an event type (default priority 0)
-     * 
-     * @param eventType The event type constant from EventBytes
-     * @param handlers The handler to invoke
-     * @return This registry for chaining
+     * Register multiple handlers at once
      */
     public void register(NoteBytesReadOnly eventType, List<RoutedEventHandler> handlers) {
-        for(RoutedEventHandler handler : handlers){
+        for (RoutedEventHandler handler : handlers) {
             register(eventType, handler);
         }
     }
 
     /**
-     * Register a handler for an event type (default priority 0)
-     * 
-     * @param eventType The event type constant from EventBytes
-     * @param handler The handler to invoke
-     * @return This registry for chaining
+     * Register a handler (default priority, no filter)
      */
-    public NoteBytesReadOnly register(NoteBytesReadOnly eventType, Consumer<RoutedEvent> handler) {
-        return register(eventType, new RoutedEventHandler(handler, 0));
-    }
-
-    public NoteBytesReadOnly registerIfEmpty(NoteBytesReadOnly eventType, Consumer<RoutedEvent> handler) {
-        List<RoutedEventHandler> handlers = getEventHandlers(eventType);
-        if(handlers == null || handlers.isEmpty()){
-            return register(eventType, new RoutedEventHandler(handler, 0));
-        }else{
-            return null;
-        }
+    public NoteBytesReadOnly register(
+            NoteBytesReadOnly eventType, 
+            Consumer<RoutedEvent> handler) {
+        return register(eventType, new RoutedEventHandler(handler, 0, null));
     }
     
     /**
-     * Register a handler with priority (higher = called first)
-     * 
-     * @param eventType The event type constant from EventBytes
-     * @param handler The handler to invoke
-     * @param priority Handler priority (higher values called first)
-     * @return This registry for chaining
+     * Register a handler with event filter
+     */
+    public NoteBytesReadOnly register(
+            NoteBytesReadOnly eventType,
+            Consumer<RoutedEvent> handler,
+            EventFilter filter) {
+        return register(eventType, new RoutedEventHandler(handler, 0, filter));
+    }
+    
+    /**
+     * Register a handler with priority and filter
+     */
+    public NoteBytesReadOnly register(
+            NoteBytesReadOnly eventType,
+            Consumer<RoutedEvent> handler,
+            int priority,
+            EventFilter filter) {
+        return register(eventType, new RoutedEventHandler(handler, priority, filter));
+    }
+
+    /**
+     * Register only if no handlers exist for this event type
+     */
+    public NoteBytesReadOnly registerIfEmpty(
+            NoteBytesReadOnly eventType, 
+            Consumer<RoutedEvent> handler) {
+        List<RoutedEventHandler> handlers = getEventHandlers(eventType);
+        if (handlers == null || handlers.isEmpty()) {
+            return register(eventType, new RoutedEventHandler(handler, 0, null));
+        }
+        return null;
+    }
+    
+    /**
+     * Register a wrapped handler
      */
     public NoteBytesReadOnly register(
             NoteBytesReadOnly eventType,
@@ -149,19 +182,16 @@ public class EventHandlerRegistry {
         return wrapper.id;
     }
 
-    public  List<RoutedEventHandler> getEventHandlers(NoteBytesReadOnly eventType){
+    public List<RoutedEventHandler> getEventHandlers(NoteBytesReadOnly eventType) {
         return handlers.get(eventType);
     }
 
-    public Map<NoteBytesReadOnly, List<RoutedEventHandler>> getHandlersMap(){
+    public Map<NoteBytesReadOnly, List<RoutedEventHandler>> getHandlersMap() {
         return handlers;
     }
     
     /**
-     * Unregister a specific handler
-     * 
-     * @param eventType The event type
-     * @param handler The handler to remove
+     * Unregister by handler reference
      */
     public List<RoutedEventHandler> unregister(
             NoteBytesReadOnly eventType,
@@ -173,34 +203,30 @@ public class EventHandlerRegistry {
         });
     }
 
-     /**
-     * Unregister a specific handler
-     * 
-     * @param eventType The event type
-     * @param handler The handler to remove
+    /**
+     * Unregister by wrapper reference
      */
     public List<RoutedEventHandler> unregister(
             NoteBytesReadOnly eventType,
-            RoutedEventHandler eventHander) {
+            RoutedEventHandler eventHandler) {
         
         return handlers.computeIfPresent(eventType, (k, list) -> {
-            list.removeIf(wrapper -> wrapper.id.equals(eventHander.id));
+            list.removeIf(wrapper -> wrapper.id.equals(eventHandler.id));
             return list.isEmpty() ? null : list;
         });
     }
 
-
+    /**
+     * Unregister all handlers for event type
+     */
     public List<RoutedEventHandler> unregister(NoteBytesReadOnly eventType) {
         return handlers.remove(eventType);
     }
 
-     /**
-     * Unregister a specific handler
-     * 
-     * @param eventType The event type
-     * @param handler The handler to remove
+    /**
+     * Unregister by handler ID
      */
-    public  List<RoutedEventHandler> unregister(
+    public List<RoutedEventHandler> unregister(
             NoteBytesReadOnly eventType,
             NoteBytesReadOnly id) {
         
@@ -209,8 +235,6 @@ public class EventHandlerRegistry {
             return list.isEmpty() ? null : list;
         });
     }
-    
-
 
     /**
      * Clear all handlers
@@ -220,14 +244,16 @@ public class EventHandlerRegistry {
     }
     
     /**
-     * Dispatch an event to all registered handlers
-     * Encrypted packets are not dispatched
+     * Dispatch an event to all registered handlers that accept it
+     * 
+     * Handlers are invoked in priority order. If a handler's filter
+     * rejects the event, that handler is skipped. Dispatch stops when
+     * an event is consumed.
      * 
      * @param event The event to dispatch
      * @return true if any handlers were invoked
      */
-    public boolean dispatch(RoutedEvent event ) {
-   
+    public boolean dispatch(RoutedEvent event) {
         NoteBytes eventType = event.getEventTypeBytes();
         List<RoutedEventHandler> eventHandlers = handlers.get(eventType);
         
@@ -235,15 +261,21 @@ public class EventHandlerRegistry {
             return false;
         }
         
-        // Invoke all handlers in priority order
+        boolean anyInvoked = false;
+        
+        // Invoke handlers in priority order, checking filters
         for (RoutedEventHandler wrapper : eventHandlers) {
+            // Check if handler accepts this event
+            if (!wrapper.accepts(event)) {
+                continue;
+            }
+            
             try {
-                 wrapper.handler.accept(event);
+                wrapper.handler.accept(event);
+                anyInvoked = true;
                 
-                // Stop propagation if event is consumed
-                if (EventBytes.StateFlags.hasFlag(
-                        event.getStateFlags(), 
-                        EventBytes.StateFlags.STATE_CONSUMED)) {
+                // Stop if event is consumed
+                if (event.isConsumed()) {
                     break;
                 }
             } catch (Exception e) {
@@ -255,14 +287,11 @@ public class EventHandlerRegistry {
             }
         }
         
-        return true;
+        return anyInvoked;
     }
     
     /**
      * Check if any handlers are registered for an event type
-     * 
-     * @param eventType The event type to check
-     * @return true if handlers exist
      */
     public boolean hasHandlers(NoteBytesReadOnly eventType) {
         List<RoutedEventHandler> list = handlers.get(eventType);
@@ -271,9 +300,6 @@ public class EventHandlerRegistry {
     
     /**
      * Get the number of handlers for an event type
-     * 
-     * @param eventType The event type
-     * @return Handler count
      */
     public int getHandlerCount(NoteBytesReadOnly eventType) {
         List<RoutedEventHandler> list = handlers.get(eventType);
@@ -282,8 +308,6 @@ public class EventHandlerRegistry {
     
     /**
      * Get total number of registered handlers across all types
-     * 
-     * @return Total handler count
      */
     public int getTotalHandlerCount() {
         return handlers.values().stream()
@@ -298,6 +322,11 @@ public class EventHandlerRegistry {
         handlers.forEach((type, list) -> {
             sb.append(String.format("  %s: %d handler(s)\n", 
                 EventBytes.getEventName(type), list.size()));
+            
+            for (RoutedEventHandler handler : list) {
+                sb.append(String.format("    - priority=%d, filter=%s\n",
+                    handler.priority, handler.filter));
+            }
         });
         
         sb.append("]");

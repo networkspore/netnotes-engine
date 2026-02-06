@@ -6,7 +6,7 @@ import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
 /**
  * EphemeralKeyRepeatEvent - Key repeat with ephemeral data
  */
-public class EphemeralKeyRepeatEvent extends EphemeralRoutedEvent {
+public class EphemeralKeyRepeatEvent extends EphemeralKeyboardEvent {
     private final NoteBytesEphemeral keyData;
     private final NoteBytesEphemeral scancodeData;
 

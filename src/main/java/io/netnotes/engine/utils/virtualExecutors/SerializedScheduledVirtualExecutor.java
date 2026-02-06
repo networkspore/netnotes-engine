@@ -9,8 +9,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * A virtual-thread-based scheduled executor that guarantees serial execution.
@@ -179,25 +177,17 @@ public final class SerializedScheduledVirtualExecutor {
      * 
      * @return list of tasks that were awaiting execution
      */
-    public List<Runnable> shutdownNow() {
+    public void shutdownNow() {
         shutdown.set(true);
 
         // Cancel all queued tasks
-        List<Runnable> notExecuted = new ArrayList<>();
+    
         queue.forEach(t -> {
             t.future.cancel(true);
-            notExecuted.add(() -> {
-                try {
-                    t.callable.call();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
         });
         queue.clear();
 
         dispatcher.interrupt();
-        return notExecuted;
     }
 
     /**
@@ -268,11 +258,16 @@ public final class SerializedScheduledVirtualExecutor {
                         throw new CancellationException();
                     }
 
-                    callable.call();
+                    try{
+                        callable.call();
 
-                    long next = executeAtNanos + periodNanos;
-                    scheduleNext(next);
-                    return null;
+                        long next = executeAtNanos + periodNanos;
+                        scheduleNext(next);
+                        return null;
+                    } catch(Throwable t){
+                        controlFuture.completeExceptionally(t);
+                        return null;
+                    }
                 },
                 new CompletableFuture<>(),
                 executeAtNanos,

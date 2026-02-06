@@ -1,6 +1,5 @@
 package io.netnotes.engine.core.system.control.containers;
 
-
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.math.BigInteger;
@@ -12,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.events.containers.ContainerEventSerializer;
+import io.netnotes.engine.io.input.events.containerEvents.ContainerEventSerializer;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
@@ -33,10 +32,10 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * Container - Abstract base class for all container implementations
  * 
  * STATE MACHINE MODEL:
- * - Uses BitFlagStateMachine with bit positions for clarity
- * - States can be combined (e.g., VISIBLE + FOCUSED + ANIMATING)
- * - State transitions trigger callbacks to renderer
- * - Supports advanced scenarios: animations, compositing, split-screen, etc.
+ * - States represent USER-VISIBLE container states only
+ * - Renderer determines what to render based on these states
+ * - Container never decides if it's "actively rendering"
+ * - Error states prevent rendering via renderer logic, not state removal
  * 
  * RENDERING MODEL:
  * - PULL-BASED: Container updates internal state, renderer pulls when ready
@@ -46,8 +45,9 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  */
 public abstract class Container<T extends Container<T>> {
     
+    
+
     // ===== CONTAINER STATE BIT POSITIONS =====
-    // Using bit positions (int) instead of computed long values for clarity
     
     // Core lifecycle states (bits 0-3)
     public static final int STATE_CREATING       = 0;
@@ -61,54 +61,48 @@ public abstract class Container<T extends Container<T>> {
     public static final int STATE_MINIMIZED      = 6;
     public static final int STATE_MAXIMIZED      = 7;
     
-    // Focus states (bits 8-9)
+    // Focus state (bit 8)
     public static final int STATE_FOCUSED        = 8;
     
-    // Activity states (bits 10-11)
-    public static final int STATE_ACTIVE         = 9;  // Actively rendering
-    public static final int STATE_INACTIVE       = 10;  // Not rendering but alive
-    
-    // Stream states (bits 12-13)
+    // Stream states (bits 11-12)
     public static final int STATE_STREAM_CONNECTED = 11;
     public static final int STATE_STREAM_READY   = 12;
     
-    // Advanced states for complex renderers (bits 14-21)
-
-    public static final int STATE_FULLSCREEN     = 23;  // Fullscreen exclusive mode
-    public static final int STATE_ANIMATING      = 14;  // Animation in progress
-    public static final int STATE_TRANSITIONING  = 15;  // State transition animation
-    public static final int STATE_COMPOSITING    = 16;  // Being composited with others
-    public static final int STATE_OVERLAY        = 17;  // Rendered as overlay
-    public static final int STATE_BACKGROUND     = 18;  // Rendered in background
-    public static final int STATE_SPLIT_SCREEN   = 19;  // Part of split-screen layout
-    public static final int STATE_PIP            = 20;  // Picture-in-picture mode
-
+    // Advanced layout states (bits 14-21)
+    public static final int STATE_FULLSCREEN     = 13;
+    public static final int STATE_ANIMATING      = 14;
+    public static final int STATE_TRANSITIONING  = 15;
+    public static final int STATE_COMPOSITING    = 16;
+    public static final int STATE_OVERLAY        = 17;
+    public static final int STATE_BACKGROUND     = 18;
+    public static final int STATE_SPLIT_SCREEN   = 19;
+    public static final int STATE_PIP            = 20;
     
     // Resource states (bits 22-23)
     public static final int STATE_RESOURCES_LOADED = 22;
     public static final int STATE_RESOURCES_UNLOADING = 23;
     
-    // Error states (bits 24-25)
+    // Error states (bits 24-26)
     public static final int STATE_ERROR          = 24;
     public static final int STATE_RECOVERING     = 25;
     public static final int STATE_RENDER_ERROR   = 26;
+    public static final int STATE_STREAM_ERROR   = 27;
 
-    // Request states (bits 26-30)
-    
-    public static final int STATE_SHOW_REQUESTED     = 27;
+    // Request states (bits 27-34)
+   
     public static final int STATE_HIDE_REQUESTED     = 28;
     public static final int STATE_MAXIMIZE_REQUESTED = 29;
     public static final int STATE_RESTORE_REQUESTED  = 30;
     public static final int STATE_DESTROY_REQUESTED  = 31;
-    public static final int STATE_UPDATE_REQUESTED  = 32;
+    public static final int STATE_UPDATE_REQUESTED   = 32;
     public static final int STATE_FOCUS_REQUESTED    = 33;
-    public static final int STATE_RENDER_REQUESTED  = 34;
+    public static final int STATE_RENDER_REQUESTED   = 34;
+    public static final int STATE_SHOW_REQUESTED     = 35;
 
-    
+
     // ===== CORE IDENTITY =====
     protected final ContainerId id;
     protected final AtomicReference<String> title;
-    protected final AtomicReference<ContainerType> type;
     protected final AtomicReference<ContainerConfig> config;
     protected final ContextPath ownerPath;
     protected final ContextPath path;
@@ -134,12 +128,9 @@ public abstract class Container<T extends Container<T>> {
 
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
 
-
-
-
     protected Consumer<Container<?>> onRequestMade = null;
 
-    //HandlerFutures
+    // Handler futures
     protected CompletableFuture<Void> showFuture = null;
     protected CompletableFuture<Void> destroyFuture = null;
     protected CompletableFuture<Void> focusFuture = null;
@@ -154,14 +145,12 @@ public abstract class Container<T extends Container<T>> {
     protected Container(
         ContainerId id,
         String title,
-        ContainerType type,
         ContextPath ownerPath,
         ContainerConfig config,
         String rendererId
     ) {
         this.id = id;
         this.title = new AtomicReference<>(title);
-        this.type = new AtomicReference<>(type);
         this.config = new AtomicReference<>(config);
         this.ownerPath = ownerPath;
         this.path = ownerPath != null ? ownerPath.append("container", id.toString()) : null;
@@ -193,114 +182,96 @@ public abstract class Container<T extends Container<T>> {
     protected abstract void setupBatchMsgMap();
     protected void setupStateTransitions() {}
     protected abstract CompletableFuture<Void> initializeRenderer();
-
-
     
     // ===== BASE STATE TRANSITIONS =====
     
     private void setupBaseStateTransitions() {
-        stateMachine.onStateAdded(STATE_RENDER_ERROR, (old, now, bit) -> {
-            Log.logError("[Container:" + id + "] Render error - will retry after cooldown");
-        });
-
-        stateMachine.onStateRemoved(STATE_RENDER_ERROR, (old, now, bit) -> {
-            Log.logMsg("[Container:" + id + "] Render error cleared - recovered");
-        });
-
+        // INITIALIZED: Container ready for use
         stateMachine.onStateAdded(STATE_INITIALIZED, (old, now, bit) -> {
             stateMachine.removeState(STATE_CREATING);
         });
         
-        // VISIBLE: Container is visible
+        // VISIBLE: Container is visible to user
         stateMachine.onStateAdded(STATE_VISIBLE, (old, now, bit) -> {
             stateMachine.removeState(STATE_HIDDEN);
             stateMachine.removeState(STATE_MINIMIZED);
         });
         
-        // HIDDEN: Container is hidden
+        // HIDDEN: Container is hidden from user
         stateMachine.onStateAdded(STATE_HIDDEN, (old, now, bit) -> {
             stateMachine.removeState(STATE_VISIBLE);
+            // Hidden containers lose focus
             stateMachine.removeState(STATE_FOCUSED);
-            stateMachine.removeState(STATE_ACTIVE);
         });
         
         // FOCUSED: Container has input focus
         stateMachine.onStateAdded(STATE_FOCUSED, (old, now, bit) -> {
-            stateMachine.removeState(STATE_FOCUS_REQUESTED);            
+            stateMachine.removeState(STATE_FOCUS_REQUESTED);
+            // Focused containers must be visible
             if (stateMachine.hasState(STATE_HIDDEN)) {
                 stateMachine.removeState(STATE_HIDDEN);
                 stateMachine.addState(STATE_VISIBLE);
             }
-            
         });
         
         stateMachine.onStateRemoved(STATE_FOCUSED, (old, now, bit) -> {
- 
-        });
-        
-        // ACTIVE: Container is actively rendering
-        stateMachine.onStateAdded(STATE_ACTIVE, (old, now, bit) -> {
-            if(stateMachine.hasState(STATE_ERROR)){
-                stateMachine.removeState(STATE_ACTIVE);
-            }
-        });
-        
-        stateMachine.onStateRemoved(STATE_ACTIVE, (old, now, bit) -> {
-            stateMachine.addState(STATE_INACTIVE);
- 
+            // Focus lost - container aware but takes no action
         });
         
         // MAXIMIZED: Container is maximized
         stateMachine.onStateAdded(STATE_MAXIMIZED, (old, now, bit) -> {
-
+            // Maximized state - just tracks user intention
         });
         
         stateMachine.onStateRemoved(STATE_MAXIMIZED, (old, now, bit) -> {
-   
+            // Restore from maximized
         });
         
         // DESTROYING: Container being destroyed
         stateMachine.onStateAdded(STATE_DESTROYING, (old, now, bit) -> {
-            stateMachine.removeState(STATE_ACTIVE);
             stateMachine.removeState(STATE_FOCUSED);
             stateMachine.removeState(STATE_VISIBLE);
-
         });
-
-        stateMachine.onStateAdded(STATE_ERROR, (old, now, bit) -> {
-            Log.logError("[Container:" + id + "] FATAL ERROR - manual recovery required");
-            // Stop accepting updates when in error state
-            stateMachine.removeState(STATE_ACTIVE);
-        });
-
-        stateMachine.onStateRemoved(STATE_ERROR, (old, now, bit) -> {
-            Log.logMsg("[Container:" + id + "] Error state cleared - manual recovery applied");
-        });
-
         
         // DESTROYED: Container fully destroyed
         stateMachine.onStateAdded(STATE_DESTROYED, (old, now, bit) -> {
             stateMachine.removeState(STATE_DESTROYING);
-
+        });
+        
+        // ERROR: Container in error state
+        stateMachine.onStateAdded(STATE_ERROR, (old, now, bit) -> {
+            Log.logError("[Container:" + id + "] ERROR state - renderer should stop rendering");
+        });
+        
+        stateMachine.onStateRemoved(STATE_ERROR, (old, now, bit) -> {
+            Log.logMsg("[Container:" + id + "] ERROR state cleared");
+        });
+        
+        // RENDER_ERROR: Transient render failure
+        stateMachine.onStateAdded(STATE_RENDER_ERROR, (old, now, bit) -> {
+            Log.logError("[Container:" + id + "] RENDER_ERROR - renderer will retry");
+        });
+        
+        stateMachine.onStateRemoved(STATE_RENDER_ERROR, (old, now, bit) -> {
+            Log.logMsg("[Container:" + id + "] RENDER_ERROR cleared");
         });
         
         // STREAM_CONNECTED: Stream established
         stateMachine.onStateAdded(STATE_STREAM_CONNECTED, (old, now, bit) -> {
-
+            // Stream connected
         });
         
         stateMachine.onStateRemoved(STATE_STREAM_CONNECTED, (old, now, bit) -> {
             stateMachine.removeState(STATE_STREAM_READY);
-
         });
-    }
 
+        
+    }
 
     @SuppressWarnings("unchecked")
     protected final T self() {
         return (T) this;
     }
- 
     
     // ===== BASE MESSAGE MAP =====
     
@@ -324,7 +295,6 @@ public abstract class Container<T extends Container<T>> {
             .thenRun(() -> {
                 stateMachine.addState(STATE_INITIALIZED);
                 stateMachine.addState(STATE_VISIBLE);
-                stateMachine.addState(STATE_INACTIVE);
                 Log.logMsg("[Container:" + id + "] Initialized");
             })
             .exceptionally(ex -> {
@@ -335,7 +305,6 @@ public abstract class Container<T extends Container<T>> {
             });
     }
     
-
     // ===== STREAM HANDLING =====
     
     public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
@@ -384,8 +353,6 @@ public abstract class Container<T extends Container<T>> {
         this.eventStream = channel;
         this.eventWriter = new NoteBytesWriter(channel.getQueuedOutputStream());
     }
-
-   
 
     public boolean isEventStreamReady() {
         if(!isEventReadyCache){
@@ -451,7 +418,7 @@ public abstract class Container<T extends Container<T>> {
             stateMachine.removeState(STATE_SHOW_REQUESTED);
             stateMachine.removeState(STATE_HIDDEN);
             stateMachine.addState(STATE_VISIBLE);
-            onShowGranted();  // Subclass hook - emit events here
+            onShowGranted();
         })
         .thenRun(() -> {
             if(showFuture != null) {
@@ -467,7 +434,6 @@ public abstract class Container<T extends Container<T>> {
             return null;
         });
     }
-
     
     /**
      * Grant focus - renderer calls this to approve focus request
@@ -477,9 +443,7 @@ public abstract class Container<T extends Container<T>> {
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_FOCUS_REQUESTED);
             stateMachine.addState(STATE_FOCUSED);
-            stateMachine.addState(STATE_ACTIVE);
-            
-            onFocusGranted();  // Subclass hook - emit events here
+            onFocusGranted();
         })
         .thenRun(() -> {
             if(focusFuture != null) {
@@ -495,7 +459,6 @@ public abstract class Container<T extends Container<T>> {
             return null;
         });
     }
-
     
     /**
      * Grant hide
@@ -505,13 +468,6 @@ public abstract class Container<T extends Container<T>> {
             stateMachine.removeState(STATE_HIDE_REQUESTED);
             stateMachine.removeState(STATE_VISIBLE);
             stateMachine.addState(STATE_HIDDEN);
-            
-            // Hidden containers lose focus
-            if (stateMachine.hasState(STATE_FOCUSED)) {
-                stateMachine.removeState(STATE_FOCUSED);
-                stateMachine.removeState(STATE_ACTIVE);
-            }
-            
             onHideGranted();
         })
         .thenRun(()->{
@@ -529,22 +485,16 @@ public abstract class Container<T extends Container<T>> {
         });
     }
 
-
-
     /**
      * Revoke focus - renderer calls this when focus moves elsewhere
      */
     public CompletableFuture<Void> revokeFocus() {
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_FOCUSED);
-            stateMachine.removeState(STATE_ACTIVE);
             stateMachine.removeState(STATE_FOCUS_REQUESTED);
-            
-            onFocusRevoked();  // Subclass hook - emit events here
+            onFocusRevoked();
         });
     }
-
-   
     
     public CompletableFuture<Void> grantMaximize() {
         return containerExecutor.execute(() -> {
@@ -566,8 +516,6 @@ public abstract class Container<T extends Container<T>> {
             return null;
         }); 
     }
-
-
 
     public CompletableFuture<Void> grantRestore() {
         return containerExecutor.execute(() -> {
@@ -592,7 +540,6 @@ public abstract class Container<T extends Container<T>> {
         });
     }
 
-
     public CompletableFuture<Void> grantDestroy() {
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_DESTROY_REQUESTED);
@@ -611,7 +558,6 @@ public abstract class Container<T extends Container<T>> {
                 destroyFuture.complete(null);
                 destroyFuture = null;
             }
-            
         })
         .exceptionally(ex->{
             Log.logError("[Container:" + id + "] Error during destroy: " + ex.getMessage());
@@ -655,43 +601,36 @@ public abstract class Container<T extends Container<T>> {
     }
 
     /*
-    * ============ On Event Dispatching ==========
-    */
+     * ============ On Event Dispatching ==========
+     */
 
-
-	protected void onDestroyGranted() {
+    protected void onDestroyGranted() {
         emitEvent(ContainerEventSerializer.createCloseEvent());
-	}
-
-	
-	protected void onFocusGranted() {
-		emitEvent(ContainerEventSerializer.createFocusEvent());
-	}
-
-	
-	protected void onFocusRevoked() {
-		emitEvent(ContainerEventSerializer.createFocusLostEvent());
-	}
-
-	
-	protected void onHideGranted() {
-		emitEvent(ContainerEventSerializer.createHiddenEvent());
-	}
-
-	
-	protected void onMaximizeGranted() {
-		emitEvent(ContainerEventSerializer.createMaximizeEvent());
-	}
-
-	
-	protected void onRestoreGranted() {
-		emitEvent(ContainerEventSerializer.createRestoredEvent());
-	}
-
-	
-	protected void onShowGranted() {
-		emitEvent(ContainerEventSerializer.createShownEvent());
-	}
+    }
+    
+    protected void onFocusGranted() {
+        emitEvent(ContainerEventSerializer.createFocusEvent());
+    }
+    
+    protected void onFocusRevoked() {
+        emitEvent(ContainerEventSerializer.createFocusLostEvent());
+    }
+    
+    protected void onHideGranted() {
+        emitEvent(ContainerEventSerializer.createHiddenEvent());
+    }
+    
+    protected void onMaximizeGranted() {
+        emitEvent(ContainerEventSerializer.createMaximizeEvent());
+    }
+    
+    protected void onRestoreGranted() {
+        emitEvent(ContainerEventSerializer.createRestoredEvent());
+    }
+    
+    protected void onShowGranted() {
+        emitEvent(ContainerEventSerializer.createShownEvent());
+    }
 
     public void setOnRequestMade(Consumer<Container<?>> notifier) {
         this.onRequestMade = notifier;
@@ -702,10 +641,10 @@ public abstract class Container<T extends Container<T>> {
      */
     protected void notifyRequestMade() {
         if (onRequestMade != null) {
-
             onRequestMade.accept(this);
         }
     }
+    
     // ===== MESSAGE HANDLERS =====
    
     public CompletableFuture<Void> handleShowContainer(NoteBytesMap command) {
@@ -718,7 +657,6 @@ public abstract class Container<T extends Container<T>> {
     }
     
     public CompletableFuture<Void> handleHideContainer(NoteBytesMap command) {
- 
         if(hideFuture == null) {
             hideFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_HIDE_REQUESTED));
@@ -736,17 +674,14 @@ public abstract class Container<T extends Container<T>> {
         return destroyFuture;
     }
 
-
     public CompletableFuture<Void> destroyNow() {
         if (destroyFuture == null) {
             destroyFuture = new CompletableFuture<>();
             containerExecutor.execute(() -> stateMachine.addState(STATE_DESTROY_REQUESTED));
             notifyRequestMade();
         }
-    
         return destroyFuture;
     }   
-
  
     public CompletableFuture<Void> handleFocusContainer(NoteBytesMap command) {
         if(focusFuture == null) {
@@ -767,7 +702,6 @@ public abstract class Container<T extends Container<T>> {
         return focusFuture;
     }
     
-    
     public CompletableFuture<Void> handleMaximizeContainer(NoteBytesMap command) {
         if(maximizeFuture == null) {
             maximizeFuture = new CompletableFuture<>();
@@ -777,7 +711,6 @@ public abstract class Container<T extends Container<T>> {
         return maximizeFuture;
     }
     
-    
     public CompletableFuture<Void> handleRestoreContainer(NoteBytesMap command) {
         if(restoreFuture == null) {
             restoreFuture = new CompletableFuture<>();
@@ -786,7 +719,6 @@ public abstract class Container<T extends Container<T>> {
         }   
         return restoreFuture;
     }
-    
    
     public CompletableFuture<Void> handleUpdateContainer(NoteBytesMap command) {
         if(updateFuture == null) {
@@ -811,24 +743,17 @@ public abstract class Container<T extends Container<T>> {
         }
         return updateFuture;
     }
-    
   
     private CompletableFuture<Void> handleQueryContainer(NoteBytesMap command) {
-      
         NoteBytesObject response = queryContainer();
         emitEvent(response);
-    
         return CompletableFuture.completedFuture(null);
     }
 
     public NoteBytesObject queryContainer() {
-
-            ContainerInfo info = getInfo();
-            return info.toNoteBytes();
-  
+        ContainerInfo info = getInfo();
+        return info.toNoteBytes();
     }
-
-
     
     // ===== HELPERS =====
     
@@ -858,26 +783,51 @@ public abstract class Container<T extends Container<T>> {
     public String getRendererId() { return rendererId; }
     public ContextPath getOwnerPath() { return ownerPath; }
     public String getTitle() { return title.get(); }
-    public ContainerType getType() { return type.get(); }
     public BigInteger getState() { return stateMachine.getState(); }
     public BitFlagStateMachine getStateMachine() { return stateMachine; }
     public ContainerConfig getConfig() { return config.get(); }
-
     
     protected BitFlagStateMachine getInternalStateMachine() { return stateMachine; }
     
-    // Legacy compatibility
-    protected boolean isFocused() { return  stateMachine.hasState(STATE_FOCUSED); }
-    protected boolean isHidden() { return stateMachine.hasState(STATE_HIDDEN); }
-    protected boolean isMaximized() { return stateMachine.hasState(STATE_MAXIMIZED); }
-    protected boolean isVisible() { return stateMachine.hasState(STATE_VISIBLE); }
-    protected boolean isStreamActive() { return stateMachine.hasState(STATE_STREAM_CONNECTED); }
+    // State queries for renderer decisions
+    public boolean isFocused() { return stateMachine.hasState(STATE_FOCUSED); }
+    public boolean isHidden() { return stateMachine.hasState(STATE_HIDDEN); }
+    public boolean isMaximized() { return stateMachine.hasState(STATE_MAXIMIZED); }
+    public boolean isVisible() { return stateMachine.hasState(STATE_VISIBLE); }
+    public boolean isStreamActive() { return stateMachine.hasState(STATE_STREAM_CONNECTED); }
+    public boolean hasError() { return stateMachine.hasState(STATE_ERROR); }
+    public boolean hasRenderError() { return stateMachine.hasState(STATE_RENDER_ERROR); }
+    
+    /**
+     * Should this container be rendered?
+     * Renderer uses this to decide - NOT the container's responsibility
+     */
+    public boolean shouldRender() {
+        // Don't render if in fatal error state
+        if (hasError()) {
+            return false;
+        }
+        
+        // Don't render if hidden
+        if (isHidden()) {
+            return false;
+        }
+        
+        // Don't render if destroyed/destroying
+        if (stateMachine.hasState(STATE_DESTROYED) || 
+            stateMachine.hasState(STATE_DESTROYING)) {
+            return false;
+        }
+        
+        // Must be visible
+        return isVisible();
+    }
     
     public CompletableFuture<Void> getRenderStreamFuture() { return renderStreamFuture; }
     
     public ContainerInfo getInfo() {
         return new ContainerInfo(
-            id, title.get(), type.get(), stateMachine.getState(),
+            id, title.get(),rendererId, stateMachine.getState(),
             ownerPath, config.get(), createdTime
         );
     }
@@ -885,8 +835,8 @@ public abstract class Container<T extends Container<T>> {
     @Override
     public String toString() {
         return String.format(
-            "Container[id=%s, title=%s, type=%s, state=0x%X, visible=%s, focused=%s, renderer=%s]",
-            id, title.get(), type.get(), getState(), isVisible(), isFocused(), rendererId
+            "Container[id=%s, title=%s, state=0x%X, visible=%s, focused=%s, renderer=%s]",
+            id, title.get(), getState(), isVisible(), isFocused(), rendererId
         );
     }
 }
