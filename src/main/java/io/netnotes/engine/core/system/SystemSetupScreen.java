@@ -2,6 +2,7 @@ package io.netnotes.engine.core.system;
 
 import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.terminal.TerminalRenderState;
+import io.netnotes.engine.core.system.control.terminal.TerminalScreen;
 import io.netnotes.engine.core.system.control.terminal.TextStyle;
 import io.netnotes.engine.core.system.control.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.core.system.control.terminal.elements.TerminalTextBox;
@@ -11,88 +12,167 @@ import io.netnotes.engine.core.system.control.terminal.menus.MenuNavigator;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities;
 import io.netnotes.engine.io.daemon.IODaemonDetection;
+import io.netnotes.engine.io.input.events.KeyDownEvent;
 import io.netnotes.engine.messaging.NoteMessaging.ItemTypes;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 
 /**
- * SystemSetupScreen - REFACTORED for pull-based rendering
+ * SystemSetupScreen - REFACTORED for state-driven rendering
  * 
- * KEY CHANGES:
- * - Implements Renderable via TerminalScreen
- * - States stored as fields (not in state machine)
- * - getRenderState() builds UI from current state
- * - transitionTo() ensures invalidate() called on EVERY state change
- * - MenuNavigator handles menu rendering (already pull-based)
- * - TerminalInputReader handles input rendering
+ * KEY CHANGES FROM BEFORE:
+ * - All states are in state machine (not volatile fields)
+ * - State transitions are declarative (not imperative)
+ * - Every state change automatically invalidates
+ * - No manual invalidate() calls needed
+ * - Event handlers transition state, state drives rendering
  * 
  * State Flow:
- * WELCOME -> DETECTING -> MAIN_MENU -> KEYBOARD_SELECTION / SOCKET_CONFIG
+ * WELCOME -> (key press) -> DETECTING
+ * DETECTING -> (async detection) -> MAIN_MENU or ERROR
+ * MAIN_MENU -> (menu selection) -> KEYBOARD_SELECTION / SOCKET_CONFIG / etc.
+ * 
+ * PATTERN BEFORE (imperative):
+ * showWelcome()
+ * waitForKey()
+ * transitionTo(DETECTING)
+ * invalidate() // manual
+ * detectIODaemon()
+ * 
+ * PATTERN NOW (declarative):
+ * STATE_WELCOME: show welcome, register key handler
+ * Key handler: transitionTo(STATE_DETECTING) // auto-invalidates
+ * STATE_DETECTING: show "detecting...", start async detection
+ * Detection complete: transitionTo(STATE_MAIN_MENU) // auto-invalidates
  */
 public class SystemSetupScreen extends TerminalScreen {
     
+    // ===== SCREEN STATES (using state machine) =====
+    private static final int STATE_WELCOME = 20;
+    private static final int STATE_DETECTING = 21;
+    private static final int STATE_MAIN_MENU = 22;
+    private static final int STATE_KEYBOARD_SELECTION = 23;
+    private static final int STATE_SOCKET_CONFIG = 24;
+    private static final int STATE_ERROR = 25;
+    
+    // ===== SUB-COMPONENTS =====
     private final MenuNavigator menuNavigator;
     private final boolean isFirstRun;
     
-    // Detection results (mutable state)
+    // ===== DETECTION RESULTS (updated by async operations) =====
     private volatile boolean ioDaemonAvailable = false;
     private volatile String socketPath = "/var/run/io-daemon.sock";
     private volatile List<DeviceDescriptorWithCapabilities> availableKeyboards = null;
-    
-    // Current state (mutable)
-    private enum SetupState {
-        WELCOME,
-        DETECTING,
-        MAIN_MENU,
-        KEYBOARD_SELECTION,
-        SOCKET_CONFIG,
-        ERROR
-    }
-    
-    private volatile SetupState currentState = SetupState.WELCOME;
     private volatile String errorMessage = null;
     
-    // For socket config input
+    // ===== INPUT READER (for socket config) =====
     private TerminalInputReader inputReader = null;
     
     public SystemSetupScreen(String id, SystemApplication systemApplication) {
         super(id, systemApplication);
-        this.menuNavigator = new MenuNavigator(systemApplication).withParent(this);
+        this.menuNavigator = new MenuNavigator("setupMenu", systemApplication);
         this.isFirstRun = !systemApplication.isAuthenticated();
-        Log.logMsg("[SystemSetupScreen] created: " + id + ": terminal: " + systemApplication.getTerminal().getId());
+        
+        Log.logMsg("[SystemSetupScreen] created: " + id);
+        
+        // Set initial state
         if (!isFirstRun) {
-            currentState = SetupState.DETECTING;
+            stateMachine.addState(STATE_DETECTING);
+        } else {
+            stateMachine.addState(STATE_WELCOME);
         }
     }
     
-    /**
-     * Change state and invalidate
-     * 
-     * Helper method to ensure we ALWAYS invalidate after state changes
-     * CRITICAL: Use this instead of setting currentState directly
-     */
-    private void transitionTo(SetupState newState) {
-        Log.logMsg("[SystemSetupScreen] State transition: " + currentState + " -> " + newState);
-        currentState = newState;
-        invalidate(); // ALWAYS invalidate after state change
+    // ===== STATE TRANSITIONS =====
+    
+    @Override
+    protected void setupAdditionalStateTransitions() {
+        // STATE_WELCOME: Show welcome screen, wait for key press
+        stateMachine.onStateAdded(STATE_WELCOME, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_WELCOME - setting up key handler");
+            
+            // Register key handler that transitions to DETECTING
+            registerKeyDownHandler(event -> {
+                if (event instanceof KeyDownEvent) {
+                    transitionTo(STATE_WELCOME, STATE_DETECTING);
+                }
+            });
+        });
+        
+        // STATE_DETECTING: Show "Detecting..." and start async detection
+        stateMachine.onStateAdded(STATE_DETECTING, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_DETECTING - starting detection");
+            
+            // Start async detection
+            detectIODaemon();
+        });
+        
+        // STATE_MAIN_MENU: Show main setup menu
+        stateMachine.onStateAdded(STATE_MAIN_MENU, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_MAIN_MENU - showing menu");
+            showMainSetupMenu();
+        });
+        
+        // STATE_KEYBOARD_SELECTION: Show keyboard selection menu
+        stateMachine.onStateAdded(STATE_KEYBOARD_SELECTION, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_KEYBOARD_SELECTION");
+            showKeyboardSelectionMenu(true);
+        });
+        
+        // STATE_SOCKET_CONFIG: Show socket path input
+        stateMachine.onStateAdded(STATE_SOCKET_CONFIG, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_SOCKET_CONFIG");
+            setupSocketConfigInput();
+        });
+        
+        // STATE_ERROR: Show error message
+        stateMachine.onStateAdded(STATE_ERROR, (old, now, bit) -> {
+            Log.logMsg("[SystemSetupScreen] STATE_ERROR: " + errorMessage);
+            
+            // Register key handler to go back
+            registerKeyDownHandler(event -> {
+                if (event instanceof KeyDownEvent) {
+                    systemApplication.goBack();
+                }
+            });
+        });
     }
     
-    // ===== RENDERABLE INTERFACE =====
+    // ===== RENDERING (PULL-BASED) =====
     
     @Override
     public TerminalRenderState getRenderState() {
         // Build UI based on current state
-        return switch (currentState) {
-            case WELCOME -> buildWelcomeState();
-            case DETECTING -> buildDetectingState();
-            case MAIN_MENU -> buildMainMenuState();
-            case KEYBOARD_SELECTION -> buildKeyboardSelectionState();
-            case SOCKET_CONFIG -> buildSocketConfigState();
-            case ERROR -> buildErrorState();
-        };
+        // State machine guarantees only one of these states is active
+        
+        if (stateMachine.hasState(STATE_WELCOME)) {
+            return buildWelcomeState();
+        }
+        
+        if (stateMachine.hasState(STATE_DETECTING)) {
+            return buildDetectingState();
+        }
+        
+        if (stateMachine.hasState(STATE_MAIN_MENU)) {
+            return buildMainMenuState();
+        }
+        
+        if (stateMachine.hasState(STATE_KEYBOARD_SELECTION)) {
+            return buildKeyboardSelectionState();
+        }
+        
+        if (stateMachine.hasState(STATE_SOCKET_CONFIG)) {
+            return buildSocketConfigState();
+        }
+        
+        if (stateMachine.hasState(STATE_ERROR)) {
+            return buildErrorState();
+        }
+        
+        // Fallback: empty state
+        return TerminalRenderState.builder().build();
     }
     
     /**
@@ -101,21 +181,20 @@ public class SystemSetupScreen extends TerminalScreen {
     private TerminalRenderState buildWelcomeState() {
         TerminalTextBox welcomeBox = TerminalTextBox.builder()
             .position(0, 2)
-            .size(systemApplication.getWidth() - 4, 5)
             .title("Welcome to Netnotes", TerminalTextBox.TitlePlacement.INSIDE_CENTER)
             .style(BoxStyle.DOUBLE)
             .titleStyle(TextStyle.BOLD)
             .contentAlignment(TerminalTextBox.ContentAlignment.CENTER)
             .build();
         
-        int msgRow = Math.max(systemApplication.getHeight() / 2 + 2, 8);
+        int msgRow = Math.max(allocatedHeight / 2 + 2, 8);
         String msg = "Initial Setup";
-        int msgCol = Math.max(0, systemApplication.getWidth() / 2 - msg.length() / 2);
+        int msgCol = Math.max(0, allocatedWidth / 2 - msg.length() / 2);
         int lineCol = Math.max(0, msgCol - 1);
         
-        int promptRow = systemApplication.getHeight() / 2 + 5;
+        int promptRow = allocatedHeight / 2 + 5;
         String prompt = TerminalCommands.PRESS_ANY_KEY;
-        int promptCol = Math.max(0, systemApplication.getWidth() / 2 - prompt.length() / 2);
+        int promptCol = Math.max(0, allocatedWidth / 2 - prompt.length() / 2);
         
         return TerminalRenderState.builder()
             .add((term)-> term.clear())
@@ -134,8 +213,8 @@ public class SystemSetupScreen extends TerminalScreen {
      * Build detecting screen state
      */
     private TerminalRenderState buildDetectingState() {
-        int row = systemApplication.getHeight() / 2;
-        int col = Math.max(0, systemApplication.getWidth() / 2 - 15);
+        int row = allocatedHeight / 2;
+        int col = Math.max(0, allocatedWidth / 2 - 15);
         
         return TerminalRenderState.builder()
             .add((term) -> {
@@ -149,7 +228,6 @@ public class SystemSetupScreen extends TerminalScreen {
      */
     private TerminalRenderState buildMainMenuState() {
         // MenuNavigator handles its own rendering
-        // Return empty state - MenuNavigator is active renderable
         return TerminalRenderState.builder()
             .add(batch -> batch.clear())
             .add(menuNavigator.asRenderElement())
@@ -171,9 +249,6 @@ public class SystemSetupScreen extends TerminalScreen {
      * Build socket config state
      */
     private TerminalRenderState buildSocketConfigState() {
-        // TerminalInputReader handles its own rendering
-        // But we need to show the UI around it
-        
         int titleRow = 1;
         int pathRow = 3;
         int promptRow = 5;
@@ -194,7 +269,6 @@ public class SystemSetupScreen extends TerminalScreen {
             .add((term) -> {
                 term.printAt(inputPromptRow, 5, "> ", TextStyle.NORMAL);
             })
-            // InputReader renders itself at its configured position
             .build();
     }
     
@@ -205,7 +279,7 @@ public class SystemSetupScreen extends TerminalScreen {
         String errorText = "Setup error: " + 
             (errorMessage != null ? errorMessage : "Unknown error");
         
-        int errorRow = systemApplication.getHeight() / 2;
+        int errorRow = allocatedHeight / 2;
         int promptRow = errorRow + 2;
         
         return TerminalRenderState.builder()
@@ -223,22 +297,12 @@ public class SystemSetupScreen extends TerminalScreen {
     public CompletableFuture<Void> onShow() {
         Log.logMsg("[SystemSetupScreen] Showing setup");
         
-        // Make this screen active (calls super which sets renderable + invalidates)
-        super.onShow();
+        // Make this screen active (sets renderable + invalidates)
+        return super.onShow();
         
-        // Start the flow
-        if (currentState == SetupState.WELCOME) {
-            // Wait for keypress, then move to detecting
-            return systemApplication.waitForKeyPress()
-                .thenRun(() -> {
-                    transitionTo(SetupState.DETECTING); // Will invalidate
-                    detectIODaemon();
-                });
-        } else {
-            // Skip welcome, go straight to detecting
-            transitionTo(SetupState.DETECTING); // Will invalidate
-            return detectIODaemon();
-        }
+        // State transitions handle the rest:
+        // - If STATE_WELCOME: key handler registered, waiting for press
+        // - If STATE_DETECTING: detection already started
     }
     
     @Override
@@ -251,7 +315,7 @@ public class SystemSetupScreen extends TerminalScreen {
         super.onHide();
     }
     
-    // ===== IODaemon DETECTION =====
+    // ===== IODaemon DETECTION (ASYNC) =====
     
     private CompletableFuture<Void> detectIODaemon() {
         return systemApplication.getIoDaemonManager().detect()
@@ -292,31 +356,19 @@ public class SystemSetupScreen extends TerminalScreen {
                 }
             })
             .thenRun(() -> {
-                // Detection complete - show main menu
-                transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                showMainSetupMenu();
+                // Detection complete - transition to main menu
+                // This automatically invalidates and triggers render
+                transitionTo(STATE_DETECTING, STATE_MAIN_MENU);
             })
             .exceptionally(ex -> {
                 Log.logError("[SystemSetupScreen] IODaemon detection failed: " + 
                     ex.getMessage());
                 
-                // Extract root cause
-                Throwable cause = ex;
-                while (cause instanceof CompletionException && cause.getCause() != null) {
-                    cause = cause.getCause();
-                }
+                errorMessage = ex.getMessage() != null ? ex.getMessage() : 
+                    ex.getClass().getSimpleName();
                 
-                errorMessage = cause.getMessage();
-                if (errorMessage == null || errorMessage.isEmpty()) {
-                    errorMessage = cause.getClass().getSimpleName();
-                }
-                
-                transitionTo(SetupState.ERROR); // Will invalidate
-                
-                // Wait for keypress, then go back
-                systemApplication.waitForKeyPress()
-                    .thenRun(() -> systemApplication.goBack());
-                
+                // Transition to error state
+                transitionTo(STATE_DETECTING, STATE_ERROR);
                 return null;
             });
     }
@@ -340,12 +392,10 @@ public class SystemSetupScreen extends TerminalScreen {
             });
     }
     
-    // ===== MAIN SETUP MENU =====
+    // ===== MENU SETUP (state-triggered) =====
     
     private void showMainSetupMenu() {
-        // State already set by transitionTo()
-        
-        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("system-setup");
+        ContextPath menuPath = systemApplication.getContextPath().append("system-setup");
         String description = buildSetupDescription();
         
         MenuContext menu = new MenuContext(
@@ -355,10 +405,11 @@ public class SystemSetupScreen extends TerminalScreen {
             null
         );
         
-        if (ioDaemonAvailable && availableKeyboards != null && !availableKeyboards.isEmpty()) {
+        if (ioDaemonAvailable && availableKeyboards != null && 
+            !availableKeyboards.isEmpty()) {
             menu.addItem("select-password-keyboard", 
                 "Select Password Keyboard",
-                () -> showKeyboardSelectionMenu(true));
+                () -> transitionTo(STATE_MAIN_MENU, STATE_KEYBOARD_SELECTION));
             
             menu.addItem("use-gui-only",
                 "Use UI Keyboard Only (No Secure Input)",
@@ -382,7 +433,7 @@ public class SystemSetupScreen extends TerminalScreen {
         
         menu.addItem("socket-path",
             "Configure Socket Path: " + socketPath,
-            this::configureSocketPath);
+            () -> transitionTo(STATE_MAIN_MENU, STATE_SOCKET_CONFIG));
         
         if (isFirstRun) {
             menu.addItem("continue",
@@ -394,11 +445,8 @@ public class SystemSetupScreen extends TerminalScreen {
                 () -> systemApplication.goBack());
         }
         
-        // MenuNavigator becomes the active renderable
         menuNavigator.showMenu(menu);
-        
-        // Invalidate after menu setup to trigger render
-        invalidate();
+        // No manual invalidate needed - transitionTo already did it
     }
     
     private String buildSetupDescription() {
@@ -434,12 +482,10 @@ public class SystemSetupScreen extends TerminalScreen {
         return desc.toString();
     }
     
-    // ===== KEYBOARD SELECTION =====
-    
     private void showKeyboardSelectionMenu(boolean forPassword) {
-        transitionTo(SetupState.KEYBOARD_SELECTION); // Will invalidate
+        // State transition already happened
         
-        ContextPath menuPath = systemApplication.getTerminal().getContextPath().append("keyboard-selection");
+        ContextPath menuPath = systemApplication.getContextPath().append("keyboard-selection");
         
         String title = forPassword ? "Select Password Keyboard" : "Select Default Keyboard";
         String description = "Choose which USB keyboard to use for " + 
@@ -449,10 +495,8 @@ public class SystemSetupScreen extends TerminalScreen {
         
         if (availableKeyboards == null || availableKeyboards.isEmpty()) {
             menu.addInfoItem("no-keyboards", "No keyboards detected");
-            menu.addItem("back", "Back", () -> {
-                transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                showMainSetupMenu();
-            });
+            menu.addItem("back", "Back", 
+                () -> transitionTo(STATE_KEYBOARD_SELECTION, STATE_MAIN_MENU));
         } else {
             for (var device : availableKeyboards) {
                 String deviceId = device.usbDevice().getDeviceId();
@@ -473,17 +517,31 @@ public class SystemSetupScreen extends TerminalScreen {
             
             menu.addSeparator("");
             menu.addItem("refresh", "Refresh Device List", this::refreshKeyboards);
-            menu.addItem("back", "Back", () -> {
-                transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                showMainSetupMenu();
-            });
+            menu.addItem("back", "Back", 
+                () -> transitionTo(STATE_KEYBOARD_SELECTION, STATE_MAIN_MENU));
         }
         
         menuNavigator.showMenu(menu);
-        
-        // Invalidate after menu setup
-        invalidate();
+        // No manual invalidate needed
     }
+    
+    private void setupSocketConfigInput() {
+        // State transition already happened
+        
+        inputReader = new TerminalInputReader(systemApplication, 7, 7, 60);
+        inputReader.setText(socketPath);
+        
+        inputReader.setOnComplete(this::handleSocketPathComplete);
+        inputReader.setOnEscape(v -> {
+            if (inputReader != null) {
+                inputReader.close();
+                inputReader = null;
+            }
+            transitionTo(STATE_SOCKET_CONFIG, STATE_MAIN_MENU);
+        });
+    }
+    
+    // ===== MENU ACTIONS =====
     
     private void selectKeyboard(String deviceId, boolean forPassword) {
         Log.logMsg("[SystemSetupScreen] Selected keyboard: " + deviceId);
@@ -494,8 +552,7 @@ public class SystemSetupScreen extends TerminalScreen {
                     if (isFirstRun) {
                         completeSetup();
                     } else {
-                        transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                        showMainSetupMenu();
+                        transitionTo(STATE_KEYBOARD_SELECTION, STATE_MAIN_MENU);
                     }
                 });
         }
@@ -504,20 +561,16 @@ public class SystemSetupScreen extends TerminalScreen {
     private void refreshKeyboards() {
         discoverKeyboards()
             .thenRun(() -> {
+                // Stay in keyboard selection, but refresh menu
                 showKeyboardSelectionMenu(true);
-                // invalidate() called in showKeyboardSelectionMenu()
+                // transitionTo already invalidated
             })
             .exceptionally(ex -> {
                 errorMessage = "Failed to refresh: " + ex.getMessage();
-                transitionTo(SetupState.ERROR); // Will invalidate
-                
-                systemApplication.waitForKeyPress()
-                    .thenRun(() -> showKeyboardSelectionMenu(true));
+                transitionTo(STATE_KEYBOARD_SELECTION, STATE_ERROR);
                 return null;
             });
     }
-    
-    // ===== CONFIGURATION OPTIONS =====
     
     private void configureGUIOnly() {
         systemApplication.completeBootstrap(null)
@@ -530,27 +583,6 @@ public class SystemSetupScreen extends TerminalScreen {
             });
     }
     
-    private void configureSocketPath() {
-        transitionTo(SetupState.SOCKET_CONFIG); // Will invalidate
-        
-        // Create input reader
-        inputReader = new TerminalInputReader(systemApplication, 7, 7, 60);
-        inputReader.setText(socketPath);
-        
-        inputReader.setOnComplete(newPath -> {
-            handleSocketPathComplete(newPath);
-        });
-        
-        inputReader.setOnEscape(v -> {
-            if (inputReader != null) {
-                inputReader.close();
-                inputReader = null;
-            }
-            transitionTo(SetupState.MAIN_MENU); // Will invalidate
-            showMainSetupMenu();
-        });
-    }
-    
     private void handleSocketPathComplete(String newPath) {
         if (inputReader != null) {
             inputReader.close();
@@ -558,17 +590,13 @@ public class SystemSetupScreen extends TerminalScreen {
         }
         
         if (newPath == null || newPath.trim().isEmpty()) {
-            transitionTo(SetupState.MAIN_MENU); // Will invalidate
-            showMainSetupMenu();
+            transitionTo(STATE_SOCKET_CONFIG, STATE_MAIN_MENU);
             return;
         }
         
         if (!newPath.startsWith("/")) {
             errorMessage = "Socket path must be absolute (start with /)";
-            transitionTo(SetupState.ERROR); // Will invalidate
-            
-            systemApplication.waitForKeyPress()
-                .thenRun(this::configureSocketPath);
+            transitionTo(STATE_SOCKET_CONFIG, STATE_ERROR);
             return;
         }
         
@@ -587,47 +615,35 @@ public class SystemSetupScreen extends TerminalScreen {
                 }
             })
             .thenRun(() -> {
-                transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                showMainSetupMenu();
+                transitionTo(STATE_SOCKET_CONFIG, STATE_MAIN_MENU);
             })
             .exceptionally(ex -> {
-                // Revert on failure
                 socketPath = oldPath;
-                systemApplication.completeBootstrap(systemApplication.getPasswordKeyboardId());
+                systemApplication.completeBootstrap(
+                    systemApplication.getPasswordKeyboardId());
                 
                 errorMessage = "Failed to apply new path: " + ex.getMessage();
-                transitionTo(SetupState.ERROR); // Will invalidate
-                
-                systemApplication.waitForKeyPress()
-                    .thenRun(() -> {
-                        transitionTo(SetupState.MAIN_MENU); // Will invalidate
-                        showMainSetupMenu();
-                    });
+                transitionTo(STATE_SOCKET_CONFIG, STATE_ERROR);
                 return null;
             });
     }
     
     private void showInstallationInfo() {
-        // This would be another screen or a large text box
-        // For now, just go back
-        transitionTo(SetupState.MAIN_MENU); // Will invalidate
-        showMainSetupMenu();
+        // TODO: Show installation info screen
+        transitionTo(STATE_MAIN_MENU, STATE_MAIN_MENU);
     }
     
     private void retryDetection() {
-        transitionTo(SetupState.DETECTING); // Will invalidate
-        
-        detectIODaemon()
-            .thenRun(() -> {
-                // transitionTo already called in detectIODaemon
-            });
+        transitionTo(STATE_MAIN_MENU, STATE_DETECTING);
+        // STATE_DETECTING transition handler will start detection
     }
     
     private void completeSetup() {
         Log.logMsg("[SystemSetupScreen] Setup complete");
         
         if (isFirstRun) {
-            systemApplication.getStateMachine().addState(SystemApplication.CHECKING_SETTINGS);
+            systemApplication.getStateMachine().addState(
+                SystemApplication.CHECKING_SETTINGS);
         } else {
             systemApplication.goBack();
         }
