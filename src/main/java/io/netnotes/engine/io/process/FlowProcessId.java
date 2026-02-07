@@ -4,9 +4,8 @@ package io.netnotes.engine.io.process;
 import java.util.Objects;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteUUID;
-
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
+import io.netnotes.noteBytes.NoteBytes;
 /**
  * ProcessId - Unique identifier for a process.
  * 

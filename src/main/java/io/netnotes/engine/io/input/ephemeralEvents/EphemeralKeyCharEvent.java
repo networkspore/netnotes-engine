@@ -4,8 +4,8 @@ import java.util.Arrays;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
 
 /**
  * EphemeralKeyCharEvent - Character event with ephemeral codepoint

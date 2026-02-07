@@ -1,11 +1,10 @@
 package io.netnotes.engine.io.daemon;
 
-import io.netnotes.engine.io.daemon.ClientSession.Modes;
 import io.netnotes.engine.messaging.NoteMessaging.ItemTypes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.engine.noteBytes.*;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.*;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import java.util.*;
 
 /**

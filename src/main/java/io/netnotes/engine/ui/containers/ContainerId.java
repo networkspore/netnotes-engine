@@ -1,8 +1,8 @@
 package io.netnotes.engine.ui.containers;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class ContainerId {
     private final NoteBytesReadOnly id;

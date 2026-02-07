@@ -3,8 +3,8 @@ package io.netnotes.engine.ui.containers;
 import java.math.BigInteger;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 
 /**
  * ContainerInfo - Current information about a container

@@ -1,10 +1,10 @@
 package io.netnotes.engine.ui;
 
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 
 public class Point2D extends SpatialPoint<Point2D> {
     private final int x;

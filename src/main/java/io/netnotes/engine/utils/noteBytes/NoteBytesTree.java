@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes.collections;
+package io.netnotes.engine.utils.noteBytes;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -6,9 +6,9 @@ import java.util.List;
 
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesNode;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesNode;
+import io.netnotes.noteBytes.processing.ByteDecoding;
 
 public class NoteBytesTree{
     

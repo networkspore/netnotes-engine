@@ -1,8 +1,8 @@
 package io.netnotes.engine.io.capabilities;
 
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.*;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.*;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 

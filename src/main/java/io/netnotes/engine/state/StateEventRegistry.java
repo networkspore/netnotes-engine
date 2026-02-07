@@ -1,6 +1,6 @@
 package io.netnotes.engine.state;
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 import java.math.BigInteger;
 import java.util.*;
 

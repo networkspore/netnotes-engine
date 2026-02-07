@@ -3,13 +3,13 @@ package io.netnotes.engine.io;
 import java.util.ArrayList;
 import java.util.List;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArray;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArray;
+import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 
 /**
  * ContextPath - Hierarchical path for organizing input sources.

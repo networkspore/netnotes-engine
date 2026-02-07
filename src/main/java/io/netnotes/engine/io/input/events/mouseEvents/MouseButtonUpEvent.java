@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input.events.mouseEvents;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public final class MouseButtonUpEvent extends RoutedMouseEvent {
     private final ContextPath sourcePath;

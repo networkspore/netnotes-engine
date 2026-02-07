@@ -1,7 +1,7 @@
 package io.netnotes.engine.ui;
 
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 @FunctionalInterface
 public interface UIReplyExec {

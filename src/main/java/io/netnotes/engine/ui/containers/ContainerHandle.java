@@ -38,11 +38,11 @@ import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.ui.BatchBuilder;
@@ -52,14 +52,14 @@ import io.netnotes.engine.ui.RenderableLayoutManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
-import io.netnotes.engine.noteBytes.NoteBoolean;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.noteBytes.NoteBoolean;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * ContainerHandle - Client-side container handle with event filtering

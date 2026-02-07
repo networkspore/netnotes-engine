@@ -3,9 +3,9 @@ package io.netnotes.engine.io.daemon;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.io.capabilities.CapabilityRegistry;
-import io.netnotes.engine.noteBytes.*;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.*;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.math.BigInteger;

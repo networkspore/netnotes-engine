@@ -4,14 +4,14 @@ import java.io.EOFException;
 import java.io.IOException;
 
 import io.netnotes.engine.messaging.header.MessageHeader;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObjectEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMapEphemeral;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObjectEphemeral;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesMapEphemeral;
+import io.netnotes.noteBytes.collections.NoteBytesPairEphemeral;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
 
 public class TypedMessageMap extends MessageHeader {
     

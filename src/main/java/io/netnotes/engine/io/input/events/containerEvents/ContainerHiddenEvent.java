@@ -2,7 +2,7 @@ package io.netnotes.engine.io.input.events.containerEvents;
 
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public final class ContainerHiddenEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;

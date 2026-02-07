@@ -22,19 +22,20 @@ import javax.crypto.CipherInputStream;
 import javax.crypto.CipherOutputStream;
 import javax.crypto.SecretKey;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+
+import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.ProgressMessage;
 import io.netnotes.engine.messaging.task.TaskMessages;
-import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.processing.RandomService;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 public class FileStreamUtils {

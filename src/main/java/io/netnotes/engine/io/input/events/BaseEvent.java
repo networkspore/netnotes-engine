@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytes;
 
 public class BaseEvent extends RoutedEvent {
     private final ContextPath sourcePath;

@@ -17,9 +17,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.netnotes.engine.messaging.NoteMessaging;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 public class LoggingHelpers {

@@ -2,8 +2,8 @@ package io.netnotes.engine.ui;
 
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 
 import java.io.File;
 import java.io.IOException;

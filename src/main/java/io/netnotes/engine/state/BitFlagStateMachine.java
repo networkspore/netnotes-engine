@@ -1,11 +1,12 @@
 package io.netnotes.engine.state;
 
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.*;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.*;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 import java.math.BigInteger;

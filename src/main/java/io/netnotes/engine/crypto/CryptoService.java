@@ -5,7 +5,6 @@ import java.security.InvalidKeyException;
 import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
-import java.security.SecureRandom;
 import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
@@ -28,9 +27,9 @@ import org.bouncycastle.crypto.params.X25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class CryptoService {
     public static final String BOUNCY_CASTLE_PROVIDER = "BC";
@@ -89,8 +88,6 @@ public class CryptoService {
 
     
     public static SecretKeySpec createKey(NoteBytes password, NoteBytes salt) throws InvalidKeySpecException, NoSuchAlgorithmException {
-         SecureRandom.getInstanceStrong().generateSeed(16);
-         RandomService.getRandomBytes(16);
         try(NoteBytesEphemeral encoded = createPBKDF2Key(password, salt)){
             return new SecretKeySpec(encoded.get(), "AES");
         }

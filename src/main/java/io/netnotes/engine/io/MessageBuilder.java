@@ -2,10 +2,9 @@ package io.netnotes.engine.io;
 
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
 
 public class MessageBuilder {
     public static NoteBytesObject createCommand(NoteBytesReadOnly command, NoteBytesPair... params) {

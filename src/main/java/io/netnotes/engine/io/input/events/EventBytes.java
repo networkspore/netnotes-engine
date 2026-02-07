@@ -3,8 +3,8 @@ package io.netnotes.engine.io.input.events;
 import java.util.HashMap;
 import java.util.Map;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * EventBytes - Standardized event type constants with descriptions

@@ -1,8 +1,8 @@
 package io.netnotes.engine.io.input.events.keyboardEvents;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public final class KeyRepeatEvent extends RoutedKeyboardEvent {
     private final ContextPath sourcePath;

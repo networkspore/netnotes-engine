@@ -21,17 +21,17 @@ import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
 
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.collections.NoteBytesPairEphemeral;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.processing.RandomService;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils.StreamProgressTracker;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesObjectEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesObjectEphemeral;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class SecureMessageV1 extends MessageHeader {
 

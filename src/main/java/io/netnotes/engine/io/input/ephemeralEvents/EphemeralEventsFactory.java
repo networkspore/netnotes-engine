@@ -7,12 +7,12 @@ import java.util.Map;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytesArrayEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesObjectEphemeral;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPairEphemeral;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.NoteBytesArrayEphemeral;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesObjectEphemeral;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesPairEphemeral;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 
 /**
  * EphemeralInputEventFactory - Creates ephemeral events from decrypted data

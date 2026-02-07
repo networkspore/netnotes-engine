@@ -7,7 +7,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.TimeUnit;
 
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.processing.ByteDecoding;
 
 public class TimeHelpers {
     

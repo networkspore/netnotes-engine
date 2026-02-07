@@ -6,11 +6,11 @@ import io.netnotes.engine.io.daemon.IODaemon.SESSION_CMDS;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 

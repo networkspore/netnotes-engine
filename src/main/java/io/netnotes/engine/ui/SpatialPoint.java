@@ -1,6 +1,6 @@
 package io.netnotes.engine.ui;
 
-import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesObject;
 
 public abstract class SpatialPoint<P> {
     

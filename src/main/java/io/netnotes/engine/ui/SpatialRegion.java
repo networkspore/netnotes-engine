@@ -1,7 +1,7 @@
 package io.netnotes.engine.ui;
 
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * Generic spatial region interface

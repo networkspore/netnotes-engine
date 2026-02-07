@@ -7,7 +7,7 @@ import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * ProcessRegistryInterface - Full-featured interface matching FlowProcessService

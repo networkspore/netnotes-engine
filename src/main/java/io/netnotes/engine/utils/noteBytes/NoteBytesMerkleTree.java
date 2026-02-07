@@ -1,4 +1,4 @@
-package io.netnotes.engine.noteBytes.collections;
+package io.netnotes.engine.utils.noteBytes;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -6,12 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import io.netnotes.engine.crypto.HashServices;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArray;
-import io.netnotes.engine.noteBytes.NoteBytesNode;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteInteger;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArray;
+import io.netnotes.noteBytes.NoteBytesNode;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteInteger;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.ByteDecoding;
 public class NoteBytesMerkleTree {
     
     private NoteBytesNode m_root = null;

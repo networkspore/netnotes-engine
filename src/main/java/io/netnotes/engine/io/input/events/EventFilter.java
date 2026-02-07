@@ -1,8 +1,8 @@
 package io.netnotes.engine.io.input.events;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 import java.util.Objects;
 import java.util.function.Predicate;

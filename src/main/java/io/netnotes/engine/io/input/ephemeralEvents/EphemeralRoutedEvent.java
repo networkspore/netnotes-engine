@@ -1,10 +1,9 @@
 package io.netnotes.engine.io.input.ephemeralEvents;
 
 
-import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -47,7 +46,6 @@ public abstract class EphemeralRoutedEvent extends RoutedEvent implements AutoCl
     @Override
     public void close(){
         eventType.close();
-        flag[0] = RandomService.getRandomInt(0, Integer.MAX_VALUE);
         flag[0] *= 0;
         if(flag[0] != 0){
             Log.logMsg("Flag not updated:" + flag[0]);

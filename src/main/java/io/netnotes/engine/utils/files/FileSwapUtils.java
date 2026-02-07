@@ -8,8 +8,8 @@ import java.nio.file.StandardCopyOption;
 
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.task.TaskMessages;
-import io.netnotes.engine.noteBytes.NoteSerializable;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteSerializable;
+import io.netnotes.noteBytes.NoteBytesObject;
 
 public class FileSwapUtils {
     

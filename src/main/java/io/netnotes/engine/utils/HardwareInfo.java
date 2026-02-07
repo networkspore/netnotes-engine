@@ -2,20 +2,18 @@ package io.netnotes.engine.utils;
 
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.crypto.HashServices;
-import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteStringArrayReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.ByteEncoding;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
-import io.netnotes.engine.noteBytes.NoteString;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteStringArrayReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.processing.ByteEncoding;
+import io.netnotes.noteBytes.processing.RandomService;
+import io.netnotes.noteBytes.NoteString;
 
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor.PhysicalProcessor;
@@ -25,7 +23,7 @@ import oshi.software.os.OSFileStore;
 
 public class HardwareInfo {
 
-    private static CompletableFuture<NoteBytesReadOnly> CPU_FINGERPRINT = null;
+    private static NoteBytesReadOnly CPU_FINGERPRINT = null;
 
     public static String getStringOrRandom(String str){
         return str != null && str.length() > 0? str : RandomService.getRandomString(30);
@@ -96,19 +94,19 @@ public class HardwareInfo {
     public static final NoteBytesReadOnly HDD_KEY = new NoteBytesReadOnly(HDD_STRING);
     public static final NoteBytesReadOnly MEMORY_KEY = new NoteBytesReadOnly(MEMORY_STRING);
 
-    public static CompletableFuture<NoteBytesObject> getHardwareInfo(String... keys){
+    public static NoteBytesObject getHardwareInfo(String... keys){
         return getHardwareInfo(new NoteStringArrayReadOnly(keys));
     }
 
-    public static CompletableFuture<NoteBytesObject> getHardwareInfo(NoteBytes... keys){
+    public static NoteBytesObject getHardwareInfo(NoteBytes... keys){
         return getHardwareInfo(new NoteStringArrayReadOnly(keys));
     }
 
 
 
-    public static CompletableFuture<NoteBytesObject> getHardwareInfo(NoteBytesArrayReadOnly keys){
+    public static NoteBytesObject getHardwareInfo(NoteBytesArrayReadOnly keys){
         
-        return CompletableFuture.supplyAsync(()->{
+ 
             SystemInfo systemInfo = new SystemInfo();
             NoteBytesMap hardwareInfo = new NoteBytesMap();
            
@@ -126,27 +124,24 @@ public class HardwareInfo {
                 hardwareInfo.put(HDD_KEY,  hdUuidBytes(systemInfo));
             }
             return hardwareInfo.toNoteBytes();
-        }, VirtualExecutors.getVirtualExecutor());
+  
     }
 
-    public static CompletableFuture<NoteBytesReadOnly> getCPUFingerPrint(){
+    public static byte[] digest16(byte[] bytes){
+        return HashServices.digestBytesToBytes(bytes, 16);
+    }
+
+    public static NoteBytesReadOnly getCPUFingerPrint(){
         CPU_FINGERPRINT = CPU_FINGERPRINT == null 
-            ? getHardwareInfo(CPU_KEY)
-                .thenApply(hardwareInfo -> {
-                    return new NoteBytesReadOnly( 
-                        HashServices.digestBytesToBytes(
-                            hardwareInfo.getBytes(),32
-                        )
-                    );
-                }) 
+            ? new NoteBytesReadOnly(digest16(getHardwareInfo(CPU_KEY).getBytes()))
             : CPU_FINGERPRINT;
 
         return CPU_FINGERPRINT;
     }
 
-    public static CompletableFuture<String> getCPUFingerPrintString(){
-        CompletableFuture<NoteBytesReadOnly> future = getCPUFingerPrint();
+    public static String getCPUFingerPrintString(){
+        NoteBytesReadOnly noteBytes = getCPUFingerPrint();
 
-        return future.thenApply(readOnlyBytes ->ByteEncoding.encodeB64UrlSafeString(readOnlyBytes.get()));
+        return ByteEncoding.encodeB64UrlSafeString(noteBytes.get());
     }
 }

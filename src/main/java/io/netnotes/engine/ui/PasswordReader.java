@@ -14,10 +14,10 @@ import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry.RoutedEventHandler;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
-import io.netnotes.engine.noteBytes.KeyRunTable;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
-import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.noteBytes.KeyRunTable;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**

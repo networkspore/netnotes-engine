@@ -1,16 +1,20 @@
-package io.netnotes.engine.noteBytes;
+package io.netnotes.engine.utils.noteBytes;
 
 import java.util.Arrays;
 import java.util.Calendar;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.netnotes.engine.crypto.RandomService;
-import io.netnotes.engine.noteBytes.processing.ByteEncoding;
-import io.netnotes.engine.noteBytes.processing.ByteDecoding;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.noteBytes.processing.ByteEncoding.EncodingType;
+
+import io.netnotes.noteBytes.processing.ByteEncoding;
+import io.netnotes.engine.crypto.HashServices;
 import io.netnotes.engine.utils.HardwareInfo;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.processing.ByteDecoding;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.processing.RandomService;
+import io.netnotes.noteBytes.processing.ByteEncoding.EncodingType;
+
 
 public class NoteUUID extends NoteBytesReadOnly {
 
@@ -21,7 +25,7 @@ public class NoteUUID extends NoteBytesReadOnly {
     }
       
     public static byte[] nanoTimeHash(){
-        return ByteDecoding.intToBytesBigEndian(splitMix64(System.nanoTime()));
+        return ByteDecoding.intToBytesBigEndian(HashServices.splitMix64(System.nanoTime()));
     }
 
     public static byte[] currentTimeStampBytes(){
@@ -66,20 +70,12 @@ public class NoteUUID extends NoteBytesReadOnly {
         return bytes;
     }
 
-    public static int splitMix64(long x) {
-        x ^= (x >>> 33);
-        x *= 0xff51afd7ed558ccdL;
-        x ^= (x >>> 33);
-        x *= 0xc4ceb9fe1a85ec53L;
-        x ^= (x >>> 33);
-        return (int)x;
-    }
 
-    public static CompletableFuture<NoteUUID> createHardwareNoteUUID256(){ 
-        return HardwareInfo.getCPUFingerPrint().thenApply(cpuHashBytes->{
-            byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), cpuHashBytes.getBytes(16));
-            return fromUnencodedBytes(bytes);
-        });
+    public static NoteUUID createHardwareNoteUUID256(){ 
+        NoteBytesReadOnly hardwareInfo = HardwareInfo.getCPUFingerPrint();
+        byte[] bytes = ByteDecoding.concat(createTimeRndBytes(), hardwareInfo.getBytes(16));
+        return fromUnencodedBytes(bytes);
+   
     }
 
     public static NoteUUID fromNoteUUIDString(String urlSafeString){

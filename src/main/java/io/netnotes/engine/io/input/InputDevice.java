@@ -4,7 +4,7 @@ import java.util.function.Consumer;
 
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytes;
 
 /**
  * InputDevice - Common interface for all input sources

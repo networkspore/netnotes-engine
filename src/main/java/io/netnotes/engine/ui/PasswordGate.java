@@ -1,7 +1,7 @@
 package io.netnotes.engine.ui;
 
 import java.util.concurrent.CompletableFuture;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
 
 /**
  * PasswordGate - Verifies passwords to unlock menu contexts

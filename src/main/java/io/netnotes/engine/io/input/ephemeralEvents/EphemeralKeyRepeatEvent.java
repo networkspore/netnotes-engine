@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input.ephemeralEvents;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesEphemeral;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
 
 /**
  * EphemeralKeyRepeatEvent - Key repeat with ephemeral data

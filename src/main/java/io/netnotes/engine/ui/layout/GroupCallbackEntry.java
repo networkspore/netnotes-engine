@@ -1,6 +1,6 @@
 package io.netnotes.engine.ui.layout;
 
-import io.netnotes.engine.noteBytes.NoteUUID;
+import io.netnotes.engine.utils.noteBytes.NoteUUID;
 
 /**
  * GroupCallbackEntry - Encapsulates a group callback with its execution predicate and priority

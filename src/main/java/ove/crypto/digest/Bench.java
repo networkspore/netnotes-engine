@@ -17,13 +17,13 @@
    this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 */
 
-package io.netnotes.ove.crypto.digest;
+package ove.crypto.digest;
 
 import java.security.MessageDigest;
 import java.util.concurrent.TimeUnit;
 
-import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.ove.alphazero.util.CmdLineArgs;
+import ove.alphazero.util.CmdLineArgs;
+
 
 // REVU: let's keep the jar minimal. (TODO) move to a child project.
 public class Bench implements Runnable {
@@ -41,8 +41,8 @@ public class Bench implements Runnable {
 			System.out.format(fmtstr, args);
 		}
 		static int usage () {
-			Log.logMsg("usage: java -cp .. ove.crypto.digest.Bench [options]");
-			Log.logMsg("[options]");
+			System.out.print("usage: java -cp .. ove.crypto.digest.Bench [options]");
+			System.out.print("[options]");
 			explain ("-d",  "digest algorithm to bench - one of " +
 					"{blake2-256, blake2-256, sha1, sha-256, sha-512, md5}. default: %s", Default.digest);
 			explain ("-w",  "warm-up delay in seconds. default: %d seconds", Default.warmup);
@@ -151,7 +151,7 @@ public class Bench implements Runnable {
 				}
 			}
 			size <<= 1;
-			if(f_run) Log.logMsg("[Blake2b Bench] running...");
+			if(f_run) System.out.print("[Blake2b Bench] running...");
 			b = null;
 			System.gc();
 		}

@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.capabilities;
 
-import io.netnotes.engine.noteBytes.*;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.*;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;

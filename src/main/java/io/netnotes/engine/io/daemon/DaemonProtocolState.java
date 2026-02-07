@@ -2,7 +2,7 @@ package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.*;
+import io.netnotes.noteBytes.*;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;
 import io.netnotes.engine.state.StateEventRegistry.DeviceStates;

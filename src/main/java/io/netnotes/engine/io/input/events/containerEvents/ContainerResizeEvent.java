@@ -1,7 +1,7 @@
 package io.netnotes.engine.io.input.events.containerEvents;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class ContainerResizeEvent extends RoutedContainerEvent {
     private final int width;

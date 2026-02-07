@@ -7,9 +7,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.processing.AsyncNoteBytesWriter;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.processing.AsyncNoteBytesWriter;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 

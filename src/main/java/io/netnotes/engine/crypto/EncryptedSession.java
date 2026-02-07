@@ -6,6 +6,8 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
+import io.netnotes.noteBytes.processing.RandomService;
+
 /**
  * AES-GCM encryption session
  */

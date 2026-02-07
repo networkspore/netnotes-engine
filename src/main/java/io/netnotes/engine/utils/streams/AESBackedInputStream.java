@@ -45,10 +45,12 @@ public final class AESBackedInputStream extends InputStream {
 
     public AESBackedInputStream(
         byte[] rawBytes
-    ){
+    ) throws IOException{
         m_file = null;
         this.m_fileBacked = false;
-        this.m_delegate = new UnsynchronizedByteArrayInputStream(rawBytes);
+        
+
+        this.m_delegate = UnsynchronizedByteArrayInputStream.builder().setByteArray(rawBytes).get();
     }
 
     public AESBackedInputStream(

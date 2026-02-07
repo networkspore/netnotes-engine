@@ -1,6 +1,6 @@
 package io.netnotes.engine.ui;
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * UICommands - Command types for UI protocol

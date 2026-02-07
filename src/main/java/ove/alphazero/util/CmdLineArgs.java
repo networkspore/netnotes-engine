@@ -17,7 +17,7 @@
    this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 */
 
-package io.netnotes.ove.alphazero.util;
+package ove.alphazero.util;
 
 import java.util.HashMap;
 import java.util.Map;

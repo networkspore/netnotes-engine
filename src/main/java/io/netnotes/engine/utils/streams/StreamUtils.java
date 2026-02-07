@@ -22,8 +22,8 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 
 import io.netnotes.engine.io.process.StreamChannel;
-import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.noteBytes.processing.NoteBytesWriter;
+import io.netnotes.noteBytes.processing.NoteBytesReader;
+import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 

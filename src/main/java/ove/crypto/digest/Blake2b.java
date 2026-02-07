@@ -17,10 +17,10 @@
    this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 */
 
-package io.netnotes.ove.crypto.digest;
+package ove.crypto.digest;
 
-import static io.netnotes.ove.crypto.digest.Blake2b.Engine.Assert.*;
-import static io.netnotes.ove.crypto.digest.Blake2b.Engine.LittleEndian.*;
+import static ove.crypto.digest.Blake2b.Engine.Assert.*;
+import static ove.crypto.digest.Blake2b.Engine.LittleEndian.*;
 
 import java.io.PrintStream;
 import java.io.Serializable;

@@ -13,8 +13,8 @@ import javax.crypto.SecretKey;
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream;
 
 import io.netnotes.engine.crypto.CryptoService;
-import io.netnotes.engine.crypto.RandomService;
 import io.netnotes.engine.utils.files.FileStreamUtils;
+import io.netnotes.noteBytes.processing.RandomService;
 
 public final class AESBackedOutputStream extends OutputStream {
 
@@ -29,7 +29,7 @@ public final class AESBackedOutputStream extends OutputStream {
             int thresholdBytes
     ) throws Exception {
         if (contentLength <= thresholdBytes) {
-            this.delegate = new UnsynchronizedByteArrayOutputStream(contentLength);
+            this.delegate = UnsynchronizedByteArrayOutputStream.builder().setBufferSize(contentLength).get();
             this.file = null;
             this.fileBacked = false;
         } else {
