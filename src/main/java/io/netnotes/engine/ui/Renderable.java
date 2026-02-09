@@ -137,6 +137,7 @@ public abstract class Renderable<
     protected Consumer<R> onCleaningUp = null;
     protected VisibilityPredicate<R> visibilityPolicy = null;
     protected BiConsumer<R, Boolean> onVisibilityChanged = null;
+    protected BiConsumer<R, Boolean> onFocusChanged = null;
     /**
      * Constructor
      * 
@@ -758,14 +759,25 @@ public abstract class Renderable<
     
     public void setFocusable(boolean f) { this.focusable = f; }
     public boolean hasFocus() { return stateMachine.hasState(RenderableStates.STATE_FOCUSED); }
-    
+
+    public void setOnFocusChanged(BiConsumer<R,Boolean> onFocusChanged){
+        this.onFocusChanged = onFocusChanged;
+    }
+
+
     protected void onFocusGained() {
         onFocus();
+        if(onFocusChanged != null){
+            onFocusChanged.accept(self(), true);
+        }
         invalidate();
     }
     
     protected void onFocusLost() {
         onBlur();
+        if(onFocusChanged != null){
+            onFocusChanged.accept(self(), false);
+        }
         invalidate();
     }
 

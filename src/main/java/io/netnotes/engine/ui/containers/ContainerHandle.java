@@ -301,6 +301,12 @@ public abstract class ContainerHandle<
             if (stateMachine.hasState(Container.STATE_DESTROYING)) {
                 stateMachine.removeState(Container.STATE_DESTROYING);
             }
+
+            if(closingFuture == null){
+                closingFuture = CompletableFuture.completedFuture(null);
+            }else if(!closingFuture.isDone()){
+                closingFuture.complete(null);
+            }
         });
     }
 
@@ -759,7 +765,7 @@ public abstract class ContainerHandle<
 
                 channel.getReadyFuture().whenComplete((v,ex)->{
                     uiExecutor.execute(()->{
-                        if(ex != null){
+                        if(ex == null){
                             stateMachine.addState(Container.STATE_STREAM_READY);
                         }else{
                             stateMachine.addState(Container.STATE_STREAM_ERROR);
@@ -776,7 +782,7 @@ public abstract class ContainerHandle<
                         stateMachine.addState(Container.STATE_STREAM_ERROR);
                         Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
                         streamError = ex;
-                        stateMachine.setState(Container.STATE_DESTROYED);
+                        unregisterProcess(contextPath);
                     });
                 }
             });
@@ -798,24 +804,14 @@ public abstract class ContainerHandle<
    
     @Override
     public void onStop() {
-        Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + 
-            containerId);
-        stateMachine.setState(Container.STATE_DESTROYED);
-        
-        if (renderStream != null) {
-            try {
-                renderStream.close();
-            } catch (IOException e) {
-                Log.logError("[ContainerHandle:" + getId() + 
-                    "] Error closing render stream: " + e.getMessage());
-            }
+        if(!stateMachine.hasState(Container.STATE_DESTROYING)){
+            close();
+        }else{
+             Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + containerId);
+            stateMachine.setState(Container.STATE_DESTROYED);
+            super.onStop();
         }
-        
-        super.onStop();
-
-        if (registry != null) {
-            registry.unregisterProcess(contextPath);
-        }
+     
     }
 
     public CompletableFuture<Void> getEventStreamReadyFuture() { 
@@ -994,22 +990,23 @@ public abstract class ContainerHandle<
         return sendToService(msg);
     }
 
+    private CompletableFuture<Void> closingFuture = null;
+
     public CompletableFuture<Void> close() {
-      
         if (rendererId == null) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("[ContainerHandle] container not yet created"));
         }
-        NoteBytesMap msg = ContainerCommands.destroyContainer(containerId, rendererId);
-        if (!isDestroying()) {
-            stateMachine.addState(Container.STATE_DESTROYING);
-            return sendToService(msg);
-        } else {
-            if (registry != null) {
-                registry.unregisterProcess(contextPath);
-            }
-            return CompletableFuture.completedFuture(null);
-        }
+
+        if(closingFuture != null) return closingFuture;
+        closingFuture = new CompletableFuture<>();
+        destroy();
+        return closingFuture;
+    }
+
+    private CompletableFuture<Void> destroy(){
+        stateMachine.addState(Container.STATE_DESTROYING);
+        return sendToService(ContainerCommands.destroyContainer(containerId, rendererId));
     }
     
     public CompletableFuture<RoutedPacket> queryContainer() {

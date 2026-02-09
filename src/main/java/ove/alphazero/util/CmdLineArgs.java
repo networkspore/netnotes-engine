@@ -86,8 +86,8 @@ public final class CmdLineArgs {
 		}
 
 		final Map<String, String> map = new HashMap<String, String>();
-		int fn = 0;
-		int on = 0;
+		//int fn = 0;
+		//int on = 0;
 		int pn = 0;
 		for(int i=0; i<args.length; i++) {
 			String k = null;
@@ -96,7 +96,7 @@ public final class CmdLineArgs {
 			if ( args[i].startsWith (PREFIX_FLAG) ) {
 				k = args[i];
 				v = k;
-				fn++;
+				//fn++;
 			} else if( args[i].startsWith ( PREFIX_OPT ) ) {
 				assert0 (args.length-1 > i, String.format("no value for arg %s at args end", args[i]));
 				assert0 (!args[i+1].startsWith(PREFIX_OPT), String.format("no value for arg %s", args[i]));
@@ -104,7 +104,7 @@ public final class CmdLineArgs {
 				k = args[i];
 				i++;
 				v = args[i];
-				on++;
+				//on++;
 			} else {
 				pn++;
 				k = paramKey(pn);

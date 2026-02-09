@@ -180,7 +180,16 @@ public class RenderingService extends FlowProcess {
             reply(packet, msg);
         });
         // All commands are forwarded to renderer
-        msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::handleCreateContainer);
+        msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.CREATE_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.DESTROY_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.SHOW_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.HIDE_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.FOCUS_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.MAXIMIZE_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.RESTORE_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.QUERY_CONTAINER, this::handleContainerCmd);
+
         msgExecMap.put(ContainerCommands.LIST_CONTAINERS, this::handleListContainers);
     }
     
@@ -221,8 +230,8 @@ public class RenderingService extends FlowProcess {
         
     }
 
-    private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
-        // select renderer based on type and explicit ID
+    private CompletableFuture<Void> handleContainerCmd(NoteBytesMap msg, RoutedPacket packet) {
+
 
         NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
         
@@ -250,6 +259,7 @@ public class RenderingService extends FlowProcess {
             });
 
     }
+
 
     private CompletableFuture<Void> handleListContainers(NoteBytesMap msg, RoutedPacket packet) {
 
