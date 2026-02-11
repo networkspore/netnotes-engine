@@ -45,6 +45,7 @@ import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
+import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.BatchBuilder;
 import io.netnotes.engine.ui.FloatingLayerManager;
 import io.netnotes.engine.ui.Renderable;
@@ -102,7 +103,7 @@ public abstract class ContainerHandle<
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
     LD extends LayoutData<B,R,S,LD,?>,
     LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
-    BLD extends ContainerHandle.Builder<H,BLD>
+    BLD extends ContainerHandle.Builder<H,S,BLD>
 > extends FlowProcess {
     
     // ===== CREATION PARAMETERS =====
@@ -110,11 +111,10 @@ public abstract class ContainerHandle<
     protected final ContainerConfig containerConfig;
     protected final ContextPath renderingServicePath;
     protected final String title;
-    protected final BLD builder;
     protected final ContextPath ioDaemonPath;
     protected final RM renderableLayoutManager;
     protected final FLM floatingLayerManager;
-
+    protected final boolean autoFocusOnCreate;
 
     protected Throwable streamError = null;
 
@@ -202,7 +202,11 @@ public abstract class ContainerHandle<
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
         this.ioDaemonPath = builder.ioDaemonPath;
-        this.builder = builder;
+        this.allocatedRegion = builder.initialRegion;
+        if(builder.initialRegion != null){
+            this.dimensionsInitialized = true;
+        }
+        this.autoFocusOnCreate = builder.autoFocus;
         
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
         //runs state changes on UI executor, deffers if during layout
@@ -301,7 +305,13 @@ public abstract class ContainerHandle<
             if (stateMachine.hasState(Container.STATE_DESTROYING)) {
                 stateMachine.removeState(Container.STATE_DESTROYING);
             }
-
+            //Double check the streams are closed (null safe)
+            StreamUtils.safeClose(renderStream);
+            StreamUtils.safeClose(eventChannel);
+            if(isAlive()) {
+                unregisterProcess(contextPath);
+            }
+        
             if(closingFuture == null){
                 closingFuture = CompletableFuture.completedFuture(null);
             }else if(!closingFuture.isDone()){
@@ -607,8 +617,9 @@ public abstract class ContainerHandle<
     // ===== BUILDER =====
 
     public static abstract class Builder<
-        H extends ContainerHandle<?,H,?,?,?,?,?,?,?,?,?,BLD>,
-        BLD extends ContainerHandle.Builder<H,BLD>
+        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,BLD>,
+        S extends SpatialRegion<?,S>,
+        BLD extends ContainerHandle.Builder<H,S,BLD>
     > {
         public String name;
         public String title;
@@ -618,6 +629,7 @@ public abstract class ContainerHandle<
         public boolean autoFocus = true;
         public EventFilterList filterList = null;
         public ContextPath ioDaemonPath = null;
+        public S initialRegion = null;
 
         protected Builder(String name, ContextPath renderingServicePath, NoteBytesReadOnly rendererId) {
             this.name = name;
@@ -664,6 +676,11 @@ public abstract class ContainerHandle<
          */
         public BLD eventFilterList(EventFilterList filterList) {
             this.filterList = filterList;
+            return self();
+        }
+
+        public BLD initialRegion(S initialRegion){
+            this.initialRegion = initialRegion;
             return self();
         }
         
@@ -738,7 +755,7 @@ public abstract class ContainerHandle<
         createCmd.put(Keys.PATH, getParentPath().toNoteBytes());
         createCmd.put(Keys.CONFIG, containerConfig.toNoteBytes());
         createCmd.put(ContainerCommands.RENDERER_ID, rendererId);
-        createCmd.put(ContainerCommands.AUTO_FOCUS, builder.autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE);
+        createCmd.put(ContainerCommands.AUTO_FOCUS, this.autoFocusOnCreate ? NoteBoolean.TRUE : NoteBoolean.FALSE);
         
 
         return request(renderingServicePath, createCmd.toNoteBytesReadOnly(), Duration.ofMillis(500))
@@ -782,7 +799,7 @@ public abstract class ContainerHandle<
                         stateMachine.addState(Container.STATE_STREAM_ERROR);
                         Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
                         streamError = ex;
-                        unregisterProcess(contextPath);
+                        stateMachine.addState(Container.STATE_DESTROYED);
                     });
                 }
             });
@@ -804,14 +821,13 @@ public abstract class ContainerHandle<
    
     @Override
     public void onStop() {
-        if(!stateMachine.hasState(Container.STATE_DESTROYING)){
-            close();
+        StateSnapshot snap = stateMachine.getSnapshot();
+        if(snap.hasState(Container.STATE_DESTROYING) || snap.hasState(Container.STATE_DESTROYED)){
+            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId);
         }else{
-             Log.logMsg("[ContainerHandle:" + getId() + "] Stopped for container: " + containerId);
-            stateMachine.setState(Container.STATE_DESTROYED);
-            super.onStop();
+            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId + " verifying closed.");
+            close();
         }
-     
     }
 
     public CompletableFuture<Void> getEventStreamReadyFuture() { 
@@ -993,20 +1009,39 @@ public abstract class ContainerHandle<
     private CompletableFuture<Void> closingFuture = null;
 
     public CompletableFuture<Void> close() {
-        if (rendererId == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("[ContainerHandle] container not yet created"));
-        }
-
         if(closingFuture != null) return closingFuture;
         closingFuture = new CompletableFuture<>();
         destroy();
         return closingFuture;
     }
 
-    private CompletableFuture<Void> destroy(){
+    private void destroy(){
+     
+        if (isDestroyed()) return;
+
         stateMachine.addState(Container.STATE_DESTROYING);
-        return sendToService(ContainerCommands.destroyContainer(containerId, rendererId));
+
+        request(renderingServicePath, ContainerCommands.destroyContainer(containerId, rendererId), 
+                Duration.ofMillis(500))
+            .thenAccept(reply -> {
+                NoteBytesMap response = reply.getPayload().getAsNoteBytesMap();
+                NoteBytesReadOnly status = response.getReadOnly(Keys.STATUS);
+                
+                if (status != null && !status.equals(ProtocolMesssages.SUCCESS)) {
+                    String errorMsg = ProtocolObjects.getErrMsg(response);
+                 
+                    stateMachine.addState(Container.STATE_DESTROYED);
+                   
+                    Log.logError("[ContainerHandle"+getName()+"] destroy failed:" + errorMsg);
+                }else{
+                     stateMachine.addState(Container.STATE_DESTROYED);
+                }
+            })
+            .exceptionally(ex->{
+                Log.logError("[ContainerHandle"+getName()+"] destroy failed exceptionally:" + ex);
+                stateMachine.addState(Container.STATE_DESTROYED);
+                return null;
+            });
     }
     
     public CompletableFuture<RoutedPacket> queryContainer() {
@@ -1018,8 +1053,8 @@ public abstract class ContainerHandle<
     
     // ===== RENDER COMMAND SENDING =====
     
-    protected CompletableFuture<Void> sendRenderCommand(NoteBytes command) {
-        return CompletableFuture.runAsync(() -> {
+    protected void sendRenderCommand(NoteBytes command) {
+        renderStream.getWriteExecutor().execute(()->{
             Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command);
             
             if (!renderStream.isActive() || renderStream.isClosed()) {
@@ -1033,8 +1068,7 @@ public abstract class ContainerHandle<
             } catch (IOException ex) {
                 throw new CompletionException(ex);
             }
-            
-        }, renderStream.getWriteExecutor());
+        });
     }
 
     
@@ -1210,7 +1244,7 @@ public abstract class ContainerHandle<
         
         NoteBytes batchCommand = batch.build();
         
-        // Send async on stream executor (don't block serialExec)
+        /* Send async on stream executor (don't block serialExec)
         renderStream.getWriteExecutor().execute(() -> {
             try {
                 renderWriter.write(batchCommand);
@@ -1219,7 +1253,9 @@ public abstract class ContainerHandle<
                 Log.logError("[ContainerHandle:" + containerId + 
                     "] Render write failed", ex);
             }
-        });
+        });*/
+
+        sendRenderCommand(batchCommand);
         
         rootRenderable.clearRenderFlag();
       

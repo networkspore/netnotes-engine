@@ -11,7 +11,7 @@ public final class KeyCharEvent extends RoutedKeyboardEvent {
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
 
-    private int[] codepointCache = null;
+    private int codepointCache = -1;
     private String strCache = null;
     private NoteBytes utf8Cache = null;
     public KeyCharEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int stateFlags, NoteBytes codepoint) {
@@ -31,11 +31,11 @@ public final class KeyCharEvent extends RoutedKeyboardEvent {
 
     
 
-    public int[] getCodepoint(){
-        if(codepointCache != null){
+    public int getCodepoint(){
+        if(codepointCache > -1){
             return codepointCache;
         }
-        codepointCache = new int[] {codepointBytes.getAsInt()};
+        codepointCache = codepointBytes.getAsInt();
         return codepointCache;
     }
 
@@ -43,13 +43,11 @@ public final class KeyCharEvent extends RoutedKeyboardEvent {
         if(strCache != null){
             return strCache;
         }
-        if(codepointCache != null){
-            strCache = new String(codepointCache, 0, 1);
-            return strCache;
-        }
-        NoteBytes utf8 = getUTF8();
-        strCache = utf8.getAsString();
+        int cp =  getCodepoint();
+        strCache = Character.toString(cp);
         return strCache;
+        
+
     }
     
     public NoteBytes getUTF8() { 
@@ -59,8 +57,8 @@ public final class KeyCharEvent extends RoutedKeyboardEvent {
                 utf8Cache = charBytes;
                 return utf8Cache;
             }else{
-                int[] cp = getCodepoint();
-                utf8Cache = Keyboard.codePointToUtf8(cp[0]);
+                int cp = getCodepoint();
+                utf8Cache = Keyboard.codePointToUtf8(cp);
                 return utf8Cache;
             }
         }else{

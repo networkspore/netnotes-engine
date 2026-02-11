@@ -1,10 +1,7 @@
 package io.netnotes.engine.io.input.ephemeralEvents;
 
-import java.util.Arrays;
-
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard;
-import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
 
 /**
@@ -12,10 +9,10 @@ import io.netnotes.noteBytes.NoteBytesEphemeral;
  * SECURITY CRITICAL: Never convert to int - keep as bytes
  */
 public class EphemeralKeyCharEvent extends EphemeralKeyboardEvent {
-    private final NoteBytesEphemeral codepointBytes;
+    private final NoteBytesEphemeral codePointBytes;
 
-    private NoteBytes utf8Cache = null;
-    private int[] codepointCache = null;
+    private NoteBytesEphemeral utf8Cache = null;
+    private int codepointCache = -1;
     private String strCache = null;
     
     public EphemeralKeyCharEvent(ContextPath sourcePath,
@@ -23,21 +20,21 @@ public class EphemeralKeyCharEvent extends EphemeralKeyboardEvent {
                                 int stateFlags,
                                 NoteBytesEphemeral codepointData) {
         super(sourcePath, typeBytes, stateFlags);
-        this.codepointBytes = codepointData;
+        this.codePointBytes = codepointData;
     }
     
     /**
      * Get codepoint as bytes (DO NOT convert to int for passwords)
      */
-    public NoteBytesEphemeral getCodepointBytes() {
-        return codepointBytes;
+    public NoteBytesEphemeral getCodePointBytes() {
+        return codePointBytes;
     }
 
-    public int[] getCodepoint(){
-        if(codepointCache != null){
+    public int getCodepoint(){
+        if(codepointCache != -1){
             return codepointCache;
         }
-        codepointCache = new int[]{ codepointBytes.getAsInt() };
+        codepointCache = codePointBytes.getAsInt();
         return codepointCache;
     }
 
@@ -50,30 +47,27 @@ public class EphemeralKeyCharEvent extends EphemeralKeyboardEvent {
         if(strCache != null){
             return strCache;
         }
-        if(codepointCache != null){
-            strCache = new String(codepointCache, 0, 1);
-            return strCache;
-        }
-        NoteBytes utf8 = getUTF8();
-        strCache = utf8.getAsString();
+        int cp = getCodepoint();
+        strCache = Character.toString(cp);
         return strCache;
+  
     }
 
     /**
      * Do no clear returned value, use close
      * @return UTF8 bytes
      */
-    public NoteBytes getUTF8() { 
+    public NoteBytesEphemeral getUTF8() { 
         if(utf8Cache == null){
-            NoteBytes charBytes = Keyboard.codePointToASCII(codepointBytes);
+            NoteBytesEphemeral charBytes = Keyboard.codePointToASCII(codePointBytes);
             if(charBytes != null){
                 // doesn't cache bytes so that they are not cleared
                 return charBytes;
             }else{
                 // codepoint isn't ASCII, computation required
-                int[] cp = getCodepoint();
+                int cp = getCodepoint();
                 // use cache clears on close
-                utf8Cache =  Keyboard.codePointToUtf8(cp[0]);
+                utf8Cache =  Keyboard.codePointToUtf8(cp);
                 return utf8Cache;
             }
         }else{
@@ -84,28 +78,16 @@ public class EphemeralKeyCharEvent extends EphemeralKeyboardEvent {
  
 
 
-    private void clearCodePointCache(){
-        if(codepointCache != null){
-            Arrays.fill(codepointCache, 0);
-            for (int i = 0; i < codepointCache.length; i++) {
-                NoteBytes.clearanceVerifier ^= codepointCache[i]; 
-                if (codepointCache[i] != 0) {
-                    System.err.println("Warning: Memory clear verification failed at index " + codepointCache[i]);
-                }
-            }
-            Thread.yield();
-        }
-    }
-
+ 
     
     @Override
     public void close() {
         super.close();
-        clearCodePointCache();
+        strCache = null;
+        codepointCache = Integer.MAX_VALUE;
         if(utf8Cache != null){
-            utf8Cache.destroy();
+            utf8Cache.close();
         }
-        codepointBytes.close();
-        Thread.yield();
+        codePointBytes.close();
     }
 }

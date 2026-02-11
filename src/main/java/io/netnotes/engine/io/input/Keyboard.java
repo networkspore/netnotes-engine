@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Set;
 
 import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 
@@ -358,8 +359,8 @@ public final class Keyboard {
     }
 
 
-    private static final NoteBytes[] CP_TO_CHAR_TABLE = new NoteBytes[127];
-    private static final int[] codepoint = new int[1];
+    private static final NoteBytesReadOnly[] CP_TO_CHAR_TABLE = new NoteBytesReadOnly[127];
+
   
     static {
         
@@ -368,22 +369,22 @@ public final class Keyboard {
             char lower = (char) ('a' + i);
             char upper = (char) ('A' + i);
 
-            CP_TO_CHAR_TABLE[(int) lower] = new NoteBytes(String.valueOf(lower));
-            CP_TO_CHAR_TABLE[(int) upper] = new NoteBytes(String.valueOf(upper));
+            CP_TO_CHAR_TABLE[(int) lower] = new NoteBytesReadOnly(String.valueOf(lower));
+            CP_TO_CHAR_TABLE[(int) upper] = new NoteBytesReadOnly(String.valueOf(upper));
         }
 
         // Number row unshifted
         for (int i = 1; i <= 9; i++) {
             char c = (char) ('0' + i);
-            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytesReadOnly(String.valueOf(c));
         }
-        CP_TO_CHAR_TABLE[(int) '0'] = new NoteBytes("0");
+        CP_TO_CHAR_TABLE[(int) '0'] = new NoteBytesReadOnly("0");
 
 
         // Number row shifted
         char[] shiftedNums = "!@#$%^&*()".toCharArray();
         for (char c : shiftedNums) {
-            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytesReadOnly(String.valueOf(c));
         }
 
         // Unshifted punctuation
@@ -391,7 +392,7 @@ public final class Keyboard {
                 '-', '=', '[', ']', '\\', ';', '\'', '`', ',', '.', '/', ' ', '\t', '\n'
         };
         for (char c : unshifted) {
-            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytesReadOnly(String.valueOf(c));
         }
 
         // Shifted punctuation
@@ -399,20 +400,20 @@ public final class Keyboard {
                 '_', '+', '{', '}', '|', ':', '"', '~', '<', '>', '?'
         };
         for (char c : shifted) {
-            CP_TO_CHAR_TABLE[(int) c] = new NoteBytes(String.valueOf(c));
+            CP_TO_CHAR_TABLE[(int) c] = new NoteBytesReadOnly(String.valueOf(c));
         }
     }
 
     private static final byte ZERO = (byte) 0;
 
-    public static NoteBytes codePointToASCII(NoteBytes codePointBytes){
+    public static NoteBytesEphemeral codePointToASCII(NoteBytes codePointBytes){
         byte[] cpbytes = codePointBytes.get();
         
         if(cpbytes[0] == ZERO && cpbytes[1] == ZERO && cpbytes[2] == ZERO){
-            codepoint[0] = cpbytes[3] & 0xFF;
-            if(codepoint[0] < CP_TO_CHAR_TABLE.length){
-                NoteBytes value = CP_TO_CHAR_TABLE[codepoint[0]];
-                codepoint[0] = ZERO;
+            int cp = cpbytes[3] & 0xFF;
+            if(cp < CP_TO_CHAR_TABLE.length){
+                NoteBytesEphemeral value = new NoteBytesEphemeral(CP_TO_CHAR_TABLE[cp].get());
+                cp = ZERO;
                 return value;
             }else{
                 return null;
@@ -422,28 +423,28 @@ public final class Keyboard {
         }
     }
 
-    public static NoteBytes codePointToUtf8(int codePoint) {
+    public static NoteBytesEphemeral codePointToUtf8(int codePoint) {
         if (!Character.isValidCodePoint(codePoint)) {
             throw new IllegalArgumentException("Invalid Unicode code point");
         }
 
         if (codePoint <= 0x7F) {
-            return new NoteBytes(new byte[] {
+            return new NoteBytesEphemeral(new byte[] {
                 (byte) codePoint
             }, NoteBytesMetaData.STRING_TYPE);
         } else if (codePoint <= 0x7FF) {
-            return new NoteBytes(new byte[] {
+            return new NoteBytesEphemeral(new byte[] {
                 (byte) (0b11000000 | (codePoint >> 6)),
                 (byte) (0b10000000 | (codePoint & 0b00111111))
             }, NoteBytesMetaData.STRING_TYPE);
         } else if (codePoint <= 0xFFFF) {
-            return new NoteBytes(new byte[] {
+            return new NoteBytesEphemeral(new byte[] {
                 (byte) (0b11100000 | (codePoint >> 12)),
                 (byte) (0b10000000 | ((codePoint >> 6) & 0b00111111)),
                 (byte) (0b10000000 | (codePoint & 0b00111111))
             }, NoteBytesMetaData.STRING_TYPE);
         } else {
-            return new NoteBytes(new byte[] {
+            return new NoteBytesEphemeral(new byte[] {
                 (byte) (0b11110000 | (codePoint >> 18)),
                 (byte) (0b10000000 | ((codePoint >> 12) & 0b00111111)),
                 (byte) (0b10000000 | ((codePoint >> 6) & 0b00111111)),
@@ -619,72 +620,70 @@ public final class Keyboard {
         public static final NoteBytesReadOnly RIGHT_ALT      = new NoteBytesReadOnly(KeyCode.RIGHT_ALT);
         public static final NoteBytesReadOnly RIGHT_META     = new NoteBytesReadOnly(KeyCode.RIGHT_META);
 
-        private final static int[] usage = new int[1];
         private static final char[] shiftedNums = "!@#$%^&*".toCharArray();
 
-        public static NoteBytes hidUsageToChar(NoteBytes keycode, boolean shift) {
-            usage[0] = keycode.get()[3] & 0xFF;  // HID usage byte
-            codepoint[0] = 0;
+        public static NoteBytesEphemeral hidUsageToChar(NoteBytes keycode, boolean shift) {
+            int usage = keycode.get()[3] & 0xFF;  // HID usage byte
+            int cp = 0;
 
             // Letters A-Z
-            if (usage[0] >= KeyCode.A && usage[0] <= KeyCode.Z) {
-                codepoint[0] = shift ? ('A' + usage[0] - KeyCode.A) : ('a' + usage[0] - KeyCode.A);
+            if (usage >= KeyCode.A && usage <= KeyCode.Z) {
+                cp = shift ? ('A' + usage - KeyCode.A) : ('a' + usage - KeyCode.A);
             }
             // Numbers 1-9
-            else if (usage[0] >= KeyCode.DIGIT_1 && usage[0] <= KeyCode.DIGIT_9) {
-                codepoint[0] = shift ?  shiftedNums[usage[0] -KeyCode.DIGIT_1] : '1' + (usage[0] - KeyCode.DIGIT_1);
+            else if (usage >= KeyCode.DIGIT_1 && usage <= KeyCode.DIGIT_9) {
+                cp = shift ?  shiftedNums[usage -KeyCode.DIGIT_1] : '1' + (usage - KeyCode.DIGIT_1);
             }
             // Number 0
-            else if (usage[0] == KeyCode.DIGIT_0) {
-                codepoint[0] = shift ? ')' : '0';
+            else if (usage == KeyCode.DIGIT_0) {
+                cp = shift ? ')' : '0';
             }
-            if (usage[0] >= KeyCode.KP_1 && usage[0] <= KeyCode.KP_9) {
-                codepoint[0] = '1' + (usage[0] - KeyCode.KP_1);
-            } else if (usage[0] == KeyCode.KP_0) {
-                codepoint[0] = '0';
+            if (usage >= KeyCode.KP_1 && usage <= KeyCode.KP_9) {
+                cp = '1' + (usage - KeyCode.KP_1);
+            } else if (usage == KeyCode.KP_0) {
+                cp = '0';
             }
             // Keypad operators
-            else if (usage[0] == KeyCode.KP_SLASH) {
-                codepoint[0] = '/';
-            } else if (usage[0] == KeyCode.KP_ASTERISK) {
-                codepoint[0] = '*';
-            } else if (usage[0] == KeyCode.KP_MINUS) {
-                codepoint[0] = '-';
-            } else if (usage[0] == KeyCode.KP_PLUS) {
-                codepoint[0] = '+';
-            } else if (usage[0] == KeyCode.KP_PERIOD) {
-                codepoint[0] = '.';
-            } else if(usage[0] == KeyCode.KP_ENTER) {
-                codepoint[0] = '\n';
+            else if (usage == KeyCode.KP_SLASH) {
+                cp = '/';
+            } else if (usage == KeyCode.KP_ASTERISK) {
+                cp = '*';
+            } else if (usage == KeyCode.KP_MINUS) {
+                cp = '-';
+            } else if (usage == KeyCode.KP_PLUS) {
+                cp = '+';
+            } else if (usage == KeyCode.KP_PERIOD) {
+                cp = '.';
+            } else if(usage == KeyCode.KP_ENTER) {
+                cp = '\n';
             }
             // Punctuation
             else {
-                switch (usage[0]) {
-                    case KeyCode.MINUS: codepoint[0] = shift ? '_' : '-'; break;
-                    case KeyCode.EQUALS: codepoint[0] = shift ? '+' : '='; break;
-                    case KeyCode.LEFT_BRACKET: codepoint[0] = shift ? '{' : '['; break;
-                    case KeyCode.RIGHT_BRACKET: codepoint[0] = shift ? '}' : ']'; break;
-                    case KeyCode.BACKSLASH: codepoint[0] = shift ? '|' : '\\'; break;
-                    case KeyCode.NON_US_HASH: codepoint[0] = shift ? '|' : '#'; break;
-                    case KeyCode.SEMICOLON: codepoint[0] = shift ? ':' : ';'; break;
-                    case KeyCode.APOSTROPHE: codepoint[0] = shift ? '"' : '\''; break;
-                    case KeyCode.GRAVE: codepoint[0] = shift ? '~' : '`'; break;
-                    case KeyCode.COMMA: codepoint[0] = shift ? '<' : ','; break;
-                    case KeyCode.PERIOD: codepoint[0] = shift ? '>' : '.'; break;
-                    case KeyCode.SLASH: codepoint[0] = shift ? '?' : '/'; break;
-                    case KeyCode.ENTER: codepoint[0] = '\n'; break;
-                    case KeyCode.TAB: codepoint[0] = '\t'; break;
-                    case KeyCode.SPACE: codepoint[0] = ' '; break;
-                    default: codepoint[0] = 0; // unknown
+                switch (usage) {
+                    case KeyCode.MINUS: cp = shift ? '_' : '-'; break;
+                    case KeyCode.EQUALS: cp = shift ? '+' : '='; break;
+                    case KeyCode.LEFT_BRACKET: cp = shift ? '{' : '['; break;
+                    case KeyCode.RIGHT_BRACKET: cp = shift ? '}' : ']'; break;
+                    case KeyCode.BACKSLASH: cp = shift ? '|' : '\\'; break;
+                    case KeyCode.NON_US_HASH: cp = shift ? '|' : '#'; break;
+                    case KeyCode.SEMICOLON: cp = shift ? ':' : ';'; break;
+                    case KeyCode.APOSTROPHE: cp = shift ? '"' : '\''; break;
+                    case KeyCode.GRAVE: cp = shift ? '~' : '`'; break;
+                    case KeyCode.COMMA: cp = shift ? '<' : ','; break;
+                    case KeyCode.PERIOD: cp = shift ? '>' : '.'; break;
+                    case KeyCode.SLASH: cp = shift ? '?' : '/'; break;
+                    case KeyCode.ENTER: cp = '\n'; break;
+                    case KeyCode.TAB: cp = '\t'; break;
+                    case KeyCode.SPACE: cp = ' '; break;
+                    default: cp = 0; // unknown
                 }
             }
            
-            if (codepoint[0] == 0) return null;
+            if (cp == 0) return null;
 
-            // Lookup using your index[0] table
-            NoteBytes charBytes = CP_TO_CHAR_TABLE[codepoint[0]];
-            usage[0] = 0;
-            codepoint[0] = 0;
+            NoteBytesEphemeral charBytes = new NoteBytesEphemeral(CP_TO_CHAR_TABLE[cp].get());
+            usage = 0;
+            cp = 0;
             return charBytes;
         }
 
