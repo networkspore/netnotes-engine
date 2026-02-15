@@ -1,30 +1,18 @@
-package io.netnotes.engine.io.input.events.containerEvents;
+package io.netnotes.engine.ui.containers.containerEvents;
+
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-public class ContainerResizeEvent extends RoutedContainerEvent {
-    private final int width;
-    private final int height;
+public final class ContainerRestoreEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
-    
-    public ContainerResizeEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, int width, int height) {
+
+    public ContainerRestoreEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
         this.sourcePath = sourcePath;
-        this.width = width;
-        this.height = height;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
-    }
-    
-    public int getWidth() { return width; }
-    public int getHeight() { return height; }
-    
-    @Override
-    public String toString() {
-        return String.format("ContainerResizeEvent[%dx%d, source=%s]", 
-            width, height, getSourcePath());
     }
 
     @Override

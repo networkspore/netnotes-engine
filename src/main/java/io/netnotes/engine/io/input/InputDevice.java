@@ -1,10 +1,7 @@
 package io.netnotes.engine.io.input;
 
-import java.util.function.Consumer;
 
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
-import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.noteBytes.NoteBytes;
 
 /**
  * InputDevice - Common interface for all input sources

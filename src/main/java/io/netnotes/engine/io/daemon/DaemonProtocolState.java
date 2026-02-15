@@ -96,123 +96,6 @@ public class DaemonProtocolState {
         public static final int STALE               = DeviceStates.STALE;
     }
     
-    // ===== CLIENT SESSION =====
-    /* 
-    public static class ClientSession {
-        public final String sessionId;
-        public final int clientPid;
-        public final BitFlagStateMachine state;
-        
-        public final ConcurrentHashMap<String, DeviceState> claimedDevices = 
-            new ConcurrentHashMap<>();
-        
-        public volatile long lastPingSent = 0;
-        public volatile long lastPongReceived = 0;
-        public final AtomicInteger missedPongs = new AtomicInteger(0);
-        
-        public final AtomicInteger messagesSent = new AtomicInteger(0);
-        public final AtomicInteger messagesAcknowledged = new AtomicInteger(0);
-        
-        public int maxUnacknowledgedMessages = 100;
-        public long heartbeatIntervalMs = 5000;
-        public long heartbeatTimeoutMs = 15000;
-        
-        public ClientSession(String sessionId, int clientPid) {
-            this.sessionId = sessionId;
-            this.clientPid = clientPid;
-            this.state = new BitFlagStateMachine("client-" + sessionId);
-            
-            setupStateTransitions();
-        }
-        
-        private void setupStateTransitions() {
-            state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
-                state.addState(ClientStateFlags.HEARTBEAT_ENABLED);
-            });
-            
-            state.onStateAdded(ClientStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
-                state.addState(ClientStateFlags.FLOW_CONTROL_PAUSED);
-                Log.logMsg("Backpressure activated for client " + sessionId);
-            });
-            
-            state.onStateAdded(ClientStateFlags.HEARTBEAT_TIMEOUT, (old, now, bit) -> {
-                state.addState(ClientStateFlags.ERROR_STATE);
-                Log.logError("Heartbeat timeout for client " + sessionId);
-            });
-            
-            state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
-                for (DeviceState device : claimedDevices.values()) {
-                    device.release();
-                }
-            });
-        }
-        
-        public boolean shouldApplyBackpressure() {
-            int sent = messagesSent.get();
-            int acked = messagesAcknowledged.get();
-            int unacked = sent - acked;
-            
-            if (unacked >= maxUnacknowledgedMessages) {
-                state.addState(ClientStateFlags.BACKPRESSURE_ACTIVE);
-                return true;
-            }
-            
-            return false;
-        }
-        
-        public void messageSent() {
-            messagesSent.incrementAndGet();
-            shouldApplyBackpressure();
-        }
-        
-        public void messagesAcknowledged(int count) {
-            messagesAcknowledged.addAndGet(count);
-            
-            int sent = messagesSent.get();
-            int acked = messagesAcknowledged.get();
-            int unacked = sent - acked;
-            
-            if (unacked < maxUnacknowledgedMessages / 2) {
-                state.removeState(ClientStateFlags.BACKPRESSURE_ACTIVE);
-                state.removeState(ClientStateFlags.FLOW_CONTROL_PAUSED);
-            }
-        }
-        
-        public boolean checkHeartbeat() {
-            if (!state.hasState(ClientStateFlags.HEARTBEAT_ENABLED)) {
-                return true;
-            }
-            
-            long now = System.currentTimeMillis();
-            
-            if (state.hasState(ClientStateFlags.HEARTBEAT_WAITING)) {
-                long timeSincePing = now - lastPingSent;
-                
-                if (timeSincePing > heartbeatTimeoutMs) {
-                    missedPongs.incrementAndGet();
-                    
-                    if (missedPongs.get() >= 3) {
-                        state.addState(ClientStateFlags.HEARTBEAT_TIMEOUT);
-                        return false;
-                    }
-                }
-            }
-            
-            return true;
-        }
-        
-        public void sendPing() {
-            lastPingSent = System.currentTimeMillis();
-            state.addState(ClientStateFlags.HEARTBEAT_WAITING);
-        }
-        
-        public void receivedPong() {
-            lastPongReceived = System.currentTimeMillis();
-            state.removeState(ClientStateFlags.HEARTBEAT_WAITING);
-            missedPongs.set(0);
-        }
-    }
-    */
     // ===== DEVICE STATE (REFACTORED) =====
     
     public static class DeviceState {
@@ -406,7 +289,7 @@ public class DaemonProtocolState {
     }
     
     // ===== HEARTBEAT MANAGER =====
-    
+    /*
     public static class HeartbeatManager {
         private final ScheduledExecutorService scheduler = 
             Executors.newScheduledThreadPool(1);
@@ -461,4 +344,5 @@ public class DaemonProtocolState {
             scheduler.shutdown();
         }
     }
-}
+ */
+    }

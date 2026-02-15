@@ -2,19 +2,12 @@ package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities;
-import io.netnotes.engine.io.daemon.IODaemon.SESSION_CMDS;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
-import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -289,46 +282,28 @@ public class IODaemonManager {
      */
     public CompletableFuture<ClientSession> getDiscoverySession() {
         // If we already have a valid discovery session, reuse it
-        if (discoverySession != null && discoverySession.isAlive()) {
+        if (discoverySession != null && discoverySession.isHealthy()) {
             return CompletableFuture.completedFuture(discoverySession);
         }
         
         // Ensure IODaemon is available first
         return ensureAvailable()
-            .thenCompose(ioDaemonPath -> {
+            .thenCompose(path -> {
+                IODaemon daemon = getIODaemon();
+                if (daemon == null) {
+                    return CompletableFuture.failedFuture(
+                        new IllegalStateException("IODaemon not available"));
+                }
                 // Create a new discovery session
                 String sessionId = NoteUUID.createSafeUUID128() + "-discovery";
                 int pid = (int) ProcessHandle.current().pid();
                 
-                return registry.request(
-                    ioDaemonPath,
-                    new NoteBytesObject(
-                        new NoteBytesPair(Keys.CMD, SESSION_CMDS.CREATE_SESSION),
-                        new NoteBytesPair(Keys.SESSION_ID, sessionId),
-                        new NoteBytesPair(Keys.PID, pid)
-                    ).readOnly(),
-                    Duration.ofSeconds(2)
-                )
-                .thenApply(reply -> {
-                    NoteBytesReadOnly status = reply.getPayload().getAsNoteBytesMap()
-                        .getReadOnly(Keys.STATUS);
-                    
-                    if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
-                        String errorMsg = reply.getPayload().getAsNoteBytesMap()
-                            .get(Keys.MSG).getAsString();
-                        throw new RuntimeException("Failed to create discovery session: " + 
-                            errorMsg);
-                    }
-                    
-                    NoteBytes pathBytes = reply.getPayload().getAsNoteBytesMap().get(Keys.PATH);
-                    ContextPath sessionPath = ContextPath.fromNoteBytes(pathBytes);
-                    
-                    discoverySession = (ClientSession) registry.getProcess(sessionPath);
-                    
-                    Log.logMsg("[IODaemonManager] Discovery session created: " + sessionPath);
-                    
-                    return discoverySession;
-                });
+                return daemon.createSession(sessionId, pid)
+                    .thenApply(session -> {
+                        discoverySession = session;
+                        Log.logMsg("[IODaemonManager] Discovery session created: " + sessionId);
+                        return session;
+                    });
             });
     }
 
@@ -369,8 +344,13 @@ public class IODaemonManager {
         
         ClientSession session = discoverySession;
         discoverySession = null;
+
+        IODaemon daemon = getIODaemon();
+        CompletableFuture<Void> shutdownFuture = daemon != null
+            ? daemon.destroySession(session.sessionId)
+            : session.shutdown();
         
-        return session.shutdown()
+        return shutdownFuture
             .thenRun(() -> {
                 Log.logMsg("[IODaemonManager] Discovery session closed");
             })

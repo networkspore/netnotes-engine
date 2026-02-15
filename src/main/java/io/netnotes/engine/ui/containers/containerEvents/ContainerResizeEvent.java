@@ -1,18 +1,32 @@
-package io.netnotes.engine.io.input.events.containerEvents;
-
+package io.netnotes.engine.ui.containers.containerEvents;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-public final class ContainerHiddenEvent extends RoutedContainerEvent {
+public abstract class ContainerResizeEvent<
+    P extends SpatialPoint<P>,
+    S extends SpatialRegion<P,S>
+> extends RoutedContainerEvent {
+    private final S region;
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
-
-    public ContainerHiddenEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
+    
+    public ContainerResizeEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, S region) {
         this.sourcePath = sourcePath;
+        this.region = region;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
+    }
+
+    
+    public S getRegion() { return region; }
+    
+    @Override
+    public String toString() {
+        return String.format("ContainerResizeEvent[%s, source=%s]", region.toString(), getSourcePath());
     }
 
     @Override

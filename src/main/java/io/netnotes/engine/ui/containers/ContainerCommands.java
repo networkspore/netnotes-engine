@@ -4,7 +4,6 @@ import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -267,28 +266,18 @@ public class ContainerCommands {
         return msg;
     }
     
-     public static NoteBytesMap containerResized(
-        ContainerId containerId,
-        int width,
-        int height
-    ) {
-        return containerResized(containerId.toNoteBytes(), width, height);
-    }
+
     /**
      * Container resized event
      */
     public static NoteBytesMap containerResized(
         NoteBytes containerId,
-        int width,
-        int height
+        NoteBytes regionBytes
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_REGION_CHANGED);
         msg.put(ContainerCommands.CONTAINER_ID, containerId);
-        msg.put(Keys.PAYLOAD, new NoteBytesArrayReadOnly(new NoteBytes[]{
-            new NoteBytes(width),
-            new NoteBytes(height)
-        }));
+        msg.put(Keys.PAYLOAD, regionBytes);
         return msg;
     }
     

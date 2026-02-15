@@ -1,14 +1,15 @@
-package io.netnotes.engine.io.input.events.containerEvents;
+package io.netnotes.engine.ui.containers.containerEvents;
+
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-public class ContainerFocusLostEvent extends RoutedContainerEvent {
+public final class ContainerHiddenEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
 
-    public ContainerFocusLostEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
+    public ContainerHiddenEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
         this.sourcePath = sourcePath;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
@@ -31,4 +32,3 @@ public class ContainerFocusLostEvent extends RoutedContainerEvent {
         stateFlags = flags;
     }
 }
-

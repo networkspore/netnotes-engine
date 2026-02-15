@@ -11,7 +11,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.io.input.events.containerEvents.ContainerEventSerializer;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
@@ -23,6 +22,9 @@ import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.containers.containerEvents.ContainerEventSerializer;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -43,7 +45,11 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * - Container calls requestRender() to signal changes
  * - UIRenderer polls/observes and renders on its own schedule
  */
-public abstract class Container<T extends Container<T>> {
+public abstract class Container<
+    P extends SpatialPoint<P>,
+    S extends SpatialRegion<P,S>,
+    T extends Container<P,S,T>
+> {
     
     
 
@@ -109,8 +115,7 @@ public abstract class Container<T extends Container<T>> {
     protected final String rendererId;
     protected final long createdTime;
 
-    protected volatile int width = 0;
-    protected volatile int height = 0;
+    protected S bounds;
     
     // ===== STATE MACHINE =====
     protected final BitFlagStateMachine stateMachine;
@@ -128,7 +133,7 @@ public abstract class Container<T extends Container<T>> {
 
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
 
-    protected Consumer<Container<?>> onRequestMade = null;
+    protected Consumer<T> onRequestMade = null;
 
     // Handler futures
     protected CompletableFuture<Void> showFuture = null;
@@ -147,7 +152,8 @@ public abstract class Container<T extends Container<T>> {
         String title,
         ContextPath ownerPath,
         ContainerConfig config,
-        String rendererId
+        String rendererId,
+        S bounds
     ) {
         this.id = id;
         this.title = new AtomicReference<>(title);
@@ -156,7 +162,7 @@ public abstract class Container<T extends Container<T>> {
         this.path = ownerPath != null ? ownerPath.append("container", id.toString()) : null;
         this.rendererId = rendererId;
         this.createdTime = System.currentTimeMillis();
-        
+        this.bounds = bounds;
         // Initialize state machine
         this.stateMachine = new BitFlagStateMachine("Container:" + id);
         this.stateMachine.addState(STATE_CREATING);
@@ -176,6 +182,13 @@ public abstract class Container<T extends Container<T>> {
         setupBatchMsgMap();
     }
     
+    public CompletableFuture<S> getRegion(){
+        return containerExecutor.submit(()->bounds);
+    }
+
+    public abstract CompletableFuture<Void> setRegion(S bounds);
+
+
     // ===== ABSTRACT METHODS (Subclass Implementation) =====
     
     protected abstract void setupMessageMap();
@@ -632,7 +645,7 @@ public abstract class Container<T extends Container<T>> {
         emitEvent(ContainerEventSerializer.createShownEvent());
     }
 
-    public void setOnRequestMade(Consumer<Container<?>> notifier) {
+    public void setOnRequestMade(Consumer<T> notifier) {
         this.onRequestMade = notifier;
     }
 
@@ -641,10 +654,10 @@ public abstract class Container<T extends Container<T>> {
      */
     protected void notifyRequestMade() {
         if (onRequestMade != null) {
-            onRequestMade.accept(this);
+            onRequestMade.accept(self());
         }
     }
-    
+
     // ===== MESSAGE HANDLERS =====
    
     public CompletableFuture<Void> handleShowContainer(NoteBytesMap command) {

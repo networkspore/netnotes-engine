@@ -40,6 +40,7 @@ import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 /**
@@ -53,10 +54,10 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * 
  * Multi-session design:
  * - One IODaemon per daemon socket
- * - Multiple ClientSession children (one per session)
- * - Each ClientSession has ClaimedDevice children
+ * - Multiple ClientSession instances (one per session)
+ * - ClaimedDevice processes registered under IODaemon (path includes sessionId)
  * 
- * Hierarchy: IODaemon → ClientSession → ClaimedDevice
+ * Hierarchy: IODaemon → (sessionId namespace) → ClaimedDevice
  */
 public class IODaemon extends FlowProcess {
     public final NoteBytesReadOnly DAEMON_VERSION = new NoteBytesReadOnly(1);
@@ -70,13 +71,89 @@ public class IODaemon extends FlowProcess {
             new NoteBytesReadOnly("list_sessions");
     }
 
+     /**
+     * Commands implementation - called by ClientSessions on serialExec
+     */
+    private final IDaemonCommands daemonCommands = new IDaemonCommands() {
+        
+        @Override
+        public void requestDiscovery(String sessionId) {
+            NoteBytesObject request = MessageBuilder.createCommand(
+                ProtocolMesssages.REQUEST_DISCOVERY
+            );
+            
+            writeToDaemon(request);
+        }
+        
+        @Override
+        public void claimDevice(String sessionId, String deviceId, String mode) {
+            ClientSession session = sessions.get(sessionId);
+            if (session == null) {
+                Log.logError("Session not found: " + sessionId);
+                return;
+            }
+            
+            ClaimedDevice claimedDevice = session.getClaimedDevice(deviceId);
+            if (claimedDevice == null) {
+                Log.logError("Device not found: " + deviceId);
+                return;
+            }
+            
+            ContextPath devicePath = claimedDevice.getContextPath();
+            
+            // Setup event stream first
+            requestStreamChannel(devicePath)
+             .thenCompose(eventChannel -> {
+                    NoteBytes deviceIdBytes = new NoteBytes(deviceId);
+                    deviceEventChannels.put(deviceIdBytes, eventChannel);
+                    
+                    NoteBytesWriter eventWriter = new NoteBytesWriter(
+                        eventChannel.getQueuedOutputStream()
+                    );
+                    deviceEventWriters.put(deviceIdBytes, eventWriter);
+                    
+                    return eventChannel.getReadyFuture();
+                })
+                .thenRun(() -> {
+                    // Send claim to daemon via serialized write
+                    NoteBytesObject request = MessageBuilder.createCommand(
+                        ProtocolMesssages.CLAIM_ITEM,
+                        new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+                        new NoteBytesPair(Keys.PID, session.clientPid),
+                        new NoteBytesPair(Keys.MODE, mode)
+                    );
+                    
+                    writeToDaemon(request);
+                })
+                .exceptionally(ex -> {
+                    Log.logError("Failed to claim device: " + ex.getMessage());
+                    return null;
+                }); 
+        }
+        
+        @Override
+        public void releaseDevice(String sessionId, String deviceId) {
+            handleDeviceDisconnect(deviceId);
+            
+            NoteBytesObject request = MessageBuilder.createCommand(
+                ProtocolMesssages.RELEASE_ITEM,
+                new NoteBytesPair(Keys.DEVICE_ID, deviceId)
+            );
+            
+            writeToDaemon(request);
+        }
+    };
+
     private final String socketPath;
     private final String m_UUID = NoteUUID.createSafeUUID128();
     
     private SocketChannel socketChannel;
     private NoteBytesWriter daemonWriter;
     private NoteBytesReader daemonReader;
-    
+
+    private final SerializedVirtualExecutor serialExec = new SerializedVirtualExecutor();
+    private final Map<String, ClientSession> sessions = new ConcurrentHashMap<>();
+
     // Message dispatch maps
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
     private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgMap = new ConcurrentHashMap<>();
@@ -96,6 +173,34 @@ public class IODaemon extends FlowProcess {
         
         setupMessageMapping();
         setupRoutedMessageMapping();
+    }
+
+    private void writeToDaemon(NoteBytesObject message) {
+        serialExec.executeFireAndForget(() -> {
+            try {
+                // No synchronized needed - already serialized!
+                daemonWriter.write(message);
+                daemonWriter.flush();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to write to daemon", e);
+            }
+        });
+    }
+
+    /**
+     * Write multiple items to daemon socket
+     */
+    private void writeToDaemon(NoteBytes... items) {
+        serialExec.execute(() -> {
+            try {
+                for (NoteBytes item : items) {
+                    daemonWriter.write(item);
+                }
+                daemonWriter.flush();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to write to daemon", e);
+            }
+        });
     }
     
     // ===== PROCESS LIFECYCLE =====
@@ -122,7 +227,7 @@ public class IODaemon extends FlowProcess {
     
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
-        // Handle requests from ClientSession children
+        // Handle legacy routed requests (direct method calls preferred)
         try {
             NoteBytesReadOnly payload = packet.getPayload();
             NoteBytesMap command = payload.getAsNoteBytesMap();
@@ -169,22 +274,11 @@ public class IODaemon extends FlowProcess {
                         NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
                         
                         if (payload != null && payload.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            NoteBytesMap msgMap = payload.getAsNoteBytesMap();
-                            NoteBytesReadOnly cmd = msgMap.getReadOnly(Keys.CMD);
-                            
-                            // Check for device disconnect notification
-                            if (cmd != null && cmd.equals(ProtocolMesssages.DEVICE_DISCONNECTED)) {
-                                handleDeviceDisconnect(deviceIdBytes);
-                            } else {
-                                // Forward control message to daemon
-                                // Write routed message: [STRING:deviceId][OBJECT:payload]
-                                synchronized(daemonWriter) {
-                                    daemonWriter.write(deviceIdBytes);
-                                    daemonWriter.write(payload);
-                                    daemonWriter.flush();
-                                }
-                                Log.logMsg("Forwarded control message for device: " + deviceIdBytes);
-                            }
+                            // Forward control message to daemon
+                            // Write routed message: [STRING:deviceId][OBJECT:payload]
+                            writeToDaemon(deviceIdBytes, payload);
+                            Log.logMsg("Forwarded control message for device: " + deviceIdBytes);
+                         
                         }
                     }
                     
@@ -197,10 +291,13 @@ public class IODaemon extends FlowProcess {
     }
 
    
-
     /**
      * Handle device disconnection from ClaimedDevice
      */
+    public void handleDeviceDisconnect(String deviceId) {
+        handleDeviceDisconnect(new NoteBytes(deviceId));
+    }
+
     private void handleDeviceDisconnect(NoteBytes deviceId) {
         Log.logMsg("Device disconnecting: " + deviceId);
         cleanupDeviceStreams(deviceId);
@@ -466,26 +563,21 @@ public class IODaemon extends FlowProcess {
         int clientPid = pidBytes != null ? pidBytes.getAsInt() : 
             (int) ProcessHandle.current().pid();
         
-        // Check if session already exists
-        ContextPath sessionPath = contextPath.append(sessionId);
-        if (registry.exists(sessionPath)) {
-            NoteBytesMap response = new NoteBytesMap();
-            response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-            response.put(Keys.PATH, sessionPath.toNoteBytes());
-            response.put(Keys.MSG, new NoteBytes("Session already exists"));
-            reply(request, response.toNoteBytes());
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        // Create new session
+        boolean alreadyExists = sessions.containsKey(sessionId);
+
+        // Create new session (or return existing)
         return createSession(sessionId, clientPid)
-            .thenAccept(path -> {
+            .thenAccept(session -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                response.put(Keys.PATH, path.toNoteBytes());
+                response.put(Keys.SESSION_ID, new NoteBytes(session.sessionId));
+                response.put(Keys.PID, new NoteBytes(session.clientPid));
+                if (alreadyExists) {
+                    response.put(Keys.MSG, new NoteBytes("Session already exists"));
+                }
                 reply(request, response.toNoteBytes());
                 
-                Log.logMsg("[IODaemon] Created session: " + sessionId + " at " + path);
+                Log.logMsg("[IODaemon] Created session: " + sessionId);
             })
             .exceptionally(ex -> {
                 NoteBytesMap error = new NoteBytesMap();
@@ -516,13 +608,8 @@ public class IODaemon extends FlowProcess {
             return replyError(request, "Session not found: " + sessionId);
         }
         
-        // Cleanup session
-        session.state.addState(ClientStateFlags.DISCONNECTING);
-        
-        return session.shutdown()
+        return destroySession(sessionId)
             .thenRun(() -> {
-                registry.unregisterProcess(session.getContextPath());
-                
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(request, response.toNoteBytes());
@@ -554,7 +641,6 @@ public class IODaemon extends FlowProcess {
             ClientSession session = sessions.get(i);
             NoteBytesMap sessionInfo = new NoteBytesMap();
             sessionInfo.put(Keys.SESSION_ID, new NoteBytes(session.sessionId));
-            sessionInfo.put(Keys.PATH, session.getContextPath().toNoteBytes());
             sessionInfo.put(Keys.PID, new NoteBytes(session.clientPid));
             
             sessionsList.put(String.valueOf(i), sessionInfo);
@@ -567,42 +653,70 @@ public class IODaemon extends FlowProcess {
     }
 
     /**
-     * Create a new client session
+     * Create a new client session (in-process, not a FlowProcess)
      */
-    /**
-     * Create a new client session (internal method)
-     * Now also called by handleCreateSessionRequest
-     */
-    public CompletableFuture<ContextPath> createSession(String sessionId, int clientPid) {
-        ContextPath sessionPath = contextPath.append(sessionId);
-        
-        if (registry.exists(sessionPath)) {
-            return CompletableFuture.completedFuture(sessionPath);
+    public CompletableFuture<ClientSession> createSession(String sessionId, int clientPid) {
+        ClientSession existing = sessions.get(sessionId);
+        if (existing != null) {
+            if (existing.isHealthy()) {
+                return CompletableFuture.completedFuture(existing);
+            }
+            sessions.remove(sessionId);
         }
         
-        ClientSession session = new ClientSession(sessionId, clientPid);
+        ClientSession session = new ClientSession(
+            sessionId,
+            clientPid,
+            this,
+            daemonCommands,
+            serialExec
+        );
+        session.init();
+        sessions.put(sessionId, session);
         
-        return spawnChild(session).thenApply(path -> {
-            session.state.addState(ClientStateFlags.CONNECTED);
-            session.state.addState(ClientStateFlags.AUTHENTICATED);
-            
-            registry.startProcess(sessionPath);
-            
-            // Bidirectional connection for request-reply
-            registry.connect(contextPath, sessionPath);
-            registry.connect(sessionPath, contextPath);
-            
-            return path;
-        });
+        return CompletableFuture.completedFuture(session);
+    }
+    
+    public CompletableFuture<Void> destroySession(String sessionId) {
+        ClientSession session = sessions.remove(sessionId);
+        if (session == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        session.state.addState(ClientStateFlags.DISCONNECTING);
+        return session.shutdown();
     }
     
     public ClientSession getSession(String sessionId) {
-        ContextPath sessionPath = contextPath.append(sessionId);
-        return (ClientSession) registry.getProcess(sessionPath);
+        return sessions.get(sessionId);
     }
     
     public List<ClientSession> getSessions() {
-        return findChildrenByType(ClientSession.class);
+        return List.copyOf(sessions.values());
+    }
+
+    // ===== CLAIMED DEVICE REGISTRATION =====
+    
+    public ContextPath registerClaimedDevice(ClaimedDevice device, ContextPath devicePath) {
+        if (registry == null) {
+            throw new IllegalStateException("IODaemon not initialized");
+        }
+        return registry.registerProcess(device, devicePath, contextPath, registry);
+    }
+
+    public CompletableFuture<Void> startClaimedDevice(ContextPath devicePath) {
+        if (registry == null) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("IODaemon not initialized"));
+        }
+        return registry.startProcess(devicePath);
+    }
+
+    public void unregisterClaimedDevice(ContextPath devicePath) {
+        if (registry == null) {
+            return;
+        }
+        registry.unregisterProcess(devicePath);
     }
     
     // ===== SESSION REQUEST HANDLERS (ROUTED) =====
@@ -780,26 +894,55 @@ public class IODaemon extends FlowProcess {
     }
     
     private void handleDeviceClaimed(NoteBytesMap map) {
-        Log.logMsg("Device claim confirmed by daemon");
+        NoteBytes deviceIdBytes = map.get(Keys.DEVICE_ID);
+        if (deviceIdBytes == null) {
+            Log.logError("ITEM_CLAIMED missing device_id");
+            return;
+        }
+        
+        String deviceId = deviceIdBytes.getAsString();
+        
+        // Find session that owns this device
+        for (ClientSession session : sessions.values()) {
+            if (session.hasDevice(deviceId)) {
+                session.handleDeviceClaimed(deviceId, map);
+                return;
+            }
+        }
+        
+        Log.logError("Device claimed but no owning session found: " + deviceId);
     }
     
     private void handleDeviceReleased(NoteBytesMap map) {
-        Log.logMsg("Device release confirmed by daemon");
+        NoteBytes deviceIdBytes = map.get(Keys.DEVICE_ID);
+        if (deviceIdBytes == null) {
+            Log.logError("ITEM_RELEASED missing device_id");
+            return;
+        }
+        
+        String deviceId = deviceIdBytes.getAsString();
+        
+        // Notify session (device might already be removed from session map)
+        for (ClientSession session : sessions.values()) {
+            if (session.hasDevice(deviceId)) {
+                session.handleDeviceReleased(deviceId);
+                return;
+            }
+        }
+        
+        // Also check pending releases in case device was removed but release not confirmed
+        for (ClientSession session : sessions.values()) {
+            session.handleDeviceReleased(deviceId);
+        }
+        
+        Log.logMsg("Device release confirmed by daemon: " + deviceId);
     }
     
     private void handlePing(NoteBytesMap map) {
-        try {
-            NoteBytesObject pong = MessageBuilder.createCommand(
-                ProtocolMesssages.PONG
-            );
-            
-            synchronized(daemonWriter) {
-                daemonWriter.write(pong);
-                daemonWriter.flush();
-            }
-        } catch (IOException e) {
-            Log.logError("Failed to send pong: " + e.getMessage());
-        }
+        NoteBytesObject pong = MessageBuilder.createCommand(
+            ProtocolMesssages.PONG
+        );
+        writeToDaemon(pong);
     }
     
     private void handlePong(NoteBytesMap map) {
@@ -838,38 +981,31 @@ public class IODaemon extends FlowProcess {
         }
         
         // Cleanup all sessions (they'll handle their ClaimedDevice cleanup)
-        List<ClientSession> sessions = getSessions();
-        for (ClientSession session : sessions) {
-            // Notify session of disconnect
+        List<ClientSession> sessionsSnapshot = getSessions();
+        for (ClientSession session : sessionsSnapshot) {
             notifySessionDisconnect(session);
-
-            session.state.addState(ClientStateFlags.DISCONNECTING);
-            
-            registry.unregisterProcess(session.getContextPath());
         }
         
+        sessions.clear();
+        
         Log.logMsg("Disconnected from daemon, cleaned up " + 
-            sessions.size() + " sessions");
+            sessionsSnapshot.size() + " sessions");
     }
 
     /**
      * Notify session that daemon socket disconnected
      */
     private void notifySessionDisconnect(ClientSession session) {
-        if (!session.isAlive() || session.state.hasState(ClientStateFlags.DISCONNECTING)) {
+        if (!session.isHealthy() || session.state.hasState(ClientStateFlags.DISCONNECTING)) {
             Log.logMsg("Session " + session.sessionId + " already disconnecting, skipping notification");
             return;
         }
 
-        NoteBytesObject notification = new NoteBytesObject();
-        notification.add(Keys.EVENT, EventBytes.TYPE_DISCONNECTED);
-        notification.add(Keys.MSG, "IODaemon socket disconnected");
-
-        try {
-            emitTo(session.getContextPath(), notification);
-        } catch (Exception e) {
-            Log.logError("Failed to notify session: " + e.getMessage());
-        }
+        NoteBytesMap notification = new NoteBytesMap();
+        notification.put(Keys.EVENT, EventBytes.TYPE_DISCONNECTED);
+        notification.put(Keys.MSG, new NoteBytes("IODaemon socket disconnected"));
+        
+        session.handleDaemonDisconnect(notification);
     }
 
 
@@ -880,14 +1016,7 @@ public class IODaemon extends FlowProcess {
             shutdown.add(Keys.EVENT, EventBytes.TYPE_SHUTDOWN);
      
             
-            try {
-                synchronized(daemonWriter) {
-                    daemonWriter.write(shutdown);
-                    daemonWriter.flush();
-                }
-            } catch (IOException e) {
-                // Ignore
-            }
+            writeToDaemon(shutdown);
             
             handleDisconnect();
             

@@ -40,11 +40,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * - doCreateContainer() - actual container creation
  * - handleRenderCommand() - renderer-specific rendering
  */
-public abstract class UIRenderer <T extends Container<?>> {
+public abstract class UIRenderer <
+    P extends SpatialPoint<P>,
+    S extends SpatialRegion<P,S>,
+    T extends Container<P,S,T>
+> {
+
+    private final NoteBytesReadOnly rendererId;
     
     // ===== STATE MANAGEMENT =====
     protected final BitFlagStateMachine state;
-    protected final String rendererName;
+    protected final String name;
     
     // ===== CONTAINER MANAGEMENT =====
     protected final Map<ContainerId, T> containers = new ConcurrentHashMap<>();
@@ -62,44 +68,53 @@ public abstract class UIRenderer <T extends Container<?>> {
      * 
      * @param rendererName Name for this renderer (used in logging and state machine)
      */
-    protected UIRenderer(String rendererName) {
-        this.rendererName = rendererName;
+    protected UIRenderer(String rendererName, NoteBytesReadOnly rendererId) {
+        this.rendererId = rendererId;
+        this.name = rendererName;
         this.state = new BitFlagStateMachine(rendererName + "-state");
         setupBaseStateTransitions();
         setupRendererStateTransitions();
 
         setupMessageHandlers();
     }
+
+    public NoteBytesReadOnly getId(){
+        return rendererId;
+    }
     
+    public String getName(){
+        return name;
+    }
+
     // ===== STATE TRANSITIONS =====
     
      private void setupBaseStateTransitions() {
         state.onStateAdded(RendererStates.INITIALIZING, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Initializing..."));
+            Log.logMsg("[" + name + "] Initializing..."));
         
         state.onStateAdded(RendererStates.READY, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Ready"));
+            Log.logMsg("[" + name + "] Ready"));
         
         state.onStateAdded(RendererStates.HAS_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] First container created"));
+            Log.logMsg("[" + name + "] First container created"));
         
         state.onStateRemoved(RendererStates.HAS_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] No containers remaining"));
+            Log.logMsg("[" + name + "] No containers remaining"));
         
         state.onStateAdded(RendererStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Container focused"));
+            Log.logMsg("[" + name + "] Container focused"));
         
         state.onStateRemoved(RendererStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] No container focused"));
+            Log.logMsg("[" + name + "] No container focused"));
         
         state.onStateAdded(RendererStates.SHUTTING_DOWN, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Shutting down..."));
+            Log.logMsg("[" + name + "] Shutting down..."));
         
         state.onStateAdded(RendererStates.STOPPED, (old, now, bit) -> 
-            Log.logMsg("[" + rendererName + "] Stopped"));
+            Log.logMsg("[" + name + "] Stopped"));
         
         state.onStateAdded(RendererStates.ERROR, (old, now, bit) -> 
-            Log.logError("[" + rendererName + "] ERROR"));
+            Log.logError("[" + name + "] ERROR"));
     }
 
     protected abstract void setupRendererStateTransitions();
@@ -159,11 +174,11 @@ public abstract class UIRenderer <T extends Container<?>> {
                 state.removeState(RendererStates.READY);
                 state.addState(RendererStates.STOPPED);
                 
-                Log.logMsg("[" + rendererName + "] Shutdown complete");
+                Log.logMsg("[" + name + "] Shutdown complete");
             })
             .exceptionally(ex -> {
                 state.addState(RendererStates.ERROR);
-                Log.logError("[" + rendererName + "] Shutdown error: " + ex.getMessage());
+                Log.logError("[" + name + "] Shutdown error: " + ex.getMessage());
                 return null;
             });
     }
@@ -276,7 +291,7 @@ public abstract class UIRenderer <T extends Container<?>> {
     
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(RendererStates.CREATING_CONTAINER);
-        Log.logMsg("[UIRenderer "+rendererName+"] creating container...");
+        Log.logMsg("[UIRenderer "+name+"] creating container...");
         try {
             // Parse common parameters
             NoteBytes containerIdBytes = msg.get(ContainerCommands.CONTAINER_ID);
@@ -307,9 +322,9 @@ public abstract class UIRenderer <T extends Container<?>> {
                 ContainerConfig.fromNoteBytes(configBytes) : new ContainerConfig();
             boolean autoFocus = autoFocusBytes != null ? autoFocusBytes.getAsBoolean() : true;
             String rendererId = rendererIdBytes.getAsString();
-            
+            S containerRegion = createContainerRegion(msg);
             // Delegate to subclass
-            return doCreateContainer(containerId, title, ownerPath, config, rendererId)
+            return doCreateContainer(containerId, title, ownerPath, config, rendererId, containerRegion)
                 .thenCompose(container -> {
                     // Track container
                     containers.put(containerId, container);
@@ -324,7 +339,7 @@ public abstract class UIRenderer <T extends Container<?>> {
                     }
                     
                     return container.initialize()
-                        .thenCompose(v->onContainerCreated(containerId, msg))
+                        .thenCompose(v->onContainerCreated(container, containerRegion))
                         .thenAccept(response -> {
                             state.removeState(RendererStates.CREATING_CONTAINER);
                             reply(packet, response);
@@ -340,7 +355,7 @@ public abstract class UIRenderer <T extends Container<?>> {
                     String errorMsg = ex.getCause() != null ? 
                         ex.getCause().getMessage() : ex.getMessage();
                     
-                    Log.logError("[" + rendererName + "] Create container error: " + errorMsg);
+                    Log.logError("[" + name + "] Create container error: " + errorMsg);
                     replyError(packet, errorMsg);
                     return null;
                 });
@@ -350,6 +365,8 @@ public abstract class UIRenderer <T extends Container<?>> {
             return CompletableFuture.failedFuture(e);
         }
     }
+
+    protected abstract S createContainerRegion(NoteBytesMap map);
     
     private CompletableFuture<Void> handleDestroyContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
@@ -368,7 +385,7 @@ public abstract class UIRenderer <T extends Container<?>> {
                 String errorMsg = ex.getCause() != null ? 
                     ex.getCause().getMessage() : ex.getMessage();
                 
-                Log.logError("[" + rendererName + "] Destroy error: " + errorMsg);
+                Log.logError("[" + name + "] Destroy error: " + errorMsg);
                 replyError(packet, errorMsg);
                 
                 return null;
@@ -547,17 +564,15 @@ public abstract class UIRenderer <T extends Container<?>> {
         String title,
         ContextPath ownerPath,
         ContainerConfig config,
-        String rendererId
+        String rendererId,
+        S containerregion
     );
     
     /**
      * Called after container is created and tracked
      * Return response data to include in CREATE_CONTAINER reply
      */
-    protected abstract CompletableFuture<NoteBytesReadOnly> onContainerCreated(
-        ContainerId containerId,
-        NoteBytesMap createMsg
-    );
+    protected abstract CompletableFuture<NoteBytesReadOnly> onContainerCreated( T container, S containerRegion);
     
 
     /**

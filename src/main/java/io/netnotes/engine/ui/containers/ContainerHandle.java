@@ -21,7 +21,7 @@ import io.netnotes.engine.ui.layout.LayoutData;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClientSession;
-import io.netnotes.engine.io.daemon.IODaemon.SESSION_CMDS;
+import io.netnotes.engine.io.daemon.IODaemon;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.EventFilter;
@@ -29,7 +29,6 @@ import io.netnotes.engine.io.input.events.EventFilterList;
 import io.netnotes.engine.io.input.events.EventFilterList.FilterMode;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.input.events.containerEvents.RoutedContainerEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.io.process.FlowProcess;
@@ -52,6 +51,7 @@ import io.netnotes.engine.ui.Renderable;
 import io.netnotes.engine.ui.RenderableLayoutManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.containers.containerEvents.RoutedContainerEvent;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
@@ -93,7 +93,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  */
 public abstract class ContainerHandle<
     B extends BatchBuilder<S>,
-    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,BLD>,
+    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,EF, BLD>,
     P extends SpatialPoint<P>,
     R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
     S extends SpatialRegion<P,S>,
@@ -103,6 +103,7 @@ public abstract class ContainerHandle<
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
     LD extends LayoutData<B,R,S,LD,?>,
     LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
+    EF extends EventsFactory<P,S>,
     BLD extends ContainerHandle.Builder<H,S,BLD>
 > extends FlowProcess {
     
@@ -140,7 +141,8 @@ public abstract class ContainerHandle<
     // Message handling
     protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_msgMap = new ConcurrentHashMap<>();
     protected final EventHandlerRegistry eventHandlerRegistry = new EventHandlerRegistry();
-   
+    protected final EF eventsFactory;
+
     protected NoteBytesReadOnly traversalKey = KeyCodeBytes.TAB;
     protected FocusTraversalStrategy strategy = FocusTraversalStrategy.TAB_INDEX_THEN_TREE;
     protected R focused = null;
@@ -203,6 +205,7 @@ public abstract class ContainerHandle<
         this.renderingServicePath = builder.renderingServicePath;
         this.ioDaemonPath = builder.ioDaemonPath;
         this.allocatedRegion = builder.initialRegion;
+        this.eventsFactory = createEventsFactory();
         if(builder.initialRegion != null){
             this.dimensionsInitialized = true;
         }
@@ -223,10 +226,13 @@ public abstract class ContainerHandle<
         setupStateTransitions();
     }
 
+
     public enum FocusTraversalStrategy {
         TAB_INDEX_THEN_TREE,
         TAB_INDEX_THEN_SCREEN
     }
+
+    protected abstract EF createEventsFactory();
 
     protected abstract FLM createFloatingLayerManager();
 
@@ -617,7 +623,7 @@ public abstract class ContainerHandle<
     // ===== BUILDER =====
 
     public static abstract class Builder<
-        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,BLD>,
+        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,?,BLD>,
         S extends SpatialRegion<?,S>,
         BLD extends ContainerHandle.Builder<H,S,BLD>
     > {
@@ -898,7 +904,9 @@ public abstract class ContainerHandle<
 
    
 
-    protected abstract RoutedEvent createRoutedEvent(NoteBytes eventBytes) throws IOException;
+    protected RoutedEvent createRoutedEvent(NoteBytes eventBytes) throws IOException{
+        return eventsFactory.from(renderingServicePath, eventBytes);
+    }
         
 
     private ArrayList<EventDispatcher> dispatchers = new ArrayList<>();
@@ -1610,43 +1618,25 @@ public abstract class ContainerHandle<
         }
         return getIODaemonSession()
             .thenCompose(clientSession->{
-                if (clientSession != null && clientSession.isAlive()) {
+                if (clientSession != null && clientSession.isHealthy()) {
                     return CompletableFuture.completedFuture(clientSession);
+                }
+
+                IODaemon daemon = (IODaemon) registry.getProcess(ioDaemonPath);
+                if (daemon == null || !daemon.isConnected()) {
+                    return CompletableFuture.failedFuture(
+                        new IllegalStateException("IODaemon not available"));
                 }
 
                 String sessionId = NoteUUID.createSafeUUID128();
                 int pid = (int) ProcessHandle.current().pid();
                 
-                return registry.request(
-                    ioDaemonPath,
-                    new NoteBytesObject(
-                        new NoteBytesPair(Keys.CMD, SESSION_CMDS.CREATE_SESSION),
-                        new NoteBytesPair(Keys.SESSION_ID, sessionId),
-                        new NoteBytesPair(Keys.PID, pid)
-                    ).readOnly(),
-                    Duration.ofSeconds(2)
-                )
-                .thenCompose(reply -> {
-                    NoteBytesReadOnly status = reply.getPayload().getAsNoteBytesMap()
-                        .getReadOnly(Keys.STATUS);
-                    
-                    if (status == null || !status.equals(ProtocolMesssages.SUCCESS)) {
-                        String errorMsg = reply.getPayload().getAsNoteBytesMap()
-                            .get(Keys.MSG).getAsString();
-                        throw new RuntimeException("Failed to create session: " + errorMsg);
-                    }
-                    
-                    NoteBytes pathBytes = reply.getPayload().getAsNoteBytesMap().get(Keys.PATH);
-                    ContextPath sessionPath = ContextPath.fromNoteBytes(pathBytes);
-                    
-                    ioSession = (ClientSession) registry.getProcess(sessionPath);
-                    
-                    Log.logMsg("[ContainerHandle:" + containerId + 
-                        "] IODaemon session created: " + sessionPath);
-                    
-                    return setIdoDaemonSession(ioSession);
-                       
-                });
+                return daemon.createSession(sessionId, pid)
+                    .thenCompose(session -> {
+                        Log.logMsg("[ContainerHandle:" + containerId + 
+                            "] IODaemon session created: " + sessionId);
+                        return setIdoDaemonSession(session);
+                    });
         });
         
     }
@@ -1679,7 +1669,12 @@ public abstract class ContainerHandle<
                 ClientSession session = ioSession;
                 ioSession = null;
                 
-                return session.shutdown()
+                IODaemon daemon = (IODaemon) registry.getProcess(ioDaemonPath);
+                CompletableFuture<Void> shutdownFuture = daemon != null
+                    ? daemon.destroySession(session.sessionId)
+                    : session.shutdown();
+
+                return shutdownFuture
                     .thenRun(() -> {
                         Log.logMsg("[ContainerHandle:" + containerId + 
                             "] IODaemon session closed");

@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
@@ -26,15 +28,14 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
+import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.io.input.InputDevice;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralEventsFactory;
-import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.io.input.events.EventsFactory;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
+
 
 /**
  * ClaimedDevice - Represents a claimed USB device
@@ -56,6 +57,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private final ContextPath devicePath;
     private final NoteBytesReadOnly deviceType;
     private final ContextPath ioDaemonPath;
+    private final IEventFactory eventFactory; 
     private DeviceState deviceState;
   
 
@@ -73,6 +75,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     private volatile boolean active = false;
     private final EventHandlerRegistry eventHandlerRegistry;
+    private Consumer<String> onDisconnect;
+    private final AtomicBoolean disconnectNotified = new AtomicBoolean(false);
 
     /**
      * Constructor with dependency injection
@@ -88,7 +92,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         ContextPath devicePath, 
         NoteBytesReadOnly deviceType, 
         DeviceCapabilitySet capabilities,
-        ContextPath ioDaemonPath
+        ContextPath ioDaemonPath,
+        IEventFactory eventFatory
     ) {
         
         super(deviceId, ProcessType.BIDIRECTIONAL);
@@ -97,6 +102,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         this.devicePath = devicePath;
         this.deviceType = deviceType;
         this.ioDaemonPath = ioDaemonPath;
+        this.eventFactory = eventFatory;
         this.eventHandlerRegistry = new EventHandlerRegistry();
         
         this.deviceState = new DeviceState(
@@ -195,6 +201,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             } catch (IOException e) {
                 Log.logError("Event stream error: " + e.getMessage());
                 active = false;
+                notifyDisconnect();
             }
         });
     }
@@ -215,31 +222,26 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         this.eventDispatcher = dispatcher;
     }
 
+    public void setOnDisconnect(Consumer<String> onDisconnect){
+        this.onDisconnect = onDisconnect;
+    }
+
     private void createEvent(NoteBytes event)
     {
-        if(m_onCreateEvent == null){
-            if(event instanceof NoteBytesEphemeral ephemeralEvent){
-                EphemeralRoutedEvent ephemeralRoutedEvent = EphemeralEventsFactory.from(getContextPath(), ephemeralEvent);
-                if(eventDispatcher != null){
-                    eventDispatcher.dispatchEvent(ephemeralRoutedEvent);
-                }else{
-                    this.eventHandlerRegistry.dispatch(ephemeralRoutedEvent);
-                }
-            }else{
-                RoutedEvent routedEvent = EventsFactory.from(getContextPath(), event);
-                if(eventDispatcher != null){
-                    eventDispatcher.dispatchEvent(routedEvent);
-                }else{
-                    this.eventHandlerRegistry.dispatch(routedEvent);
-                }
-            }
+        RoutedEvent routedEvent = m_onCreateEvent != null
+            ? m_onCreateEvent.createEvent(event)
+            : eventFactory.from(getContextPath(), event);
+
+        if(eventDispatcher != null){
+            eventDispatcher.dispatchEvent(routedEvent);
         }else{
-            RoutedEvent routedEvent = m_onCreateEvent.createEvent(event);
-            if(eventDispatcher != null){
-                eventDispatcher.dispatchEvent(routedEvent);
-            }else{
-                this.eventHandlerRegistry.dispatch(routedEvent);
-            }
+            this.eventHandlerRegistry.dispatch(routedEvent);
+        }
+    }
+
+    private void notifyDisconnect(){
+        if (onDisconnect != null && disconnectNotified.compareAndSet(false, true)) {
+            onDisconnect.accept(deviceId);
         }
     }
 
@@ -416,6 +418,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      */
     public void release() {
         active = false;
+        notifyDisconnect();
         
         // Send release notification BEFORE cleanup
         sendReleaseNotification();

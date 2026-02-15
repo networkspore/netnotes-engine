@@ -5,7 +5,7 @@ import java.util.concurrent.CompletionException;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.ClaimedDevice;
-import io.netnotes.engine.io.daemon.ClientSession;
+import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -31,7 +31,7 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * 
  */
 public abstract class DeviceManager<
-    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?>,
+    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?,?>,
     DM extends DeviceManager<H,DM>
 > {
     
@@ -85,7 +85,7 @@ public abstract class DeviceManager<
         
         Log.logMsg("[DeviceManager:" + getDeviceType() + "] Enabling device: " + deviceId);
         
-        return claimDevice()
+        return claimDevice() 
             .thenCompose(device -> {
                 if (device == null) {
                     return CompletableFuture.failedFuture(
@@ -96,11 +96,10 @@ public abstract class DeviceManager<
                 
                 // Setup event routing on handle's executor
                 return setupEventRouting(device)
-                    .thenCompose(v->onDeviceEnabled(device))
-                    .thenApply(v->{
-
+                    .thenCompose(v -> onDeviceEnabled(device))
+                    .thenApply(v -> {
                         Log.logMsg("[DeviceManager:" + device.getDeviceType() + 
-                        "] Device enabled, source: " + deviceSourcePath);
+                            "] Device enabled, source: " + deviceSourcePath);
                         return device;
                     });
             })
@@ -161,28 +160,19 @@ public abstract class DeviceManager<
      * Claim the device through IODaemon session
      */
     private CompletableFuture<ClaimedDevice> claimDevice() {
-        
         return getHandle() 
-            .thenCompose(handle->{
-                if(handle == null)
-                {
+            .thenCompose(handle -> {
+                if (handle == null) {
                     throw new CompletionException(new NullPointerException("handle is null"));
                 }
                 return handle.ensureIOSession()
-                    .thenCompose(session ->  claimDevice(session));
+                    .thenCompose(session -> session.claimDevice(deviceId, mode, createEventFactory()));
             });
     }
 
-    private CompletableFuture<ClaimedDevice> claimDevice(ClientSession ioSession){
-        return ioSession.claimDevice(deviceId, mode)
-            .thenApply(path->{
-                ClaimedDevice device = ioSession.getClaimedDevice(deviceId);
-                if (device == null) {
-                    throw new CompletionException(new IllegalStateException("Device not found after claim: " + deviceId));
-                }
-                return device;
-            });
-    }
+    protected abstract IEventFactory createEventFactory();
+
+
     /*
     */
     /**

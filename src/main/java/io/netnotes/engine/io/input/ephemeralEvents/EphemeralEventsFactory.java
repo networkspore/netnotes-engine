@@ -95,9 +95,10 @@ public final class EphemeralEventsFactory {
             
             // Extract payload array (ephemeral)
             // payloadPair.getValue().get() cleaned up in above try (close warning suppressed)
-            
-            NoteBytesEphemeral[] payloadArray = payloadPair != null 
-                ? new NoteBytesArrayEphemeral(payloadPair.getValue().get()).getAsArray()
+            NoteBytesEphemeral payload = payloadPair.getValue();
+
+            NoteBytesEphemeral[] payloadArray = payloadPair != null && payload.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE 
+                ? new NoteBytesArrayEphemeral(payload.get()).getAsArray()
                 : new NoteBytesEphemeral[0];
             
       

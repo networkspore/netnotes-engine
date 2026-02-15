@@ -1,34 +1,21 @@
-package io.netnotes.engine.io.input.events.containerEvents;
-    
+package io.netnotes.engine.ui.containers.containerEvents;
+
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-
-public final class ContainerMoveEvent extends RoutedContainerEvent {
+public final class ContainerMinimizeEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;
-    private final int x;
-    private final int y;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
 
-    public ContainerMoveEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, int x, int y) {
+    public ContainerMinimizeEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
         this.sourcePath = sourcePath;
-        this.x = x;
-        this.y = y;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
     }
 
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
-    public int getX() { return x; }
-    public int getY() { return y; }
-    
-    @Override
-    public String toString() {
-        return String.format("ContainerMoveEvent[pos=(%d,%d), source=%s]", 
-            x, y, getSourcePath());
-    }
 
     @Override
     public NoteBytesReadOnly getEventTypeBytes() {

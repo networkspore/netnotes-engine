@@ -1,14 +1,15 @@
-package io.netnotes.engine.io.input.events.containerEvents;
+package io.netnotes.engine.ui.containers.containerEvents;
 
+    
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-public final class ContainerShownEvent extends RoutedContainerEvent {
+public class ContainerCloseEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
 
-    public ContainerShownEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
+    public ContainerCloseEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
         this.sourcePath = sourcePath;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
@@ -30,4 +31,5 @@ public final class ContainerShownEvent extends RoutedContainerEvent {
     public void setStateFlags(int flags) {
         stateFlags = flags;
     }
+
 }

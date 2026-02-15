@@ -1,15 +1,14 @@
-package io.netnotes.engine.io.input.events.containerEvents;
-
+package io.netnotes.engine.ui.containers.containerEvents;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
-public final class ContainerRestoreEvent extends RoutedContainerEvent {
+public class ContainerFocusGainedEvent extends RoutedContainerEvent {
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
 
-    public ContainerRestoreEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
+    public ContainerFocusGainedEvent(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags) {
         this.sourcePath = sourcePath;
         this.stateFlags = flags;
         this.typeBytes = typeBytes;
@@ -17,7 +16,7 @@ public final class ContainerRestoreEvent extends RoutedContainerEvent {
 
     @Override
     public ContextPath getSourcePath() { return sourcePath; }
-
+    
     @Override
     public NoteBytesReadOnly getEventTypeBytes() {
         return typeBytes;
