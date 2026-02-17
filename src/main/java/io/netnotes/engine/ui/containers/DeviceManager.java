@@ -9,6 +9,8 @@ import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
  * DeviceManager - Base class for device drivers that attach to ContainerHandles
@@ -37,9 +39,9 @@ public abstract class DeviceManager<
     
     // ===== CORE STATE =====
     protected H handle;
-    protected String deviceId;
-    protected String mode;
-    protected final String deviceType;
+    protected NoteBytesReadOnly deviceId;
+    protected NoteBytesReadOnly mode;
+    protected final NoteBytesReadOnly deviceType;
     protected ContextPath deviceSourcePath;
     protected ContainerHandle.EventDispatcher dispatcher;
 
@@ -47,10 +49,10 @@ public abstract class DeviceManager<
     
     // ===== CONSTRUCTION =====
     
-    protected DeviceManager(String deviceId, String mode, String deviceType) {
-        this.deviceId = deviceId;
-        this.mode = mode;
-        this.deviceType = deviceType;
+    protected DeviceManager(NoteBytes deviceId, NoteBytes mode, NoteBytes deviceType) {
+        this.deviceId = deviceId.readOnly();
+        this.mode = mode.readOnly();
+        this.deviceType = deviceType.readOnly();
     }
     
     // ===== LIFECYCLE MANAGEMENT =====
@@ -310,7 +312,7 @@ public abstract class DeviceManager<
     /**
      * Get the device ID
      */
-    public CompletableFuture<String> getDeviceId() {
+    public CompletableFuture<NoteBytesReadOnly> getDeviceId() {
         return serialExec.submit(()->{
             return deviceId;
         });
@@ -319,13 +321,13 @@ public abstract class DeviceManager<
     /**
      * Get the device mode
      */
-    public CompletableFuture<String> getMode() {
+    public CompletableFuture<NoteBytesReadOnly> getMode() {
         return serialExec.submit(()->{
             return mode;
         });
     }
 
-    public String getDeviceType(){
+    public NoteBytesReadOnly getDeviceType(){
         return deviceType;
     }
     

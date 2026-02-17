@@ -132,6 +132,7 @@ public abstract class Container<
     protected final HashMap<NoteBytes, MessageExecutor> batchMsgMap = new HashMap<>();
 
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
+    protected final SerializedVirtualExecutor eventWriterExecutor = new SerializedVirtualExecutor();
 
     protected Consumer<T> onRequestMade = null;
 
@@ -364,7 +365,7 @@ public abstract class Container<
     public void handleEventStream(StreamChannel channel, ContextPath fromPath) {
         Log.logMsg("[Container:" + id + "] Event stream established to: " + fromPath);
         this.eventStream = channel;
-        this.eventWriter = new NoteBytesWriter(channel.getQueuedOutputStream());
+        this.eventWriter = new NoteBytesWriter(channel.getChannelStream());
     }
 
     public boolean isEventStreamReady() {
@@ -414,11 +415,18 @@ public abstract class Container<
             return;
         }
         Log.logNoteBytes("[Container.emitEvent]", event);
-        try {
-            eventWriter.write(event);
-        } catch (IOException e) {
-            Log.logError("[Container:" + id + "] Error emitting event: " + e.getMessage());
-        }
+        eventWriterExecutor.execute(()->{
+            try {
+                eventWriter.write(event);
+            } catch (IOException e) {
+                Log.logError("[Container:" + id + "]", "Error emitting event", e);
+                throw new CompletionException(e);
+            }
+        })
+            .exceptionally(ex->{
+                eventWriterExecutor.shutdown();
+                throw new RuntimeException(ex);
+            });
     }
     
     // ===== STATE OPERATIONS =====

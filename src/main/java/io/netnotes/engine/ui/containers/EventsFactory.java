@@ -26,8 +26,6 @@ import io.netnotes.engine.ui.containers.containerEvents.ContainerFocusLostEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerHiddenEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerMaximizeEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerMinimizeEvent;
-import io.netnotes.engine.ui.containers.containerEvents.ContainerMoveEvent;
-import io.netnotes.engine.ui.containers.containerEvents.ContainerResizeEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerRestoreEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerShownEvent;
 import io.netnotes.noteBytes.NoteBytes;

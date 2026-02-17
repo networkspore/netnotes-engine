@@ -3,19 +3,22 @@ package io.netnotes.engine.io.capabilities;
 import java.util.List;
 import java.util.Set;
 
+import io.netnotes.noteBytes.NoteBytes;
+
 /**
  * User-friendly capability description
  */
 public record CapabilityDescription(
     String name,
-    String deviceType,
-    Set<String> availableCapabilities,
-    Set<String> enabledCapabilities,
-    Set<String> availableModes,
-    String enabledMode,
+    NoteBytes deviceType,
+    Set<NoteBytes> availableCapabilities,
+    Set<NoteBytes> enabledCapabilities,
+    Set<NoteBytes> availableModes,
+    NoteBytes enabledMode,
     List<CapabilityDescription> children
 ) {
     public String toReadableString() {
+    
         StringBuilder sb = new StringBuilder();
         sb.append(name).append(" (").append(deviceType).append(")\n");
         sb.append("  Available: ").append(availableCapabilities).append("\n");

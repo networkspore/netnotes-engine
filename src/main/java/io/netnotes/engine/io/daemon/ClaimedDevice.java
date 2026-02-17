@@ -4,12 +4,12 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
+import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
@@ -33,6 +33,7 @@ import io.netnotes.engine.io.input.InputDevice;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.io.input.events.EventHandlerRegistry;
 import io.netnotes.engine.io.input.events.RoutedEvent;
+import io.netnotes.engine.io.process.ChannelWriter;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.StreamChannel;
 
@@ -53,18 +54,19 @@ import io.netnotes.engine.io.process.StreamChannel;
  */
 public class ClaimedDevice extends FlowProcess implements InputDevice {
     
-    private final String deviceId;
+
+    private final NoteBytesReadOnly deviceId;
     private final ContextPath devicePath;
     private final NoteBytesReadOnly deviceType;
     private final ContextPath ioDaemonPath;
     private final IEventFactory eventFactory; 
+    private final NoteBytesReadOnly sessionId;
     private DeviceState deviceState;
-  
+    
 
     // TWO channels: incoming events + outgoing control
     private StreamChannel incomingEventStream;
-    private StreamChannel outgoingControlStream;
-    private NoteBytesWriter controlStreamWriter;
+    private ChannelWriter outgoingControlStream;
     
     private DeviceEncryptionSession encryptionSession;
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
@@ -75,9 +77,16 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     private volatile boolean active = false;
     private final EventHandlerRegistry eventHandlerRegistry;
-    private Consumer<String> onDisconnect;
-    private final AtomicBoolean disconnectNotified = new AtomicBoolean(false);
+    private volatile DeviceDisconnectHandler onDeviceDisconnected = null;
 
+    @FunctionalInterface
+    public interface DeviceDisconnectHandler {
+        void onDeviceDisconnected(ClaimedDevice device);
+    }
+
+  
+
+    private final byte[] ackBytes;
     /**
      * Constructor with dependency injection
      * 
@@ -88,19 +97,20 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      * @param ioDaemonPath Where to send control messages
      */
     public ClaimedDevice(
-        String deviceId, 
+        NoteBytes sessionId,
+        NoteBytes deviceId, 
         ContextPath devicePath, 
-        NoteBytesReadOnly deviceType, 
+        NoteBytes deviceType, 
         DeviceCapabilitySet capabilities,
         ContextPath ioDaemonPath,
         IEventFactory eventFatory
     ) {
         
-        super(deviceId, ProcessType.BIDIRECTIONAL);
-
-        this.deviceId = deviceId;
+        super(deviceId.getAsString(), ProcessType.BIDIRECTIONAL);
+        this.deviceId = deviceId.readOnly();
+        this.sessionId = sessionId.readOnly();
         this.devicePath = devicePath;
-        this.deviceType = deviceType;
+        this.deviceType = deviceType.readOnly();
         this.ioDaemonPath = ioDaemonPath;
         this.eventFactory = eventFatory;
         this.eventHandlerRegistry = new EventHandlerRegistry();
@@ -108,14 +118,29 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         this.deviceState = new DeviceState(
             deviceId, 
             (int) ProcessHandle.current().pid(), 
-            deviceType.getAsString(), 
+            deviceType, 
             capabilities
         );
+
+        ackBytes = new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
+            new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
+            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+            new NoteBytesPair(Keys.PROCESSED_COUNT, 0)
+        }).get();
 
         setupMessageMapping();
     }
 
-   
+   public NoteBytesReadOnly getSessionId(){
+        return sessionId;
+   }
+
+    
+
+    public void setOnDeviceDisconnected(DeviceDisconnectHandler handler) {
+        this.onDeviceDisconnected = handler;
+    }
 
     
     @Override
@@ -125,12 +150,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         // Request control stream TO IODaemon (for sending control messages)
         requestStreamChannel(ioDaemonPath)
             .thenAccept(channel -> {
-                this.outgoingControlStream = channel;
-                this.controlStreamWriter = new NoteBytesWriter(
-                    channel.getQueuedOutputStream()
-                );
-                
-                Log.logMsg("Control stream ready: " + devicePath + " → " + ioDaemonPath);
+                this.outgoingControlStream = new ChannelWriter(channel);
             })
             .exceptionally(ex -> {
                 Log.logError("Failed to setup control stream: " + ex.getMessage());
@@ -142,6 +162,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         m_execMsgMap.put(EventBytes.TYPE_ENCRYPTION_OFFER, this::handleEncryptionOffer);
         m_execMsgMap.put(EventBytes.TYPE_ENCRYPTION_READY, this::handleEncryptionReady);
         m_execMsgMap.put(EventBytes.TYPE_ERROR, this::handleEncryptionError);
+        m_execMsgMap.put(ProtocolMesssages.DEVICE_DISCONNECTED, this::handleDeviceDisconnectedNotification);
     }
     
     public DeviceState getDeviceState(){
@@ -152,7 +173,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         return deviceType;
     }
 
-    public boolean enableMode(String mode) {
+    public boolean enableMode(NoteBytes mode) {
         return deviceState.enableMode(mode);
     }
 
@@ -160,7 +181,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      * Handle stream channels - distinguishes between event and control streams
      */
 
-        @Override
+    @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
         if (!fromPath.equals(ioDaemonPath)) {
             Log.logError("Unexpected stream from: " + fromPath + 
@@ -181,27 +202,12 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
                 
                 while (nextBytes != null && active) {
-                    // Read routed events: [STRING:deviceId][OBJECT/ENCRYPTED:event]
-                    if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
-                        if (!nextBytes.equalsString(deviceId)) {
-                            Log.logError("DeviceId mismatch: expected " + 
-                                deviceId + ", got " + nextBytes);
-                            break;
-                        }
-                        
-                        NoteBytesReadOnly payload = reader.nextNoteBytesReadOnly();
-                        if (payload == null) break;
-                        
-                        handleIncomingPayload(payload);
-                    }
-                    
+                    handleIncomingPayload(nextBytes);
                     nextBytes = reader.nextNoteBytesReadOnly();
                 }
-                
             } catch (IOException e) {
                 Log.logError("Event stream error: " + e.getMessage());
                 active = false;
-                notifyDisconnect();
             }
         });
     }
@@ -222,9 +228,40 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         this.eventDispatcher = dispatcher;
     }
 
-    public void setOnDisconnect(Consumer<String> onDisconnect){
-        this.onDisconnect = onDisconnect;
+
+    /**
+     * Handle DEVICE_DISCONNECTED notification from daemon.
+     *
+     * The physical USB device has gone away.  This is informational: the
+     * ClaimedDevice session infrastructure stays alive.  We mark ourselves
+     * inactive so that event-stream reads stop cleanly, then invoke the
+     * registered disconnect handler so the application layer can decide what
+     * to do (wait, retry, give up, show UI, etc.).
+     *
+     * If no handler is registered we log and leave the instance idle.  The
+     * session will stay open; the application can still call releaseDevice()
+     * at any time.
+     */
+    private void handleDeviceDisconnectedNotification(NoteBytesMap msg) {
+        Log.logMsg("[ClaimedDevice:" + deviceId + "] Physical USB disconnect received from daemon");
+
+        // Stop the incoming event stream — there will be no more events until
+        // the device is reclaimed after a reattach.
+        active = false;
+
+        DeviceDisconnectHandler handler = this.onDeviceDisconnected;
+        if (handler != null) {
+            try {
+                handler.onDeviceDisconnected(this);
+            } catch (Exception e) {
+                Log.logError("[ClaimedDevice:" + deviceId + "] onDeviceDisconnected handler threw", e);
+            }
+        } else {
+            Log.logMsg("[ClaimedDevice:" + deviceId +
+                "] No onDeviceDisconnected handler registered; device is idle until released or reclaimed");
+        }
     }
+
 
     private void createEvent(NoteBytes event)
     {
@@ -239,11 +276,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         }
     }
 
-    private void notifyDisconnect(){
-        if (onDisconnect != null && disconnectNotified.compareAndSet(false, true)) {
-            onDisconnect.accept(deviceId);
-        }
-    }
 
     public EventHandlerRegistry getEventHandlerRegistry(){
         return eventHandlerRegistry;
@@ -260,16 +292,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             NoteBytesReadOnly typeBytes = msgMap.getReadOnly(Keys.EVENT);
             
             if (typeBytes != null) {
-                // Check if it's an encryption control message
-                if (typeBytes.equals(EventBytes.TYPE_ENCRYPTION_OFFER) ||
-                    typeBytes.equals(EventBytes.TYPE_ENCRYPTION_READY) ||
-                    typeBytes.equals(EventBytes.TYPE_ERROR)) {
-                    
-                    // Handle encryption control message
-                    MessageExecutor executor = m_execMsgMap.get(typeBytes);
-                    if (executor != null) {
-                        executor.execute(msgMap);
-                    }
+                // Handle encryption control message
+                MessageExecutor executor = m_execMsgMap.get(typeBytes);
+                if (executor != null) {
+                    executor.execute(msgMap);
                     return;
                 }
             }
@@ -306,7 +332,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     // ===== ENCRYPTION NEGOTIATION =====
     
     private void handleEncryptionOffer(NoteBytesMap offer) {
-        Log.logMsg("Encryption offered for device: " + deviceId);
+        Log.logMsg("Encryption offered for device: " + getName());
         
         try {
             byte[] serverPublicKey = offer.get(Keys.PUBLIC_KEY).getBytes();
@@ -318,7 +344,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                 return;
             }
             
-            encryptionSession = new DeviceEncryptionSession(deviceId, devicePath);
+            encryptionSession = new DeviceEncryptionSession(getName(), devicePath);
             encryptionSession.acceptOffer(serverPublicKey, cipher);
             
             byte[] clientPublicKey = encryptionSession.getPublicKey();
@@ -336,13 +362,13 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     }
     
     private void handleEncryptionReady(NoteBytesMap ready) {
-        Log.logMsg("Encryption ready for device: " + deviceId);
+        Log.logMsg("Encryption ready for device: " + getName());
         
         try {
             byte[] serverIV = ready.get(Keys.AES_IV).getBytes();
             encryptionSession.finalizeEncryption(serverIV);
             
-            Log.logMsg("Device encryption active: " + deviceId);
+            Log.logMsg("Device encryption active: " + getName());
             
         } catch (Exception e) {
             Log.logError("Encryption finalization failed: " + e.getMessage());
@@ -353,7 +379,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private void handleEncryptionError(NoteBytesMap error) {
         String reason = ProtocolObjects.getErrMsg(error);
        
-        Log.logError("Encryption error for device " + deviceId + ": " + reason);
+        Log.logError("Encryption error for device " + getName() + ": " + reason);
         encryptionSession = null;
     }
     
@@ -367,87 +393,99 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
         
     /**
-     * Send control message via control stream (already setup in onStart)
+     * Send control message via control stream
      */
     private void sendDeviceControlMessage(NoteBytesObject message) {
-        if (controlStreamWriter == null) {
-            Log.logError("Control stream not ready");
+        SerializedVirtualExecutor controlWriteExec =outgoingControlStream  != null ? outgoingControlStream.getWriteExec() : null;
+
+        if(controlWriteExec != null && controlWriteExec.isShutdown()){
             return;
         }
         
-        try {
-            // Write routed message: [STRING:deviceId][OBJECT:message]
-            synchronized(controlStreamWriter) {
-                controlStreamWriter.write(new NoteBytes(deviceId));
+        controlWriteExec.executeFireAndForget(()->{
+            NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
+            if (controlStreamWriter == null) {
+                
+                Log.logMsg("[ClaiemdDevice] Control stream waiting: " + deviceId);
+                try{
+                    controlStreamWriter = outgoingControlStream.getReadyWriter()
+                        .orTimeout(2, TimeUnit.SECONDS)
+                        .join();
+                }catch(Exception e){
+                    Log.logError("[ClaiemdDevice] Control stream timed out: " + deviceId, e);
+                }
+            
+            }else{
+                Log.logError("[ClaiemdDevice] Control stream unavailable: " + deviceId);
+                return;
+            }
+            try {
+                controlStreamWriter.write(deviceId);
                 controlStreamWriter.write(message);
                 controlStreamWriter.flush();
+            } catch (IOException e) {
+                Log.logError("Failed to send control message: " + e.getMessage());
             }
-        } catch (IOException e) {
-            Log.logError("Failed to send control message: " + e.getMessage());
-        }
-    }
-    
-    // ===== BACKPRESSURE ACK =====
-    
-    private void sendAck(int count) {
-        
-        sendDeviceControlMessage(new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
-            new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
-            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
-            new NoteBytesPair(Keys.PROCESSED_COUNT, count)
-        }));
+        });
     }
 
-    private void sendReleaseNotification() {
-        if (controlStreamWriter == null) {
+ 
+    
+    // ===== BACKPRESSURE ACK =====
+
+    
+    private byte[] getAckBytes(int count){
+        int offset = ackBytes.length - 4;
+        ackBytes[offset]     = (byte) (count >> 24);
+        ackBytes[offset + 1] = (byte) (count >> 16);
+        ackBytes[offset + 2] = (byte) (count >> 8);
+        ackBytes[offset + 3] = (byte) (count);
+        return ackBytes;
+    }
+    
+    private void sendAck(int count) {
+        SerializedVirtualExecutor controlWriteExec =outgoingControlStream  != null ? outgoingControlStream.getWriteExec() : null;
+
+        if(controlWriteExec != null && controlWriteExec.isShutdown()){
             return;
         }
         
-        NoteBytesObject notification = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
-            new NoteBytesPair(Keys.CMD, ProtocolMesssages.DEVICE_DISCONNECTED),
-            new NoteBytesPair(Keys.DEVICE_ID, deviceId)
+        controlWriteExec.executeFireAndForget(()->{
+            NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
+            if (controlStreamWriter == null) {
+                
+                Log.logMsg("[ClaiemdDevice] Control stream waiting: " + deviceId);
+                try{
+                    controlStreamWriter = outgoingControlStream.getReadyWriter()
+                        .orTimeout(2, TimeUnit.SECONDS)
+                        .join();
+                }catch(Exception e){
+                    Log.logError("[ClaiemdDevice] Control stream timed out: " + deviceId, e);
+                }
+            
+            }
+
+            try {
+                controlStreamWriter.write(deviceId);
+                controlStreamWriter.write(getAckBytes(count));
+                controlStreamWriter.flush();
+            } catch (IOException e) {
+                Log.logError("Failed to send control message: " + e.getMessage());
+            }
         });
-        
-        sendDeviceControlMessage(notification);
     }
-    
+
+
     /**
-     * Release device
+     * Release device called to cleanup device
      */
     public void release() {
         active = false;
-        notifyDisconnect();
-        
-        // Send release notification BEFORE cleanup
-        sendReleaseNotification();
-        
-        // Send remaining ACKs
-        int remaining = processedEvents.get() % ACK_BATCH_SIZE;
-        if (remaining > 0) {
-            sendAck(remaining);
-        }
-        
-        // Small delay to let messages flush
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        
-        cleanup();
-    }
-
-    private void cleanup() {
-        
+        StreamUtils.safeClose(incomingEventStream);
         // Shutdown async writer (drains queue)
-        if (controlStreamWriter != null) {
-            try {
-                controlStreamWriter.close();
-            } catch (IOException e) {
-                Log.logError("Error closing control writer: " + e.getMessage());
-            }
+        if (outgoingControlStream != null) {
+            outgoingControlStream.shutdown();
+            outgoingControlStream = null;
         }
         
         // Clear encryption
@@ -463,27 +501,11 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             deviceState = null;
         }
         
-        // Close streams (writers already shut down)
-        if (incomingEventStream != null) {
-            try {
-                incomingEventStream.close();
-            } catch (IOException e) {
-                Log.logError("Error closing event stream: " + e.getMessage());
-            }
-        }
-        
-        if (outgoingControlStream != null) {
-            try {
-                outgoingControlStream.close();
-            } catch (IOException e) {
-                Log.logError("Error closing control stream: " + e.getMessage());
-            }
-        }
     }
     
     // ===== GETTERS =====
     
-    public String getDeviceId() {
+    public NoteBytes getDeviceId() {
         return deviceId;
     }
     

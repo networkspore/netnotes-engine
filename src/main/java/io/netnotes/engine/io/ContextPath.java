@@ -278,6 +278,10 @@ public final class ContextPath {
         return new ContextPath(segments.append(segment));
     }
 
+    public ContextPath append(NoteBytes segment){
+        return append(segment.readOnly());
+    }
+
     public ContextPath append(NoteBytesReadOnly segment) {
         validateSegment(segment);
         return new ContextPath(segments.append(segment));

@@ -149,7 +149,7 @@ public class IODaemonProtocol {
         public int maxPacketSize;
         
         // Daemon-assigned identifier
-        public String deviceId;
+        public NoteBytes deviceId;
         
         // Device type (string-based)
         private NoteBytesReadOnly deviceType;
@@ -171,7 +171,7 @@ public class IODaemonProtocol {
             return deviceType;
         }
 
-        public String getDeviceId(){
+        public NoteBytes getDeviceId(){
             return deviceId;
         }
        
@@ -258,7 +258,7 @@ public class IODaemonProtocol {
             
             NoteBytesMap map = obj.getAsNoteBytesMap();
             
-            desc.deviceId = map.getReadOnly(Keys.DEVICE_ID).getAsString();
+            desc.deviceId = map.getReadOnly(Keys.DEVICE_ID);
             desc.vendorId = map.get("vendor_id").getAsInt();
             desc.productId = map.get("product_id").getAsInt();
             desc.deviceClass = map.get("device_class").getAsInt();

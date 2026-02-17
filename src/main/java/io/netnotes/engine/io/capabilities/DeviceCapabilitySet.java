@@ -1,5 +1,6 @@
 package io.netnotes.engine.io.capabilities;
 
+import io.netnotes.engine.io.capabilities.CapabilityRegistry.DefaultCapabilities;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.*;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -42,9 +43,9 @@ public class DeviceCapabilitySet {
     
     // Metadata
     private final String name;
-    private final String deviceType;
+    private final NoteBytes deviceType;
     
-    public DeviceCapabilitySet(String name, String deviceType) {
+    public DeviceCapabilitySet(String name, NoteBytes deviceType) {
         this.name = name;
         this.deviceType = deviceType;
         this.availableCapabilities = new BitFlagStateMachine(name + "-available");
@@ -69,7 +70,7 @@ public class DeviceCapabilitySet {
             for (int i = 0; i < bitLength; i++) {
                 if (changedBits.testBit(i)) {
                    
-                    String capName = REGISTRY.getNameForBit(i);
+                    NoteBytes capName = REGISTRY.getNameForBit(i);
                     
                     if (capName != null && !availableCapabilities.hasFlag(i)) {
                         Log.logError("Warning: Enabled unavailable capability: " + capName);
@@ -91,8 +92,8 @@ public class DeviceCapabilitySet {
      */
     private void setupDefaultConstraints() {
         // Mode capabilities are mutually exclusive
-        Set<String> modes = REGISTRY.getAllModes();
-        List<String> modeList = new ArrayList<>(modes);
+        Set<NoteBytes> modes = REGISTRY.getAllModes();
+        List<NoteBytes> modeList = new ArrayList<>(modes);
         
         for (int i = 0; i < modeList.size(); i++) {
             for (int j = i + 1; j < modeList.size(); j++) {
@@ -101,23 +102,23 @@ public class DeviceCapabilitySet {
         }
         
         // Parsed mode requires device type to be known
-        if (modes.contains("parsed_mode")) {
-            constraints.addRequirement("parsed_mode", "device_type_known");
+        if (modes.contains(DefaultCapabilities.PARSED_MODE)) {
+            constraints.addRequirement(DefaultCapabilities.PARSED_MODE, DefaultCapabilities.DEVICE_TYPE_KNOWN);
         }
         
         // High precision requires device type known
-        if (REGISTRY.isRegistered("high_precision")) {
-            constraints.addRequirement("high_precision", "device_type_known");
+        if (REGISTRY.isRegistered(DefaultCapabilities.HIGH_PRECISION)) {
+            constraints.addRequirement(DefaultCapabilities.HIGH_PRECISION, DefaultCapabilities.DEVICE_TYPE_KNOWN);
         }
         
         // Encryption enabled requires encryption supported
-        if (REGISTRY.isRegistered("encryption_enabled")) {
-            constraints.addRequirement("encryption_enabled", "encryption_supported");
+        if (REGISTRY.isRegistered(DefaultCapabilities.ENCRYPTION_ENABLED)) {
+            constraints.addRequirement(DefaultCapabilities.ENCRYPTION_ENABLED, DefaultCapabilities.ENCRYPTION_SUPPORTED);
         }
         
         // Buffering enabled requires buffering supported
-        if (REGISTRY.isRegistered("buffering_enabled")) {
-            constraints.addRequirement("buffering_enabled", "buffering_supported");
+        if (REGISTRY.isRegistered(DefaultCapabilities.BUFFERING_ENABLED)) {
+            constraints.addRequirement(DefaultCapabilities.BUFFERING_ENABLED, DefaultCapabilities.BUFFERING_SUPPORTED);
         }
     }
     
@@ -126,7 +127,7 @@ public class DeviceCapabilitySet {
     /**
      * Mark a capability as available (device has it)
      */
-    public void addAvailableCapability(String capability) {
+    public void addAvailableCapability(NoteBytes capability) {
         if (!REGISTRY.isRegistered(capability)) {
             throw new IllegalArgumentException("Unknown capability: " + capability);
         }
@@ -138,7 +139,7 @@ public class DeviceCapabilitySet {
     /**
      * Check if capability is available
      */
-    public boolean hasCapability(String capability) {
+    public boolean hasCapability(NoteBytes capability) {
         if (!REGISTRY.isRegistered(capability)) {
             return false;
         }
@@ -151,7 +152,7 @@ public class DeviceCapabilitySet {
      * Enable a capability (user selected mode)
      * @return true if enabled, false if constraints violated
      */
-    public boolean enableCapability(String capability) {
+    public boolean enableCapability(NoteBytes capability) {
         if (!REGISTRY.isRegistered(capability)) {
             throw new IllegalArgumentException("Unknown capability: " + capability);
         }
@@ -166,8 +167,8 @@ public class DeviceCapabilitySet {
         }
         
         // Handle mutual exclusions - disable conflicting capabilities
-        Set<String> exclusions = constraints.getExclusions(capability);
-        for (String excluded : exclusions) {
+        Set<NoteBytes> exclusions = constraints.getExclusions(capability);
+        for (NoteBytes excluded : exclusions) {
             if (isEnabled(excluded)) {
                 disableCapability(excluded);
             }
@@ -180,7 +181,7 @@ public class DeviceCapabilitySet {
     /**
      * Disable a capability
      */
-    public void disableCapability(String capability) {
+    public void disableCapability(NoteBytes capability) {
         if (!REGISTRY.isRegistered(capability)) {
             return;
         }
@@ -192,7 +193,7 @@ public class DeviceCapabilitySet {
     /**
      * Check if capability is enabled
      */
-    public boolean isEnabled(String capability) {
+    public boolean isEnabled(NoteBytes capability) {
         if (!REGISTRY.isRegistered(capability)) {
             return false;
         }
@@ -204,14 +205,14 @@ public class DeviceCapabilitySet {
     /**
      * Get all available capability names
      */
-    public Set<String> getAvailableCapabilities() {
+    public Set<NoteBytes> getAvailableCapabilities() {
         return REGISTRY.getNamesForState(availableCapabilities.getState());
     }
     
     /**
      * Get all enabled capability names
      */
-    public Set<String> getEnabledCapabilities() {
+    public Set<NoteBytes> getEnabledCapabilities() {
         return REGISTRY.getNamesForState(enabledCapabilities.getState());
     }
     
@@ -235,7 +236,7 @@ public class DeviceCapabilitySet {
      * Add mutual exclusion constraint
      * Example: "raw_mode" excludes "parsed_mode"
      */
-    public void addMutualExclusion(String capability1, String capability2) {
+    public void addMutualExclusion(NoteBytes capability1, NoteBytes capability2) {
         constraints.addMutualExclusion(capability1, capability2);
     }
     
@@ -243,21 +244,21 @@ public class DeviceCapabilitySet {
      * Add requirement constraint
      * Example: "parsed_mode" requires "device_type_known"
      */
-    public void addRequirement(String capability, String requiredCapability) {
+    public void addRequirement(NoteBytes capability, NoteBytes requiredCapability) {
         constraints.addRequirement(capability, requiredCapability);
     }
     
     /**
      * Check if capability can be enabled given current state
      */
-    public boolean canEnable(String capability) {
+    public boolean canEnable(NoteBytes capability) {
         return constraints.canEnable(capability, this);
     }
     
     /**
      * Get reason why capability cannot be enabled
      */
-    public String getEnableFailureReason(String capability) {
+    public String getEnableFailureReason(NoteBytes capability) {
         return constraints.getFailureReason(capability, this);
     }
     
@@ -277,10 +278,10 @@ public class DeviceCapabilitySet {
         children.add(child);
         
         // Mark self as composite
-        addAvailableCapability("composite_source");
+        addAvailableCapability(DefaultCapabilities.COMPOSITE_SOURCE);
         
         if (children.size() > 1) {
-            addAvailableCapability("multiple_children");
+            addAvailableCapability(DefaultCapabilities.MULTIPLE_CHILDREN);
         }
     }
     
@@ -358,7 +359,7 @@ public class DeviceCapabilitySet {
         NoteBytesMap map = obj.getAsNoteBytesMap();
         
         String name = map.get(Keys.NAME).getAsString();
-        String deviceType = map.get(Keys.ITEM_TYPE).getAsString();
+        NoteBytes deviceType = map.get(Keys.ITEM_TYPE);
         
         DeviceCapabilitySet caps = new DeviceCapabilitySet(name, deviceType);
         
@@ -409,9 +410,9 @@ public class DeviceCapabilitySet {
     /**
      * Get available modes (mutually exclusive capability groups)
      */
-    public Set<String> getAvailableModes() {
-        Set<String> modes = new HashSet<>();
-        for (String cap : getAvailableCapabilities()) {
+    public Set<NoteBytes> getAvailableModes() {
+        Set<NoteBytes> modes = new HashSet<>();
+        for (NoteBytes cap : getAvailableCapabilities()) {
             if (REGISTRY.isMode(cap)) {
                 modes.add(cap);
             }
@@ -422,8 +423,8 @@ public class DeviceCapabilitySet {
     /**
      * Get currently enabled mode (only one from mutually exclusive group)
      */
-    public String getEnabledMode() {
-        for (String cap : getEnabledCapabilities()) {
+    public NoteBytes getEnabledMode() {
+        for (NoteBytes cap : getEnabledCapabilities()) {
             if (REGISTRY.isMode(cap)) {
                 return cap;
             }
@@ -434,7 +435,7 @@ public class DeviceCapabilitySet {
     /**
      * Get user-friendly name for capability
      */
-    public static String getUserFriendlyName(String capability) {
+    public static String getUserFriendlyName(NoteBytes capability) {
         return REGISTRY.getUserFriendlyName(capability);
     }
     
@@ -459,33 +460,33 @@ public class DeviceCapabilitySet {
     public static class Builder {
         private final DeviceCapabilitySet caps;
         
-        public Builder(String name, String deviceType) {
+        public Builder(String name, NoteBytes deviceType) {
             this.caps = new DeviceCapabilitySet(name, deviceType);
         }
         
-        public Builder withCapability(String capability) {
+        public Builder withCapability(NoteBytes capability) {
             caps.addAvailableCapability(capability);
             return this;
         }
         
-        public Builder withCapabilities(String... capabilities) {
-            for (String cap : capabilities) {
+        public Builder withCapabilities(NoteBytes... capabilities) {
+            for (NoteBytes cap : capabilities) {
                 caps.addAvailableCapability(cap);
             }
             return this;
         }
         
-        public Builder enableCapability(String capability) {
+        public Builder enableCapability(NoteBytes capability) {
             caps.enableCapability(capability);
             return this;
         }
         
-        public Builder addMutualExclusion(String cap1, String cap2) {
+        public Builder addMutualExclusion(NoteBytes cap1, NoteBytes cap2) {
             caps.addMutualExclusion(cap1, cap2);
             return this;
         }
         
-        public Builder addRequirement(String capability, String required) {
+        public Builder addRequirement(NoteBytes capability, NoteBytes required) {
             caps.addRequirement(capability, required);
             return this;
         }

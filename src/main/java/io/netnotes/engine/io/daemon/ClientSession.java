@@ -2,7 +2,7 @@
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.input.IEventFactory;
@@ -10,14 +10,19 @@ import io.netnotes.engine.io.daemon.DiscoveredDeviceRegistry.DeviceDescriptorWit
 
 import io.netnotes.noteBytes.*;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 /**
  * ClientSession - Manages devices for one client connection
@@ -45,39 +50,76 @@ public class ClientSession {
     }
 
     // ===== CORE IDENTITY =====
-    public final String sessionId;
+    public final NoteBytesReadOnly sessionId;
     public final int clientPid;
-    public final BitFlagStateMachine state;
+    public final ConcurrentBitFlagStateMachine state;
     
     // ===== PARENT REFERENCES =====
     private final IODaemon daemon;
-    private final IDaemonCommands daemonCommands;
-    private final SerializedVirtualExecutor daemonExecutor;
+    private final IODaemonInterface daemonInterface;
     
     // ===== DEVICE MANAGEMENT =====
     private final DiscoveredDeviceRegistry discoveredDevices = new DiscoveredDeviceRegistry();
-    private final Map<String, ClaimedDevice> claimedDevices = new ConcurrentHashMap<>();
+  
     private volatile CompletableFuture<List<DeviceDescriptorWithCapabilities>> discoveryFuture;
-    private final Map<String, CompletableFuture<ClaimedDevice>> pendingClaims = new ConcurrentHashMap<>();
-    private final Map<String, CompletableFuture<Void>> pendingReleases = new ConcurrentHashMap<>();
+    private final Map<NoteBytes, PendingDevice> pendingClaims = new ConcurrentHashMap<>();
+    private final Map<NoteBytes, CompletableFuture<Void>> pendingReleases = new ConcurrentHashMap<>();
     private static final int CLAIM_TIMEOUT_SECONDS = 5;
     private static final int RELEASE_TIMEOUT_SECONDS = 5;
+
+    /**
+     * Optional callback invoked when the underlying daemon socket disconnects.
+     *
+     * If a handler IS registered:
+     *   - The session is NOT torn down automatically.
+     *   - The handler is responsible for deciding whether to attempt reconnect
+     *     (via IODaemon.connect() + rebuild session) or to call shutdown().
+     *   - Claimed devices will have already received their own DEVICE_DISCONNECTED
+     *     notifications via ClaimedDevice.onDeviceDisconnected.
+     *
+     * If no handler is registered:
+     *   - Default behaviour: the session is shut down immediately (legacy path).
+     */
+    @FunctionalInterface
+    public interface DisconnectHandler {
+        void onDisconnect(ClientSession session);
+    }
+
+    private volatile DisconnectHandler onDisconnect = null;
+
+    public void setOnDisconnect(DisconnectHandler handler) {
+        this.onDisconnect = handler;
+    }
+
+    private static class PendingDevice{
+        final ClaimedDevice device;
+        final CompletableFuture<ClaimedDevice> pendingClaim;
+
+        PendingDevice(ClaimedDevice device){
+            this.device = device;
+            this.pendingClaim = new CompletableFuture<>();
+        }
+
+        void complete(){
+            pendingClaim.complete(device);
+        }
+    }
 
     // ===== CONSTRUCTOR =====
     
     public ClientSession(
-            String sessionId,
+            NoteBytes sessionId,
             int clientPid,
             IODaemon daemon,
-            IDaemonCommands daemonCommands,
-            SerializedVirtualExecutor daemonExecutor) {
+            IODaemonInterface daemonCommands
+    ) {
         
-        this.sessionId = sessionId;
+        this.sessionId = sessionId.readOnly();
         this.clientPid = clientPid;
         this.daemon = daemon;
-        this.daemonCommands = daemonCommands;
-        this.daemonExecutor = daemonExecutor;
-        this.state = new BitFlagStateMachine("client-" + sessionId);
+        this.daemonInterface = daemonCommands;
+
+        this.state = new ConcurrentBitFlagStateMachine("client-" + sessionId);
         
         setupStateTransitions();
     }
@@ -114,7 +156,7 @@ public class ClientSession {
      * Request device discovery from daemon
      */
     public CompletableFuture<List<DeviceDescriptorWithCapabilities>> discoverDevices() {
-        if (!ClientStateFlags.canDiscover(state)) {
+        if (!ClientStateFlags.canDiscover(state.getSnapshot())) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cannot discover in current state: " + 
                     state.getState()));
@@ -128,10 +170,11 @@ public class ClientSession {
         state.addState(ClientStateFlags.DISCOVERING);
         CompletableFuture<List<DeviceDescriptorWithCapabilities>> future = new CompletableFuture<>();
         discoveryFuture = future;
-        
-        // Send discovery request to daemon via interface
-        return daemonExecutor.execute(() -> daemonCommands.requestDiscovery(sessionId))
-            .thenCompose(v -> future)
+
+        // Send discovery request to daemon via interface, serialized via executor in IODaemon
+        daemonInterface.requestDiscovery(sessionId);
+
+        return future
             .exceptionally(ex -> {
                 state.removeState(ClientStateFlags.DISCOVERING);
                 if (!future.isDone()) {
@@ -163,23 +206,34 @@ public class ClientSession {
     }
     
     // ===== CLAIM =====
-    
+    private Map<NoteBytes, ClaimedDevice> getClaimedDevices(){
+        return daemon.getClaimedDevices();
+    }
+
+     public CompletableFuture<ClaimedDevice> claimDevice(
+        NoteBytes deviceId, 
+        NoteBytes requestedMode,
+        IEventFactory eventFactory
+    ) {
+        return claimDevice(deviceId, requestedMode, CLAIM_TIMEOUT_SECONDS, eventFactory);
+    }
     /**
      * Claim a device with event factory
      */
     public CompletableFuture<ClaimedDevice> claimDevice(
-        String deviceId, 
-        String requestedMode,
+        NoteBytes deviceId, 
+        NoteBytes requestedMode,
+        int timeoutSeconds,
         IEventFactory eventFactory
     ) {
         // Validation
-        if (!ClientStateFlags.canClaim(state)) {
+        if (!ClientStateFlags.canClaim(state.getSnapshot())) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Cannot claim in current state: " + 
                     state.getState()));
         }
 
-        var deviceInfo = discoveredDevices.getDevice(deviceId);
+        DeviceDescriptorWithCapabilities deviceInfo = discoveredDevices.getDevice(deviceId);
         if (deviceInfo == null) {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Device not found: " + deviceId));
@@ -191,18 +245,30 @@ public class ClientSession {
         }
 
         if (!discoveredDevices.validateModeCompatibility(deviceId, requestedMode)) {
-            String availableModes = String.join(", ",
-                discoveredDevices.getAvailableModes(deviceId));
+            String availableModes = discoveredDevices.getAvailableModes(deviceId)
+                .stream().map(NoteBytes::toString)
+                .collect(Collectors.joining(", "));
+
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException(
                     "Device does not support mode: " + requestedMode +
                     ". Available: " + availableModes));
         }
+        ClaimedDevice existingDevice = getClaimedDevices().get(deviceId);
+        if(existingDevice != null){
+            if(existingDevice.getSessionId().equals(sessionId)){
+                return CompletableFuture.completedFuture(existingDevice);
+            }else{
+                return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("Device is claimed by another session"));
+            }
+        }
 
-        // Create confirmation future
-        CompletableFuture<ClaimedDevice> confirmationFuture = new CompletableFuture<>();
-        pendingClaims.put(deviceId, confirmationFuture);
-
+        PendingDevice existingClaim = pendingClaims.get(deviceId);
+        if(existingClaim != null){
+            return existingClaim.pendingClaim;
+        }
+                
         // Setup ClaimedDevice path
         ContextPath claimedDevicePath = daemon.getContextPath()
             .append(sessionId)
@@ -210,6 +276,7 @@ public class ClientSession {
 
         // Create ClaimedDevice with injected event factory
         ClaimedDevice claimedDevice = new ClaimedDevice(
+            this.sessionId,
             deviceId,
             claimedDevicePath,
             deviceInfo.usbDevice().getDeviceType(),
@@ -219,45 +286,32 @@ public class ClientSession {
         );
 
         if (!claimedDevice.enableMode(requestedMode)) {
-            pendingClaims.remove(deviceId);
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Failed to enable mode: " + requestedMode));
         }
 
-        claimedDevice.setOnDisconnect(daemon::handleDeviceDisconnect);
+        // Create confirmation future
+        PendingDevice pendingDevice = new PendingDevice(claimedDevice);
+        pendingClaims.put(deviceId, pendingDevice);
 
-        // Local setup
-        try {
-            daemon.registerClaimedDevice(claimedDevice, claimedDevicePath);
-            claimedDevices.put(deviceId, claimedDevice);
-            discoveredDevices.markClaimed(deviceId);
-            state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
-        } catch (Exception e) {
-            pendingClaims.remove(deviceId);
-            return CompletableFuture.failedFuture(e);
-        }
 
         // Request daemon claim (async)
-        daemonExecutor.execute(() -> 
-            daemonCommands.claimDevice(sessionId, deviceId, requestedMode))
+        daemonInterface.claimDevice(sessionId, deviceId, requestedMode)
             .exceptionally(ex -> {
                 Log.logError("[ClientSession:" + sessionId + "] Claim request failed: " + 
                     ex.getMessage());
-                rollbackClaim(deviceId, claimedDevice);
-                CompletableFuture<ClaimedDevice> future = pendingClaims.remove(deviceId);
-                if (future != null && !future.isDone()) {
-                    future.completeExceptionally(ex);
-                }
+                rollbackClaim(deviceId, ex);
+                
                 return null;
             });
 
         // Add timeout
-        CompletableFuture<ClaimedDevice> timeoutFuture = confirmationFuture
-            .orTimeout(CLAIM_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+        CompletableFuture<ClaimedDevice> timeoutFuture = pendingDevice.pendingClaim
+            .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .exceptionally(ex -> {
-                if (ex.getCause() instanceof java.util.concurrent.TimeoutException) {
+                if (ex.getCause() instanceof TimeoutException) {
                     Log.logError("[ClientSession:" + sessionId + "] Claim timeout: " + deviceId);
-                    rollbackClaim(deviceId, claimedDevice);
+                    rollbackClaim(deviceId, ex);
                     pendingClaims.remove(deviceId);
                 }
                 throw new CompletionException(ex);
@@ -271,9 +325,9 @@ public class ClientSession {
     /**
      * Release device - returns future that completes when daemon confirms
      */
-    public CompletableFuture<Void> releaseDevice(String deviceId) {
-        ClaimedDevice claimedDevice = claimedDevices.get(deviceId);
-        if (claimedDevice == null) {
+    public CompletableFuture<Void> releaseDevice(NoteBytes deviceId) {
+        ClaimedDevice claimedDevice = getClaimedDevices().get(deviceId);
+        if (claimedDevice == null || !claimedDevice.getSessionId().equals(sessionId)) {
             Log.logMsg("[ClientSession:" + sessionId + "] Device not claimed: " + deviceId);
             return CompletableFuture.completedFuture(null);
         }
@@ -285,22 +339,13 @@ public class ClientSession {
         // Start local cleanup
         claimedDevice.release();
 
-        // Request daemon release (async)
-        daemonExecutor.execute(() ->
-            daemonCommands.releaseDevice(sessionId, deviceId))
-            .exceptionally(ex -> {
-                Log.logError("[ClientSession:" + sessionId + "] Release request failed: " + 
-                    ex.getMessage());
-                // Complete anyway - local cleanup already started
-                completeRelease(deviceId);
-                return null;
-            });
 
+        
         // Add timeout - more forgiving since local cleanup is done
         CompletableFuture<Void> timeoutFuture = confirmationFuture
-            .orTimeout(RELEASE_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(RELEASE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .exceptionally(ex -> {
-                if (ex.getCause() instanceof java.util.concurrent.TimeoutException) {
+                if (ex.getCause() instanceof TimeoutException) {
                     Log.logError("[ClientSession:" + sessionId + "] Release timeout: " + deviceId);
                 }
                 // Complete anyway - force cleanup
@@ -308,21 +353,33 @@ public class ClientSession {
                 pendingReleases.remove(deviceId);
                 return null;
             });
+            
+        // Request daemon release (async)
+        daemonInterface.releaseDevice(sessionId, deviceId)
+            .exceptionally(ex -> {
+                Log.logError("[ClientSession:" + sessionId + "] Release request failed: " + 
+                    ex.getMessage());
+                timeoutFuture.completeExceptionally(ex);
+                return null;
+            });
+
 
         return timeoutFuture;
     }
 
     /**
-     * Handle device claimed confirmation from daemon
+     *   device claimed confirmation from daemon
      * Called by IODaemon when ITEM_CLAIMED message arrives
      */
-    public void handleDeviceClaimed(String deviceId, NoteBytesMap response) {
-        CompletableFuture<ClaimedDevice> future = pendingClaims.remove(deviceId);
-        if (future == null) {
+    void handleDeviceClaimed(NoteBytes deviceId, NoteBytesMap response) {
+        PendingDevice pendingDevice = pendingClaims.remove(deviceId);
+        if(pendingDevice == null){
             Log.logMsg("[ClientSession:" + sessionId + 
-                "] Received claim confirmation for unknown device: " + deviceId);
+                "] pending device does not exist: " + deviceId);
+            releaseDevice(deviceId);
             return;
         }
+        CompletableFuture<ClaimedDevice> future = pendingDevice.pendingClaim;
 
         if (future.isDone()) {
             Log.logMsg("[ClientSession:" + sessionId + 
@@ -333,22 +390,33 @@ public class ClientSession {
         // Check for errors in response
         NoteBytes errorCode = response.get(io.netnotes.engine.messaging.NoteMessaging.Keys.ERROR_CODE);
         if (errorCode != null) {
-            String errorMsg = response.get(io.netnotes.engine.messaging.NoteMessaging.Keys.MSG).getAsString();
+            NoteBytes msgBytes = response.get(io.netnotes.engine.messaging.NoteMessaging.Keys.MSG);
+            String errorMsg = msgBytes != null ? msgBytes.getAsString() : "unknown error";
             Log.logError("[ClientSession:" + sessionId + "] Daemon claim failed: " + errorMsg);
             
-            ClaimedDevice device = claimedDevices.get(deviceId);
-            rollbackClaim(deviceId, device);
-            future.completeExceptionally(
-                new RuntimeException("Daemon claim failed: " + errorMsg));
+            RuntimeException ex = new RuntimeException("Daemon claim failed: " + errorMsg);
+            
+            rollbackClaim(deviceId, ex);
         } else {
-            ClaimedDevice device = claimedDevices.get(deviceId);
-            if (device != null) {
-                future.complete(device);
-                Log.logMsg("[ClientSession:" + sessionId + "] Device claim confirmed: " + deviceId);
-            } else {
-                future.completeExceptionally(
-                    new IllegalStateException("Device not found after claim: " + deviceId));
-            }
+            ClaimedDevice claimedDevice = pendingDevice.device;
+
+            // Local setup
+            ContextPath devicePath = claimedDevice.getDevicePath();
+            daemon.registerClaimedDevice(claimedDevice, devicePath);
+           
+            discoveredDevices.markClaimed(deviceId);
+            state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
+            
+            daemon.startProcess(devicePath)
+                .thenCompose((v)->daemon.addClaimedDevice(claimedDevice))
+                .whenComplete((v,ex)->{
+                    if(ex != null){
+                        Log.logError("[ClientSession]", "error creating stream", ex);
+                        
+                    }else{
+                        pendingDevice.complete();
+                    }
+                });
         }
     }
 
@@ -356,7 +424,7 @@ public class ClientSession {
      * Handle device released confirmation from daemon
      * Called by IODaemon when ITEM_RELEASED message arrives
      */
-    public void handleDeviceReleased(String deviceId) {
+    public void handleDeviceReleased(NoteBytes deviceId) {
         CompletableFuture<Void> future = pendingReleases.remove(deviceId);
         
         completeRelease(deviceId);
@@ -373,66 +441,70 @@ public class ClientSession {
     /**
      * Rollback claim operation - cleanup after failure
      */
-    private void rollbackClaim(String deviceId, ClaimedDevice device) {
-        if (device != null) {
-            try {
-                device.release();
-                daemon.unregisterClaimedDevice(device.getContextPath());
-            } catch (Exception e) {
-                Log.logError("[ClientSession:" + sessionId + 
-                    "] Rollback unregister failed: " + e.getMessage());
-            }
+    private void rollbackClaim(NoteBytes deviceId, Throwable ex) {
+
+
+        PendingDevice pendingDevice = pendingClaims.remove(deviceId);
+        CompletableFuture<ClaimedDevice> future = pendingDevice.pendingClaim;
+         if (future != null && !future.isDone()) {
+            future.completeExceptionally(ex);
         }
-        
-        claimedDevices.remove(deviceId);
-        discoveredDevices.markReleased(deviceId);
-        
-        if (claimedDevices.isEmpty()) {
+
+        if (getClaimedDevices().isEmpty()) {
             state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
         }
+
     }
 
     /**
      * Complete release operation - final cleanup
      */
-    private void completeRelease(String deviceId) {
-        ClaimedDevice device = claimedDevices.remove(deviceId);
-        if (device != null) {
-            try {
-                daemon.unregisterClaimedDevice(device.getContextPath());
-            } catch (Exception e) {
-                Log.logError("[ClientSession:" + sessionId + 
-                    "] Release cleanup failed: " + e.getMessage());
-            }
-        }
-        
+    private void completeRelease(NoteBytes deviceId) {
+       
+        daemon.completeDeviceRelease(deviceId);
+
         discoveredDevices.markReleased(deviceId);
         
-        if (claimedDevices.isEmpty()) {
+        if (claimedAnyDevices()) {
             state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
         }
+    }
+
+    public boolean claimedAnyDevices(){
+        for(ClaimedDevice device : getClaimedDevices().values()){
+            if(device.getSessionId().equals(sessionId)){
+                return true;
+            }
+        }
+        return false;
     }
     
     /**
      * Release all devices - called during shutdown
      */
     private void releaseAllDevices() {
-        if (claimedDevices.isEmpty()) {
+        if (!claimedAnyDevices()) {
             return;
         }
         
         Log.logMsg("[ClientSession:" + sessionId + "] Releasing " + 
-            claimedDevices.size() + " devices");
+            getClaimedDevices().size() + " devices");
         
-        for (ClaimedDevice device : claimedDevices.values()) {
-            try {
-                String deviceId = device.getDeviceId();
+        for (ClaimedDevice device : getClaimedDevices().values()) {
+            
+            NoteBytes sessionId = device.getSessionId();
+
+            if(!sessionId.equals(this.sessionId)){
+                continue;
+            }
                 
+            NoteBytes deviceId = device.getDeviceId();
+            try {   
                 // Notify device to release
                 device.release();
                 
                 // Unregister from registry
-                daemon.unregisterClaimedDevice(device.getContextPath());
+                daemon.completeDeviceRelease(deviceId);
                 
                 // Update discovery state
                 discoveredDevices.markReleased(deviceId);
@@ -445,7 +517,7 @@ public class ClientSession {
             }
         }
         
-        claimedDevices.clear();
+        getClaimedDevices().clear();
         state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
     }
     
@@ -466,32 +538,37 @@ public class ClientSession {
                 new IllegalStateException("Session shutting down"));
         }
         
-        if (claimedDevices.isEmpty()) {
+        if (getClaimedDevices().isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
+        Iterator<Entry<NoteBytes, ClaimedDevice>> it = getClaimedDevices().entrySet().iterator();
+        ArrayList<CompletableFuture<Void>> releaseFutures = new ArrayList<>();
+        while(it.hasNext()){
+            Entry<NoteBytes, ClaimedDevice> entry = it.next();
+            if(entry.getValue().getSessionId().equals(sessionId)){
+                NoteBytes deviceId = entry.getKey();
+                releaseFutures
+                    .add(releaseDevice(deviceId)
+                        .exceptionally(ex -> {
+                            Log.logError("[ClientSession:" + sessionId + "] Error releasing " + 
+                                deviceId + ": " + ex.getMessage());
+                            return null;
+                        }));
+                it.remove();
+            }
+        }
         
-        // Release each device
-        CompletableFuture<Void> releaseAll = CompletableFuture.allOf(
-            claimedDevices.keySet().stream()
-                .map(deviceId -> releaseDevice(deviceId)  // Now returns confirmation future
-                    .exceptionally(ex -> {
-                        Log.logError("[ClientSession:" + sessionId + "] Error releasing " + 
-                            deviceId + ": " + ex.getMessage());
-                        return null;
-                    })
-                )
-                .toArray(CompletableFuture[]::new)
-        );
-        
-        return releaseAll.thenRun(() -> {
-            // Clear discovery state
-            discoveredDevices.clear();
-            state.removeState(ClientStateFlags.DISCOVERING);
-            state.removeState(ClientStateFlags.AUTHENTICATED);
-            state.removeState(ClientStateFlags.CONNECTED);
-            
-            Log.logMsg("[ClientSession:" + sessionId + "] Session stopped");
-        });
+
+        return CompletableFuture.allOf(releaseFutures.toArray(new CompletableFuture[0]))
+            .thenRun(() -> {
+                // Clear discovery state
+                discoveredDevices.clear();
+                state.removeState(ClientStateFlags.DISCOVERING);
+                state.removeState(ClientStateFlags.AUTHENTICATED);
+                state.removeState(ClientStateFlags.CONNECTED);
+                
+                Log.logMsg("[ClientSession:" + sessionId + "] Session stopped");
+            });
     }
     
     /**
@@ -502,15 +579,11 @@ public class ClientSession {
         
         state.addState(ClientStateFlags.DISCONNECTING);
         state.addState(ClientStateFlags.ERROR_STATE);
-        CompletableFuture<List<DeviceDescriptorWithCapabilities>> pendingDiscovery = discoveryFuture;
-        discoveryFuture = null;
-        if (pendingDiscovery != null && !pendingDiscovery.isDone()) {
-            pendingDiscovery.completeExceptionally(
-                new IllegalStateException("Daemon disconnected"));
-        }
+   
         
         // Cancel all pending operations
-        for (CompletableFuture<ClaimedDevice> future : pendingClaims.values()) {
+        for (PendingDevice device : pendingClaims.values()) {
+            CompletableFuture<ClaimedDevice> future = device.pendingClaim;
             if (!future.isDone()) {
                 future.completeExceptionally(
                     new IllegalStateException("Session emergency shutdown"));
@@ -529,27 +602,54 @@ public class ClientSession {
         // Force release without waiting for daemon responses
         releaseAllDevices();
         
-        discoveredDevices.clear();
+        disconnected();
     }
-    
+
     /**
-     * Handle daemon disconnect notification
-     * Called directly by IODaemon
+     * Called by IODaemon when the daemon socket has dropped.
+     *
+     * If an {@link DisconnectHandler} is registered the session is kept alive
+     * and the handler is invoked — the application may choose to reconnect
+     * while keeping claimed-device state intact.
+     *
+     * If no handler is registered we perform an immediate emergency shutdown
+     * (legacy / default behaviour).
      */
-    public void handleDaemonDisconnect(NoteBytesMap notification) {
-        Log.logError("[ClientSession:" + sessionId + "] Daemon disconnected: " + 
-            notification.get(io.netnotes.engine.messaging.NoteMessaging.Keys.MSG));
-        
-        // Emergency shutdown - can't communicate with daemon anymore
-        emergencyShutdown();
+    void disconnected() {
+        // Always fail any pending discovery — the socket is gone.
+        CompletableFuture<List<DeviceDescriptorWithCapabilities>> pendingDiscovery = discoveryFuture;
+        discoveryFuture = null;
+        if (pendingDiscovery != null && !pendingDiscovery.isDone()) {
+            pendingDiscovery.completeExceptionally(
+                new IllegalStateException("Daemon socket disconnected"));
+        }
+
+        DisconnectHandler handler = this.onDisconnect;
+        if (handler != null) {
+            // Application has opted in to handling reconnect — do not tear down.
+            Log.logMsg("[ClientSession:" + sessionId +
+                "] Socket disconnected; delegating to onDisconnect handler (session kept alive)");
+            state.removeState(ClientStateFlags.CONNECTED);
+            try {
+                handler.onDisconnect(this);
+            } catch (Exception e) {
+                Log.logError("[ClientSession:" + sessionId + "] onDisconnect handler threw", e);
+            }
+        } else {
+            // No handler — default path: tear down immediately.
+            Log.logMsg("[ClientSession:" + sessionId +
+                "] Socket disconnected; no onDisconnect handler, performing emergency shutdown");
+            discoveredDevices.clear();
+            emergencyShutdown();
+        }
     }
-    
+
     // ===== DISCOVERED DEVICE HELPERS =====
     
     /**
      * Get device info from discovered registry
      */
-    public DeviceDescriptorWithCapabilities getDeviceInfo(String deviceId) {
+    public DeviceDescriptorWithCapabilities getDeviceInfo(NoteBytes deviceId) {
         return discoveredDevices.getDevice(deviceId);
     }
     
@@ -570,14 +670,14 @@ public class ClientSession {
     /**
      * Get available modes for a device
      */
-    public Set<String> getAvailableModesForDevice(String deviceId) {
+    public Set<NoteBytes> getAvailableModesForDevice(NoteBytes deviceId) {
         return discoveredDevices.getAvailableModes(deviceId);
     }
     
     /**
      * Validate mode before claiming
      */
-    public boolean canClaimWithMode(String deviceId, String mode) {
+    public boolean canClaimWithMode(NoteBytes deviceId, NoteBytes mode) {
         return discoveredDevices.validateModeCompatibility(deviceId, mode);
     }
     
@@ -590,8 +690,16 @@ public class ClientSession {
     
     // ===== GETTERS =====
     
-    public ClaimedDevice getClaimedDevice(String deviceId) {
-        return claimedDevices.get(deviceId);
+    public ClaimedDevice getClaimedDevice(NoteBytes deviceId) {
+        ClaimedDevice device = getClaimedDevices().get(deviceId);
+        if(device != null){
+            if(device.getSessionId().equals(sessionId)){
+                return device;
+            }else{
+                throw new IllegalAccessError("Device does not belong to this session");
+            }
+        }
+        return null;
     }
     
     public DiscoveredDeviceRegistry getDiscoveredDevices() {
@@ -602,21 +710,22 @@ public class ClientSession {
      * Get count of claimed devices in this session
      */
     public int getClaimedDeviceCount() {
-        return claimedDevices.size();
+        return getClaimedDevices().size();
     }
 
     /**
      * Get all claimed devices
-     */
+     //TODO copy fields give nutered list
     public List<ClaimedDevice> getClaimedDevices() {
         return List.copyOf(claimedDevices.values());
-    }
+    }*/
 
     /**
      * Check if device is claimed by this session
      */
-    public boolean hasDevice(String deviceId) {
-        return claimedDevices.containsKey(deviceId);
+    public boolean hasDevice(NoteBytes deviceId) {
+        ClaimedDevice device = getClaimedDevices().get(deviceId);
+        return (device != null && device.getSessionId().equals(sessionId));
     }
     
     /**

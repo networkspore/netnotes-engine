@@ -3,6 +3,7 @@ package io.netnotes.engine.io.daemon;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities;
 import io.netnotes.engine.io.process.ProcessRegistryInterface;
+import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
@@ -295,7 +296,7 @@ public class IODaemonManager {
                         new IllegalStateException("IODaemon not available"));
                 }
                 // Create a new discovery session
-                String sessionId = NoteUUID.createSafeUUID128() + "-discovery";
+                NoteUUID sessionId = NoteUUID.createLocalUUID128();
                 int pid = (int) ProcessHandle.current().pid();
                 
                 return daemon.createSession(sessionId, pid)
@@ -364,7 +365,7 @@ public class IODaemonManager {
     /**
      * Check if a specific device is available and unclaimed
      */
-    public CompletableFuture<Boolean> isDeviceAvailable(String deviceId) {
+    public CompletableFuture<Boolean> isDeviceAvailable(NoteBytes deviceId) {
         return discoverDevices()
             .thenApply(devices -> devices.stream()
                 .anyMatch(d -> d.usbDevice().getDeviceId().equals(deviceId) && 

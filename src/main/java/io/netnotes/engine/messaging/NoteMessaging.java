@@ -374,13 +374,13 @@ public class NoteMessaging {
         public static final int MODE_INCOMPATIBLE   = 12;
         public static final int MODE_NOT_SUPPORTED  = 13;
         public static final int FEATURE_NOT_SUPPORTED = 14;
-        public static final int CLAIM_FAILED        = 15;
+        public static final int FAILED              = 15;
         
         // Permission errors (20-29)
         public static final int PERMISSION_DENIED   = 20;
         public static final int UNAUTHORIZED        = 21;
         public static final int PID_MISMATCH        = 22;
-        public static final int ALREADY_CLAIMED     = 23;
+        public static final int ALREADY_EXISTS     = 23;
         
         // State errors (30-39)
         public static final int INVALID_STATE       = 30;
@@ -411,7 +411,7 @@ public class NoteMessaging {
             ERROR_MESSAGES.put(PERMISSION_DENIED, "Permission denied");
             ERROR_MESSAGES.put(UNAUTHORIZED, "Unauthorized");
             ERROR_MESSAGES.put(PID_MISMATCH, "PID mismatch");
-            ERROR_MESSAGES.put(CLAIM_FAILED, "Failed to claim item");
+            ERROR_MESSAGES.put(FAILED, "Failed to claim item");
         }
         
         public static String getMessage(int errorCode) {

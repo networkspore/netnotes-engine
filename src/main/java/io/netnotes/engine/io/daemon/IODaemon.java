@@ -1,6 +1,5 @@
 package io.netnotes.engine.io.daemon;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -10,24 +9,27 @@ import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.MessageBuilder;
 import io.netnotes.engine.io.RoutedPacket;
-import io.netnotes.engine.io.daemon.ClientSession.Modes;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.io.process.ChannelWriter;
 import io.netnotes.engine.io.process.FlowProcess;
+import io.netnotes.engine.io.process.ProcessKeys;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging.ErrorCodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
@@ -71,79 +73,6 @@ public class IODaemon extends FlowProcess {
             new NoteBytesReadOnly("list_sessions");
     }
 
-     /**
-     * Commands implementation - called by ClientSessions on serialExec
-     */
-    private final IDaemonCommands daemonCommands = new IDaemonCommands() {
-        
-        @Override
-        public void requestDiscovery(String sessionId) {
-            NoteBytesObject request = MessageBuilder.createCommand(
-                ProtocolMesssages.REQUEST_DISCOVERY
-            );
-            
-            writeToDaemon(request);
-        }
-        
-        @Override
-        public void claimDevice(String sessionId, String deviceId, String mode) {
-            ClientSession session = sessions.get(sessionId);
-            if (session == null) {
-                Log.logError("Session not found: " + sessionId);
-                return;
-            }
-            
-            ClaimedDevice claimedDevice = session.getClaimedDevice(deviceId);
-            if (claimedDevice == null) {
-                Log.logError("Device not found: " + deviceId);
-                return;
-            }
-            
-            ContextPath devicePath = claimedDevice.getContextPath();
-            
-            // Setup event stream first
-            requestStreamChannel(devicePath)
-             .thenCompose(eventChannel -> {
-                    NoteBytes deviceIdBytes = new NoteBytes(deviceId);
-                    deviceEventChannels.put(deviceIdBytes, eventChannel);
-                    
-                    NoteBytesWriter eventWriter = new NoteBytesWriter(
-                        eventChannel.getQueuedOutputStream()
-                    );
-                    deviceEventWriters.put(deviceIdBytes, eventWriter);
-                    
-                    return eventChannel.getReadyFuture();
-                })
-                .thenRun(() -> {
-                    // Send claim to daemon via serialized write
-                    NoteBytesObject request = MessageBuilder.createCommand(
-                        ProtocolMesssages.CLAIM_ITEM,
-                        new NoteBytesPair(Keys.DEVICE_ID, deviceId),
-                        new NoteBytesPair(Keys.PID, session.clientPid),
-                        new NoteBytesPair(Keys.MODE, mode)
-                    );
-                    
-                    writeToDaemon(request);
-                })
-                .exceptionally(ex -> {
-                    Log.logError("Failed to claim device: " + ex.getMessage());
-                    return null;
-                }); 
-        }
-        
-        @Override
-        public void releaseDevice(String sessionId, String deviceId) {
-            handleDeviceDisconnect(deviceId);
-            
-            NoteBytesObject request = MessageBuilder.createCommand(
-                ProtocolMesssages.RELEASE_ITEM,
-                new NoteBytesPair(Keys.DEVICE_ID, deviceId)
-            );
-            
-            writeToDaemon(request);
-        }
-    };
-
     private final String socketPath;
     private final String m_UUID = NoteUUID.createSafeUUID128();
     
@@ -151,14 +80,18 @@ public class IODaemon extends FlowProcess {
     private NoteBytesWriter daemonWriter;
     private NoteBytesReader daemonReader;
 
-    private final SerializedVirtualExecutor serialExec = new SerializedVirtualExecutor();
-    private final Map<String, ClientSession> sessions = new ConcurrentHashMap<>();
+    //Re-entrant safe serial executors
+    private final SerializedVirtualExecutor daemonWriterExec = new SerializedVirtualExecutor();
+    private final SerializedVirtualExecutor daemonInternalExec = new SerializedVirtualExecutor();
+
+    private final Map<NoteBytes, ClientSession> sessions = new ConcurrentHashMap<>();
 
     // Message dispatch maps
-    private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new HashMap<>();
     private final Map<NoteBytesReadOnly, RoutedMessageExecutor> m_routedMsgMap = new ConcurrentHashMap<>();
-    private final Map<NoteBytes, StreamChannel> deviceEventChannels = new ConcurrentHashMap<>();
-    private final Map<NoteBytes, NoteBytesWriter> deviceEventWriters = new ConcurrentHashMap<>();
+    private final Map<NoteBytes, ChannelWriter> deviceStreams = new ConcurrentHashMap<>();
+  //  private final Map<NoteBytes, NoteBytesWriter> deviceEventWriters = new ConcurrentHashMap<>();
+    private final Map<NoteBytes, ClaimedDevice> claimedDevices = new ConcurrentHashMap<>();
 
     private volatile boolean connected = false;
     private volatile boolean running = false;
@@ -175,32 +108,83 @@ public class IODaemon extends FlowProcess {
         setupRoutedMessageMapping();
     }
 
-    private void writeToDaemon(NoteBytesObject message) {
-        serialExec.executeFireAndForget(() -> {
+    private CompletableFuture<Void> writeToDaemon(NoteBytesObject message) {
+        return daemonWriterExec.execute(() -> {
             try {
                 // No synchronized needed - already serialized!
                 daemonWriter.write(message);
                 daemonWriter.flush();
             } catch (IOException e) {
-                throw new RuntimeException("Failed to write to daemon", e);
+                throw new CompletionException("Failed to write to daemon", e);
+            }
+        }).whenComplete((v,ex)->{
+            if(!socketChannel.isConnected() && connected){
+                handleDisconnect();
             }
         });
     }
 
-    /**
-     * Write multiple items to daemon socket
-     */
-    private void writeToDaemon(NoteBytes... items) {
-        serialExec.execute(() -> {
+    private CompletableFuture<Void> writeToDaemon(NoteBytes id,  NoteBytes messageObject) {
+        return daemonWriterExec.execute(() -> {
+
             try {
-                for (NoteBytes item : items) {
-                    daemonWriter.write(item);
-                }
+                daemonWriter.write(id);
+                daemonWriter.write(messageObject);
                 daemonWriter.flush();
             } catch (IOException e) {
-                throw new RuntimeException("Failed to write to daemon", e);
+                throw new CompletionException("Failed to write to daemon", e);
+            }
+        
+        }).whenComplete((v,ex)->{
+            if(!socketChannel.isConnected() && connected){
+                handleDisconnect();
             }
         });
+    }
+
+    private boolean writeToDevice(NoteBytes deviceId,  NoteBytes messageObject) {
+        if(messageObject == null){
+            return false;
+        }
+        ChannelWriter deviceStream = deviceStreams.get(deviceId);
+        if(deviceStream == null){
+            Log.logMsg("[IODaemon] deviceStream not available for: " + deviceId);
+            return true;
+        }
+        SerializedVirtualExecutor exec = deviceStream.getWriteExec();
+
+        if(!exec.isShutdown()){
+            exec.executeFireAndForget(() -> {
+                NoteBytesWriter writer = deviceStream.getWriter();
+             
+                if (writer == null) {
+                    Log.logMsg("[IODaemon] device stream waiting: " + deviceId);
+                    try{
+                        writer = deviceStream.getReadyWriter()
+                            .orTimeout(2, TimeUnit.SECONDS)
+                            .join();
+                        
+                    }catch(Exception e){
+                        Log.logError("[IODaemon] device stream timed out: " + deviceId, e);
+                        return;
+                    }
+                }
+    
+                try {
+                    writer.write(messageObject);
+                    writer.flush();
+                } catch (IOException e) {
+                    Log.logError("[IODaemon]", "write to device failed", e);
+                    //TODO: handle device write failed
+                }
+            
+            });
+        }
+        return true;
+    }
+
+    Map<NoteBytes, ClaimedDevice> getClaimedDevices(){
+        return claimedDevices;
     }
     
     // ===== PROCESS LIFECYCLE =====
@@ -208,10 +192,7 @@ public class IODaemon extends FlowProcess {
     @Override
     public CompletableFuture<Void> run() {
         return connect()
-            .thenCompose(v -> startReadLoop())
-            .thenRun(() -> {
-                Log.logMsg("IODaemon running at: " + contextPath);
-            });
+            .thenRun(() -> startReadLoop());
     }
     
     @Override
@@ -224,7 +205,9 @@ public class IODaemon extends FlowProcess {
         Log.logMsg("IODaemon stopping");
         handleDisconnect();
     }
+
     
+   
     @Override
     public CompletableFuture<Void> handleMessage(RoutedPacket packet) {
         // Handle legacy routed requests (direct method calls preferred)
@@ -251,6 +234,8 @@ public class IODaemon extends FlowProcess {
             return CompletableFuture.failedFuture(e);
         }
     }
+
+    
     
     
     /**
@@ -291,42 +276,19 @@ public class IODaemon extends FlowProcess {
     }
 
    
-    /**
-     * Handle device disconnection from ClaimedDevice
-     */
-    public void handleDeviceDisconnect(String deviceId) {
-        handleDeviceDisconnect(new NoteBytes(deviceId));
-    }
 
-    private void handleDeviceDisconnect(NoteBytes deviceId) {
-        Log.logMsg("Device disconnecting: " + deviceId);
-        cleanupDeviceStreams(deviceId);
-    }
 
-    /**
-     * Cleanup streams for a specific device
-     */
-    private void cleanupDeviceStreams(NoteBytes deviceId) {
-        // Shutdown async writer
-        deviceEventWriters.remove(deviceId);
-     
-        // Close stream channel
-        StreamChannel channel = deviceEventChannels.remove(deviceId);
-        if (channel != null) {
-            try {
-                channel.close();
-            } catch (IOException e) {
-                Log.logError("Error closing event channel for " + deviceId + ": " + e.getMessage());
-            }
-        }
-        
-        Log.logMsg("Cleaned up streams for device: " + deviceId);
-    }
+
     
     // ===== CONNECTION LIFECYCLE =====
     
     public CompletableFuture<Void> connect() {
-        return establishConnection().thenAccept((v)->performHandshake());
+        return establishConnection().thenCompose((v)->performHandshake())
+            .exceptionally((ex)->{
+                establsihConnectionFuture = null;
+                handshakeFuture = null;
+                return null;
+            });
     }
     
     private CompletableFuture<Void> establsihConnectionFuture = null;
@@ -371,8 +333,7 @@ public class IODaemon extends FlowProcess {
                             new NoteBytesPair(Keys.VERSION, DAEMON_VERSION),
                             new NoteBytesPair("daemon_id", m_UUID)
                         );
-                        
-                        daemonWriter.write(helloCmd);
+                        writeToDaemon(helloCmd);
                         
                         // Wait for ACCEPT response
                         NoteBytesReadOnly response = daemonReader.nextNoteBytesReadOnly();
@@ -380,10 +341,15 @@ public class IODaemon extends FlowProcess {
                             throw new IOException("Invalid handshake response");
                         }
                         
-                        NoteBytesMap responseMap = response.getAsNoteBytesMap();
-                        NoteBytesReadOnly type = responseMap.getReadOnly(Keys.EVENT);
-                        
-                        if (type == null || !type.equals(EventBytes.TYPE_ACCEPT)) {
+                        NoteBytesObject responseObj = response.getAsNoteBytesObject();
+                        NoteBytesPair responseEvent = responseObj.get(Keys.EVENT);
+                     
+                        if (responseEvent == null 
+                            || responseEvent.getValue() == null 
+                            || !responseEvent
+                                .getValue()
+                                .equals(EventBytes.TYPE_ACCEPT)
+                        ) {
                             throw new IOException("Handshake rejected");
                         }
                         
@@ -405,6 +371,7 @@ public class IODaemon extends FlowProcess {
         }
     }
     
+   
     /**
      * Main read loop - reads from daemon socket and routes to sessions/devices
      */
@@ -422,8 +389,10 @@ public class IODaemon extends FlowProcess {
                     
                     switch(first.getType()) {
                         case NoteBytesMetaData.STRING_TYPE:
-                            // ROUTED MESSAGE: [STRING:deviceId][OBJECT:payload]
-                            handleRoutedMessage(first);
+                            if(!writeToDevice(first, daemonReader.nextNoteBytesReadOnly())){
+                                Log.logError("[IODaemon] Expected payload, EOF signaled");
+                                break;
+                            }
                         break;
                         case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                             // CONTROL MESSAGE: [OBJECT]
@@ -442,30 +411,6 @@ public class IODaemon extends FlowProcess {
         }, VirtualExecutors.getVirtualExecutor());
     }
     
-    /**
-     * Handle routed message from daemon (device data)
-     * Format: [STRING:deviceId][OBJECT:payload]
-     * 
-     */
-    private void handleRoutedMessage(NoteBytes deviceIdBytes) throws IOException {
-        NoteBytesReadOnly payload = daemonReader.nextNoteBytesReadOnly();
-        if (payload == null) {
-            throw new EOFException("Daemon closed stream");
-        }
-        
-        NoteBytesWriter writer = deviceEventWriters.get(deviceIdBytes);
-        if (writer == null) {
-            Log.logError("No event writer for device: " + deviceIdBytes);
-            return;
-        }
-        
-        // Write routed message: [STRING:deviceId][OBJECT/ENCRYPTED:payload]
-        synchronized(writer) {
-            writer.write(deviceIdBytes);
-            writer.write(payload);
-            writer.flush();
-        }
-    }
 
     
     /**
@@ -483,7 +428,9 @@ public class IODaemon extends FlowProcess {
         // Dispatch using message map
         MessageExecutor executor = m_execMsgMap.get(typeBytes);
         if (executor != null) {
-            executor.execute(map);
+            daemonInternalExec.executeFireAndForget(()->{
+                executor.execute(map);
+            });
         } else {
             Log.logError("Unknown message type: " + typeBytes);
         }
@@ -497,11 +444,8 @@ public class IODaemon extends FlowProcess {
     private void setupMessageMapping() {
         // Protocol messages from daemon
         m_execMsgMap.put(EventBytes.TYPE_PING, this::handlePing);
-        m_execMsgMap.put(EventBytes.TYPE_PONG, this::handlePong);
         m_execMsgMap.put(EventBytes.TYPE_ACCEPT, this::handleAccept);
         m_execMsgMap.put(EventBytes.TYPE_ERROR, this::handleError);
-        m_execMsgMap.put(EventBytes.TYPE_CMD, this::handleCommand);
-        m_execMsgMap.put(EventBytes.TYPE_DISCONNECTED, this::handleDisconnected);
         
         // Command subtypes (daemon responses)
         m_execMsgMap.put(ProtocolMesssages.ITEM_LIST, this::broadcastDeviceList);
@@ -518,10 +462,6 @@ public class IODaemon extends FlowProcess {
         m_routedMsgMap.put(SESSION_CMDS.DESTROY_SESSION, this::handleDestroySessionRequest);
         m_routedMsgMap.put(SESSION_CMDS.LIST_SESSIONS, this::handleListSessionsRequest);
         
-        // Session commands (forwarded to daemon)
-        m_routedMsgMap.put(ProtocolMesssages.REQUEST_DISCOVERY, this::handleDiscoveryRequest);
-        m_routedMsgMap.put(ProtocolMesssages.CLAIM_ITEM, this::handleClaimRequest);
-        m_routedMsgMap.put(ProtocolMesssages.RELEASE_ITEM, this::handleReleaseRequest);
     }
     
     // ===== SESSION MANAGEMENT =====
@@ -546,12 +486,12 @@ public class IODaemon extends FlowProcess {
      * }
      */
     private CompletableFuture<Void> handleCreateSessionRequest(
-            NoteBytesMap command, RoutedPacket request) {
+        NoteBytesMap command, RoutedPacket request) {
         
-        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
+        NoteBytes sessionId = command.get(Keys.SESSION_ID);
         NoteBytes pidBytes = command.get(Keys.PID);
         
-        if (sessionIdBytes == null) {
+        if (sessionId == null) {
             NoteBytesMap error = new NoteBytesMap();
             error.put(Keys.STATUS, ProtocolMesssages.ERROR);
             error.put(Keys.ERROR_MESSAGE, new NoteBytes("session_id required"));
@@ -559,22 +499,28 @@ public class IODaemon extends FlowProcess {
             return CompletableFuture.completedFuture(null);
         }
         
-        String sessionId = sessionIdBytes.getAsString();
         int clientPid = pidBytes != null ? pidBytes.getAsInt() : 
             (int) ProcessHandle.current().pid();
         
         boolean alreadyExists = sessions.containsKey(sessionId);
 
+        if(alreadyExists){
+            NoteBytesMap response = new NoteBytesMap();
+            response.put(Keys.SESSION_ID, sessionId);
+            response.put(Keys.STATUS, ProtocolMesssages.ERROR);
+            response.put(Keys.ERROR_CODE, ErrorCodes.ALREADY_EXISTS);
+            response.put(Keys.MSG, new NoteBytes("Session already exists"));
+            reply(request, response.toNoteBytes());
+            return CompletableFuture.completedFuture(null);
+        }
         // Create new session (or return existing)
         return createSession(sessionId, clientPid)
             .thenAccept(session -> {
                 NoteBytesMap response = new NoteBytesMap();
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-                response.put(Keys.SESSION_ID, new NoteBytes(session.sessionId));
+                response.put(Keys.SESSION_ID, session.sessionId);
                 response.put(Keys.PID, new NoteBytes(session.clientPid));
-                if (alreadyExists) {
-                    response.put(Keys.MSG, new NoteBytes("Session already exists"));
-                }
+    
                 reply(request, response.toNoteBytes());
                 
                 Log.logMsg("[IODaemon] Created session: " + sessionId);
@@ -583,8 +529,8 @@ public class IODaemon extends FlowProcess {
                 NoteBytesMap error = new NoteBytesMap();
                 error.put(Keys.STATUS, ProtocolMesssages.ERROR);
                 error.put(Keys.ERROR_MESSAGE, new NoteBytes(ex.getMessage()));
+                error.put(Keys.ERROR_CODE, ErrorCodes.FAILED);
                 reply(request, error.toNoteBytes());
-                
                 Log.logError("[IODaemon] Failed to create session: " + ex.getMessage());
                 return null;
             });
@@ -596,12 +542,11 @@ public class IODaemon extends FlowProcess {
     private CompletableFuture<Void> handleDestroySessionRequest(
             NoteBytesMap command, RoutedPacket request) {
         
-        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
-        if (sessionIdBytes == null) {
+        NoteBytes sessionId = command.get(Keys.SESSION_ID);
+        if (sessionId == null) {
             return replyError(request, "session_id required");
         }
-        
-        String sessionId = sessionIdBytes.getAsString();
+    
         ClientSession session = getSession(sessionId);
         
         if (session == null) {
@@ -655,7 +600,7 @@ public class IODaemon extends FlowProcess {
     /**
      * Create a new client session (in-process, not a FlowProcess)
      */
-    public CompletableFuture<ClientSession> createSession(String sessionId, int clientPid) {
+    public CompletableFuture<ClientSession> createSession(NoteBytes sessionId, int clientPid) {
         ClientSession existing = sessions.get(sessionId);
         if (existing != null) {
             if (existing.isHealthy()) {
@@ -668,8 +613,7 @@ public class IODaemon extends FlowProcess {
             sessionId,
             clientPid,
             this,
-            daemonCommands,
-            serialExec
+            daemonCommands
         );
         session.init();
         sessions.put(sessionId, session);
@@ -677,7 +621,7 @@ public class IODaemon extends FlowProcess {
         return CompletableFuture.completedFuture(session);
     }
     
-    public CompletableFuture<Void> destroySession(String sessionId) {
+    public CompletableFuture<Void> destroySession(NoteBytes sessionId) {
         ClientSession session = sessions.remove(sessionId);
         if (session == null) {
             return CompletableFuture.completedFuture(null);
@@ -687,7 +631,7 @@ public class IODaemon extends FlowProcess {
         return session.shutdown();
     }
     
-    public ClientSession getSession(String sessionId) {
+    public ClientSession getSession(NoteBytes sessionId) {
         return sessions.get(sessionId);
     }
     
@@ -712,38 +656,8 @@ public class IODaemon extends FlowProcess {
         return registry.startProcess(devicePath);
     }
 
-    public void unregisterClaimedDevice(ContextPath devicePath) {
-        if (registry == null) {
-            return;
-        }
-        registry.unregisterProcess(devicePath);
-    }
+ 
     
-    // ===== SESSION REQUEST HANDLERS (ROUTED) =====
-    
-    /**
-     * Handle discovery request from session - forward to daemon
-     */
-    private CompletableFuture<Void> handleDiscoveryRequest(NoteBytesMap command, RoutedPacket request) {
-    
-        try {
-            NoteBytesObject daemonRequest = MessageBuilder.createCommand(
-                ProtocolMesssages.REQUEST_DISCOVERY
-            );
-            synchronized(daemonWriter){
-                daemonWriter.write(daemonRequest);
-                daemonWriter.flush();
-            }
-            // Reply immediately - device list comes via broadcast
-            reply(request, ProtocolObjects.SUCCESS_OBJECT);
-            return CompletableFuture.completedFuture(null);
-        } catch (IOException ex) {
-            reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
-            return CompletableFuture.failedFuture(ex);
-        }
-    
-    }
-
     /**
      * Helper to reply with error
      */
@@ -755,128 +669,24 @@ public class IODaemon extends FlowProcess {
         return CompletableFuture.completedFuture(null);
     }
     
-   /**
-     * Handle claim request from session - setup event stream
-     * IODaemon requests stream TO ClaimedDevice (for sending events)
-     */
-    private CompletableFuture<Void> handleClaimRequest(NoteBytesMap command, RoutedPacket request) {
-        NoteBytes sessionIdBytes = command.get(Keys.SESSION_ID);
-        NoteBytes deviceIdBytes = command.get(Keys.DEVICE_ID);
-        NoteBytes modeBytes = command.getOrDefault(Keys.MODE, Modes.PARSED);
-
-        if(deviceIdBytes == null || sessionIdBytes == null){
-            reply(request, ProtocolObjects.getErrorObject("Invalid claim request"));
-            return CompletableFuture.completedFuture(null);
-        }
-
-        String sessionId = sessionIdBytes != null ? sessionIdBytes.getAsString() : null;
-        String mode = modeBytes.getAsString();
-        
-       
-
-        ClientSession session = getSession(sessionId);
-        if (session == null) {
-            reply(request, ProtocolObjects.getErrorObject("Session not found: " + sessionId));
-            return CompletableFuture.completedFuture(null);
-        }
-        String deviceIdString = deviceIdBytes.getAsString();
-        ClaimedDevice claimedDevice = session.getClaimedDevice(deviceIdString);
-        if (claimedDevice == null) {
-            reply(request, ProtocolObjects.getErrorObject("Device not found in session: " + deviceIdString));
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        ContextPath devicePath = claimedDevice.getContextPath();
-        
-        // IODaemon requests stream TO ClaimedDevice (for sending events)
-        return requestStreamChannel(devicePath)
-            .thenCompose(eventChannel -> {
+    
+    CompletableFuture<Void> addClaimedDevice(ClaimedDevice claimedDevice){
+        NoteBytes deviceId = claimedDevice.getDeviceId();
+        getClaimedDevices().put(claimedDevice.getDeviceId(), claimedDevice);
+    
+         return requestStreamChannel(claimedDevice.getDevicePath())
+            .thenAccept(eventChannel -> {
                 // Store channel
-                deviceEventChannels.put(deviceIdBytes, eventChannel);
+                ChannelWriter channelWriter = new ChannelWriter(eventChannel);
+                deviceStreams.put(deviceId, channelWriter);
                 
                 // Create async writer for this channel
-                NoteBytesWriter eventWriter = new NoteBytesWriter(
-                    eventChannel.getQueuedOutputStream()
-                );
-                deviceEventWriters.put(deviceIdBytes, eventWriter);
-                
-                return eventChannel.getReadyFuture();
-            })
-            .thenRun(() -> {
-                // Send claim request to daemon
-                NoteBytesObject daemonRequest = MessageBuilder.createCommand(
-                    ProtocolMesssages.CLAIM_ITEM,
-                    new NoteBytesPair(Keys.DEVICE_ID, deviceIdBytes),
-                    new NoteBytesPair(Keys.PID, session.clientPid),
-                    new NoteBytesPair(Keys.MODE, mode)
-                );
-                
-                 try {
-                    synchronized(daemonWriter) {
-                        daemonWriter.write(daemonRequest);
-                        daemonWriter.flush();
-                    }
-                    
-                    // Reply success to session
-                    reply(request, ProtocolObjects.SUCCESS_OBJECT);
-                    
-                    Log.logMsg("Setup event stream for device: " + deviceIdString);
-                    
-                } catch (IOException e) {
-                    Log.logError("Failed to send claim to daemon: " + e.getMessage());
-                    reply(request, ProtocolObjects.getErrorObject(e.getMessage()));
-                }
-            })
-            .exceptionally(ex -> {
-                reply(request, ProtocolObjects.getErrorObject(ex.getMessage()));
-                return null;
+             
             });
-    }
-    
-    /**
-     * Handle release request from session - forward to daemon
-     */
-    private CompletableFuture<Void> handleReleaseRequest(NoteBytesMap command, RoutedPacket request) {
-        String deviceId = command.get(Keys.DEVICE_ID).getAsString();
-        try {
-
-            NoteBytesObject daemonRequest = MessageBuilder.createCommand(
-                ProtocolMesssages.RELEASE_ITEM,
-                new NoteBytesPair(Keys.DEVICE_ID, deviceId)
-            );
-            
-            synchronized(daemonWriter) {
-                daemonWriter.write(daemonRequest);
-                daemonWriter.flush();
-            }
-            
-            reply(request, ProtocolObjects.SUCCESS_OBJECT);
-            return CompletableFuture.completedFuture(null);
-        } catch (IOException e) {
-            reply(request, ProtocolObjects.getErrorObject(e.getMessage()));
-            return CompletableFuture.failedFuture(e);
-        }
-
     }
 
     
     // ===== DAEMON MESSAGE HANDLERS =====
-    
-    private void handleCommand(NoteBytesMap map) {
-        NoteBytes cmdBytes = map.get(Keys.CMD);
-        if (cmdBytes == null) {
-            Log.logError("No cmd field in TYPE_CMD message");
-            return;
-        }
-        
-        // Dispatch command subtype
-        MessageExecutor executor = m_execMsgMap.get(cmdBytes);
-        if (executor != null) {
-            executor.execute(map);
-        } else {
-            Log.logError("Unknown command: " + cmdBytes);
-        }
-    }
     
     /**
      * Broadcast device list to all discovering sessions
@@ -894,48 +704,60 @@ public class IODaemon extends FlowProcess {
     }
     
     private void handleDeviceClaimed(NoteBytesMap map) {
-        NoteBytes deviceIdBytes = map.get(Keys.DEVICE_ID);
-        if (deviceIdBytes == null) {
-            Log.logError("ITEM_CLAIMED missing device_id");
+        NoteBytes deviceId = map.get(Keys.DEVICE_ID);
+        NoteBytes sessionId = map.get(ProcessKeys.CORRELATION_ID);
+        if (deviceId == null) {
+            IllegalStateException ex = new IllegalStateException("deviceId missing");
+            Log.logError("[IODaemon]", "handleDeviceClaimed", ex);
+            //TODO: temporary only while testing
+            throw ex;
+        }
+        if(sessionId == null){
+            IllegalStateException ex = new IllegalStateException("correlationId missing");
+            Log.logError("[IODaemon]", "handleDeviceClaimed", ex);
+             //TODO: temporary only while testing
+            throw ex;
+        }
+        ClientSession session = sessions.get(sessionId);
+        if(session == null || session.state.hasState(ClientStateFlags.DISCONNECTING)){
+            if(session == null){
+                Log.logError("Device claimed but no owning session found: " + sessionId  + ":" + deviceId);
+            }
+            releaseDevice(sessionId, deviceId);
             return;
         }
         
-        String deviceId = deviceIdBytes.getAsString();
-        
-        // Find session that owns this device
-        for (ClientSession session : sessions.values()) {
-            if (session.hasDevice(deviceId)) {
-                session.handleDeviceClaimed(deviceId, map);
-                return;
-            }
-        }
-        
-        Log.logError("Device claimed but no owning session found: " + deviceId);
+        session.handleDeviceClaimed(deviceId, map);
+    }
+
+    private NoteBytes getDeviceSessionId(NoteBytes deviceId){
+        ClaimedDevice claimedDevice = claimedDevices.get(deviceId);
+        return claimedDevice != null ? claimedDevice.getSessionId() : null;
     }
     
     private void handleDeviceReleased(NoteBytesMap map) {
-        NoteBytes deviceIdBytes = map.get(Keys.DEVICE_ID);
-        if (deviceIdBytes == null) {
-            Log.logError("ITEM_RELEASED missing device_id");
+        NoteBytes deviceId = map.get(Keys.DEVICE_ID);
+        NoteBytes sessionId = map.get(ProcessKeys.CORRELATION_ID);
+
+        if (deviceId == null) {
+            String msg = "ITEM_RELEASED missing device_id";
+            Throwable ex = new IllegalStateException(msg);
+            Log.logError("[IODaemon]", msg, ex);
             return;
         }
         
-        String deviceId = deviceIdBytes.getAsString();
-        
-        // Notify session (device might already be removed from session map)
-        for (ClientSession session : sessions.values()) {
-            if (session.hasDevice(deviceId)) {
-                session.handleDeviceReleased(deviceId);
-                return;
-            }
-        }
-        
-        // Also check pending releases in case device was removed but release not confirmed
-        for (ClientSession session : sessions.values()) {
+        sessionId = sessionId == null ? getDeviceSessionId(deviceId) : sessionId;
+
+        ClientSession session = sessionId != null ? sessions.get(sessionId) : null;
+
+        if(session != null){
             session.handleDeviceReleased(deviceId);
+        }else{
+            Log.logMsg("[IODaemon] session not found for release: " + sessionId + ":" + deviceId);
+            completeDeviceRelease(deviceId);
         }
         
-        Log.logMsg("Device release confirmed by daemon: " + deviceId);
+     
     }
     
     private void handlePing(NoteBytesMap map) {
@@ -945,9 +767,7 @@ public class IODaemon extends FlowProcess {
         writeToDaemon(pong);
     }
     
-    private void handlePong(NoteBytesMap map) {
-        // Sessions handle their own pongs
-    }
+
     
     private void handleAccept(NoteBytesMap map) {
         NoteBytes statusBytes = map.get(Keys.STATUS);
@@ -962,38 +782,57 @@ public class IODaemon extends FlowProcess {
         Log.logError("Daemon error " + errorCode + ": " + errorMsg);
     }
     
-    private void handleDisconnected(NoteBytesMap map) {
-        Log.logMsg("Daemon disconnected");
-        handleDisconnect();
-    }
-    
+
     // ===== CLEANUP =====
     
     private void handleDisconnect() {
         connected = false;
         running = false;
-        
-        Log.logMsg("Socket disconnected, cleaning up all device streams...");
-        
-        // Cleanup all device event streams
-        for (NoteBytes deviceId : deviceEventChannels.keySet()) {
-            cleanupDeviceStreams(deviceId);
-        }
-        
-        // Cleanup all sessions (they'll handle their ClaimedDevice cleanup)
+
+        Log.logMsg("Socket disconnected, notifying sessions...");
+
+        // Take a snapshot of sessions before clearing maps.
         List<ClientSession> sessionsSnapshot = getSessions();
+
+        // For sessions that will be torn down (no onDisconnect handler registered),
+        // we need to release their devices locally since the daemon socket is gone
+        // and we won't receive ITEM_RELEASED confirmations.
+        //
+        // For sessions with an onDisconnect handler we leave device cleanup to
+        // the application — it may reconnect and reclaim the same devices.
         for (ClientSession session : sessionsSnapshot) {
+            // notifySessionDisconnect guards against already-disconnecting sessions
+            // and delegates to session.disconnected() which honours any registered
+            // onDisconnect handler — keeping the session alive or tearing it down.
             notifySessionDisconnect(session);
         }
-        
-        sessions.clear();
-        
-        Log.logMsg("Disconnected from daemon, cleaned up " + 
+
+        // Only clear daemon-side maps for sessions that are fully gone.
+        // Sessions kept alive by an onDisconnect handler still exist in `sessions`
+        // and will be cleaned up when the application calls shutdown() or when a
+        // new connection is established.
+        sessions.entrySet().removeIf(entry -> !entry.getValue().isHealthy());
+
+        // Clean up claimed devices that belong to fully-torn-down sessions.
+        claimedDevices.entrySet().removeIf(entry -> {
+            NoteBytes sessionId = entry.getValue().getSessionId();
+            return !sessions.containsKey(sessionId);
+        });
+        deviceStreams.entrySet().removeIf(entry -> {
+            ClaimedDevice dev = claimedDevices.get(entry.getKey());
+            return dev == null;
+        });
+
+        establsihConnectionFuture = null;
+        handshakeFuture = null;
+        Log.logMsg("Disconnected from daemon, processed " +
             sessionsSnapshot.size() + " sessions");
     }
 
     /**
-     * Notify session that daemon socket disconnected
+     * Notify session that daemon socket disconnected.
+     * Delegates to {@link ClientSession#disconnected()} which honours any
+     * registered {@link ClientSession.DisconnectHandler}.
      */
     private void notifySessionDisconnect(ClientSession session) {
         if (!session.isHealthy() || session.state.hasState(ClientStateFlags.DISCONNECTING)) {
@@ -1001,11 +840,7 @@ public class IODaemon extends FlowProcess {
             return;
         }
 
-        NoteBytesMap notification = new NoteBytesMap();
-        notification.put(Keys.EVENT, EventBytes.TYPE_DISCONNECTED);
-        notification.put(Keys.MSG, new NoteBytes("IODaemon socket disconnected"));
-        
-        session.handleDaemonDisconnect(notification);
+        session.disconnected();
     }
 
 
@@ -1043,4 +878,77 @@ public class IODaemon extends FlowProcess {
     public String getSocketPath() {
         return socketPath;
     }
+
+    public void completeDeviceRelease(NoteBytes deviceId) {
+        ClaimedDevice device = claimedDevices.remove(deviceId);
+        ChannelWriter deviceStream = deviceStreams.remove(deviceId);
+        if(device != null){
+            device.release();
+            registry.unregisterProcess(device.getDevicePath());
+        }
+        if(deviceStream != null){
+            deviceStream.shutdown();
+        }            
+        Log.logMsg("Cleaned up streams for device: " + deviceId);
+    }
+
+    private CompletableFuture<Void> releaseDevice(NoteBytes sessionId, NoteBytes deviceId){
+        NoteBytesObject request = MessageBuilder.createCommand(
+        ProtocolMesssages.RELEASE_ITEM,
+            new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+            new NoteBytesPair(ProcessKeys.CORRELATION_ID, sessionId)
+        );
+        
+        return writeToDaemon(request);
+    }
+
+     /**
+     * Commands implementation - called by ClientSessions on serialExec
+     */
+    private final IODaemonInterface daemonCommands = new IODaemonInterface() {
+        
+        @Override
+        public void requestDiscovery(NoteBytes sessionId) {
+            NoteBytesObject request = MessageBuilder.createCommand(
+                ProtocolMesssages.REQUEST_DISCOVERY
+            );
+            
+            writeToDaemon(request);
+        }
+        
+        @Override
+        public CompletableFuture<Void> claimDevice(
+            NoteBytes sessionId,
+            NoteBytes deviceId, 
+            NoteBytes mode
+        ) {
+            ClientSession session = sessions.get(sessionId);
+            if (session == null) {
+                String msg = "Session not found: " + sessionId;
+                Log.logError(msg);
+                return CompletableFuture.failedFuture(new IllegalStateException(msg));
+            }
+
+         
+            // Send claim to daemon via serialized write
+            NoteBytesObject request = MessageBuilder.createCommand(
+                ProtocolMesssages.CLAIM_ITEM,
+                new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+                new NoteBytesPair(Keys.PID, session.clientPid),
+                new NoteBytesPair(Keys.MODE, mode),
+                new NoteBytesPair(ProcessKeys.CORRELATION_ID, sessionId)
+            );
+            
+            return writeToDaemon(request);
+            
+        }
+        
+        @Override
+        public CompletableFuture<Void> releaseDevice(NoteBytes sessionId, NoteBytes deviceId) {
+            return IODaemon.this.releaseDevice(sessionId, deviceId);
+        }
+    };
+
+
+    
 }

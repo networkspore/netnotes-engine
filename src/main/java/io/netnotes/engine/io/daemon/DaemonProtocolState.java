@@ -1,9 +1,11 @@
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
+import io.netnotes.engine.io.capabilities.CapabilityRegistry.DefaultCapabilities;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.*;
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
+import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;
 import io.netnotes.engine.state.StateEventRegistry.DeviceStates;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
@@ -53,22 +55,24 @@ public class DaemonProtocolState {
         public static final int FLOW_CONTROL_PAUSED = ClientStates.FLOW_CONTROL_PAUSED;
         public static final int QUEUE_FULL          = ClientStates.QUEUE_FULL;
         
-        public static boolean canDiscover(BitFlagStateMachine sm) {
+      
+
+        public static boolean canDiscover(StateSnapshot sm) {
             return sm.hasState(AUTHENTICATED) && !sm.hasState(DISCONNECTING);
         }
         
-        public static boolean canClaim(BitFlagStateMachine sm) {
+        public static boolean canClaim(StateSnapshot sm) {
             return sm.hasState(AUTHENTICATED) && !sm.hasState(DISCONNECTING);
         }
         
-        public static boolean canStream(BitFlagStateMachine sm) {
+        public static boolean canStream(StateSnapshot sm) {
             return sm.hasState(HAS_CLAIMED_DEVICES) && 
                    !sm.hasState(PAUSED) &&
                    !sm.hasState(BACKPRESSURE_ACTIVE) &&
                    !sm.hasState(DISCONNECTING);
         }
         
-        public static boolean isHeartbeatHealthy(BitFlagStateMachine sm) {
+        public static boolean isHeartbeatHealthy(StateSnapshot sm) {
             return sm.hasState(HEARTBEAT_ENABLED) && 
                    !sm.hasState(HEARTBEAT_TIMEOUT);
         }
@@ -99,12 +103,12 @@ public class DaemonProtocolState {
     // ===== DEVICE STATE (REFACTORED) =====
     
     public static class DeviceState {
-        public final String deviceId;
+        public final NoteBytes deviceId;
         public final int ownerPid;
         
-        public final BitFlagStateMachine state;
+        public final ConcurrentBitFlagStateMachine state;
         private final DeviceCapabilitySet capabilities;
-        private final String deviceType;
+        private final NoteBytes deviceType;
         private final Map<String, Object> hardwareInfo;
         
         public final AtomicInteger pendingEvents = new AtomicInteger(0);
@@ -115,9 +119,9 @@ public class DaemonProtocolState {
         public volatile long lastEventTime = 0;
         
         public DeviceState(
-                String deviceId, 
+                NoteBytes deviceId, 
                 int ownerPid,
-                String deviceType,
+                NoteBytes deviceType,
                 DeviceCapabilitySet capabilities) {
             
             this.deviceId = deviceId;
@@ -125,7 +129,7 @@ public class DaemonProtocolState {
             this.deviceType = deviceType;
             this.capabilities = capabilities;
             this.hardwareInfo = new HashMap<>();
-            this.state = new BitFlagStateMachine(deviceId);
+            this.state = new ConcurrentBitFlagStateMachine(deviceId.getAsString());
             
             setupStateTransitions();
         }
@@ -148,26 +152,26 @@ public class DaemonProtocolState {
                 state.addState(DeviceStateFlags.DEVICE_ERROR);
                 state.removeState(DeviceStateFlags.STREAMING);
                 
-                for (String cap : capabilities.getEnabledCapabilities()) {
+                for (NoteBytes cap : capabilities.getEnabledCapabilities()) {
                     capabilities.disableCapability(cap);
                 }
             });
             
             state.onStateAdded(DeviceStateFlags.ENCRYPTION_ENABLED, (old, now, bit) -> {
-                if (!capabilities.hasCapability("encryption_supported")) {
+                if (!capabilities.hasCapability(DefaultCapabilities.ENCRYPTION_SUPPORTED)) {
                     Log.logError("Device does not support encryption");
                     state.removeState(DeviceStateFlags.ENCRYPTION_ENABLED);
                 } else {
-                    capabilities.enableCapability("encryption_enabled");
+                    capabilities.enableCapability(DefaultCapabilities.ENCRYPTION_ENABLED);
                 }
             });
             
             state.onStateAdded(DeviceStateFlags.FILTER_ENABLED, (old, now, bit) -> {
-                if (!capabilities.hasCapability("filtered_mode")) {
+                if (!capabilities.hasCapability( DefaultCapabilities.FILTERED_MODE)) {
                     Log.logError("Device does not support filtering");
                     state.removeState(DeviceStateFlags.FILTER_ENABLED);
                 } else {
-                    capabilities.enableCapability("filtered_mode");
+                    capabilities.enableCapability(DefaultCapabilities.FILTERED_MODE);
                 }
             });
         }
@@ -176,7 +180,7 @@ public class DaemonProtocolState {
             return capabilities;
         }
         
-        public boolean enableMode(String mode) {
+        public boolean enableMode(NoteBytes mode) {
             if (!capabilities.hasCapability(mode)) {
                 Log.logError("Mode not available: " + mode);
                 return false;
@@ -194,19 +198,19 @@ public class DaemonProtocolState {
             return enabled;
         }
         
-        public String getCurrentMode() {
+        public NoteBytes getCurrentMode() {
             return capabilities.getEnabledMode();
         }
         
-        public boolean hasCapability(String capability) {
+        public boolean hasCapability(NoteBytes capability) {
             return capabilities.hasCapability(capability);
         }
         
-        public boolean isCapabilityEnabled(String capability) {
+        public boolean isCapabilityEnabled(NoteBytes capability) {
             return capabilities.isEnabled(capability);
         }
         
-        public String getDeviceType() {
+        public NoteBytes getDeviceType() {
             return deviceType;
         }
         
@@ -221,18 +225,27 @@ public class DaemonProtocolState {
         public Map<String, Object> getAllHardwareInfo() {
             return Collections.unmodifiableMap(hardwareInfo);
         }
+
+        public static class ProtocolKeys{
+            public static final NoteBytesReadOnly OWNER_PID = new NoteBytesReadOnly("owner_pid");
+            public static final NoteBytesReadOnly CURRENT_MODE = new NoteBytesReadOnly("current_mode");
+            public static final NoteBytesReadOnly CAPABILITIES = new NoteBytesReadOnly("capabilities");
+            public static final NoteBytesReadOnly EVENTS_SENT = new NoteBytesReadOnly("events_sent");
+            public static final NoteBytesReadOnly EVENTS_DROPPED = new NoteBytesReadOnly("events_dropped");
+            public static final NoteBytesReadOnly PENDING_EVENTS = new NoteBytesReadOnly("pending_events");
+        }
         
         public NoteBytesObject toNoteBytes() {
             NoteBytesObject obj = new NoteBytesObject();
             obj.add(Keys.DEVICE_ID, deviceId);
-            obj.add("owner_pid", ownerPid);
+            obj.add(ProtocolKeys.OWNER_PID, ownerPid);
             obj.add(Keys.ITEM_TYPE, deviceType);
-            obj.add("current_mode", getCurrentMode());
-            obj.add("capabilities", capabilities.toNoteBytes());
+            obj.add(ProtocolKeys.CURRENT_MODE, getCurrentMode());
+            obj.add(ProtocolKeys.CAPABILITIES, capabilities.toNoteBytes());
             obj.add(Keys.STATE, new NoteBigInteger(state.getState()));
-            obj.add("events_sent", eventsSent);
-            obj.add("events_dropped", eventsDropped);
-            obj.add("pending_events", pendingEvents.get());
+            obj.add(ProtocolKeys.EVENTS_SENT, eventsSent);
+            obj.add(ProtocolKeys.EVENTS_DROPPED, eventsDropped);
+            obj.add(ProtocolKeys.PENDING_EVENTS, pendingEvents.get());
             return obj;
         }
         
@@ -273,7 +286,7 @@ public class DaemonProtocolState {
             eventBuffer.clear();
             pendingEvents.set(0);
             
-            for (String cap : capabilities.getEnabledCapabilities()) {
+            for (NoteBytes cap : capabilities.getEnabledCapabilities()) {
                 capabilities.disableCapability(cap);
             }
         }

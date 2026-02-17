@@ -1,6 +1,7 @@
 package io.netnotes.engine.io.daemon;
 
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
+import io.netnotes.engine.io.capabilities.CapabilityRegistry.DefaultCapabilities;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.io.capabilities.CapabilityRegistry;
 import io.netnotes.noteBytes.*;
@@ -35,11 +36,11 @@ public class DiscoveredDeviceRegistry {
     public static final NoteBytesReadOnly AVAILABLE_CAPABILITIES = new NoteBytesReadOnly("available_capabilities");
     
     // deviceId → device info (before claiming)
-    private final Map<String, DeviceDescriptorWithCapabilities> discoveredDevices = 
+    private final Map<NoteBytes, DeviceDescriptorWithCapabilities> discoveredDevices = 
         new ConcurrentHashMap<>();
     
     // Track claimed devices: deviceId → sourceId
-    private final List<String> claimedDevices = new CopyOnWriteArrayList<>();
+    private final List<NoteBytes> claimedDevices = new CopyOnWriteArrayList<>();
     
     /**
      * Container for device descriptor + capabilities
@@ -130,7 +131,7 @@ public class DiscoveredDeviceRegistry {
         IODaemonProtocol.USBDeviceDescriptor desc = new IODaemonProtocol.USBDeviceDescriptor();
         
         // Required fields
-        desc.deviceId = deviceMap.get(Keys.DEVICE_ID).getAsString();
+        desc.deviceId = deviceMap.get(Keys.DEVICE_ID);
         desc.vendorId = deviceMap.get(Keys.VENDOR_ID).getAsInt();
         desc.productId = deviceMap.get(Keys.PRODUCT_ID).getAsInt();
         desc.deviceClass = deviceMap.get(Keys.DEVICE_CLASS).getAsInt();
@@ -177,7 +178,7 @@ public class DiscoveredDeviceRegistry {
             usbDevice.product : "USB Device " + usbDevice.deviceId;
         NoteBytesReadOnly deviceType = usbDevice.getDeviceType();
         
-        DeviceCapabilitySet caps = new DeviceCapabilitySet(deviceName, deviceType.getAsString());
+        DeviceCapabilitySet caps = new DeviceCapabilitySet(deviceName, deviceType);
         
         // Get capability bits from daemon
         NoteBytes capsBytes = deviceMap.getOrDefault(AVAILABLE_CAPABILITIES, null);
@@ -192,7 +193,7 @@ public class DiscoveredDeviceRegistry {
         // Parse each bit into named capability
         for (int i = 0; i < capabilityBits.bitLength(); i++) {
             if (capabilityBits.testBit(i)) {
-                String capName = getCapabilityNameForBit(i);
+                NoteBytes capName = getCapabilityNameForBit(i);
                 if (capName != null && CAPABILITY_REGISTRY.isRegistered(capName)) {
                     caps.addAvailableCapability(capName);
                 } else {
@@ -218,59 +219,59 @@ public class DiscoveredDeviceRegistry {
      * Map bit position to capability name
      * Must match C++ capability_registry.h bit positions
      */
-    private String getCapabilityNameForBit(int bitPosition) {
+    private NoteBytes getCapabilityNameForBit(int bitPosition) {
         // Device types (0-7)
         return switch (bitPosition) {
-            case 0 -> "keyboard";
-            case 1 -> "mouse";
-            case 2 -> "touch";
-            case 3 -> "gamepad";
-            case 4 -> "pen";
-            case 5 -> "touchpad";
-            case 6 -> "scroll";
+            case 0 -> DefaultCapabilities.KEYBOARD;
+            case 1 -> DefaultCapabilities.MOUSE;
+            case 2 -> DefaultCapabilities.TOUCH;
+            case 3 -> DefaultCapabilities.GAMEPAD;
+            case 4 -> DefaultCapabilities.PEN;
+            case 5 -> DefaultCapabilities.TOUCHPAD;
+            case 6 -> DefaultCapabilities.SCROLL;
             
             // Modes (8-15)
-            case 8 -> "raw_mode";
-            case 9 -> "parsed_mode";
-            case 10 -> "passthrough_mode";
-            case 11 -> "filtered_mode";
+            case 8 -> DefaultCapabilities.RAW_MODE;
+            case 9 -> DefaultCapabilities.PARSED_MODE;
+            case 10 -> DefaultCapabilities.PASSTHROUGH_MODE;
+            case 11 -> DefaultCapabilities.FILTERED_MODE;
             
             // Coordinates (16-23)
-            case 16 -> "absolute_coordinates";
-            case 17 -> "relative_coordinates";
-            case 18 -> "screen_coordinates";
-            case 19 -> "normalized_coordinates";
+            case 16 -> DefaultCapabilities.ABSOLUTE_COORDINATES;
+            case 17 -> DefaultCapabilities.RELATIVE_COORDINATES;
+            case 18 -> DefaultCapabilities.SCREEN_COORDINATES;
+            case 19 -> DefaultCapabilities.NORMALIZED_COORDINATES;
             
             // Advanced features (24-31)
-            case 24 -> "high_precision";
-            case 25 -> "multiple_devices";
-            case 26 -> "global_capture";
-            case 27 -> "provides_scancodes";
-            case 28 -> "nanosecond_timestamps";
+            case 24 -> DefaultCapabilities.HIGH_PRECISION;
+            case 25 -> DefaultCapabilities.MULTIPLE_DEVICES;
+            case 26 -> DefaultCapabilities.GLOBAL_CAPTURE;
+            case 27 -> DefaultCapabilities.PROVIDES_SCANCODES;
+            case 28 -> DefaultCapabilities.NANOSECOND_TIMESTAMPS;
             
             // Device detection (32-39)
-            case 32 -> "device_type_known";
-            case 33 -> "hid_device";
-            case 34 -> "usb_device";
-            case 35 -> "bluetooth_device";
+            case 32 -> DefaultCapabilities.DEVICE_TYPE_KNOWN;
+            case 33 -> DefaultCapabilities.HID_DEVICE;
+            case 34 -> DefaultCapabilities.USB_DEVICE;
+            case 35 -> DefaultCapabilities.BLUETOOTH_DEVICE;
             
             // State (40-47)
-            case 40 -> "encryption_supported";
-            case 41 -> "encryption_enabled";
-            case 42 -> "buffering_supported";
-            case 43 -> "buffering_enabled";
+            case 40 -> DefaultCapabilities.ENCRYPTION_SUPPORTED;
+            case 41 -> DefaultCapabilities.ENCRYPTION_ENABLED;
+            case 42 -> DefaultCapabilities.BUFFERING_SUPPORTED;
+            case 43 -> DefaultCapabilities.BUFFERING_ENABLED;
             
             // Lifecycle (48-55)
-            case 48 -> "scene_location";
-            case 49 -> "scene_size";
-            case 50 -> "window_lifecycle";
-            case 51 -> "stage_position";
-            case 52 -> "stage_size";
-            case 53 -> "stage_focus";
+            case 48 -> DefaultCapabilities.SCENE_LOCATION;
+            case 49 -> DefaultCapabilities.SCENE_SIZE;
+            case 50 -> DefaultCapabilities.WINDOW_LIFECYCLE;
+            case 51 -> DefaultCapabilities.STAGE_POSITION;
+            case 52 -> DefaultCapabilities.STAGE_SIZE;
+            case 53 -> DefaultCapabilities.STAGE_FOCUS;
             
             // Composite (56-63)
-            case 56 -> "composite_source";
-            case 57 -> "multiple_children";
+            case 56 -> DefaultCapabilities.COMPOSITE_SOURCE;
+            case 57 -> DefaultCapabilities.MULTIPLE_CHILDREN;
             
             default -> null;
         };
@@ -281,7 +282,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Get device by deviceId
      */
-    public DeviceDescriptorWithCapabilities getDevice(String deviceId) {
+    public DeviceDescriptorWithCapabilities getDevice(NoteBytes deviceId) {
         return discoveredDevices.get(deviceId);
     }
     
@@ -313,7 +314,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Check if device is claimed
      */
-    public boolean isClaimed(String deviceId) {
+    public boolean isClaimed(NoteBytes deviceId) {
         return claimedDevices.contains(deviceId);
     }
     
@@ -325,7 +326,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Mark device as claimed with sourceId
      */
-    public void markClaimed(String deviceId) {
+    public void markClaimed(NoteBytes deviceId) {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device != null) {
             discoveredDevices.put(deviceId, device.claim());
@@ -337,7 +338,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Mark device as released (unclaimed)
      */
-    public void markReleased(String deviceId) {
+    public void markReleased(NoteBytes deviceId) {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device != null) {
             discoveredDevices.put(deviceId, new DeviceDescriptorWithCapabilities(
@@ -361,7 +362,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Validate mode compatibility before claiming
      */
-    public boolean validateModeCompatibility(String deviceId, String requestedMode) {
+    public boolean validateModeCompatibility(NoteBytes deviceId, NoteBytes requestedMode) {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device == null) {
             return false;
@@ -388,7 +389,7 @@ public class DiscoveredDeviceRegistry {
     /**
      * Get available modes for device
      */
-    public Set<String> getAvailableModes(String deviceId) {
+    public Set<NoteBytes> getAvailableModes(NoteBytes deviceId) {
         DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
         if (device == null) {
             return Collections.emptySet();

@@ -38,7 +38,6 @@ import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
@@ -59,7 +58,6 @@ import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 /**
@@ -1628,7 +1626,7 @@ public abstract class ContainerHandle<
                         new IllegalStateException("IODaemon not available"));
                 }
 
-                String sessionId = NoteUUID.createSafeUUID128();
+                NoteUUID sessionId = NoteUUID.createLocalUUID128();
                 int pid = (int) ProcessHandle.current().pid();
                 
                 return daemon.createSession(sessionId, pid)
