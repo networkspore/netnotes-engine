@@ -7,10 +7,12 @@ import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.process.ChannelWriter;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
@@ -122,9 +124,8 @@ public abstract class Container<
     
     // ===== STREAM CHANNELS =====
     protected StreamChannel renderStreamChannel = null;
-    protected StreamChannel eventStream = null;
-    private volatile boolean isEventReadyCache = false;
-    protected NoteBytesWriter eventWriter;
+    protected ChannelWriter eventWriter = null;
+ 
     protected CompletableFuture<Void> renderStreamFuture = new CompletableFuture<>();
     
     // ===== MESSAGE DISPATCH =====
@@ -132,7 +133,6 @@ public abstract class Container<
     protected final HashMap<NoteBytes, MessageExecutor> batchMsgMap = new HashMap<>();
 
     protected final SerializedVirtualExecutor containerExecutor = new SerializedVirtualExecutor();
-    protected final SerializedVirtualExecutor eventWriterExecutor = new SerializedVirtualExecutor();
 
     protected Consumer<T> onRequestMade = null;
 
@@ -364,21 +364,11 @@ public abstract class Container<
     
     public void handleEventStream(StreamChannel channel, ContextPath fromPath) {
         Log.logMsg("[Container:" + id + "] Event stream established to: " + fromPath);
-        this.eventStream = channel;
-        this.eventWriter = new NoteBytesWriter(channel.getChannelStream());
+
+        this.eventWriter = new ChannelWriter(channel);
     }
 
-    public boolean isEventStreamReady() {
-        if(!isEventReadyCache){
-            isEventReadyCache = eventStream != null && 
-                eventStream.getReadyFuture().isDone() &&
-                !eventStream.getReadyFuture().isCompletedExceptionally();
-            return isEventReadyCache;
-        }else{
-            isEventReadyCache = isEventReadyCache && eventStream != null;
-            return isEventReadyCache;
-        }
-    }
+
     
     protected void dispatchCommand(NoteBytesMap command) {
         NoteBytes cmd = command.get(Keys.CMD);
@@ -414,10 +404,30 @@ public abstract class Container<
             Log.logNoteBytes("[Container:" + id + "] Cannot emit event - no event stream", event);
             return;
         }
+
         Log.logNoteBytes("[Container.emitEvent]", event);
+
+        SerializedVirtualExecutor eventWriterExecutor =eventWriter.getWriteExec();
+        if(eventWriterExecutor.isShutdown()){
+            Log.logNoteBytes("[Container:" + id + "] Cannot emit event executor shutdown", event);
+            return;
+        }
         eventWriterExecutor.execute(()->{
+            NoteBytesWriter writer = eventWriter.getWriter();
+            if (writer == null) {
+                Log.logMsg("[Container] event stream waiting: " + getId());
+                try{
+                    writer = eventWriter.getReadyWriter()
+                        .orTimeout(2, TimeUnit.SECONDS)
+                        .join();
+                    
+                }catch(Exception e){
+                    Log.logError("[Container] event stream timed out: " + getId(), e);
+                    return;
+                }
+            }
             try {
-                eventWriter.write(event);
+                writer.write(event);
             } catch (IOException e) {
                 Log.logError("[Container:" + id + "]", "Error emitting event", e);
                 throw new CompletionException(e);
@@ -779,20 +789,9 @@ public abstract class Container<
     // ===== HELPERS =====
     
     protected void closeStreams() {
-        if (renderStreamChannel != null) {
-            try {
-                renderStreamChannel.close();
-            } catch (IOException e) {
-                Log.logError("[Container:" + id + "] Error closing render stream: " + e.getMessage());
-            }
-        }
-        
-        if (eventStream != null) {
-            try {
-                eventStream.close();
-            } catch (IOException e) {
-                Log.logError("[Container:" + id + "] Error closing event stream: " + e.getMessage());
-            }
+        StreamUtils.safeClose(renderStreamChannel);
+        if (eventWriter != null) {
+            eventWriter.shutdown();
         }
     }
     
