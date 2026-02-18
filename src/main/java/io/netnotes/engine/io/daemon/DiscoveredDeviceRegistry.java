@@ -350,6 +350,55 @@ public class DiscoveredDeviceRegistry {
     }
     
     /**
+     * Add or update a single device (for incremental DEVICE_ATTACHED notifications).
+     * Parses the device descriptor from the message and adds/updates in registry.
+     */
+    public void addOrUpdateDevice(NoteBytesMap deviceMap) {
+        try {
+            // Parse USB descriptor
+            IODaemonProtocol.USBDeviceDescriptor usbDevice = parseUSBDescriptor(deviceMap);
+            
+            // Parse capabilities from BigInteger
+            DeviceCapabilitySet capabilities = parseCapabilities(deviceMap, usbDevice);
+            
+            DeviceDescriptorWithCapabilities deviceInfo = new DeviceDescriptorWithCapabilities(
+                usbDevice, 
+                capabilities,
+                false
+            );
+            
+            discoveredDevices.put(deviceInfo.usbDevice.deviceId, deviceInfo);
+            Log.logMsg("Added/updated device: " + deviceInfo.usbDevice.deviceId);
+            
+        } catch (Exception e) {
+            Log.logError("Failed to add/update device: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Mark device as detached (physically removed from USB bus).
+     * Keeps the entry in registry but marks as unavailable.
+     */
+    public void markDetached(NoteBytes deviceId) {
+        DeviceDescriptorWithCapabilities device = discoveredDevices.get(deviceId);
+        if (device != null) {
+            // Create updated descriptor with available=false
+            IODaemonProtocol.USBDeviceDescriptor updatedDesc = device.usbDevice;
+            updatedDesc.available = false;
+            
+            DeviceDescriptorWithCapabilities updatedDevice = new DeviceDescriptorWithCapabilities(
+                updatedDesc,
+                device.capabilities,
+                device.claimed
+            );
+            
+            discoveredDevices.put(deviceId, updatedDevice);
+            Log.logMsg("Marked device " + deviceId + " as detached");
+        }
+    }
+    
+    /**
      * Clear all discovered devices
      */
     public void clear() {
@@ -404,11 +453,12 @@ public class DiscoveredDeviceRegistry {
         Log.logMsg("=== Discovered Devices ===");
         for (DeviceDescriptorWithCapabilities device : discoveredDevices.values()) {
             IODaemonProtocol.USBDeviceDescriptor usb = device.usbDevice;
-            System.out.printf("  %s: %s (type=%s, claimed=%s)%n",
+            String usbDeviceInfo = String.format("  %s: %s (type=%s, claimed=%s)%n",
                 usb.deviceId,
                 usb.product != null ? usb.product : "Unknown",
                 usb.getDeviceType(),
                 device.claimed);
+            Log.logMsg("    Device Info:: " + usbDeviceInfo);
             Log.logMsg("    Available modes: " + device.capabilities.getAvailableModes());
             Log.logMsg("    Capabilities: " + device.capabilities.getAvailableCapabilities());
         }

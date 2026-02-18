@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import io.netnotes.engine.io.ContextPath;
@@ -85,6 +86,46 @@ public class IODaemon extends FlowProcess {
     private final SerializedVirtualExecutor daemonInternalExec = new SerializedVirtualExecutor();
 
     private final Map<NoteBytes, ClientSession> sessions = new ConcurrentHashMap<>();
+
+    // Shared device registry - all sessions see the same discovered devices
+    private final DiscoveredDeviceRegistry discoveredDevices = new DiscoveredDeviceRegistry();
+    
+    /**
+     * Listener interface for device registry changes.
+     * Notified when devices are attached, detached, or claimed/released.
+     */
+    @FunctionalInterface
+    public interface DeviceRegistryChangeListener {
+        void onRegistryChanged(DiscoveredDeviceRegistry registry);
+    }
+    
+    private final List<DeviceRegistryChangeListener> registryChangeListeners = new CopyOnWriteArrayList<>();
+    
+    public void addRegistryChangeListener(DeviceRegistryChangeListener listener) {
+        registryChangeListeners.add(listener);
+    }
+    
+    public void removeRegistryChangeListener(DeviceRegistryChangeListener listener) {
+        registryChangeListeners.remove(listener);
+    }
+    
+    private void notifyRegistryChanged() {
+        for (DeviceRegistryChangeListener listener : registryChangeListeners) {
+            try {
+                listener.onRegistryChanged(discoveredDevices);
+            } catch (Exception e) {
+                Log.logError("[IODaemon] Registry change listener threw", e);
+            }
+        }
+    }
+    
+    /**
+     * Get the shared discovered device registry.
+     * All sessions share this registry - it's the single source of truth.
+     */
+    public DiscoveredDeviceRegistry getDiscoveredDevices() {
+        return discoveredDevices;
+    }
 
     // Message dispatch maps
     private final Map<NoteBytesReadOnly, MessageExecutor> m_execMsgMap = new HashMap<>();
@@ -451,6 +492,10 @@ public class IODaemon extends FlowProcess {
         m_execMsgMap.put(ProtocolMesssages.ITEM_LIST, this::broadcastDeviceList);
         m_execMsgMap.put(ProtocolMesssages.ITEM_CLAIMED, this::handleDeviceClaimed);
         m_execMsgMap.put(ProtocolMesssages.ITEM_RELEASED, this::handleDeviceReleased);
+        
+        // Device lifecycle notifications (daemon push model)
+        m_execMsgMap.put(ProtocolMesssages.DEVICE_ATTACHED, this::handleDeviceAttached);
+        m_execMsgMap.put(ProtocolMesssages.DEVICE_DETACHED, this::handleDeviceDetached);
     }
     
     /**
@@ -689,18 +734,143 @@ public class IODaemon extends FlowProcess {
     // ===== DAEMON MESSAGE HANDLERS =====
     
     /**
-     * Broadcast device list to all discovering sessions
+     * Sync device list from daemon to shared registry.
+     * Called on connect (full sync) or when daemon sends updated list.
+     * 
+     * This updates the single source of truth that all sessions share.
+     * Sessions no longer need to "discover" - they just read from the registry.
      */
     private void broadcastDeviceList(NoteBytesMap map) {
-        List<ClientSession> sessions = getSessions();
+        // Update shared registry
+        discoveredDevices.parseDeviceList(map);
         
-        for (ClientSession session : sessions) {
-            if (session.state.hasState(ClientStateFlags.DISCOVERING)) {
-                session.handleDeviceList(map);
-            }
+        // Notify all listeners (UI, etc.) that devices changed
+        notifyRegistryChanged();
+        
+        // Auto-reattach logic: if any keepAlive devices are now available, reclaim them
+        attemptAutoReattach();
+        
+        Log.logMsg("Device list synced to registry: " + discoveredDevices.getAllDevices().size() + " devices");
+    }
+    
+    /**
+     * Handle DEVICE_ATTACHED notification from daemon.
+     * A new USB device has appeared - add it to the registry.
+     */
+    private void handleDeviceAttached(NoteBytesMap map) {
+        NoteBytes deviceId = map.get(Keys.DEVICE_ID);
+        if (deviceId == null) {
+            Log.logError("[IODaemon] DEVICE_ATTACHED missing device_id");
+            return;
         }
         
-        Log.logMsg("Broadcasted device list to " + sessions.size() + " sessions");
+        // Daemon should send full device descriptor in this message
+        discoveredDevices.addOrUpdateDevice(map);
+        notifyRegistryChanged();
+        
+        Log.logMsg("[IODaemon] Device attached: " + deviceId);
+        
+        // Check if any keepAlive device is waiting for this deviceId
+        attemptAutoReattachForDevice(deviceId);
+    }
+    
+    /**
+     * Handle DEVICE_DETACHED notification from daemon.
+     * A USB device has been physically removed - mark unavailable in registry.
+     * 
+     * NOTE: This is different from DEVICE_DISCONNECTED:
+     *   - DETACHED: device removed from USB bus entirely (no longer in lsusb)
+     *   - DISCONNECTED: USB slot still present, but handle lost (can reattach)
+     */
+    private void handleDeviceDetached(NoteBytesMap map) {
+        NoteBytes deviceId = map.get(Keys.DEVICE_ID);
+        if (deviceId == null) {
+            Log.logError("[IODaemon] DEVICE_DETACHED missing device_id");
+            return;
+        }
+        
+        // Mark device as unavailable (keep in registry for history)
+        discoveredDevices.markDetached(deviceId);
+        notifyRegistryChanged();
+        
+        Log.logMsg("[IODaemon] Device detached: " + deviceId);
+    }
+    
+    /**
+     * Attempt to auto-reattach all keepAlive devices that are now available.
+     */
+    private void attemptAutoReattach() {
+        for (ClaimedDevice device : claimedDevices.values()) {
+            if (device.isKeepAlive() && !device.isActive()) {
+                NoteBytes deviceId = device.getDeviceId();
+                NoteBytes sessionId = device.getSessionId();
+                
+                ClientSession session = sessions.get(sessionId);
+                if (session == null) {
+                    continue;
+                }
+                
+                // Check if device is now available in registry
+                DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo = 
+                    discoveredDevices.getDevice(deviceId);
+                
+                if (deviceInfo != null && !deviceInfo.claimed()) {
+                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId);
+                    attemptReclaim(session, device, deviceInfo);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Attempt auto-reattach for a specific newly-attached device.
+     */
+    private void attemptAutoReattachForDevice(NoteBytes deviceId) {
+        for (ClaimedDevice device : claimedDevices.values()) {
+            if (device.getDeviceId().equals(deviceId) && 
+                device.isKeepAlive() && 
+                !device.isActive()) {
+                
+                NoteBytes sessionId = device.getSessionId();
+                ClientSession session = sessions.get(sessionId);
+                if (session == null) {
+                    continue;
+                }
+                
+                DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo = 
+                    discoveredDevices.getDevice(deviceId);
+                
+                if (deviceInfo != null && !deviceInfo.claimed()) {
+                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId);
+                    attemptReclaim(session, device, deviceInfo);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Attempt to reclaim a device (for auto-reattach).
+     * The ClaimedDevice instance already exists - we just need to re-request the claim from the daemon.
+     */
+    private void attemptReclaim(
+        ClientSession session,
+        ClaimedDevice device,
+        DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities deviceInfo
+    ) {
+        // Get the mode that was previously enabled
+        NoteBytes requestedMode = device.getDeviceState().getCurrentMode();
+        if (requestedMode == null) {
+            // Fallback to a default mode if none was enabled
+            requestedMode = ClientSession.Modes.PARSED;
+        }
+        
+        // Send claim request to daemon
+        daemonCommands.claimDevice(session.sessionId, device.getDeviceId(), requestedMode)
+            .exceptionally(ex -> {
+                Log.logError("[IODaemon] Auto-reattach claim failed for " + 
+                    device.getDeviceId() + ": " + ex.getMessage());
+                return null;
+            });
     }
     
     private void handleDeviceClaimed(NoteBytesMap map) {

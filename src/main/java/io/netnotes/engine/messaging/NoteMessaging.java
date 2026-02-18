@@ -52,6 +52,9 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly RELEASE_ITEM          = new NoteBytesReadOnly("release_item");
         public static final NoteBytesReadOnly ITEM_RELEASED         = new NoteBytesReadOnly("item_released");
         public static final NoteBytesReadOnly ITEM_TYPE             = new NoteBytesReadOnly("item_type");
+        public static final NoteBytesReadOnly DEVICE_ATTACHED       = new NoteBytesReadOnly("device_attached");
+        public static final NoteBytesReadOnly DEVICE_DETACHED       = new NoteBytesReadOnly("device_detached");
+
 
         // Control
         public static final NoteBytesReadOnly START_STREAM          = new NoteBytesReadOnly("start_stream");

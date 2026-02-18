@@ -59,8 +59,9 @@ public class ClientSession {
     private final IODaemonInterface daemonInterface;
     
     // ===== DEVICE MANAGEMENT =====
-    private final DiscoveredDeviceRegistry discoveredDevices = new DiscoveredDeviceRegistry();
-  
+    // NOTE: discoveredDevices is now shared across all sessions in IODaemon.
+    // Sessions read from daemon.getDiscoveredDevices() - no per-session discovery needed.
+    
     private volatile CompletableFuture<List<DeviceDescriptorWithCapabilities>> discoveryFuture;
     private final Map<NoteBytes, PendingDevice> pendingClaims = new ConcurrentHashMap<>();
     private final Map<NoteBytes, CompletableFuture<Void>> pendingReleases = new ConcurrentHashMap<>();
@@ -86,9 +87,27 @@ public class ClientSession {
     }
 
     private volatile DisconnectHandler onDisconnect = null;
+    
+    /**
+     * If true, the session will remain alive after daemon socket disconnection
+     * regardless of whether an onDisconnect handler is registered. The application
+     * is responsible for explicitly calling shutdown() or attempting reconnection.
+     * 
+     * This is useful for long-running applications that want to survive transient
+     * daemon restarts without losing device state.
+     */
+    private volatile boolean keepAlive = false;
 
     public void setOnDisconnect(DisconnectHandler handler) {
         this.onDisconnect = handler;
+    }
+    
+    public void setKeepAlive(boolean keepAlive) {
+        this.keepAlive = keepAlive;
+    }
+    
+    public boolean isKeepAlive() {
+        return keepAlive;
     }
 
     private static class PendingDevice{
@@ -153,7 +172,17 @@ public class ClientSession {
     // ===== DISCOVERY =====
     
     /**
-     * Request device discovery from daemon
+     * Get discovered devices from shared registry.
+     * 
+     * **BREAKING CHANGE**: This now returns immediately with the current state
+     * of the shared IODaemon registry. The registry is kept in sync automatically
+     * by the daemon push model (DEVICE_ATTACHED/DETACHED/ITEM_LIST notifications).
+     * 
+     * Applications should:
+     * 1. Call this method to get the current device list
+     * 2. Register a DeviceRegistryChangeListener on IODaemon for live updates
+     * 
+     * The old discovery model (request→wait→response) is no longer needed.
      */
     public CompletableFuture<List<DeviceDescriptorWithCapabilities>> discoverDevices() {
         if (!ClientStateFlags.canDiscover(state.getSnapshot())) {
@@ -161,48 +190,24 @@ public class ClientSession {
                 new IllegalStateException("Cannot discover in current state: " + 
                     state.getState()));
         }
-
-        CompletableFuture<List<DeviceDescriptorWithCapabilities>> existing = discoveryFuture;
-        if (existing != null && !existing.isDone()) {
-            return existing;
-        }
         
-        state.addState(ClientStateFlags.DISCOVERING);
-        CompletableFuture<List<DeviceDescriptorWithCapabilities>> future = new CompletableFuture<>();
-        discoveryFuture = future;
-
-        // Send discovery request to daemon via interface, serialized via executor in IODaemon
-        daemonInterface.requestDiscovery(sessionId);
-
-        return future
-            .exceptionally(ex -> {
-                state.removeState(ClientStateFlags.DISCOVERING);
-                if (!future.isDone()) {
-                    future.completeExceptionally(ex);
-                }
-                discoveryFuture = null;
-                Log.logError("[ClientSession:" + sessionId + "] Discovery failed: " + 
-                    ex.getMessage());
-                throw new RuntimeException("Discovery failed", ex);
-            });
+        // Return current registry state immediately - no daemon roundtrip
+        List<DeviceDescriptorWithCapabilities> devices = daemon.getDiscoveredDevices().getAllDevices();
+        return CompletableFuture.completedFuture(devices);
     }
     
     /**
-     * Handle device list from daemon
-     * Called directly by IODaemon when device list arrives
+     * Handle device list from daemon (legacy path for backward compatibility).
+     * 
+     * This is now handled centrally in IODaemon.broadcastDeviceList().
+     * Individual sessions no longer parse device lists themselves.
+     * 
+     * @deprecated Use IODaemon.getDiscoveredDevices() directly
      */
+    @Deprecated
     public void handleDeviceList(NoteBytesMap map) {
-        discoveredDevices.parseDeviceList(map);
-        state.removeState(ClientStateFlags.DISCOVERING);
-        CompletableFuture<List<DeviceDescriptorWithCapabilities>> future = discoveryFuture;
-        discoveryFuture = null;
-        if (future != null && !future.isDone()) {
-            future.complete(discoveredDevices.getAllDevices());
-        }
-        
-        int deviceCount = discoveredDevices.getAllDevices().size();
-        Log.logMsg("[ClientSession:" + sessionId + "] Discovery complete: " + 
-            deviceCount + " devices found");
+        // No-op: registry is updated centrally in IODaemon
+        Log.logMsg("[ClientSession:" + sessionId + "] handleDeviceList called (deprecated path)");
     }
     
     // ===== CLAIM =====
@@ -233,7 +238,7 @@ public class ClientSession {
                     state.getState()));
         }
 
-        DeviceDescriptorWithCapabilities deviceInfo = discoveredDevices.getDevice(deviceId);
+        DeviceDescriptorWithCapabilities deviceInfo = daemon.getDiscoveredDevices().getDevice(deviceId);
         if (deviceInfo == null) {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Device not found: " + deviceId));
@@ -244,8 +249,8 @@ public class ClientSession {
                 new IllegalStateException("Device already claimed: " + deviceId));
         }
 
-        if (!discoveredDevices.validateModeCompatibility(deviceId, requestedMode)) {
-            String availableModes = discoveredDevices.getAvailableModes(deviceId)
+        if (!daemon.getDiscoveredDevices().validateModeCompatibility(deviceId, requestedMode)) {
+            String availableModes = daemon.getDiscoveredDevices().getAvailableModes(deviceId)
                 .stream().map(NoteBytes::toString)
                 .collect(Collectors.joining(", "));
 
@@ -404,7 +409,7 @@ public class ClientSession {
             ContextPath devicePath = claimedDevice.getDevicePath();
             daemon.registerClaimedDevice(claimedDevice, devicePath);
            
-            discoveredDevices.markClaimed(deviceId);
+            daemon.getDiscoveredDevices().markClaimed(deviceId);
             state.addState(ClientStateFlags.HAS_CLAIMED_DEVICES);
             
             daemon.startProcess(devicePath)
@@ -463,7 +468,7 @@ public class ClientSession {
        
         daemon.completeDeviceRelease(deviceId);
 
-        discoveredDevices.markReleased(deviceId);
+        daemon.getDiscoveredDevices().markReleased(deviceId);
         
         if (claimedAnyDevices()) {
             state.removeState(ClientStateFlags.HAS_CLAIMED_DEVICES);
@@ -507,7 +512,7 @@ public class ClientSession {
                 daemon.completeDeviceRelease(deviceId);
                 
                 // Update discovery state
-                discoveredDevices.markReleased(deviceId);
+                daemon.getDiscoveredDevices().markReleased(deviceId);
                 
                 Log.logMsg("[ClientSession:" + sessionId + "] Released: " + deviceId);
                 
@@ -561,8 +566,7 @@ public class ClientSession {
 
         return CompletableFuture.allOf(releaseFutures.toArray(new CompletableFuture[0]))
             .thenRun(() -> {
-                // Clear discovery state
-                discoveredDevices.clear();
+                // Do NOT clear the shared registry - it belongs to IODaemon
                 state.removeState(ClientStateFlags.DISCOVERING);
                 state.removeState(ClientStateFlags.AUTHENTICATED);
                 state.removeState(ClientStateFlags.CONNECTED);
@@ -608,12 +612,17 @@ public class ClientSession {
     /**
      * Called by IODaemon when the daemon socket has dropped.
      *
-     * If an {@link DisconnectHandler} is registered the session is kept alive
-     * and the handler is invoked — the application may choose to reconnect
-     * while keeping claimed-device state intact.
+     * Behaviour depends on configuration:
+     * 
+     * 1. If {@link #keepAlive} is true: session is ALWAYS kept alive, handler
+     *    is invoked if present, but session is never torn down automatically.
+     * 
+     * 2. If a {@link DisconnectHandler} is registered (and keepAlive is false):
+     *    session is kept alive and the handler is invoked — the application may
+     *    choose to reconnect while keeping claimed-device state intact.
      *
-     * If no handler is registered we perform an immediate emergency shutdown
-     * (legacy / default behaviour).
+     * 3. If neither keepAlive nor a handler is set: immediate emergency shutdown
+     *    (legacy / default behaviour).
      */
     void disconnected() {
         // Always fail any pending discovery — the socket is gone.
@@ -625,21 +634,28 @@ public class ClientSession {
         }
 
         DisconnectHandler handler = this.onDisconnect;
-        if (handler != null) {
-            // Application has opted in to handling reconnect — do not tear down.
+        boolean shouldKeepAlive = this.keepAlive || (handler != null);
+        
+        if (shouldKeepAlive) {
+            // Application has opted in to keeping session alive during disconnection
             Log.logMsg("[ClientSession:" + sessionId +
-                "] Socket disconnected; delegating to onDisconnect handler (session kept alive)");
+                "] Socket disconnected; " + 
+                (keepAlive ? "keepAlive=true" : "onDisconnect handler registered") +
+                ", session kept alive");
             state.removeState(ClientStateFlags.CONNECTED);
-            try {
-                handler.onDisconnect(this);
-            } catch (Exception e) {
-                Log.logError("[ClientSession:" + sessionId + "] onDisconnect handler threw", e);
+            
+            if (handler != null) {
+                try {
+                    handler.onDisconnect(this);
+                } catch (Exception e) {
+                    Log.logError("[ClientSession:" + sessionId + "] onDisconnect handler threw", e);
+                }
             }
         } else {
-            // No handler — default path: tear down immediately.
+            // No handler and keepAlive=false — default path: tear down immediately.
             Log.logMsg("[ClientSession:" + sessionId +
-                "] Socket disconnected; no onDisconnect handler, performing emergency shutdown");
-            discoveredDevices.clear();
+                "] Socket disconnected; no onDisconnect handler and keepAlive=false, performing emergency shutdown");
+            // Note: do NOT clear the shared discoveredDevices registry - it belongs to IODaemon
             emergencyShutdown();
         }
     }
@@ -650,42 +666,42 @@ public class ClientSession {
      * Get device info from discovered registry
      */
     public DeviceDescriptorWithCapabilities getDeviceInfo(NoteBytes deviceId) {
-        return discoveredDevices.getDevice(deviceId);
+        return daemon.getDiscoveredDevices().getDevice(deviceId);
     }
     
     /**
      * Get all discovered devices
      */
     public List<DeviceDescriptorWithCapabilities> getAllDiscoveredDevices() {
-        return discoveredDevices.getAllDevices();
+        return daemon.getDiscoveredDevices().getAllDevices();
     }
     
     /**
      * Get unclaimed devices
      */
     public List<DeviceDescriptorWithCapabilities> getUnclaimedDevices() {
-        return discoveredDevices.getUnclaimedDevices();
+        return daemon.getDiscoveredDevices().getUnclaimedDevices();
     }
     
     /**
      * Get available modes for a device
      */
     public Set<NoteBytes> getAvailableModesForDevice(NoteBytes deviceId) {
-        return discoveredDevices.getAvailableModes(deviceId);
+        return daemon.getDiscoveredDevices().getAvailableModes(deviceId);
     }
     
     /**
      * Validate mode before claiming
      */
     public boolean canClaimWithMode(NoteBytes deviceId, NoteBytes mode) {
-        return discoveredDevices.validateModeCompatibility(deviceId, mode);
+        return daemon.getDiscoveredDevices().validateModeCompatibility(deviceId, mode);
     }
     
     /**
-     * Print discovered devices for debugging
+     * Log discovered devices for debugging
      */
-    public void printDiscoveredDevices() {
-        discoveredDevices.printDevices();
+    public void logDiscoveredDevices() {
+        daemon.getDiscoveredDevices().printDevices();
     }
     
     // ===== GETTERS =====
@@ -703,7 +719,7 @@ public class ClientSession {
     }
     
     public DiscoveredDeviceRegistry getDiscoveredDevices() {
-        return discoveredDevices;
+        return daemon.getDiscoveredDevices();
     }
     
     /**

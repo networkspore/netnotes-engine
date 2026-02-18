@@ -77,14 +77,47 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     private volatile boolean active = false;
     private final EventHandlerRegistry eventHandlerRegistry;
-    private volatile DeviceDisconnectHandler onDeviceDisconnected = null;
 
+    /**
+     * Optional callback invoked when the daemon reports that the physical USB
+     * device has disconnected.  This is NOT terminal — the ClaimedDevice
+     * infrastructure stays alive.  Consumers may attempt to wait for reattach
+     * and re-issue a claim, or call releaseDevice() to fully tear down.
+     *
+     * If no consumer is registered the disconnection is logged and silently
+     * absorbed; the caller is responsible for periodically polling isActive()
+     * or registering this handler.
+     */
     @FunctionalInterface
     public interface DeviceDisconnectHandler {
         void onDeviceDisconnected(ClaimedDevice device);
     }
 
-  
+    private volatile DeviceDisconnectHandler onDeviceDisconnected = null;
+    
+    /**
+     * If true, the ClaimedDevice will remain in an idle (active=false) state
+     * after physical USB disconnection even if no onDeviceDisconnected handler
+     * is registered. The device can be reclaimed after reattach without
+     * recreating the ClaimedDevice instance.
+     * 
+     * Useful for devices that frequently disconnect/reconnect (USB hubs,
+     * power-cycled devices, etc.) where you want to preserve session state.
+     */
+    private volatile boolean keepAlive = false;
+
+    public void setOnDeviceDisconnected(DeviceDisconnectHandler handler) {
+        this.onDeviceDisconnected = handler;
+    }
+    
+    public void setKeepAlive(boolean keepAlive) {
+        this.keepAlive = keepAlive;
+    }
+    
+    public boolean isKeepAlive() {
+        return keepAlive;
+    }
+
 
     private final byte[] ackBytes;
     /**
@@ -137,12 +170,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
    }
 
     
-
-    public void setOnDeviceDisconnected(DeviceDisconnectHandler handler) {
-        this.onDeviceDisconnected = handler;
-    }
-
-    
     @Override
     public void onStart() {
         Log.logMsg("ClaimedDevice starting: " + devicePath);
@@ -162,6 +189,8 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         m_execMsgMap.put(EventBytes.TYPE_ENCRYPTION_OFFER, this::handleEncryptionOffer);
         m_execMsgMap.put(EventBytes.TYPE_ENCRYPTION_READY, this::handleEncryptionReady);
         m_execMsgMap.put(EventBytes.TYPE_ERROR, this::handleEncryptionError);
+        // Daemon notifies us that the physical USB device has disconnected.
+        // This is non-terminal: the session and ClaimedDevice instance survive.
         m_execMsgMap.put(ProtocolMesssages.DEVICE_DISCONNECTED, this::handleDeviceDisconnectedNotification);
     }
     
@@ -229,39 +258,6 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     }
 
 
-    /**
-     * Handle DEVICE_DISCONNECTED notification from daemon.
-     *
-     * The physical USB device has gone away.  This is informational: the
-     * ClaimedDevice session infrastructure stays alive.  We mark ourselves
-     * inactive so that event-stream reads stop cleanly, then invoke the
-     * registered disconnect handler so the application layer can decide what
-     * to do (wait, retry, give up, show UI, etc.).
-     *
-     * If no handler is registered we log and leave the instance idle.  The
-     * session will stay open; the application can still call releaseDevice()
-     * at any time.
-     */
-    private void handleDeviceDisconnectedNotification(NoteBytesMap msg) {
-        Log.logMsg("[ClaimedDevice:" + deviceId + "] Physical USB disconnect received from daemon");
-
-        // Stop the incoming event stream — there will be no more events until
-        // the device is reclaimed after a reattach.
-        active = false;
-
-        DeviceDisconnectHandler handler = this.onDeviceDisconnected;
-        if (handler != null) {
-            try {
-                handler.onDeviceDisconnected(this);
-            } catch (Exception e) {
-                Log.logError("[ClaimedDevice:" + deviceId + "] onDeviceDisconnected handler threw", e);
-            }
-        } else {
-            Log.logMsg("[ClaimedDevice:" + deviceId +
-                "] No onDeviceDisconnected handler registered; device is idle until released or reclaimed");
-        }
-    }
-
 
     private void createEvent(NoteBytes event)
     {
@@ -286,13 +282,13 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      */
     private void handleIncomingPayload(NoteBytesReadOnly payload) {
    
-        // Check if this is a control message (encryption negotiation)
+        // Check if this is a control message (encryption negotiation or device lifecycle)
         if (payload.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
             NoteBytesMap msgMap = payload.getAsNoteBytesMap();
             NoteBytesReadOnly typeBytes = msgMap.getReadOnly(Keys.EVENT);
             
             if (typeBytes != null) {
-                // Handle encryption control message
+                // Dispatch any registered control message (encryption, device disconnect, etc.)
                 MessageExecutor executor = m_execMsgMap.get(typeBytes);
                 if (executor != null) {
                     executor.execute(msgMap);
@@ -328,6 +324,51 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
 
 
 
+
+    // ===== DEVICE DISCONNECT NOTIFICATION (non-terminal) =====
+
+    /**
+     * Handle DEVICE_DISCONNECTED notification from daemon.
+     *
+     * The physical USB device has gone away.  This is informational: the
+     * ClaimedDevice session infrastructure stays alive.  We mark ourselves
+     * inactive so that event-stream reads stop cleanly, then invoke the
+     * registered disconnect handler so the application layer can decide what
+     * to do (wait, retry, give up, show UI, etc.).
+     *
+     * Behaviour:
+     * - If keepAlive=true: device stays idle regardless of handler registration
+     * - If handler is registered (and keepAlive=false): handler invoked, device stays idle
+     * - If neither keepAlive nor handler: device logs and stays idle
+     * 
+     * The session remains open in all cases; the application can call release()
+     * at any time to fully tear down.
+     */
+    private void handleDeviceDisconnectedNotification(NoteBytesMap msg) {
+        Log.logMsg("[ClaimedDevice:" + deviceId + "] Physical USB disconnect received from daemon");
+
+        // Stop the incoming event stream — there will be no more events until
+        // the device is reclaimed after a reattach.
+        active = false;
+
+        boolean shouldKeepAlive = this.keepAlive;
+        DeviceDisconnectHandler handler = this.onDeviceDisconnected;
+        
+        if (shouldKeepAlive) {
+            Log.logMsg("[ClaimedDevice:" + deviceId + "] keepAlive=true, device kept idle for potential reattach");
+        }
+        
+        if (handler != null) {
+            try {
+                handler.onDeviceDisconnected(this);
+            } catch (Exception e) {
+                Log.logError("[ClaimedDevice:" + deviceId + "] onDeviceDisconnected handler threw", e);
+            }
+        } else if (!shouldKeepAlive) {
+            Log.logMsg("[ClaimedDevice:" + deviceId +
+                "] No onDeviceDisconnected handler and keepAlive=false; device is idle until explicitly released");
+        }
+    }
 
     // ===== ENCRYPTION NEGOTIATION =====
     
@@ -396,28 +437,27 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      * Send control message via control stream
      */
     private void sendDeviceControlMessage(NoteBytesObject message) {
-        SerializedVirtualExecutor controlWriteExec =outgoingControlStream  != null ? outgoingControlStream.getWriteExec() : null;
+        SerializedVirtualExecutor controlWriteExec = outgoingControlStream != null
+            ? outgoingControlStream.getWriteExec()
+            : null;
 
-        if(controlWriteExec != null && controlWriteExec.isShutdown()){
+        if (controlWriteExec == null || controlWriteExec.isShutdown()) {
+            Log.logError("[ClaimedDevice] Control stream unavailable for: " + deviceId);
             return;
         }
         
-        controlWriteExec.executeFireAndForget(()->{
+        controlWriteExec.executeFireAndForget(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
-                
-                Log.logMsg("[ClaiemdDevice] Control stream waiting: " + deviceId);
-                try{
+                Log.logMsg("[ClaimedDevice] Control stream not yet ready, waiting: " + deviceId);
+                try {
                     controlStreamWriter = outgoingControlStream.getReadyWriter()
                         .orTimeout(2, TimeUnit.SECONDS)
                         .join();
-                }catch(Exception e){
-                    Log.logError("[ClaiemdDevice] Control stream timed out: " + deviceId, e);
+                } catch (Exception e) {
+                    Log.logError("[ClaimedDevice] Control stream timed out: " + deviceId, e);
+                    return;
                 }
-            
-            }else{
-                Log.logError("[ClaiemdDevice] Control stream unavailable: " + deviceId);
-                return;
             }
             try {
                 controlStreamWriter.write(deviceId);
@@ -444,33 +484,33 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     }
     
     private void sendAck(int count) {
-        SerializedVirtualExecutor controlWriteExec =outgoingControlStream  != null ? outgoingControlStream.getWriteExec() : null;
+        SerializedVirtualExecutor controlWriteExec = outgoingControlStream != null
+            ? outgoingControlStream.getWriteExec()
+            : null;
 
-        if(controlWriteExec != null && controlWriteExec.isShutdown()){
+        if (controlWriteExec == null || controlWriteExec.isShutdown()) {
             return;
         }
         
-        controlWriteExec.executeFireAndForget(()->{
+        controlWriteExec.executeFireAndForget(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
-                
-                Log.logMsg("[ClaiemdDevice] Control stream waiting: " + deviceId);
-                try{
+                Log.logMsg("[ClaimedDevice] Control stream not yet ready for ack, waiting: " + deviceId);
+                try {
                     controlStreamWriter = outgoingControlStream.getReadyWriter()
                         .orTimeout(2, TimeUnit.SECONDS)
                         .join();
-                }catch(Exception e){
-                    Log.logError("[ClaiemdDevice] Control stream timed out: " + deviceId, e);
+                } catch (Exception e) {
+                    Log.logError("[ClaimedDevice] Control stream timed out for ack: " + deviceId, e);
+                    return;
                 }
-            
             }
-
             try {
                 controlStreamWriter.write(deviceId);
                 controlStreamWriter.write(getAckBytes(count));
                 controlStreamWriter.flush();
             } catch (IOException e) {
-                Log.logError("Failed to send control message: " + e.getMessage());
+                Log.logError("Failed to send ack: " + e.getMessage());
             }
         });
     }
