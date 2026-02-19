@@ -56,7 +56,6 @@ import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
-import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
@@ -91,7 +90,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  */
 public abstract class ContainerHandle<
     B extends BatchBuilder<S>,
-    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,EF, BLD>,
+    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,EF,CCFG,BLD>,
     P extends SpatialPoint<P>,
     R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
     S extends SpatialRegion<P,S>,
@@ -101,24 +100,24 @@ public abstract class ContainerHandle<
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
     LD extends LayoutData<B,R,S,LD,?>,
     LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
-    EF extends EventsFactory<P,S>,
-    BLD extends ContainerHandle.Builder<H,S,BLD>
+    EF extends ContainerEventsFactory<P,S>,
+    CCFG extends ContainerConfig<S,CCFG>,
+    BLD extends ContainerHandle.Builder<H,S,CCFG,BLD>
 > extends FlowProcess {
     
     // ===== CREATION PARAMETERS =====
     protected final ContainerId containerId;
-    protected final ContainerConfig containerConfig;
+    protected final CCFG containerConfig;
     protected final ContextPath renderingServicePath;
     protected final String title;
     protected final ContextPath ioDaemonPath;
     protected final RM renderableLayoutManager;
     protected final FLM floatingLayerManager;
-    protected final boolean autoFocusOnCreate;
 
     protected Throwable streamError = null;
 
     private ClientSession ioSession = null;
-    private final Map<String, DM> deviceManagers = new HashMap<>();
+    private final Map<NoteBytes, DM> deviceManagers = new HashMap<>();
     
     // ===== RUNTIME STATE =====
 
@@ -202,13 +201,7 @@ public abstract class ContainerHandle<
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
         this.ioDaemonPath = builder.ioDaemonPath;
-        this.allocatedRegion = builder.initialRegion;
         this.eventsFactory = createEventsFactory();
-        if(builder.initialRegion != null){
-            this.dimensionsInitialized = true;
-        }
-        this.autoFocusOnCreate = builder.autoFocus;
-        
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
         //runs state changes on UI executor, deffers if during layout
         this.stateMachine.setSerialExecutor(uiExecutor);
@@ -373,6 +366,10 @@ public abstract class ContainerHandle<
     }
 
     protected void handleOnFocused() {
+        Log.logMsg("[ContainerHandle:" + getName() + "] onFocused - renderSnapshot " + renderReadySnapshot);
+        if (renderReadySnapshot) {
+            render();  // repopulate cells after focus granted
+        }
         if (notifyOnFocused != null) {
             notifyOnFocused.accept(self());
         }
@@ -470,7 +467,11 @@ public abstract class ContainerHandle<
 
     protected void updateIsRendering() {
         boolean prev = renderReadySnapshot;
-
+        Log.logMsg("[ContainerHandle] updateIsRendering: \n\tSTATE_STREAM_READY:" + stateMachine.hasState(Container.STATE_STREAM_READY) 
+            + "\n\t STATE_STREAM_ERROR:" + stateMachine.hasState(Container.STATE_STREAM_ERROR)
+            + "\n\t STATE_VISIBLE: " + stateMachine.hasState(Container.STATE_VISIBLE)
+            + "\n\t STATE_HIDDEN: " + stateMachine.hasState(Container.STATE_HIDDEN)
+        );
         renderReadySnapshot = renderStream != null && 
             stateMachine.hasState(Container.STATE_STREAM_READY) &&
             !stateMachine.hasState(Container.STATE_STREAM_ERROR) &&
@@ -621,19 +622,18 @@ public abstract class ContainerHandle<
     // ===== BUILDER =====
 
     public static abstract class Builder<
-        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,?,BLD>,
+        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,?,CCFG,BLD>,
         S extends SpatialRegion<?,S>,
-        BLD extends ContainerHandle.Builder<H,S,BLD>
+        CCFG extends ContainerConfig<S,CCFG>,
+        BLD extends ContainerHandle.Builder<H,S,CCFG, BLD>
     > {
         public String name;
         public String title;
         public final NoteBytesReadOnly rendererId;
-        public ContainerConfig containerConfig = new ContainerConfig();
+        public CCFG containerConfig = createContainerConfig();
         public final ContextPath renderingServicePath;
-        public boolean autoFocus = true;
         public EventFilterList filterList = null;
         public ContextPath ioDaemonPath = null;
-        public S initialRegion = null;
 
         protected Builder(String name, ContextPath renderingServicePath, NoteBytesReadOnly rendererId) {
             this.name = name;
@@ -641,6 +641,8 @@ public abstract class ContainerHandle<
             this.rendererId = rendererId;
             this.renderingServicePath = renderingServicePath;
         }
+
+        protected abstract CCFG createContainerConfig();
 
         @SuppressWarnings("unchecked")
         protected BLD self() {
@@ -663,13 +665,8 @@ public abstract class ContainerHandle<
         }
         
       
-        public BLD config(ContainerConfig config) {
+        public BLD config(CCFG config) {
             this.containerConfig = config;
-            return self();
-        }
-
-        public BLD autoFocus(boolean autoFocus) {
-            this.autoFocus = autoFocus;
             return self();
         }
         
@@ -683,11 +680,7 @@ public abstract class ContainerHandle<
             return self();
         }
 
-        public BLD initialRegion(S initialRegion){
-            this.initialRegion = initialRegion;
-            return self();
-        }
-        
+
         /**
          * Add an event filter to the list 
          * @param filter filter to add
@@ -742,7 +735,10 @@ public abstract class ContainerHandle<
 
     public CompletableFuture<Void> create(){
         if(!canCreate()){
+            Log.logError("[ContainerHandle] cannot create()");
             if(isRenderStreamError()){
+                Log.logError("[ContainerHandle] renderStreamError", streamError);
+
                 return CompletableFuture.failedFuture(streamError);
             }
             return CompletableFuture.completedFuture(null);
@@ -759,9 +755,8 @@ public abstract class ContainerHandle<
         createCmd.put(Keys.PATH, getParentPath().toNoteBytes());
         createCmd.put(Keys.CONFIG, containerConfig.toNoteBytes());
         createCmd.put(ContainerCommands.RENDERER_ID, rendererId);
-        createCmd.put(ContainerCommands.AUTO_FOCUS, this.autoFocusOnCreate ? NoteBoolean.TRUE : NoteBoolean.FALSE);
         
-
+        Log.logNoteBytes("[ContainerHandle] requesting container creation", createCmd);
         return request(renderingServicePath, createCmd.toNoteBytesReadOnly(), Duration.ofMillis(500))
             .thenCompose(response -> {
                 NoteBytesMap responseMap = response.getPayload().getAsNoteBytesMap();
@@ -770,8 +765,9 @@ public abstract class ContainerHandle<
                     String errorMsg = ProtocolObjects.getErrMsg(responseMap);
                     throw new RuntimeException("Container creation failed: " + errorMsg);
                 }
-            
-                allocatedRegion = extractRegionFromResponse(responseMap);
+                Log.logNoteBytes("[ContainerHandle] creation responded", responseMap);
+
+                allocatedRegion = extractRegionFromCreateResponse(responseMap);
                 dimensionsInitialized = true;
                 Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
                 uiExecutor.executeFireAndForget(()->{
@@ -816,7 +812,7 @@ public abstract class ContainerHandle<
      * @param responseMap Response from renderer
      * @return Initial region in renderer's coordinate system
      */
-    protected abstract S extractRegionFromResponse(NoteBytesMap responseMap);
+    protected abstract S extractRegionFromCreateResponse(NoteBytesMap responseMap);
 
  
 
@@ -1112,7 +1108,7 @@ public abstract class ContainerHandle<
         return title;
     }
     
-    public ContainerConfig getConfig() {
+    public CCFG getConfig() {
         return containerConfig;
     }
     
@@ -1239,7 +1235,7 @@ public abstract class ContainerHandle<
      * Perform actual render - runs on serialExec
      */
     private void renderInternal() {
-       
+        Log.logMsg("[ContainerHandle: "+getName()+"] + renderInternal");
         B batch = createBatch();
         rootRenderable.toBatch(batch);
         
@@ -1249,18 +1245,7 @@ public abstract class ContainerHandle<
         }
         
         NoteBytes batchCommand = batch.build();
-        
-        /* Send async on stream executor (don't block serialExec)
-        renderStream.getWriteExecutor().execute(() -> {
-            try {
-                renderWriter.write(batchCommand);
-                renderWriter.flush();
-            } catch (IOException ex) {
-                Log.logError("[ContainerHandle:" + containerId + 
-                    "] Render write failed", ex);
-            }
-        });*/
-
+        Log.logNoteBytes("[ContainerHandle: "+getName()+"] + renderInternal", batchCommand);
         sendRenderCommand(batchCommand);
         
         rootRenderable.clearRenderFlag();
@@ -1279,7 +1264,7 @@ public abstract class ContainerHandle<
     private void setupEventHandlers() {
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RENDERED, 
             this::handleContainerRendered);
-        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_REGION_CHANGED, 
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RESIZE, 
             this::handleContainerResized);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSED, 
             this::handleContainerClosed);
@@ -1690,7 +1675,7 @@ public abstract class ContainerHandle<
     /**
      * Register a device manager with this handle
      */
-    public CompletableFuture<DM> addDeviceManager(String id, DM manager) {
+    public CompletableFuture<DM> addDeviceManager(NoteBytes id, DM manager) {
         return uiExecutor.submit(() -> {
             deviceManagers.put(id, manager);
             manager.attachToHandle(self());
@@ -1698,7 +1683,7 @@ public abstract class ContainerHandle<
         });
     }
 
-     public CompletableFuture<DM> getDeviceManager(String id) {
+     public CompletableFuture<DM> getDeviceManager(NoteBytes id) {
         return uiExecutor.submit(() -> {
             return deviceManagers.get(id);
         });
@@ -1708,7 +1693,7 @@ public abstract class ContainerHandle<
     /**
      * Remove a device manager
      */
-    public CompletableFuture<Void> removeDeviceManager(String id) {
+    public CompletableFuture<Void> removeDeviceManager(NoteBytes id) {
         return uiExecutor.submit(() -> deviceManagers.remove(id)).thenCompose(manager->{
             if(manager != null){
                 Log.logMsg("[ContainerHandle:" + containerId + "] Device manager removed: " + id);

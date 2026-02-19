@@ -47,7 +47,7 @@ public class RenderingService extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // ===== RENDERER MANAGEMENT =====
-    private final Map<NoteBytesReadOnly, UIRenderer<?,?,?>> renderers = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, UIRenderer<?,?,?,?>> renderers = new ConcurrentHashMap<>();
     private final NoteBytesReadOnly systemDefaultRendererId;
     
     // ===== MESSAGE DISPATCH =====
@@ -56,7 +56,7 @@ public class RenderingService extends FlowProcess {
     /**
      * Constructor with system default renderer
      */
-    public RenderingService(String name, UIRenderer<?,?,?> systemDefaultRenderer) {
+    public RenderingService(String name, UIRenderer<?,?,?,?> systemDefaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine(name);
         
@@ -72,7 +72,7 @@ public class RenderingService extends FlowProcess {
     
     // ===== RENDERER REGISTRATION =====
     
-    public void registerRenderer(UIRenderer<?,?,?> renderer) {
+    public void registerRenderer(UIRenderer<?,?,?,?> renderer) {
         if (renderer == null || renderer.getId() == null) {
             throw new IllegalArgumentException("rendererId and renderer required");
         }
@@ -100,7 +100,7 @@ public class RenderingService extends FlowProcess {
             throw new IllegalArgumentException("Cannot unregister system default renderer");
         }
         
-        UIRenderer<?,?,?> renderer = renderers.get(rendererId);
+        UIRenderer<?,?,?,?> renderer = renderers.get(rendererId);
         if (renderer != null && renderer.getContainerCount() > 0) {
             throw new IllegalStateException(
                 "Cannot unregister renderer with active containers: " + rendererId
@@ -122,7 +122,7 @@ public class RenderingService extends FlowProcess {
     public NoteBytes selectRendererId(NoteBytes rendererId) {
         // TIER 1: Explicit renderer
         if (rendererId != null && !rendererId.isEmpty()) {
-            UIRenderer<?,?,?> renderer = renderers.get(rendererId);
+            UIRenderer<?,?,?,?> renderer = renderers.get(rendererId);
             
             if (renderer == null) {
                 throw new IllegalArgumentException("Renderer not found: " + rendererId);
@@ -168,7 +168,7 @@ public class RenderingService extends FlowProcess {
         Log.logMsg("[RenderingService] Started at: " + contextPath);
         
         // Check if default renderer is active
-        UIRenderer<?,?,?> defaultRenderer = renderers.get(systemDefaultRendererId);
+        UIRenderer<?,?,?,?> defaultRenderer = renderers.get(systemDefaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
             Log.logMsg("[RenderingService] Default renderer active");
             state.addState(RenderingServiceStates.UI_RENDERER_ACTIVE);
@@ -247,13 +247,13 @@ public class RenderingService extends FlowProcess {
         NoteBytes rendererId = selectRendererId(rendererIdBytes);
         
 
-        UIRenderer<?,?,?> renderer = rendererId != null ? renderers.get(rendererId) : null;
+        UIRenderer<?,?,?,?> renderer = rendererId != null ? renderers.get(rendererId) : null;
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
             return CompletableFuture.completedFuture(null);
         }
-        
+        Log.logMsg("[RenderingService] fording containerCmd to renderer");
         // Forward to renderer and handle result
         return renderer.handleMessage(msg, packet)
             .exceptionally(ex -> {
@@ -299,7 +299,7 @@ public class RenderingService extends FlowProcess {
      */
     private CompletableFuture<Void> forwardToRenderer(NoteBytes rendererId, NoteBytesMap msg, RoutedPacket packet) {
      
-        UIRenderer<?,?,?> renderer = renderers.get(rendererId);
+        UIRenderer<?,?,?,?> renderer = renderers.get(rendererId);
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
@@ -350,8 +350,8 @@ public class RenderingService extends FlowProcess {
         // Try each renderer until one accepts it
         boolean handled = false;
         
-        for (Map.Entry<NoteBytesReadOnly, UIRenderer<?,?,?>> entry : renderers.entrySet()) {
-            UIRenderer<?,?,?> renderer = entry.getValue();
+        for (Map.Entry<NoteBytesReadOnly, UIRenderer<?,?,?,?>> entry : renderers.entrySet()) {
+            UIRenderer<?,?,?,?> renderer = entry.getValue();
             
             if (renderer.canHandleStreamFrom(fromPath)) {
                 Log.logMsg("[RenderingService] Routing stream to renderer: " + entry.getKey());
@@ -385,14 +385,14 @@ public class RenderingService extends FlowProcess {
     /**
      * Get renderer by ID
      */
-    public UIRenderer<?,?,?> getRenderer(NoteBytesReadOnly rendererId) {
+    public UIRenderer<?,?,?,?> getRenderer(NoteBytesReadOnly rendererId) {
         return renderers.get(rendererId);
     }
     
     /**
      * Get system default renderer
      */
-    public UIRenderer<?,?,?> getSystemDefaultRenderer() {
+    public UIRenderer<?,?,?,?> getSystemDefaultRenderer() {
         return renderers.get(systemDefaultRendererId);
     }
     
@@ -428,18 +428,18 @@ public class RenderingService extends FlowProcess {
     /**
      * Get all containers across all renderers
      */
-    public List<Container<?,?,?>> getAllContainers() {
+    public List<Container<?,?,?,?>> getAllContainers() {
         return renderers.values().stream()
-            .<Container<?,?,?>>flatMap(renderer -> renderer.getAllContainers().stream())
+            .<Container<?,?,?,?>>flatMap(renderer -> renderer.getAllContainers().stream())
             .toList();
     }
 
     /**
      * Get visible containers
      */
-    public List<Container<?,?,?>> getVisibleContainers() {
+    public List<Container<?,?,?,?>> getVisibleContainers() {
         return renderers.values().stream()
-            .<Container<?,?,?>>flatMap(renderer -> renderer.getAllContainers().stream())
+            .<Container<?,?,?,?>>flatMap(renderer -> renderer.getAllContainers().stream())
             .filter(Container::isVisible)
             .toList();
     }
@@ -447,18 +447,18 @@ public class RenderingService extends FlowProcess {
     /**
      * Get containers by owner across all renderers
      */
-    public List<Container<?,?,?>> getContainersByOwner(ContextPath ownerPath) {
+    public List<Container<?,?,?,?>> getContainersByOwner(ContextPath ownerPath) {
         return renderers.values().stream()
-            .<Container<?,?,?>>flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
+            .<Container<?,?,?,?>>flatMap(renderer -> renderer.getContainersByOwner(ownerPath).stream())
             .toList();
     }
     
     /**
      * Find container by ID across all renderers
      */
-    public Container<?,?,?> findContainer(ContainerId containerId) {
-        for (UIRenderer<?,?,?> renderer : renderers.values()) {
-            Container<?,?,?> container = renderer.getContainer(containerId);
+    public Container<?,?,?,?> findContainer(ContainerId containerId) {
+        for (UIRenderer<?,?,?,?> renderer : renderers.values()) {
+            Container<?,?,?,?> container = renderer.getContainer(containerId);
             if (container != null) {
                 return container;
             }

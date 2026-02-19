@@ -35,7 +35,7 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
-public abstract class EventsFactory<
+public abstract class ContainerEventsFactory<
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>
 > implements IEventFactory {
@@ -47,7 +47,7 @@ public abstract class EventsFactory<
         RoutedEvent create(ContextPath sourcePath, NoteBytesReadOnly type, int stateFlags, NoteBytes[] payload);
     }
 
-    public EventsFactory(){
+    public ContainerEventsFactory(){
         registerConstructors();
     }
 
@@ -66,7 +66,7 @@ public abstract class EventsFactory<
         // ===== Container Events =====
         REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, this::onContainerFocusGained);
         REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_LOST, this::onContainerFocusLost);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_REGION_CHANGED, this::onResize);
+        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESIZE, this::onContainerResize);
         REGISTRY.put(EventBytes.EVENT_CONTAINER_MOVE, this::onContainerMove);
         REGISTRY.put(EventBytes.EVENT_CONTAINER_CLOSED, this::onContainerClosed);
         REGISTRY.put(EventBytes.EVENT_CONTAINER_MINIMIZE, this::onContainerMinimize);
@@ -149,21 +149,8 @@ public abstract class EventsFactory<
         return new ContainerHiddenEvent(src, type, flags);
     }
 
-    protected abstract P createPoint(NoteBytes[] p);
-    protected abstract RoutedEvent createMoveEvent(ContextPath src, NoteBytesReadOnly type, int flags, P p);
-
-    protected RoutedEvent onContainerMove(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p){
-        P point = createPoint(p);
-        return createMoveEvent(src, type, flags, point);
-    }
-
-    protected abstract S createRegion(NoteBytes[] p);
-    protected abstract RoutedEvent createResizeEvent(ContextPath src, NoteBytesReadOnly type, int flags, S region);
-
-    protected RoutedEvent onResize(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p){
-        S region = createRegion(p);
-        return createResizeEvent(src, type, flags, region);
-    }
+    protected abstract RoutedEvent onContainerMove(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p);
+    protected abstract RoutedEvent onContainerResize(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p);
     
     /**
      * Deserializes a RoutedPacket into a typed InputEvent.

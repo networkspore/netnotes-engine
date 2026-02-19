@@ -50,7 +50,8 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 public abstract class Container<
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
-    T extends Container<P,S,T>
+    CCFG extends ContainerConfig<S,CCFG>,
+    T extends Container<P,S,CCFG,T>
 > {
     
     
@@ -111,7 +112,7 @@ public abstract class Container<
     // ===== CORE IDENTITY =====
     protected final ContainerId id;
     protected final AtomicReference<String> title;
-    protected final AtomicReference<ContainerConfig> config;
+    protected final AtomicReference<CCFG> config;
     protected final ContextPath ownerPath;
     protected final ContextPath path;
     protected final String rendererId;
@@ -152,9 +153,8 @@ public abstract class Container<
         ContainerId id,
         String title,
         ContextPath ownerPath,
-        ContainerConfig config,
-        String rendererId,
-        S bounds
+        CCFG config,
+        String rendererId
     ) {
         this.id = id;
         this.title = new AtomicReference<>(title);
@@ -163,7 +163,7 @@ public abstract class Container<
         this.path = ownerPath != null ? ownerPath.append("container", id.toString()) : null;
         this.rendererId = rendererId;
         this.createdTime = System.currentTimeMillis();
-        this.bounds = bounds;
+        this.bounds = config.initialRegion();
         // Initialize state machine
         this.stateMachine = new BitFlagStateMachine("Container:" + id);
         this.stateMachine.addState(STATE_CREATING);
@@ -308,8 +308,13 @@ public abstract class Container<
         return initializeRenderer()
             .thenRun(() -> {
                 stateMachine.addState(STATE_INITIALIZED);
-                stateMachine.addState(STATE_VISIBLE);
-                Log.logMsg("[Container:" + id + "] Initialized");
+                boolean startVisible = config.get().isVisible();
+                if (startVisible) {
+                    stateMachine.addState(STATE_VISIBLE);
+                } else {
+                    stateMachine.addState(STATE_HIDDEN);
+                }
+                Log.logMsg("[Container:" + id + "] Initialized" + (startVisible ? "" : " hidden"));
             })
             .exceptionally(ex -> {
                 Log.logError("[Container:" + id + "] Failed to initialize: " + ex.getMessage());
@@ -805,7 +810,7 @@ public abstract class Container<
     public String getTitle() { return title.get(); }
     public BigInteger getState() { return stateMachine.getState(); }
     public BitFlagStateMachine getStateMachine() { return stateMachine; }
-    public ContainerConfig getConfig() { return config.get(); }
+    public CCFG getConfig() { return config.get(); }
     
     protected BitFlagStateMachine getInternalStateMachine() { return stateMachine; }
     

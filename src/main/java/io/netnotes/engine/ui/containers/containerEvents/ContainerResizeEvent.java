@@ -9,7 +9,7 @@ public abstract class ContainerResizeEvent<
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>
 > extends RoutedContainerEvent {
-    private final S region;
+    private S region;
     private final ContextPath sourcePath;
     private int stateFlags;
     private final NoteBytesReadOnly typeBytes;
@@ -23,6 +23,14 @@ public abstract class ContainerResizeEvent<
 
     
     public S getRegion() { return region; }
+   
+
+    public S getAndConsumeRegion() { 
+        setConsumed(true);
+        S oldRegion = region;
+        region = null;
+        return oldRegion;
+    }
     
     @Override
     public String toString() {

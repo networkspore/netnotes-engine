@@ -43,7 +43,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public abstract class UIRenderer <
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
-    T extends Container<P,S,T>
+    CCFG extends ContainerConfig<S,CCFG>,
+    T extends Container<P,S,CCFG,T>
 > {
 
     private final NoteBytesReadOnly rendererId;
@@ -248,6 +249,22 @@ public abstract class UIRenderer <
     public final T getFocusedContainer() {
         return focusedContainerId != null ? containers.get(focusedContainerId) : null;
     }
+
+    public void onFocusGranted(T container){
+      
+        if(container != null){
+            focusedContainerId = container.getId();
+            state.addState(RendererStates.HAS_FOCUSED_CONTAINER);
+        }
+    }
+
+    public void onFocusRevoked(T container){
+      
+        if(container != null && focusedContainerId.equals(container.getId())){
+            focusedContainerId = null;
+            state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
+        }
+    }
     
     // ===== MESSAGE HANDLING =====
     
@@ -286,7 +303,12 @@ public abstract class UIRenderer <
     public final void setUIReplyExec(UIReplyExec exec) {
         this.replyExec = exec;
     }
-    
+
+    protected abstract CCFG createContainerConfig(NoteBytes config);
+    protected abstract CCFG createContainerConfig();
+
+    protected abstract void allocateContainerRegion(CCFG config);
+
     // ===== CONTAINER COMMAND HANDLERS =====
     
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
@@ -298,7 +320,6 @@ public abstract class UIRenderer <
             NoteBytes titleBytes = msg.get(Keys.TITLE);
             NoteBytes pathBytes = msg.get(Keys.PATH);
             NoteBytes configBytes = msg.get(Keys.CONFIG);
-            NoteBytes autoFocusBytes = msg.get(ContainerCommands.AUTO_FOCUS);
             NoteBytes rendererIdBytes = msg.get(ContainerCommands.RENDERER_ID);
             
             if (containerIdBytes == null) {
@@ -318,17 +339,16 @@ public abstract class UIRenderer <
            
             ContextPath ownerPath = pathBytes != null ? 
                 ContextPath.fromNoteBytes(pathBytes) : null;
-            ContainerConfig config = configBytes != null ? 
-                ContainerConfig.fromNoteBytes(configBytes) : new ContainerConfig();
-            boolean autoFocus = autoFocusBytes != null ? autoFocusBytes.getAsBoolean() : true;
+            CCFG config = configBytes != null ? createContainerConfig(configBytes) : createContainerConfig();
+            allocateContainerRegion(config);
             String rendererId = rendererIdBytes.getAsString();
-            S containerRegion = createContainerRegion(msg);
+
             // Delegate to subclass
-            return doCreateContainer(containerId, title, ownerPath, config, rendererId, containerRegion)
+            return doCreateContainer(containerId, title, ownerPath, config, rendererId)
                 .thenCompose(container -> {
                     // Track container
                     containers.put(containerId, container);
-                    
+                    Log.logMsg("[UIRenderer "+name+"] tracking container: " + containerId);
                     // Track by owner
                     ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
                         .add(containerId);
@@ -339,13 +359,16 @@ public abstract class UIRenderer <
                     }
                     
                     return container.initialize()
-                        .thenCompose(v->onContainerCreated(container, containerRegion))
+                        .thenCompose(v->{
+                            Log.logMsg("[UiRenderer] container initialized, executing onContainerCreated");
+                            return onContainerCreated(container);
+                        })
                         .thenAccept(response -> {
                             state.removeState(RendererStates.CREATING_CONTAINER);
                             reply(packet, response);
                         })
                         .thenRun(()->{
-                            if (autoFocus || focusedContainerId == null) {
+                            if (config.isFocused() || focusedContainerId == null) {
                                 container.requestFocus();                            
                             }
                         });
@@ -366,8 +389,7 @@ public abstract class UIRenderer <
         }
     }
 
-    protected abstract S createContainerRegion(NoteBytesMap map);
-    
+
     private CompletableFuture<Void> handleDestroyContainer(NoteBytesMap msg, RoutedPacket packet) {
         T container = getContainerFromMsg(msg);
         if (container == null) {
@@ -563,16 +585,15 @@ public abstract class UIRenderer <
         ContainerId id,
         String title,
         ContextPath ownerPath,
-        ContainerConfig config,
-        String rendererId,
-        S containerregion
+        CCFG config,
+        String rendererId
     );
     
     /**
      * Called after container is created and tracked
      * Return response data to include in CREATE_CONTAINER reply
      */
-    protected abstract CompletableFuture<NoteBytesReadOnly> onContainerCreated( T container, S containerRegion);
+    protected abstract CompletableFuture<NoteBytesReadOnly> onContainerCreated( T container);
     
 
     /**

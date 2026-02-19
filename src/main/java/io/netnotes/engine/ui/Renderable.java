@@ -854,16 +854,16 @@ public abstract class Renderable<
         if (visible && !(
             stateMachine.hasAnyState(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_INVISIBLE_DESIRED)
         )) {
-            if(visibilityPolicy != null){
-                if(!visibilityPolicy.allowVisibilityChange(self(), visible)){
-                    return;
-                }
+         
+            if(visibilityPolicy != null && !visibilityPolicy.allowVisibilityChange(self(), visible)){
+                return;
             }
+        
             // Clear both modifiers - let effective state flow through
             stateMachine.removeStates(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_INVISIBLE_DESIRED);
             markVisibilityDirty();
         } else if(!visible && !stateMachine.hasState(RenderableStates.STATE_HIDDEN_DESIRED)) {
-            if(!visibilityPolicy.allowVisibilityChange(self(), visible)){
+            if(visibilityPolicy != null && !visibilityPolicy.allowVisibilityChange(self(), visible)){
                 return;
             }
             // Default to HIDDEN (collapses space - most common case)
@@ -994,7 +994,10 @@ public abstract class Renderable<
      * Should this renderable be rendered?
      */
     public boolean shouldRender() {
-        return stateMachine.hasState(RenderableStates.STATE_RENDERABLE) && needsRender();
+        
+        boolean shouldRender =  stateMachine.hasState(RenderableStates.STATE_RENDERABLE) && needsRender();
+        Log.logMsg("[ContainerHandle: "+shouldRender()+"] + shouldRender()? " + shouldRender);
+        return shouldRender;
     }
   
     public void hide() {
@@ -1205,7 +1208,11 @@ public abstract class Renderable<
      * @return true if there's any damage to render
      */
     public boolean needsRender() {
-        return localDamage != null || absoluteDamage != null || childrenDirty;
+         
+        boolean needsRender =  localDamage != null || absoluteDamage != null || childrenDirty;
+
+        Log.logMsg("[Renderable: "+getName()+"] + needsRender? " + needsRender + "localDmg: " + localDamage + " absDmg:" + absoluteDamage + " chrnDrty:" + childrenDirty);
+        return needsRender;
     }
 
     /**

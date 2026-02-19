@@ -2,7 +2,6 @@ package io.netnotes.engine.ui.containers;
 
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
@@ -34,7 +33,8 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly MAXIMIZABLE = new NoteBytesReadOnly("maximizable");
     public static final NoteBytesReadOnly ICON = new NoteBytesReadOnly("icon");
     public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
-    public static final NoteBytesReadOnly AUTO_FOCUS = new NoteBytesReadOnly( "auto_focus");
+    public static final NoteBytesReadOnly IS_VISIBLE = new NoteBytesReadOnly( "is_visible");
+    public static final NoteBytesReadOnly IS_FOCUSED = new NoteBytesReadOnly( "is_focused");
     public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
     public static final NoteBytesReadOnly BATCH_COMMANDS = new NoteBytesReadOnly( "batch_cmds");
 
@@ -98,18 +98,18 @@ public class ContainerCommands {
         String title,
         NoteBytesReadOnly rendererId,
         NoteBytes ownerPath,
-        ContainerConfig config,
+        ContainerConfig<?,?> config,
         boolean autoFocus
     ) {
-        config = config == null ? new ContainerConfig() : config;
-        
+        if(config == null){
+            throw new NullPointerException("[ContainerCommands] createContainer: config cannot be null.");
+        }
         NoteBytesObject msg = new NoteBytesObject(new NoteBytesPair[]{
             new NoteBytesPair(Keys.CMD, CREATE_CONTAINER),
             new NoteBytesPair(ContainerCommands.CONTAINER_ID, containerId.toNoteBytes()),
-            new NoteBytesPair(Keys.TITLE, new NoteBytes(title)),
+            new NoteBytesPair(Keys.TITLE, title),
             new NoteBytesPair(ContainerCommands.RENDERER_ID, rendererId),
             new NoteBytesPair(Keys.PATH, ownerPath),
-            new NoteBytesPair(AUTO_FOCUS, autoFocus ? NoteBoolean.TRUE : NoteBoolean.FALSE),
             new NoteBytesPair(Keys.CONFIG, config.toNoteBytes())
         });
         
@@ -272,12 +272,12 @@ public class ContainerCommands {
      */
     public static NoteBytesMap containerResized(
         NoteBytes containerId,
-        NoteBytes regionBytes
+        NoteBytes regionBytesArray
     ) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_REGION_CHANGED);
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZE);
         msg.put(ContainerCommands.CONTAINER_ID, containerId);
-        msg.put(Keys.PAYLOAD, regionBytes);
+        msg.put(Keys.PAYLOAD, regionBytesArray);
         return msg;
     }
     

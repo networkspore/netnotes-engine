@@ -33,7 +33,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  * 
  */
 public abstract class DeviceManager<
-    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?,?>,
+    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?,?,?>,
     DM extends DeviceManager<H,DM>
 > {
     

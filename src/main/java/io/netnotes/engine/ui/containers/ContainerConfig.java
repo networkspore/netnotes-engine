@@ -1,6 +1,7 @@
 package io.netnotes.engine.ui.containers;
 
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -14,11 +15,11 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
  * - Position hints (x/y) → Screen coords or relative position
  * - Flags (resizable, closable) → UI capabilities
  */
-public class ContainerConfig {
-    private Integer width = null;
-    private Integer height = null;
-    private Integer x = null;
-    private Integer y = null;
+public abstract class ContainerConfig <
+    S extends SpatialRegion<?,S>,
+    CCFG extends ContainerConfig<S,CCFG>
+> {
+    private S initialRegion = null;
     private Boolean resizable = null;
     private Boolean closable = null;
     private Boolean movable = null;
@@ -26,7 +27,40 @@ public class ContainerConfig {
     private Boolean maximizable = null;
     private NoteBytes icon = null;
     private NoteBytesMap metadata = null;
+    private boolean isVisible = true;
+    private boolean isFocused = true;
     
+    public ContainerConfig(NoteBytesMap map){
+        if(map == null){
+            return;
+        }
+        NoteBytes regionBytes = map.get(ContainerCommands.REGION);
+        NoteBytes resizableBytes = map.get(ContainerCommands.RESIZABLE);
+        NoteBytes closableBytes = map.get(ContainerCommands.CLOSABLE);
+        NoteBytes movableBytes = map.get(ContainerCommands.MOVABLE);
+        NoteBytes minimizableBytes = map.get(ContainerCommands.MINIMIZABLE);
+        NoteBytes maximizableBytes = map.get(ContainerCommands.MAXIMIZABLE);
+        NoteBytes iconBytes = map.get(ContainerCommands.ICON);
+        NoteBytes metadataBytes = map.get( ContainerCommands.METADATA);
+        NoteBytes isVisibleBytes = map.get(ContainerCommands.IS_VISIBLE);
+        NoteBytes isFocusedBytes = map.get(ContainerCommands.IS_FOCUSED);
+
+        if(regionBytes != null) initialRegion = createRegionFromnNoteBytes(regionBytes);
+
+        if (resizableBytes != null) resizable = resizableBytes.getAsBoolean();
+        if (closableBytes != null) closable = closableBytes.getAsBoolean();
+        if (movableBytes != null) movable = movableBytes.getAsBoolean();
+        if (minimizableBytes != null) minimizable = minimizableBytes.getAsBoolean();
+        if (maximizableBytes != null) maximizable = maximizableBytes.getAsBoolean();
+        if (iconBytes != null) icon = iconBytes;
+        if (metadataBytes != null) metadata = metadataBytes.getAsNoteBytesMap();
+        if (isVisibleBytes != null) isVisible = isVisibleBytes.getAsBoolean();
+        if (isFocusedBytes != null) isFocused = isFocusedBytes.getAsBoolean();
+        
+    }
+
+    protected abstract S createRegionFromnNoteBytes(NoteBytes noteBytes);
+
     public ContainerConfig() {
         // Defaults
         this.resizable = true;
@@ -35,62 +69,63 @@ public class ContainerConfig {
         this.minimizable = true;
         this.maximizable = true;
     }
+
+    @SuppressWarnings("unchecked")
+    protected CCFG self(){
+        return (CCFG) this;
+    }
     
     // ===== BUILDER STYLE =====
+    public boolean isVisible() { return isVisible; }
+    public CCFG isVisible(boolean v) { this.isVisible = v; return self(); }
     
-    public ContainerConfig withSize(int width, int height) {
-        this.width = width;
-        this.height = height;
-        return this;
+    public boolean isFocused() { return isFocused; }
+    public CCFG autoFocus(boolean v) { this.isFocused = v; return self(); }
+    
+    public CCFG withInitialRegion(S region) {
+        this.initialRegion = region;
+        return self();
     }
     
-    public ContainerConfig withPosition(int x, int y) {
-        this.x = x;
-        this.y = y;
-        return this;
-    }
-    
-    public ContainerConfig withResizable(boolean resizable) {
+
+    public CCFG withResizable(boolean resizable) {
         this.resizable = resizable;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withClosable(boolean closable) {
+    public CCFG withClosable(boolean closable) {
         this.closable = closable;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withMovable(boolean movable) {
+    public CCFG withMovable(boolean movable) {
         this.movable = movable;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withMinimizable(boolean minimizable) {
+    public CCFG withMinimizable(boolean minimizable) {
         this.minimizable = minimizable;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withMaximizable(boolean maximizable) {
+    public CCFG withMaximizable(boolean maximizable) {
         this.maximizable = maximizable;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withIcon(NoteBytes icon) {
+    public CCFG withIcon(NoteBytes icon) {
         this.icon = icon;
-        return this;
+        return self();
     }
     
-    public ContainerConfig withMetadata(NoteBytesMap metadata) {
+    public CCFG withMetadata(NoteBytesMap metadata) {
         this.metadata = metadata;
-        return this;
+        return self();
     }
     
     // ===== GETTERS =====
     
-    public Integer getWidth() { return width; }
-    public Integer getHeight() { return height; }
-    public Integer getX() { return x; }
-    public Integer getY() { return y; }
+    public S initialRegion() { return initialRegion; }
     public Boolean isResizable() { return resizable; }
     public Boolean isClosable() { return closable; }
     public Boolean isMovable() { return movable; }
@@ -104,51 +139,18 @@ public class ContainerConfig {
     public NoteBytesObject toNoteBytes() {
         NoteBytesMap map = new NoteBytesMap();
         
-        if (width != null) map.put("width", width);
-        if (height != null) map.put("height", height);
-        if (x != null) map.put("x", x);
-        if (y != null) map.put("y", y);
-        if (resizable != null) map.put("resizable", resizable);
-        if (closable != null) map.put("closable", closable);
-        if (movable != null) map.put("movable", movable);
-        if (minimizable != null) map.put("minimizable", minimizable);
-        if (maximizable != null) map.put("maximizable", maximizable);
-        if (icon != null) map.put("icon", icon);
-        if (metadata != null) map.put("metadata", metadata);
-        
+        if (initialRegion != null) map.put(ContainerCommands.REGION, initialRegion.toNoteBytes());
+        if (resizable != null) map.put(ContainerCommands.RESIZABLE, resizable);
+        if (closable != null) map.put(ContainerCommands.CLOSABLE, closable);
+        if (movable != null) map.put(ContainerCommands.MOVABLE, movable);
+        if (minimizable != null) map.put(ContainerCommands.MINIMIZABLE, minimizable);
+        if (maximizable != null) map.put(ContainerCommands.MAXIMIZABLE, maximizable);
+        if (icon != null) map.put(ContainerCommands.ICON, icon);
+        if (metadata != null) map.put(ContainerCommands.METADATA, metadata);
+        if (isFocused != true) map.put(ContainerCommands.IS_FOCUSED, NoteBoolean.FALSE);
+        if (isVisible != true) map.put(ContainerCommands.IS_VISIBLE, NoteBoolean.FALSE);
         return map.toNoteBytes();
     }
 
-    public static ContainerConfig fromNoteBytes(NoteBytes noteBytes) {
-        return fromNoteBytes(noteBytes.getAsMap());
-    }
     
-    public static ContainerConfig fromNoteBytes(NoteBytesMap map) {
-        ContainerConfig config = new ContainerConfig();
-        NoteBytes widthBytes = map.get(Keys.WIDTH);
-        NoteBytes heightBytes = map.get(Keys.HEIGHT);
-        NoteBytes xBytes = map.get(ContainerCommands.X);
-        NoteBytes yBytes = map.get(ContainerCommands.Y);
-        NoteBytes resizableBytes = map.get(ContainerCommands.RESIZABLE);
-        NoteBytes closableBytes = map.get(ContainerCommands.CLOSABLE);
-        NoteBytes movableBytes = map.get(ContainerCommands.MOVABLE);
-        NoteBytes minimizableBytes = map.get(ContainerCommands.MINIMIZABLE);
-        NoteBytes maximizableBytes = map.get(ContainerCommands.MAXIMIZABLE);
-        NoteBytes iconBytes = map.get(ContainerCommands.ICON);
-        NoteBytes metadataBytes = map.get( ContainerCommands.METADATA);
-
-        if (widthBytes != null) config.width = widthBytes.getAsInt();
-        if (heightBytes != null) config.height = heightBytes.getAsInt();
-        if (xBytes != null) config.x = xBytes.getAsInt();
-        if (yBytes != null) config.y = yBytes.getAsInt();
-        if (resizableBytes != null) config.resizable = resizableBytes.getAsBoolean();
-        if (closableBytes != null) config.closable = closableBytes.getAsBoolean();
-        if (movableBytes != null) config.movable = movableBytes.getAsBoolean();
-        if (minimizableBytes != null) config.minimizable = minimizableBytes.getAsBoolean();
-        if (maximizableBytes != null) config.maximizable = maximizableBytes.getAsBoolean();
-        if (iconBytes != null) config.icon = iconBytes;
-        if (metadataBytes != null) config.metadata = metadataBytes.getAsNoteBytesMap();
-        
-        return config;
-    }
 }
