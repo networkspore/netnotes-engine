@@ -14,7 +14,8 @@ import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.collections.NoteBytesPair;
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
+import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.containers.*;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -43,6 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public abstract class UIRenderer <
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
+    CLM extends ContainerLayoutManager<S,T>,
     CCFG extends ContainerConfig<S,CCFG>,
     T extends Container<P,S,CCFG,T>
 > {
@@ -50,29 +52,31 @@ public abstract class UIRenderer <
     private final NoteBytesReadOnly rendererId;
     
     // ===== STATE MANAGEMENT =====
-    protected final BitFlagStateMachine state;
+    protected final ConcurrentBitFlagStateMachine state;
     protected final String name;
     
     // ===== CONTAINER MANAGEMENT =====
     protected final Map<ContainerId, T> containers = new ConcurrentHashMap<>();
     protected final Map<ContextPath, List<ContainerId>> ownerContainers = new ConcurrentHashMap<>();
     protected volatile ContainerId focusedContainerId = null;
-    
+    protected final CLM containerLayoutManager;
     // ===== MESSAGE DISPATCH =====
     protected final Map<NoteBytesReadOnly, RoutedMessageExecutor> msgMap = new ConcurrentHashMap<>();
     protected UIReplyExec replyExec;
     
     protected final SerializedVirtualExecutor rendererExecutor = 
         new SerializedVirtualExecutor();
+
     /**
      * Constructor
      * 
      * @param rendererName Name for this renderer (used in logging and state machine)
      */
-    protected UIRenderer(String rendererName, NoteBytesReadOnly rendererId) {
+    protected UIRenderer(String rendererName, NoteBytesReadOnly rendererId, CLM containerLayoutManager) {
         this.rendererId = rendererId;
         this.name = rendererName;
-        this.state = new BitFlagStateMachine(rendererName + "-state");
+        this.state = new ConcurrentBitFlagStateMachine(rendererName + "-state");
+        this.containerLayoutManager = containerLayoutManager;
         setupBaseStateTransitions();
         setupRendererStateTransitions();
 
@@ -153,6 +157,7 @@ public abstract class UIRenderer <
     }
     
     public final CompletableFuture<Void> shutdown() {
+
         state.addState(RendererStates.SHUTTING_DOWN);
 
         // Destroy all containers first
@@ -206,7 +211,7 @@ public abstract class UIRenderer <
     
     public abstract boolean isActive();
     
-    public final BitFlagStateMachine getState() {
+    public final ConcurrentBitFlagStateMachine getState() {
         return state;
     }
     
@@ -271,8 +276,9 @@ public abstract class UIRenderer <
     
     public final CompletableFuture<Void> handleMessage(NoteBytesMap msg, RoutedPacket packet) {
         // State check
-        if (!RendererStates.canAcceptRequests(state)) {
-            String stateDesc = RendererStates.describe(state);
+        StateSnapshot snapshot = state.getSnapshot();
+        if (!RendererStates.canAcceptRequests(snapshot)) {
+            String stateDesc = RendererStates.describe(snapshot);
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Renderer not ready (state: " + stateDesc + ")")
             );
@@ -289,9 +295,10 @@ public abstract class UIRenderer <
         // Dispatch commands
         RoutedMessageExecutor msgExec = msgMap.get(cmdBytes);
         if (msgExec != null) {
-    
-            return msgExec.execute(msg, packet);
-  
+            // Re-entrant safe
+            return rendererExecutor.execute(()->{
+                msgExec.execute(msg, packet).join();
+            });
         } else {
             return CompletableFuture.failedFuture(
                 new IllegalArgumentException("Unknown command: " + cmdBytes)
@@ -307,14 +314,13 @@ public abstract class UIRenderer <
     protected abstract CCFG createContainerConfig(NoteBytes config);
     protected abstract CCFG createContainerConfig();
 
-    protected abstract void allocateContainerRegion(CCFG config);
-
     // ===== CONTAINER COMMAND HANDLERS =====
     
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(RendererStates.CREATING_CONTAINER);
         Log.logMsg("[UIRenderer "+name+"] creating container...");
         try {
+  
             // Parse common parameters
             NoteBytes containerIdBytes = msg.get(ContainerCommands.CONTAINER_ID);
             NoteBytes titleBytes = msg.get(Keys.TITLE);
@@ -337,10 +343,10 @@ public abstract class UIRenderer <
             ContainerId containerId = ContainerId.fromNoteBytes(containerIdBytes);
             String title = titleBytes != null ? titleBytes.getAsString() : "Untitled";
            
-            ContextPath ownerPath = pathBytes != null ? 
-                ContextPath.fromNoteBytes(pathBytes) : null;
+            ContextPath ownerPath = pathBytes != null ? ContextPath.fromNoteBytes(pathBytes) : null;
+
             CCFG config = configBytes != null ? createContainerConfig(configBytes) : createContainerConfig();
-            allocateContainerRegion(config);
+    
             String rendererId = rendererIdBytes.getAsString();
 
             // Delegate to subclass

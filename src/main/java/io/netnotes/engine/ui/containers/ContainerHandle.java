@@ -275,7 +275,7 @@ public abstract class ContainerHandle<
         stateMachine.onStateAdded(Container.STATE_VISIBLE, (old, now, bit) -> {
             Log.logMsg("[ContainerHandle:" + containerId + "] Now VISIBLE");
             stateMachine.removeState(Container.STATE_HIDDEN);
-            updateIsRendering();
+            updateIsRendering(true);
             handleOnVisible();
         });
         
@@ -367,9 +367,6 @@ public abstract class ContainerHandle<
 
     protected void handleOnFocused() {
         Log.logMsg("[ContainerHandle:" + getName() + "] onFocused - renderSnapshot " + renderReadySnapshot);
-        if (renderReadySnapshot) {
-            render();  // repopulate cells after focus granted
-        }
         if (notifyOnFocused != null) {
             notifyOnFocused.accept(self());
         }
@@ -466,6 +463,9 @@ public abstract class ContainerHandle<
     protected abstract void applyRegionToRenderable(R currentRenderable, S allocatedRegion);
 
     protected void updateIsRendering() {
+        updateIsRendering(false);
+    }
+    protected void updateIsRendering(boolean forceRender) {
         boolean prev = renderReadySnapshot;
         Log.logMsg("[ContainerHandle] updateIsRendering: \n\tSTATE_STREAM_READY:" + stateMachine.hasState(Container.STATE_STREAM_READY) 
             + "\n\t STATE_STREAM_ERROR:" + stateMachine.hasState(Container.STATE_STREAM_ERROR)
@@ -480,9 +480,10 @@ public abstract class ContainerHandle<
 
         if(renderReadySnapshot != prev){
             notifyOnRenderingChanged.accept(self(), renderReadySnapshot);
-            if(rootRenderable != null && rootRenderable.needsRender()){
-                render();
-            }
+        }
+
+        if (rootRenderable != null && (renderReadySnapshot && (forceRender || renderReadySnapshot != prev))) {
+            renderableLayoutManager.flushLayout().thenRun(this::render);
         }
     
     }
@@ -766,14 +767,15 @@ public abstract class ContainerHandle<
                     throw new RuntimeException("Container creation failed: " + errorMsg);
                 }
                 Log.logNoteBytes("[ContainerHandle] creation responded", responseMap);
-
+                NoteBytes isVisibleBytes = responseMap.get(ContainerCommands.IS_VISIBLE);
+                boolean isVisible = isVisibleBytes != null ? isVisibleBytes.getAsBoolean() : true;
                 allocatedRegion = extractRegionFromCreateResponse(responseMap);
                 dimensionsInitialized = true;
                 Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
-                uiExecutor.executeFireAndForget(()->{
-              
-                    stateMachine.addState(Container.STATE_INITIALIZED);
-                });
+                stateMachine.addState(Container.STATE_INITIALIZED);
+                if(isVisible){
+                    stateMachine.addState(Container.STATE_VISIBLE);
+                }
                 return requestStreamChannel(renderingServicePath);
             }).thenAccept(channel -> {
                 Log.logMsg("[ContainerHandle] Render stream established");
@@ -1235,7 +1237,7 @@ public abstract class ContainerHandle<
      * Perform actual render - runs on serialExec
      */
     private void renderInternal() {
-        Log.logMsg("[ContainerHandle: "+getName()+"] + renderInternal");
+        Log.logMsg("[ContainerHandle: "+getName()+"] renderInternal");
         B batch = createBatch();
         rootRenderable.toBatch(batch);
         
@@ -1245,7 +1247,8 @@ public abstract class ContainerHandle<
         }
         
         NoteBytes batchCommand = batch.build();
-        Log.logNoteBytes("[ContainerHandle: "+getName()+"] + renderInternal", batchCommand);
+    
+        Log.logNoteBytes("[ContainerHandle: "+getName()+"]", batchCommand);
         sendRenderCommand(batchCommand);
         
         rootRenderable.clearRenderFlag();

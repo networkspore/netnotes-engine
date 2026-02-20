@@ -996,7 +996,7 @@ public abstract class Renderable<
     public boolean shouldRender() {
         
         boolean shouldRender =  stateMachine.hasState(RenderableStates.STATE_RENDERABLE) && needsRender();
-        Log.logMsg("[ContainerHandle: "+shouldRender()+"] + shouldRender()? " + shouldRender);
+        Log.logMsg("[ContainerHandle] + shouldRender()? " + shouldRender);
         return shouldRender;
     }
   

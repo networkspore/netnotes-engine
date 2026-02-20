@@ -2,7 +2,6 @@ package io.netnotes.engine.ui.containers;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
-import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -23,7 +22,8 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
+import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerEventSerializer;
@@ -118,10 +118,11 @@ public abstract class Container<
     protected final String rendererId;
     protected final long createdTime;
 
-    protected S bounds;
+    protected S allocatedBounds;
+
     
     // ===== STATE MACHINE =====
-    protected final BitFlagStateMachine stateMachine;
+    protected final ConcurrentBitFlagStateMachine stateMachine;
     
     // ===== STREAM CHANNELS =====
     protected StreamChannel renderStreamChannel = null;
@@ -163,9 +164,9 @@ public abstract class Container<
         this.path = ownerPath != null ? ownerPath.append("container", id.toString()) : null;
         this.rendererId = rendererId;
         this.createdTime = System.currentTimeMillis();
-        this.bounds = config.initialRegion();
+        this.allocatedBounds = config.initialRegion();
         // Initialize state machine
-        this.stateMachine = new BitFlagStateMachine("Container:" + id);
+        this.stateMachine = new ConcurrentBitFlagStateMachine("Container:" + id);
         this.stateMachine.addState(STATE_CREATING);
         
         // Setup base state transitions
@@ -183,11 +184,13 @@ public abstract class Container<
         setupBatchMsgMap();
     }
     
-    public CompletableFuture<S> getRegion(){
-        return containerExecutor.submit(()->bounds);
+    public CompletableFuture<S> getAllocationBounds(){
+        return containerExecutor.submit(()->allocatedBounds.copy());
     }
 
-    public abstract CompletableFuture<Void> setRegion(S bounds);
+    public CompletableFuture<Void> setAllocatedBounds(S allocatedBounds){
+        return containerExecutor.execute(()->this.allocatedBounds.copyFrom(allocatedBounds));
+    }
 
 
     // ===== ABSTRACT METHODS (Subclass Implementation) =====
@@ -386,11 +389,15 @@ public abstract class Container<
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
-            try {
-                executor.execute(command);
-            } catch (Exception e) {
-                Log.logError("[Container:" + id + "] Error executing command '" + cmd + "': " + e.getMessage());
-            }
+            
+            containerExecutor.execute(()->{
+                try {
+                    executor.execute(command);
+                } catch (Exception e) {
+                    Log.logError("[Container:" + id + "] Error executing command '" + cmd + "': " + e.getMessage());
+                }
+            });
+           
         } else {
             Log.logError("[Container:" + id + "] Unknown command: " + cmd);
         }
@@ -808,11 +815,9 @@ public abstract class Container<
     public String getRendererId() { return rendererId; }
     public ContextPath getOwnerPath() { return ownerPath; }
     public String getTitle() { return title.get(); }
-    public BigInteger getState() { return stateMachine.getState(); }
-    public BitFlagStateMachine getStateMachine() { return stateMachine; }
+    public StateSnapshot getState() { return stateMachine.getSnapshot(); }
+    public ConcurrentBitFlagStateMachine getStateMachine() { return stateMachine; }
     public CCFG getConfig() { return config.get(); }
-    
-    protected BitFlagStateMachine getInternalStateMachine() { return stateMachine; }
     
     // State queries for renderer decisions
     public boolean isFocused() { return stateMachine.hasState(STATE_FOCUSED); }

@@ -1,6 +1,7 @@
 package io.netnotes.engine.ui;
 
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
+import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 
 /**
  * ContainerServiceStates - State flags for ContainerService
@@ -54,14 +55,14 @@ public class RendererStates {
     /**
      * Check if service is busy
      */
-    public static boolean isBusy(BitFlagStateMachine state) {
+    public static boolean isBusy(StateSnapshot state) {
         return state.hasState(CREATING_CONTAINER) ||
                state.hasState(DESTROYING_CONTAINER) ||
                state.hasState(RENDERING);
     }
     
    
-    public static boolean canAcceptRequests(BitFlagStateMachine state) {
+    public static boolean canAcceptRequests(StateSnapshot state) {
         return state.hasState(READY) && 
                !state.hasState(SHUTTING_DOWN);
     }
@@ -69,34 +70,34 @@ public class RendererStates {
        /**
      * Check if containers exist
      */
-    public static boolean hasContainers(BitFlagStateMachine state) {
+    public static boolean hasContainers(ConcurrentBitFlagStateMachine state) {
         return state.hasState(HAS_CONTAINERS);
     }
     /**
      * Check if any containers are visible
      */
-    public static boolean hasVisibleContainers(BitFlagStateMachine state) {
+    public static boolean hasVisibleContainers(ConcurrentBitFlagStateMachine state) {
         return state.hasState(HAS_VISIBLE_CONTAINERS);
     }
     
     /**
      * Check if a container has focus
      */
-    public static boolean hasFocus(BitFlagStateMachine state) {
+    public static boolean hasFocus(ConcurrentBitFlagStateMachine state) {
         return state.hasState(HAS_FOCUSED_CONTAINER);
     }
     
     /**
      * Check if service needs attention
      */
-    public static boolean needsAttention(BitFlagStateMachine state) {
+    public static boolean needsAttention(ConcurrentBitFlagStateMachine state) {
         return state.hasState(ERROR);
     }
     
     /**
      * Get human-readable state description
      */
-    public static String describe(BitFlagStateMachine state) {
+    public static String describe(StateSnapshot state) {
         if (state.hasState(ERROR)) {
             return "Error";
         }
@@ -141,7 +142,7 @@ public class RendererStates {
     /**
      * Get detailed status
      */
-    public static String describeDetailed(BitFlagStateMachine state, int containerCount) {
+    public static String describeDetailed(StateSnapshot state, int containerCount) {
         StringBuilder status = new StringBuilder();
         
         status.append("ContainerService: ").append(describe(state)).append("\n");

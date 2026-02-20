@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.netnotes</groupId>
     <artifactId>engine</artifactId>
-    <version>0.4.2</version>
+    <version>0.4.7</version>
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -39,7 +39,7 @@
         <dependency>
             <groupId>io.netnotes</groupId>
             <artifactId>notebytes</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
         </dependency>
         
         <!-- Dependancy for: 

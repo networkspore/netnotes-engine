@@ -40,11 +40,17 @@ public abstract class ContainerEventsFactory<
     S extends SpatialRegion<P,S>
 > implements IEventFactory {
 
-    private Map<NoteBytesReadOnly, EventDeserializer> REGISTRY = new HashMap<>();
+    private Map<NoteBytesReadOnly, EventDeserializer> registry = new HashMap<>();
+    private Map<NoteBytesReadOnly, NoteBytesEventDeserializer> objRegistry = new HashMap<>();
 
     @FunctionalInterface
     private interface EventDeserializer {
         RoutedEvent create(ContextPath sourcePath, NoteBytesReadOnly type, int stateFlags, NoteBytes[] payload);
+    }
+
+    @FunctionalInterface
+    private interface NoteBytesEventDeserializer {
+        RoutedEvent create(ContextPath sourcePath, NoteBytesReadOnly type, int stateFlags, NoteBytes payload);
     }
 
     public ContainerEventsFactory(){
@@ -52,28 +58,29 @@ public abstract class ContainerEventsFactory<
     }
 
     protected void registerConstructors(){
+
+        objRegistry.put(EventBytes.EVENT_CONTAINER_RESIZE, this::onContainerResize);
+        objRegistry.put(EventBytes.EVENT_CONTAINER_MOVE, this::onContainerMove);
         // ===== Mouse Events =====
-        REGISTRY.put(EventBytes.EVENT_MOUSE_BUTTON_DOWN, this::onMouseDown);
-        REGISTRY.put(EventBytes.EVENT_MOUSE_BUTTON_UP, this::onMouseUp);
-        REGISTRY.put(EventBytes.EVENT_MOUSE_SCROLL, this::onMouseScroll);
+        registry.put(EventBytes.EVENT_MOUSE_BUTTON_DOWN, this::onMouseDown);
+        registry.put(EventBytes.EVENT_MOUSE_BUTTON_UP, this::onMouseUp);
+        registry.put(EventBytes.EVENT_MOUSE_SCROLL, this::onMouseScroll);
         
         // ===== Keyboard Events =====
-        REGISTRY.put(EventBytes.EVENT_KEY_DOWN, this::onKeyDown);
-        REGISTRY.put(EventBytes.EVENT_KEY_UP, this::onKeyUp);
-        REGISTRY.put(EventBytes.EVENT_KEY_REPEAT, this::onKeyRepeat);
-        REGISTRY.put(EventBytes.EVENT_KEY_CHAR, this::onKeyChar);
+        registry.put(EventBytes.EVENT_KEY_DOWN, this::onKeyDown);
+        registry.put(EventBytes.EVENT_KEY_UP, this::onKeyUp);
+        registry.put(EventBytes.EVENT_KEY_REPEAT, this::onKeyRepeat);
+        registry.put(EventBytes.EVENT_KEY_CHAR, this::onKeyChar);
         
         // ===== Container Events =====
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, this::onContainerFocusGained);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_FOCUS_LOST, this::onContainerFocusLost);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESIZE, this::onContainerResize);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_MOVE, this::onContainerMove);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_CLOSED, this::onContainerClosed);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_MINIMIZE, this::onContainerMinimize);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_MAXIMIZE, this::onContainerMaximize);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_RESTORE, this::onContainerRestore);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_SHOWN, this::onContainerShown);
-        REGISTRY.put(EventBytes.EVENT_CONTAINER_HIDDEN, this::onContainerHidden);
+        registry.put(EventBytes.EVENT_CONTAINER_FOCUS_GAINED, this::onContainerFocusGained);
+        registry.put(EventBytes.EVENT_CONTAINER_FOCUS_LOST, this::onContainerFocusLost);
+        registry.put(EventBytes.EVENT_CONTAINER_CLOSED, this::onContainerClosed);
+        registry.put(EventBytes.EVENT_CONTAINER_MINIMIZE, this::onContainerMinimize);
+        registry.put(EventBytes.EVENT_CONTAINER_MAXIMIZE, this::onContainerMaximize);
+        registry.put(EventBytes.EVENT_CONTAINER_RESTORE, this::onContainerRestore);
+        registry.put(EventBytes.EVENT_CONTAINER_SHOWN, this::onContainerShown);
+        registry.put(EventBytes.EVENT_CONTAINER_HIDDEN, this::onContainerHidden);
     }
 
     protected RoutedEvent onMouseDown(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p){
@@ -149,8 +156,8 @@ public abstract class ContainerEventsFactory<
         return new ContainerHiddenEvent(src, type, flags);
     }
 
-    protected abstract RoutedEvent onContainerMove(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p);
-    protected abstract RoutedEvent onContainerResize(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes[] p);
+    protected abstract RoutedEvent onContainerMove(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes p);
+    protected abstract RoutedEvent onContainerResize(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes p);
     
     /**
      * Deserializes a RoutedPacket into a typed InputEvent.
@@ -180,15 +187,39 @@ public abstract class ContainerEventsFactory<
 
         
         int flags = stateFlags != null ?stateFlags.getAsInt() : 0;
+
+        switch(payloadNote.getType()){
+            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
+                return fromArray(sourcePath, typeBytes, flags, payloadNote);
+            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
+                return fromObject(sourcePath, typeBytes, flags, payloadNote);
+            default:
+                return new BaseEvent(sourcePath, typeBytes, flags, new NoteBytes[] { payloadNote});
+        }
+    }
+
+    protected RoutedEvent fromArray(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, NoteBytes payloadNote){
         NoteBytesArrayReadOnly payloadReadOnly = payloadNote != null ? payloadNote.getAsNoteBytesArrayReadOnly() : null;
         NoteBytes[] payloadArray = payloadReadOnly != null ? payloadReadOnly.getAsArray() : new NoteBytes[0];
 
-        EventDeserializer constructor = REGISTRY.get(typeBytes);
+        EventDeserializer constructor = registry.get(typeBytes);
         if (constructor == null) {
             return new BaseEvent(sourcePath, typeBytes, flags, payloadArray);
         }
 
         return constructor.create(sourcePath, typeBytes, flags, payloadArray);
+    }
+
+    protected RoutedEvent fromObject(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, NoteBytes payloadNote){
+  
+
+
+        NoteBytesEventDeserializer constructor = objRegistry.get(typeBytes);
+        if (constructor == null) {
+            return new BaseEvent(sourcePath, typeBytes, flags, new NoteBytes[] { payloadNote});
+        }
+
+        return constructor.create(sourcePath, typeBytes, flags, payloadNote);
     }
 
 }

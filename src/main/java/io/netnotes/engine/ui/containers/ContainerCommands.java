@@ -35,6 +35,10 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
     public static final NoteBytesReadOnly IS_VISIBLE = new NoteBytesReadOnly( "is_visible");
     public static final NoteBytesReadOnly IS_FOCUSED = new NoteBytesReadOnly( "is_focused");
+    public static final NoteBytesReadOnly IS_MANAGED = new NoteBytesReadOnly( "is_managed");
+
+    public static final NoteBytesReadOnly CONTENT_BOUNDS = new NoteBytesReadOnly("CONTENT_BOUNDS");
+
     public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
     public static final NoteBytesReadOnly BATCH_COMMANDS = new NoteBytesReadOnly( "batch_cmds");
 
@@ -272,12 +276,14 @@ public class ContainerCommands {
      */
     public static NoteBytesMap containerResized(
         NoteBytes containerId,
-        NoteBytes regionBytesArray
+        NoteBytes regionBytesArray,
+        boolean isManaged
     ) {
         NoteBytesMap msg = new NoteBytesMap();
         msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZE);
         msg.put(ContainerCommands.CONTAINER_ID, containerId);
         msg.put(Keys.PAYLOAD, regionBytesArray);
+        msg.put(ContainerCommands.IS_MANAGED, isManaged);
         return msg;
     }
     

@@ -81,6 +81,17 @@ public abstract class BatchBuilder
             new NoteBytesPair(ContainerCommands.BATCH_COMMANDS, commands)
         });
     }
+
+    /**
+     * Build final batch command
+     */
+    public NoteBytesObject build(S contentBounds) {
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.CMD, ContainerCommands.CONAINER_BATCH),
+            new NoteBytesPair(ContainerCommands.CONTENT_BOUNDS, contentBounds.toNoteBytes()),
+            new NoteBytesPair(ContainerCommands.BATCH_COMMANDS, commands)
+        });
+    }
     
     /**
      * Add raw command to batch

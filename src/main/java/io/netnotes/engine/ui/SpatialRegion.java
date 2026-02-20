@@ -1,6 +1,5 @@
 package io.netnotes.engine.ui;
 
-import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
@@ -99,8 +98,6 @@ public abstract class SpatialRegion<
      */
     public abstract boolean contains(P point);
 
-
-    public abstract NoteBytes toNoteBytesArray();
 
     public abstract NoteBytesObject toNoteBytes();
 
