@@ -15,9 +15,13 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-import io.netnotes.engine.ui.layout.LayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutContext;
-import io.netnotes.engine.ui.layout.LayoutData;
+
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.RenderableLayoutManager;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutContext;
+import io.netnotes.engine.ui.renderer.layout.LayoutData;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClientSession;
@@ -44,12 +48,11 @@ import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
-import io.netnotes.engine.ui.BatchBuilder;
 import io.netnotes.engine.ui.FloatingLayerManager;
-import io.netnotes.engine.ui.Renderable;
-import io.netnotes.engine.ui.RenderableLayoutManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.SpatialRegionPool;
+import io.netnotes.engine.ui.containers.containerEvents.ContainerRegionChangedEvent;
 import io.netnotes.engine.ui.containers.containerEvents.RoutedContainerEvent;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
@@ -90,7 +93,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  */
 public abstract class ContainerHandle<
     B extends BatchBuilder<S>,
-    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,EF,CCFG,BLD>,
+    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,RP,EF,CCFG,BLD>,
     P extends SpatialPoint<P>,
     R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
     S extends SpatialRegion<P,S>,
@@ -100,9 +103,10 @@ public abstract class ContainerHandle<
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
     LD extends LayoutData<B,R,S,LD,?>,
     LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
+    RP extends SpatialRegionPool<S>,
     EF extends ContainerEventsFactory<P,S>,
     CCFG extends ContainerConfig<S,CCFG>,
-    BLD extends ContainerHandle.Builder<H,S,CCFG,BLD>
+    BLD extends ContainerHandle.Builder<H,RP,S,CCFG,BLD>
 > extends FlowProcess {
     
     // ===== CREATION PARAMETERS =====
@@ -166,7 +170,8 @@ public abstract class ContainerHandle<
 
     protected boolean dimensionsInitialized = false;
 
-    
+    protected final RP regionPool;
+
     @FunctionalInterface
     public interface EventDispatcher {
         void dispatchEvent(RoutedEvent event);
@@ -179,7 +184,7 @@ public abstract class ContainerHandle<
     protected Consumer<H> notifyOnHidden = null;
     protected Consumer<H> notifyOnFocused = null;
     protected Consumer<H> notifyOnFocusLost = null;
-    protected Consumer<H> notifyOnResize = null;
+    protected Consumer<H> notifyOnRegionChanged = null;
     protected Consumer<H> notifyOnMove = null;
     protected Consumer<R> onRenderableRegistered = null;
     protected Consumer<R> onRenderableUnregistered = null;
@@ -201,7 +206,8 @@ public abstract class ContainerHandle<
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
         this.ioDaemonPath = builder.ioDaemonPath;
-        this.eventsFactory = createEventsFactory();
+        this.regionPool = builder.regionPool == null ? createRegionPool() : builder.regionPool;
+        this.eventsFactory = createEventsFactory(regionPool);
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
         //runs state changes on UI executor, deffers if during layout
         this.stateMachine.setSerialExecutor(uiExecutor);
@@ -223,7 +229,9 @@ public abstract class ContainerHandle<
         TAB_INDEX_THEN_SCREEN
     }
 
-    protected abstract EF createEventsFactory();
+    protected abstract RP createRegionPool();
+
+    protected abstract EF createEventsFactory(RP pool);
 
     protected abstract FLM createFloatingLayerManager();
 
@@ -395,8 +403,8 @@ public abstract class ContainerHandle<
         this.notifyOnFocusLost = onFocusLost;
     }
 
-    public void setOnResize(Consumer<H> listener) {
-        this.notifyOnResize = listener;
+    public void setOnRegionChanged(Consumer<H> listener) {
+        this.notifyOnRegionChanged = listener;
     }
 
      public void setOnMove(Consumer<H> onMove) {
@@ -467,10 +475,14 @@ public abstract class ContainerHandle<
     }
     protected void updateIsRendering(boolean forceRender) {
         boolean prev = renderReadySnapshot;
-        Log.logMsg("[ContainerHandle] updateIsRendering: \n\tSTATE_STREAM_READY:" + stateMachine.hasState(Container.STATE_STREAM_READY) 
-            + "\n\t STATE_STREAM_ERROR:" + stateMachine.hasState(Container.STATE_STREAM_ERROR)
-            + "\n\t STATE_VISIBLE: " + stateMachine.hasState(Container.STATE_VISIBLE)
-            + "\n\t STATE_HIDDEN: " + stateMachine.hasState(Container.STATE_HIDDEN)
+        Log.logMsg("[ContainerHandle:" + getName() + "] updateIsRendering(forceRender=" + forceRender + ")"
+            + "\n\t renderStream!=null:     " + (renderStream != null)
+            + "\n\t STATE_STREAM_READY:     " + stateMachine.hasState(Container.STATE_STREAM_READY)
+            + "\n\t STATE_STREAM_ERROR:     " + stateMachine.hasState(Container.STATE_STREAM_ERROR)
+            + "\n\t STATE_VISIBLE:          " + stateMachine.hasState(Container.STATE_VISIBLE)
+            + "\n\t STATE_HIDDEN:           " + stateMachine.hasState(Container.STATE_HIDDEN)
+            + "\n\t rootRenderable!=null:   " + (rootRenderable != null)
+            + "\n\t prev renderReady:       " + prev
         );
         renderReadySnapshot = renderStream != null && 
             stateMachine.hasState(Container.STATE_STREAM_READY) &&
@@ -478,7 +490,15 @@ public abstract class ContainerHandle<
             stateMachine.hasState(Container.STATE_VISIBLE) &&
             !stateMachine.hasState(Container.STATE_HIDDEN);
 
-        if(renderReadySnapshot != prev){
+        Log.logMsg("[ContainerHandle:" + getName() + "] updateIsRendering result"
+            + "\n\t rendrenderableRequestRenderInternalerReadySnapshot:    " + renderReadySnapshot
+            + "\n\t changed:                " + (renderReadySnapshot != prev)
+            + "\n\t willRender:             " + (rootRenderable != null && renderReadySnapshot 
+                                                && (forceRender || renderReadySnapshot != prev))
+        );
+
+
+        if(notifyOnRenderingChanged != null && renderReadySnapshot != prev){
             notifyOnRenderingChanged.accept(self(), renderReadySnapshot);
         }
 
@@ -623,10 +643,11 @@ public abstract class ContainerHandle<
     // ===== BUILDER =====
 
     public static abstract class Builder<
-        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,?,CCFG,BLD>,
+        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,RP,?,CCFG,BLD>,
+        RP extends SpatialRegionPool<S>,
         S extends SpatialRegion<?,S>,
         CCFG extends ContainerConfig<S,CCFG>,
-        BLD extends ContainerHandle.Builder<H,S,CCFG, BLD>
+        BLD extends ContainerHandle.Builder<H,RP,S,CCFG, BLD>
     > {
         public String name;
         public String title;
@@ -635,6 +656,7 @@ public abstract class ContainerHandle<
         public final ContextPath renderingServicePath;
         public EventFilterList filterList = null;
         public ContextPath ioDaemonPath = null;
+        public RP regionPool = null;
 
         protected Builder(String name, ContextPath renderingServicePath, NoteBytesReadOnly rendererId) {
             this.name = name;
@@ -653,6 +675,11 @@ public abstract class ContainerHandle<
         public BLD ioDaemonPath(ContextPath ioDaemonPath){
             this.ioDaemonPath = ioDaemonPath;
             return self();
+        }
+
+        public BLD withRegionPool(RP regionPool){
+            this.regionPool = regionPool;
+            return (BLD) self();
         }
         
         public BLD name(String name) {
@@ -766,16 +793,11 @@ public abstract class ContainerHandle<
                     String errorMsg = ProtocolObjects.getErrMsg(responseMap);
                     throw new RuntimeException("Container creation failed: " + errorMsg);
                 }
-                Log.logNoteBytes("[ContainerHandle] creation responded", responseMap);
-                NoteBytes isVisibleBytes = responseMap.get(ContainerCommands.IS_VISIBLE);
-                boolean isVisible = isVisibleBytes != null ? isVisibleBytes.getAsBoolean() : true;
-                allocatedRegion = extractRegionFromCreateResponse(responseMap);
-                dimensionsInitialized = true;
+                parseCreationResponse(responseMap);
+
                 Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
                 stateMachine.addState(Container.STATE_INITIALIZED);
-                if(isVisible){
-                    stateMachine.addState(Container.STATE_VISIBLE);
-                }
+               
                 return requestStreamChannel(renderingServicePath);
             }).thenAccept(channel -> {
                 Log.logMsg("[ContainerHandle] Render stream established");
@@ -807,16 +829,87 @@ public abstract class ContainerHandle<
             });
     }
 
-    /**
-     * Extract spatial region from container creation response
-     * Concrete implementations translate renderer-specific format
-     * 
-     * @param responseMap Response from renderer
-     * @return Initial region in renderer's coordinate system
-     */
-    protected abstract S extractRegionFromCreateResponse(NoteBytesMap responseMap);
 
- 
+    protected void parseCreationResponse(NoteBytesMap responseMap){
+        Log.logNoteBytes("[ContainerHandle] creation responded", responseMap);
+
+        NoteBytes isVisibleBytes = responseMap.get(ContainerCommands.IS_VISIBLE);
+        NoteBytes isManagedBytes = responseMap.get(ContainerCommands.IS_MANAGED);
+        NoteBytes isOffScreenBytes = responseMap.get(ContainerCommands.IS_OFF_SCREEN);
+        NoteBytes regionBytes = responseMap.get(ContainerCommands.REGION);
+
+        boolean isVisible = isVisibleBytes != null ? isVisibleBytes.getAsBoolean() : true;
+
+        if (isVisible) {
+            stateMachine.addState(Container.STATE_VISIBLE);
+            stateMachine.removeState(Container.STATE_HIDDEN);
+        } else {
+            stateMachine.removeState(Container.STATE_VISIBLE);
+            stateMachine.addState(Container.STATE_HIDDEN);
+        }
+
+        boolean isManaged = isManagedBytes != null && isManagedBytes.getAsBoolean();
+        boolean isOffScreen = isOffScreenBytes != null && isOffScreenBytes.getAsBoolean();
+        S region = regionBytes != null ? createRegionFromNoteBytes(regionBytes) : null;
+        applyAllocatedRegionFromRenderer(region, isManaged, isOffScreen);
+    }
+
+
+    protected abstract S createRegionFromNoteBytes(NoteBytes noteBytes);
+
+    /**
+     * Apply region/state updates provided by the renderer.
+     *
+     * This is the generic wiring point for the renderer -> handle bounds path.
+     */
+    protected final void applyAllocatedRegionFromRenderer(S region, boolean isLayoutManaged, boolean isOffScreen) {
+        if (isLayoutManaged) {
+            stateMachine.addState(Container.STATE_LAYOUT_MANAGED);
+        } else {
+            stateMachine.removeState(Container.STATE_LAYOUT_MANAGED);
+        }
+
+        if (isOffScreen) {
+            stateMachine.addState(Container.STATE_OFF_SCREEN);
+        } else {
+            stateMachine.removeState(Container.STATE_OFF_SCREEN);
+        }
+
+        if (region == null) {
+            return;
+        }
+
+        boolean changed = allocatedRegion == null || !regionsEqual(allocatedRegion, region);
+
+        if (allocatedRegion == null) {
+            allocatedRegion = region.copy();
+            dimensionsInitialized = true;
+        } else {
+            allocatedRegion.copyFrom(region);
+            dimensionsInitialized = true;
+        }
+
+        if (!changed) {
+            return;
+        }
+
+        if (rootRenderable != null) {
+            applyRegionToRenderable(rootRenderable, allocatedRegion);
+        }
+        requestLayout();
+
+        if (notifyOnRegionChanged != null) {
+            notifyOnRegionChanged.accept(self());
+        }
+    }
+
+    protected final void applyAllocatedRegionFromRenderer(S region, int stateFlags) {
+        applyAllocatedRegionFromRenderer(
+            region,
+            (stateFlags & ContainerCommands.BIT_IS_LAYOUT_MANAGED) != 0,
+            (stateFlags & ContainerCommands.BIT_IS_OFF_SCREEN) != 0
+        );
+    }
 
 
 
@@ -953,13 +1046,11 @@ public abstract class ContainerHandle<
                 }
             }
 
-            if(manageFocus){
+            if (manageFocus) {
                 handleTraversalKey(event);
-
-                
                 if (shouldRouteToFocused(event)) {
                     dispatchToFocused(event);
-                    return;
+                    return; 
                 }
             }
 
@@ -995,6 +1086,15 @@ public abstract class ContainerHandle<
     public CompletableFuture<Void> focus() {
         
         NoteBytesMap msg = ContainerCommands.focusContainer(containerId, rendererId);
+        return sendToService(msg);
+    }
+
+    public CompletableFuture<Void> update(NoteBytesMap updates) {
+        if (updates == null || updates.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        NoteBytesMap msg = ContainerCommands.updateContainer(containerId, updates, rendererId);
         return sendToService(msg);
     }
     
@@ -1065,14 +1165,32 @@ public abstract class ContainerHandle<
                 Log.logMsg("[ContainerHandle] Render stream is closed, skipping");
                 return;
             }
+
+            NoteBytes commandToSend = command;
+            if (command.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                NoteBytesMap commandMap = preprocessOutgoingRenderCommand(command.getAsNoteBytesMap());
+                if (commandMap == null) {
+                    return;
+                }
+                commandToSend = commandMap.toNoteBytes();
+            }
             
             try {
-                renderWriter.write(command);
+                renderWriter.write(commandToSend);
                 renderWriter.flush();
             } catch (IOException ex) {
                 throw new CompletionException(ex);
             }
         });
+    }
+
+    /**
+     * Hook for renderer-specific outbound command processing.
+     *
+     * Return {@code null} to drop the command.
+     */
+    protected NoteBytesMap preprocessOutgoingRenderCommand(NoteBytesMap command) {
+        return command;
     }
 
     
@@ -1158,11 +1276,20 @@ public abstract class ContainerHandle<
                 
                 if (dimensionsInitialized && allocatedRegion != null) {
                     applyRegionToRenderable(renderable, allocatedRegion);
+                }else{
+                    Log.logMsg("[ContainerHandle: "+getName()+"] setRenderable:"
+                        + "\n\t dimensionsInitialized: " + dimensionsInitialized
+                        + "\n\t allocatedRegion: " + allocatedRegion != null ? allocatedRegion.toString() : "null"
+                    );
                 }
                 
                 if (onRenderableRegistered != null) {
                     onRenderableRegistered.accept(renderable);
                 }
+
+                /*if (renderReadySnapshot) {
+                    renderableLayoutManager.flushLayout().thenRun(this::render);
+                }*/
             }
         });
     }
@@ -1173,18 +1300,27 @@ public abstract class ContainerHandle<
     }
 
     private void renderableRequestRenderInternal(R renderable){
+        Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender"
+            + "\n\t from:               " + renderable.getName()
+            + "\n\t isRoot:             " + (rootRenderable == renderable)
+            + "\n\t renderReadySnapshot:" + renderReadySnapshot
+            + "\n\t needsRender:        " + (rootRenderable != null && rootRenderable.needsRender())
+        );
         if (rootRenderable != renderable) {
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - stale renderable");
                 return; // Stale request from old renderable
             }
             
             if (!renderReadySnapshot) {
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - not ready");
                 return; // Not ready to render yet
             }
             
             if (!rootRenderable.needsRender()) {
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - needsRender=false");
                 return; // Already rendered
             }
-            
+            Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender → render");
             render();
     }
 
@@ -1237,22 +1373,43 @@ public abstract class ContainerHandle<
      * Perform actual render - runs on serialExec
      */
     private void renderInternal() {
-        Log.logMsg("[ContainerHandle: "+getName()+"] renderInternal");
+        Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal"
+            + "\n\t rootRenderable: " + (rootRenderable != null ? rootRenderable.getName() : "null")
+        );
         B batch = createBatch();
         rootRenderable.toBatch(batch);
         
         if (batch.isEmpty()) {
+            Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal SKIPPED - batch empty");
             rootRenderable.clearRenderFlag();
             return;
         }
-        
-        NoteBytes batchCommand = batch.build();
+        Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal → sendRenderCommand");
+        NoteBytes batchCommand = buildBatchCommand(batch);
     
         Log.logNoteBytes("[ContainerHandle: "+getName()+"]", batchCommand);
         sendRenderCommand(batchCommand);
         
         rootRenderable.clearRenderFlag();
       
+    }
+
+    /**
+     * Hook for renderer-specific batch metadata.
+     */
+    protected NoteBytes buildBatchCommand(B batch) {
+        S contentBounds = getContentBoundsForBatch(batch);
+        return contentBounds != null ? batch.build(contentBounds) : batch.build();
+    }
+
+    /**
+     * Content bounds included with outgoing container batches.
+     *
+     * Implementations can override to provide a different notion of content bounds,
+     * or return {@code null} to omit bounds metadata.
+     */
+    protected S getContentBoundsForBatch(B batch) {
+        return rootRenderable != null ? rootRenderable.getRegion() : null;
     }
     
     @SuppressWarnings("unchecked")
@@ -1267,8 +1424,8 @@ public abstract class ContainerHandle<
     private void setupEventHandlers() {
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RENDERED, 
             this::handleContainerRendered);
-        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_RESIZE, 
-            this::handleContainerResized);
+        eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_REGION_CHANGED, 
+            this::handleContainerRegionChanged);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_CLOSED, 
             this::handleContainerClosed);
         eventHandlerRegistry.register(EventBytes.EVENT_CONTAINER_SHOWN, 
@@ -1285,8 +1442,14 @@ public abstract class ContainerHandle<
         onContainerRendered(event);
     }
     
-    private void handleContainerResized(RoutedEvent event) {
-        onContainerResized(event);
+    private void handleContainerRegionChanged(RoutedEvent event) {
+        if (event instanceof ContainerRegionChangedEvent<?, ?> rawRegionEvent) {
+            @SuppressWarnings("unchecked")
+            ContainerRegionChangedEvent<P,S> regionEvent =
+                (ContainerRegionChangedEvent<P,S>) rawRegionEvent;
+            applyAllocatedRegionFromRenderer(regionEvent.getRegion(), regionEvent.getStateFlags());
+        }
+        onContainerRegionChanged(event);
     }
     
     private void handleContainerClosed(RoutedEvent event) {
@@ -1311,14 +1474,10 @@ public abstract class ContainerHandle<
     
  
     protected abstract void onContainerRendered(RoutedEvent event);
-    protected abstract void onContainerResized(RoutedEvent event);
+    protected abstract void onContainerRegionChanged(RoutedEvent event);
 
 
-    /**
-     * Extract region from resize event
-     * Concrete implementations interpret event data
-     */
-    protected abstract S extractRegionFromResizeEvent(RoutedEvent event);
+
 
     public abstract CompletableFuture<Void> requestContainerRegion(S region);
     /**

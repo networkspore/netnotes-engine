@@ -26,6 +26,7 @@ import io.netnotes.engine.ui.containers.containerEvents.ContainerFocusLostEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerHiddenEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerMaximizeEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerMinimizeEvent;
+import io.netnotes.engine.ui.containers.containerEvents.ContainerRegionChangedEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerRestoreEvent;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerShownEvent;
 import io.netnotes.noteBytes.NoteBytes;
@@ -59,8 +60,7 @@ public abstract class ContainerEventsFactory<
 
     protected void registerConstructors(){
 
-        objRegistry.put(EventBytes.EVENT_CONTAINER_RESIZE, this::onContainerResize);
-        objRegistry.put(EventBytes.EVENT_CONTAINER_MOVE, this::onContainerMove);
+        objRegistry.put(EventBytes.EVENT_CONTAINER_REGION_CHANGED, this::onContainerRegionChanged);
         // ===== Mouse Events =====
         registry.put(EventBytes.EVENT_MOUSE_BUTTON_DOWN, this::onMouseDown);
         registry.put(EventBytes.EVENT_MOUSE_BUTTON_UP, this::onMouseUp);
@@ -156,8 +156,8 @@ public abstract class ContainerEventsFactory<
         return new ContainerHiddenEvent(src, type, flags);
     }
 
-    protected abstract RoutedEvent onContainerMove(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes p);
-    protected abstract RoutedEvent onContainerResize(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes p);
+
+    protected abstract ContainerRegionChangedEvent<P,S> onContainerRegionChanged(ContextPath src, NoteBytesReadOnly type, int flags, NoteBytes p);
     
     /**
      * Deserializes a RoutedPacket into a typed InputEvent.
@@ -187,16 +187,30 @@ public abstract class ContainerEventsFactory<
 
         
         int flags = stateFlags != null ?stateFlags.getAsInt() : 0;
-
-        switch(payloadNote.getType()){
-            case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
-                return fromArray(sourcePath, typeBytes, flags, payloadNote);
-            case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
-                return fromObject(sourcePath, typeBytes, flags, payloadNote);
-            default:
-                return new BaseEvent(sourcePath, typeBytes, flags, new NoteBytes[] { payloadNote});
+        if(payloadNote != null){
+            switch(payloadNote.getType()){
+                case NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE:
+                    return fromArray(sourcePath, typeBytes, flags, payloadNote);
+                case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
+                    return fromObject(sourcePath, typeBytes, flags, payloadNote);
+                default:
+                    return fromNoteBytes(sourcePath, typeBytes, flags, payloadNote);
+            }
         }
+
+        return fromNoteBytes(sourcePath, typeBytes, flags);
     }
+
+
+    protected RoutedEvent fromNoteBytes(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, NoteBytes... payloadArray){
+        EventDeserializer constructor = registry.get(typeBytes);
+        if (constructor == null) {
+            return new BaseEvent(sourcePath, typeBytes, flags, payloadArray);
+        }
+        return constructor.create(sourcePath, typeBytes, flags, payloadArray);
+    }
+
+
 
     protected RoutedEvent fromArray(ContextPath sourcePath, NoteBytesReadOnly typeBytes, int flags, NoteBytes payloadNote){
         NoteBytesArrayReadOnly payloadReadOnly = payloadNote != null ? payloadNote.getAsNoteBytesArrayReadOnly() : null;

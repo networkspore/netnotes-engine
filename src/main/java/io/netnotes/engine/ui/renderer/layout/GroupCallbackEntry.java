@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.layout;
+package io.netnotes.engine.ui.renderer.layout;
 
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 

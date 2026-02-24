@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.layout;
+package io.netnotes.engine.ui.renderer.layout;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -7,10 +7,11 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 
-import io.netnotes.engine.ui.BatchBuilder;
-import io.netnotes.engine.ui.Renderable;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * LayoutGroup - Collection of renderables calculated together
@@ -63,6 +64,7 @@ public abstract class LayoutGroup<
     // ===== MEMBER MANAGEMENT =====
     
     public void addMember(L node) {
+        Log.logMsg("[LayoutGroup] groupId:"+groupId+" addMember:" + node.getName());
         if (!members.contains(node)) {
             members.add(node);
 
@@ -128,6 +130,7 @@ public abstract class LayoutGroup<
      * @param priority Execution priority (lower numbers execute first)
      */
     public void registerCallback(GCE entry) {
+        Log.logMsg("[LayoutGroup] registerCallback:" + entry.getCallbackId());
         // Remove old entry if exists
         GCE oldEntry = callbackMap.remove(entry.getCallbackId());
         if (oldEntry != null) {
@@ -177,7 +180,7 @@ public abstract class LayoutGroup<
      * @param context Layout context (from first encoutnered member)
      */
     public void executeCallbacks(LC[] contexts) {
-      
+        Log.logMsg("[LayoutGroup] executeCallbacks:" + contexts.length);
         // Execute each callback whose predicate passes
         for (GCE entry : callbackSet) {
             // Check if predicate allows execution

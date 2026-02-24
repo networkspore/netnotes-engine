@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
@@ -6,6 +6,7 @@ import io.netnotes.noteBytes.NoteBytesArray;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 
 import java.util.ArrayDeque;

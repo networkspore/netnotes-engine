@@ -1,13 +1,17 @@
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
-import io.netnotes.engine.ui.layout.GroupCallbackEntry;
-import io.netnotes.engine.ui.layout.GroupLayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutContext;
-import io.netnotes.engine.ui.layout.LayoutData;
-import io.netnotes.engine.ui.layout.LayoutGroup;
-import io.netnotes.engine.ui.layout.LayoutNode;
-import io.netnotes.engine.ui.Renderable.GroupStateEntry;
+import io.netnotes.engine.ui.FloatingLayerManager;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
+
+import io.netnotes.engine.ui.renderer.Renderable.GroupStateEntry;
+import io.netnotes.engine.ui.renderer.layout.GroupCallbackEntry;
+import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutContext;
+import io.netnotes.engine.ui.renderer.layout.LayoutData;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup;
+import io.netnotes.engine.ui.renderer.layout.LayoutNode;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.SerializedDebouncedExecutor;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -256,7 +260,11 @@ public abstract class RenderableLayoutManager<
      * Unregister a renderable
      */
     public void unregisterRenderable(R renderable) {
-        uiExecutor.executeFireAndForget(() -> unregisterRenderableInternal(renderable));
+        if(isCurrentThread()){
+            unregisterRenderableInternal(renderable);
+        }else{
+            uiExecutor.executeFireAndForget(() -> unregisterRenderableInternal(renderable));
+        }
     }
 
     private void unregisterRenderableInternal(R renderable) {
@@ -443,19 +451,29 @@ public abstract class RenderableLayoutManager<
         Set<L> currentLayoutDirty = dirtyLayoutNodes;
         Set<L> currentFloatingDirty = dirtyFloatingNodes;
 
+        Log.logMsg("[LayoutManager] currentLayoutDirt: " + currentLayoutDirty.size());
+
         dirtyLayoutNodes = new LinkedHashSet<>();
         dirtyFloatingNodes = new LinkedHashSet<>();
 
         Set<L> allDirtyNodes = new LinkedHashSet<>();
         allDirtyNodes.addAll(currentLayoutDirty);
         allDirtyNodes.addAll(currentFloatingDirty);
-                
+
         int allDirtyNodesSize = allDirtyNodes.size();
+         Log.logMsg("[LayoutManager] allDirtyNodesSize: " + currentLayoutDirty.size());
         // Now process the snapshot
         if (!allDirtyNodes.isEmpty()) {
-            performUnifiedLayoutUpdate(allDirtyNodes);
+            try {
+                performUnifiedLayoutUpdate(allDirtyNodes);
+            } catch (Exception e) {
+                // Dirty nodes were already swapped — re-add them so next run can retry
+                dirtyLayoutNodes.addAll(currentLayoutDirty);
+                Log.logError("[LayoutManager:" + containerName + "] Layout update failed", e);
+                throw e; // still propagate so we know it happened
+            }
         }
-        
+                
         applyPendingFocusRequest();
     
         long endTime = System.nanoTime();
@@ -546,33 +564,29 @@ public abstract class RenderableLayoutManager<
      */
     private void apply(L node) {
         LD calculatedLayout = node.getCalculatedLayout();
-
-        if (calculatedLayout == null) {
-            return;
-        }
+        if (calculatedLayout == null) return;
 
         R renderable = node.getRenderable();
         
-        // Set parent absolute position if applicable
         L parent = node.getParent();
         if (calculatedLayout.hasRegion() && parent != null) {
             S parentRegion = parent.getRenderable().getRegion();
-            
             calculatedLayout.getSpatialRegion().setParentAbsolutePosition(
                 parentRegion.getAbsolutePosition()
             );
         }
 
-        // Apply to renderable
         renderable.applyLayoutData(calculatedLayout);
-        
-        // Clean up node
-        node.clear();
 
-        // Recycle layout data
-        if (calculatedLayout != null) {
-            recycleLayoutData(calculatedLayout);
+        // Layout changed spatial or visibility state — register damage so
+        // toBatch has something to render. Without this, applyLayoutData
+        // sets the region but no render ever fires.
+        if (calculatedLayout.hasRegion() || calculatedLayout.hasStateChanges()) {
+            renderable.invalidate();
         }
+
+        node.clear();
+        recycleLayoutData(calculatedLayout);
     }
 
     protected abstract void recycleLayoutData(LD layoutData);
@@ -652,7 +666,15 @@ public abstract class RenderableLayoutManager<
      * Create a new layout group
      */
     public void createGroup(String groupId) {
-        uiExecutor.executeFireAndForget(() -> createGroupIfAbsent(groupId));
+        if (isCurrentThread()) {
+            createGroupIfAbsent(groupId);
+        }else{
+            uiExecutor.executeFireAndForget(() -> createGroupIfAbsent(groupId));
+        }
+    }
+
+    private boolean isCurrentThread(){
+        return uiExecutor.isCurrentThread();
     }
 
     private G createGroupIfAbsent(String groupId){
@@ -663,12 +685,15 @@ public abstract class RenderableLayoutManager<
      * Add a renderable to a group
      */
     public void addToGroup(R renderable, String groupId) {
-       
-        uiExecutor.executeFireAndForget(() -> addToGroupInternal(renderable, groupId));
-        
+        if (isCurrentThread()) {
+            addToGroupInternal(renderable, groupId);
+        }else{
+            uiExecutor.executeFireAndForget(() -> addToGroupInternal(renderable, groupId));
+        }
     }
     
     private void addToGroupInternal(R renderable, String groupId) {
+
         L node = renderableRegistry.get(renderable);
         L floatingNode = node == null ? floatingRegistry.get(renderable) : null;
         if (node == null && floatingNode == null) {
@@ -677,12 +702,21 @@ public abstract class RenderableLayoutManager<
         }
 
         node = node == null ? floatingNode : node;
+        Log.logMsg("[RenderableLayoutManager] addToGroupInternal r:" + node.getName());
         
         G group = createGroupIfAbsent(groupId);
         node.setGroup(group);
-        markLayoutDirty(renderable);
+        for (L member : group.getMembers()) {
+            dirtyLayoutNodes.add(member);
+        }
 
-        
+         L parentNode = node.getParent();
+        if (parentNode != null) {
+            markLayoutDirty(parentNode.getRenderable());
+        }
+    
+            
+        requestLayout();
     }
 
     public String getRenderableGroupId(R renderable){
@@ -699,7 +733,11 @@ public abstract class RenderableLayoutManager<
      * Remove a renderable from its group
      */
     public void removeFromGroup(R renderable) {
-        uiExecutor.executeFireAndForget(() -> removeFromGroupInternal(renderable));
+        if (isCurrentThread()) {
+            removeFromGroupInternal(renderable);
+        }else{
+            uiExecutor.executeFireAndForget(() -> removeFromGroupInternal(renderable));
+        }
     }
     
     private void removeFromGroupInternal(R renderable) {
@@ -725,9 +763,11 @@ public abstract class RenderableLayoutManager<
      * Destroy a group and remove all members
      */
     public void destroyGroup(String groupId) {
-       
-        uiExecutor.executeFireAndForget(() -> destroyGroupInternal(groupId));
-        
+        if(isCurrentThread()){
+            destroyGroupInternal(groupId);
+        }else{
+            uiExecutor.executeFireAndForget(() -> destroyGroupInternal(groupId));
+        }
     }
     
     private void destroyGroupInternal(String groupId) {
@@ -751,14 +791,14 @@ public abstract class RenderableLayoutManager<
      * @param predicate Condition that determines if callback should execute
      * @param callback The group callback to execute
      */
-    public void registerGroupCallback(
-            String groupId,
-            GCE entry) {
-   
-        uiExecutor.executeFireAndForget(() -> 
-            registerGroupCallbackInternal(groupId, entry)
-        );
-        
+    public void registerGroupCallback(String groupId,GCE entry) {
+        if(isCurrentThread()){
+            registerGroupCallbackInternal(groupId, entry);
+        }else{
+            uiExecutor.executeFireAndForget(() -> 
+                registerGroupCallbackInternal(groupId, entry)
+            );
+        }
     }
     
     private void registerGroupCallbackInternal(
@@ -788,11 +828,13 @@ public abstract class RenderableLayoutManager<
      * Unregister a group callback from a group
      */
     public void unregisterGroupCallback(String groupId, String callbackId) {
-    
-        uiExecutor.executeFireAndForget(() -> 
-            unregisterGroupCallbackInternal(groupId, callbackId)
-        );
-        
+        if(isCurrentThread()){
+            unregisterGroupCallbackInternal(groupId, callbackId);
+        }else{
+            uiExecutor.executeFireAndForget(() -> 
+                unregisterGroupCallbackInternal(groupId, callbackId)
+            );
+        }
     }
     
     private void unregisterGroupCallbackInternal(String groupId, String callbackId) {

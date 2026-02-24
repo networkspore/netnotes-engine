@@ -26,7 +26,7 @@ import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
-import io.netnotes.engine.ui.containers.containerEvents.ContainerEventSerializer;
+// ContainerEventSerializer removed from base - event format is renderer-specific, see subclass on*Granted() impls
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -64,14 +64,14 @@ public abstract class Container<
     public static final int STATE_DESTROYING     = 2;
     public static final int STATE_DESTROYED      = 3;
     
-    // Visibility states (bits 4-7)
+   
     public static final int STATE_VISIBLE        = 4;
     public static final int STATE_HIDDEN         = 5;
     public static final int STATE_MINIMIZED      = 6;
     public static final int STATE_MAXIMIZED      = 7;
-    
-    // Focus state (bit 8)
-    public static final int STATE_FOCUSED        = 8;
+    public static final int STATE_LAYOUT_MANAGED = 8;
+    public static final int STATE_OFF_SCREEN     = 9;
+    public static final int STATE_FOCUSED        = 10;
     
     // Stream states (bits 11-12)
     public static final int STATE_STREAM_CONNECTED = 11;
@@ -107,6 +107,7 @@ public abstract class Container<
     public static final int STATE_FOCUS_REQUESTED    = 33;
     public static final int STATE_RENDER_REQUESTED   = 34;
     public static final int STATE_SHOW_REQUESTED     = 35;
+
 
 
     // ===== CORE IDENTITY =====
@@ -301,6 +302,7 @@ public abstract class Container<
         msgMap.put(ContainerCommands.RESTORE_CONTAINER, this::handleRestoreContainer);
         msgMap.put(ContainerCommands.UPDATE_CONTAINER, this::handleUpdateContainer);
         msgMap.put(ContainerCommands.QUERY_CONTAINER, this::handleQueryContainer);
+        msgMap.put(ContainerCommands.CONAINER_BATCH, this::handleContainerBatch);
     }
     
     // ===== LIFECYCLE =====
@@ -379,20 +381,26 @@ public abstract class Container<
 
     
     protected void dispatchCommand(NoteBytesMap command) {
-        NoteBytes cmd = command.get(Keys.CMD);
+        NoteBytesMap commandToDispatch = preprocessIncomingRenderCommand(command);
+        if (commandToDispatch == null) {
+            return;
+        }
+
+        NoteBytes cmd = commandToDispatch.get(Keys.CMD);
         if (cmd == null) {
             Log.logError("[Container:" + id + "] No cmd in command");
             return;
         }
 
-        Log.logNoteBytes("[Container: "+ getTitle()+"]", command);
+        Log.logNoteBytes("[Container: "+ getTitle()+"]", commandToDispatch);
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
+            final NoteBytesMap dispatchPayload = commandToDispatch;
             
             containerExecutor.execute(()->{
                 try {
-                    executor.execute(command);
+                    executor.execute(dispatchPayload);
                 } catch (Exception e) {
                     Log.logError("[Container:" + id + "] Error executing command '" + cmd + "': " + e.getMessage());
                 }
@@ -402,6 +410,85 @@ public abstract class Container<
             Log.logError("[Container:" + id + "] Unknown command: " + cmd);
         }
     }
+
+    /**
+     * Hook for renderer-specific inbound command processing.
+     *
+     * Return {@code null} to drop the command.
+     */
+    protected NoteBytesMap preprocessIncomingRenderCommand(NoteBytesMap command) {
+        return command;
+    }
+
+    /**
+     * Hook for renderer-specific handling of batch-level content bounds metadata.
+     */
+    protected void onBatchContentBounds(NoteBytes contentBounds, NoteBytesMap batchCommand) {}
+
+    /**
+     * Hook for renderer-specific preprocessing of commands inside a container batch.
+     *
+     * Return {@code null} to drop the nested command.
+     */
+    protected NoteBytesMap preprocessBatchCommand(NoteBytesMap command, NoteBytesMap parentBatch) {
+        return command;
+    }
+
+    private CompletableFuture<Void> handleContainerBatch(NoteBytesMap command) {
+        NoteBytes contentBounds = command.get(ContainerCommands.CONTENT_BOUNDS);
+        if (contentBounds != null) {
+            onBatchContentBounds(contentBounds, command);
+        }
+
+        NoteBytes batchBytes = command.get(ContainerCommands.BATCH_COMMANDS);
+        if (batchBytes == null || batchBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
+            Log.logError("[Container:" + id + "] container_batch missing batch_cmds");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        NoteBytesReadOnly[] batchArray = batchBytes.getAsNoteBytesArrayReadOnly().getAsArray();
+
+        return containerExecutor.execute(() -> {
+            for (NoteBytesReadOnly next : batchArray) {
+                if (next == null || next.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    continue;
+                }
+
+                NoteBytesMap nested = preprocessBatchCommand(next.getAsNoteBytesMap(), command);
+                if (nested == null) {
+                    continue;
+                }
+
+                NoteBytes nestedCmd = nested.get(Keys.CMD);
+                if (nestedCmd == null) {
+                    Log.logError("[Container:" + id + "] Nested command missing cmd");
+                    continue;
+                }
+
+                MessageExecutor batchExecutor = batchMsgMap.get(nestedCmd);
+                MessageExecutor executor = batchExecutor != null ? batchExecutor : msgMap.get(nestedCmd);
+
+                if (executor != null) {
+                    try {
+                        executor.execute(nested);
+                    } catch (Exception e) {
+                        Log.logError("[Container:" + id + "] Error executing nested command '" +
+                            nestedCmd + "': " + e.getMessage());
+                    }
+                } else {
+                    Log.logError("[Container:" + id + "] Unknown nested command: " + nestedCmd);
+                }
+            }
+            onBatchComplete();
+        });
+    }
+
+    /**
+     * Hook called after all commands in a batch have been executed, within the
+     * container executor. Subclasses can override to coalesce render requests,
+     * flush buffers, etc.
+     */
+    protected void onBatchComplete() {}
 
     public void emitEvent(NoteBytesMap map){
         if (map == null) {
@@ -447,9 +534,12 @@ public abstract class Container<
         })
             .exceptionally(ex->{
                 eventWriterExecutor.shutdown();
+                onEventStreamClosed();
                 throw new RuntimeException(ex);
             });
     }
+
+    protected abstract void onEventStreamClosed();
     
     // ===== STATE OPERATIONS =====
     
@@ -457,8 +547,21 @@ public abstract class Container<
      * Grant show - renderer calls this to approve show request
      */
     public CompletableFuture<Void> grantShow() {
+        stateMachine.removeState(STATE_SHOW_REQUESTED);
+
+        if (isVisible() && !isHidden()) {
+            if(showFuture != null) {
+                showFuture.complete(null);
+                showFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_SHOW_REQUESTED);
+            if (stateMachine.hasState(STATE_VISIBLE) && !stateMachine.hasState(STATE_HIDDEN)) {
+                return;
+            }
             stateMachine.removeState(STATE_HIDDEN);
             stateMachine.addState(STATE_VISIBLE);
             onShowGranted();
@@ -483,8 +586,22 @@ public abstract class Container<
      */
     public CompletableFuture<Void> grantFocus() {
         Log.logMsg("[Container].grantFocus");
+        // Clear immediately so request scanners stop re-queueing while grant is pending.
+        stateMachine.removeState(STATE_FOCUS_REQUESTED);
+
+        if (isFocused()) {
+            if (focusFuture != null) {
+                focusFuture.complete(null);
+                focusFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_FOCUS_REQUESTED);
+            if (stateMachine.hasState(STATE_FOCUSED)) {
+                return;
+            }
             stateMachine.addState(STATE_FOCUSED);
             onFocusGranted();
         })
@@ -507,8 +624,21 @@ public abstract class Container<
      * Grant hide
      */
     public CompletableFuture<Void> grantHide() {
+        stateMachine.removeState(STATE_HIDE_REQUESTED);
+
+        if (isHidden() && !isVisible()) {
+            if(hideFuture != null) {
+                hideFuture.complete(null);
+                hideFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_HIDE_REQUESTED);
+            if (stateMachine.hasState(STATE_HIDDEN) && !stateMachine.hasState(STATE_VISIBLE)) {
+                return;
+            }
             stateMachine.removeState(STATE_VISIBLE);
             stateMachine.addState(STATE_HIDDEN);
             onHideGranted();
@@ -540,8 +670,21 @@ public abstract class Container<
     }
     
     public CompletableFuture<Void> grantMaximize() {
+        stateMachine.removeState(STATE_MAXIMIZE_REQUESTED);
+
+        if (isMaximized()) {
+            if(maximizeFuture != null){
+                maximizeFuture.complete(null);
+                maximizeFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_MAXIMIZE_REQUESTED);
+            if (stateMachine.hasState(STATE_MAXIMIZED)) {
+                return;
+            }
             stateMachine.addState(STATE_MAXIMIZED);
             onMaximizeGranted();
         })
@@ -561,8 +704,23 @@ public abstract class Container<
     }
 
     public CompletableFuture<Void> grantRestore() {
+        stateMachine.removeState(STATE_RESTORE_REQUESTED);
+
+        if (!isMaximized() && isVisible() && !isHidden()) {
+            if(restoreFuture != null) {
+                restoreFuture.complete(null);
+                restoreFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_RESTORE_REQUESTED);
+            if (!stateMachine.hasState(STATE_MAXIMIZED) &&
+                    stateMachine.hasState(STATE_VISIBLE) &&
+                    !stateMachine.hasState(STATE_HIDDEN)) {
+                return;
+            }
             stateMachine.removeState(STATE_MAXIMIZED);
             stateMachine.removeState(STATE_HIDDEN);
             stateMachine.addState(STATE_VISIBLE);
@@ -584,8 +742,25 @@ public abstract class Container<
     }
 
     public CompletableFuture<Void> grantDestroy() {
+        stateMachine.removeState(STATE_DESTROY_REQUESTED);
+
+        if (isDestroying()) {
+            return destroyFuture != null ? destroyFuture : CompletableFuture.completedFuture(null);
+        }
+
+        if (isDestroyed()) {
+            if(destroyFuture != null) {
+                destroyFuture.complete(null);
+                destroyFuture = null;
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
         return containerExecutor.execute(() -> {
             stateMachine.removeState(STATE_DESTROY_REQUESTED);
+            if (stateMachine.hasState(STATE_DESTROYED)) {
+                return;
+            }
             stateMachine.addState(STATE_DESTROYING);
             Log.logMsg("[Container:" + id + "] Destroying");
         
@@ -608,6 +783,34 @@ public abstract class Container<
             if(destroyFuture != null){
                 destroyFuture.completeExceptionally(ex);
                 destroyFuture = null;
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Grant update - renderer calls this to approve update request.
+     */
+    public CompletableFuture<Void> grantUpdate() {
+        stateMachine.removeState(STATE_UPDATE_REQUESTED);
+
+        if (updateFuture == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return containerExecutor.execute(() -> {
+            stateMachine.removeState(STATE_UPDATE_REQUESTED);
+        })
+        .thenRun(() -> {
+            if (updateFuture != null) {
+                updateFuture.complete(null);
+                updateFuture = null;
+            }
+        })
+        .exceptionally(ex -> {
+            if (updateFuture != null) {
+                updateFuture.completeExceptionally(ex);
+                updateFuture = null;
             }
             return null;
         });
@@ -639,41 +842,29 @@ public abstract class Container<
             } else if(requestStateBit == STATE_DESTROY_REQUESTED && destroyFuture != null) {
                 destroyFuture.completeExceptionally(new Exception("Destroy request denied"));
                 destroyFuture = null;
+            } else if(requestStateBit == STATE_UPDATE_REQUESTED && updateFuture != null) {
+                updateFuture.completeExceptionally(new Exception("Update request denied"));
+                updateFuture = null;
             }
         });
     }
 
     /*
      * ============ On Event Dispatching ==========
+     * 
+     * These hooks are called by the grant*() methods after state has been committed.
+     * Subclasses are responsible for emitting the appropriate client-facing events.
+     * They are abstract because: (a) every concrete container must handle them, and
+     * (b) the event format is renderer-specific — there is no single correct default.
      */
 
-    protected void onDestroyGranted() {
-        emitEvent(ContainerEventSerializer.createCloseEvent());
-    }
-    
-    protected void onFocusGranted() {
-        emitEvent(ContainerEventSerializer.createFocusEvent());
-    }
-    
-    protected void onFocusRevoked() {
-        emitEvent(ContainerEventSerializer.createFocusLostEvent());
-    }
-    
-    protected void onHideGranted() {
-        emitEvent(ContainerEventSerializer.createHiddenEvent());
-    }
-    
-    protected void onMaximizeGranted() {
-        emitEvent(ContainerEventSerializer.createMaximizeEvent());
-    }
-    
-    protected void onRestoreGranted() {
-        emitEvent(ContainerEventSerializer.createRestoredEvent());
-    }
-    
-    protected void onShowGranted() {
-        emitEvent(ContainerEventSerializer.createShownEvent());
-    }
+    protected abstract void onDestroyGranted();
+    protected abstract void onFocusGranted();
+    protected abstract void onFocusRevoked();
+    protected abstract void onHideGranted();
+    protected abstract void onMaximizeGranted();
+    protected abstract void onRestoreGranted();
+    protected abstract void onShowGranted();
 
     public void setOnRequestMade(Consumer<T> notifier) {
         this.onRequestMade = notifier;
@@ -691,54 +882,84 @@ public abstract class Container<
     // ===== MESSAGE HANDLERS =====
    
     public CompletableFuture<Void> handleShowContainer(NoteBytesMap command) {
+        if (isVisible() && !isHidden()) {
+            stateMachine.removeState(STATE_SHOW_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(showFuture == null) {
             showFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_SHOW_REQUESTED));
+            stateMachine.addState(STATE_SHOW_REQUESTED);
             notifyRequestMade();
         }
         return showFuture;
     }
     
     public CompletableFuture<Void> handleHideContainer(NoteBytesMap command) {
+        if (isHidden() && !isVisible()) {
+            stateMachine.removeState(STATE_HIDE_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(hideFuture == null) {
             hideFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_HIDE_REQUESTED));
+            stateMachine.addState(STATE_HIDE_REQUESTED);
             notifyRequestMade();
         }
         return hideFuture;
     }
     
     public CompletableFuture<Void> handleDestroyContainer(NoteBytesMap command) {
+         if (isDestroyed() || isDestroying()) {
+            stateMachine.removeState(STATE_DESTROY_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
          if(destroyFuture == null) {
             destroyFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_DESTROY_REQUESTED));
+            stateMachine.addState(STATE_DESTROY_REQUESTED);
             notifyRequestMade();
         }
         return destroyFuture;
     }
 
     public CompletableFuture<Void> destroyNow() {
+        if (isDestroyed() || isDestroying()) {
+            stateMachine.removeState(STATE_DESTROY_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if (destroyFuture == null) {
             destroyFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_DESTROY_REQUESTED));
+            stateMachine.addState(STATE_DESTROY_REQUESTED);
             notifyRequestMade();
         }
         return destroyFuture;
     }   
  
     public CompletableFuture<Void> handleFocusContainer(NoteBytesMap command) {
+        if (isFocused()) {
+            stateMachine.removeState(STATE_FOCUS_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(focusFuture == null) {
             focusFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_FOCUS_REQUESTED));
+            stateMachine.addState(STATE_FOCUS_REQUESTED);
             notifyRequestMade();
         }
         return focusFuture;
     }
 
     public CompletableFuture<Void> requestFocus() {
+        if (isFocused()) {
+            stateMachine.removeState(STATE_FOCUS_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(focusFuture == null) {
             focusFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_FOCUS_REQUESTED));
+            stateMachine.addState(STATE_FOCUS_REQUESTED);
             Log.logMsg("[Container " +id+ "].requestFocus" );
             notifyRequestMade();
         }
@@ -746,18 +967,28 @@ public abstract class Container<
     }
     
     public CompletableFuture<Void> handleMaximizeContainer(NoteBytesMap command) {
+        if (isMaximized()) {
+            stateMachine.removeState(STATE_MAXIMIZE_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(maximizeFuture == null) {
             maximizeFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_MAXIMIZE_REQUESTED));
+            stateMachine.addState(STATE_MAXIMIZE_REQUESTED);
             notifyRequestMade();
         }
         return maximizeFuture;
     }
     
     public CompletableFuture<Void> handleRestoreContainer(NoteBytesMap command) {
+        if (!isMaximized() && isVisible() && !isHidden()) {
+            stateMachine.removeState(STATE_RESTORE_REQUESTED);
+            return CompletableFuture.completedFuture(null);
+        }
+
         if(restoreFuture == null) {
             restoreFuture = new CompletableFuture<>();
-            containerExecutor.execute(() -> stateMachine.addState(STATE_RESTORE_REQUESTED));
+            stateMachine.addState(STATE_RESTORE_REQUESTED);
             notifyRequestMade();
         }   
         return restoreFuture;
@@ -766,25 +997,34 @@ public abstract class Container<
     public CompletableFuture<Void> handleUpdateContainer(NoteBytesMap command) {
         if(updateFuture == null) {
             updateFuture = new CompletableFuture<>();
-           containerExecutor.execute(() -> {
-                NoteBytes updatesBytes = command.get(Keys.UPDATES);
-                if (updatesBytes != null && 
-                    updatesBytes.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    
-                    NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
-                    NoteBytes titleBytes = updates.get(Keys.TITLE);
-                    if (titleBytes != null) {
-                        title.set(titleBytes.getAsString());
-                        stateMachine.addState(STATE_UPDATE_REQUESTED);
+            stateMachine.addState(STATE_UPDATE_REQUESTED);
+            notifyRequestMade();
+
+            containerExecutor.execute(() -> applyUpdates(command))
+                .thenCompose(v -> grantUpdate())
+                .exceptionally(ex -> {
+                    stateMachine.removeState(STATE_UPDATE_REQUESTED);
+                    if (updateFuture != null) {
+                        updateFuture.completeExceptionally(ex);
+                        updateFuture = null;
                     }
-                }
-            })
-            .exceptionally(ex -> {
-                updateFuture.completeExceptionally(ex);
-                return null;
-            });
+                    return null;
+                });
         }
         return updateFuture;
+    }
+
+    protected void applyUpdates(NoteBytesMap command) {
+        NoteBytes updatesBytes = command.get(Keys.UPDATES);
+        if (updatesBytes == null || updatesBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+            return;
+        }
+
+        NoteBytesMap updates = updatesBytes.getAsNoteBytesMap();
+        NoteBytes titleBytes = updates.get(Keys.TITLE);
+        if (titleBytes != null) {
+            title.set(titleBytes.getAsString());
+        }
     }
   
     private CompletableFuture<Void> handleQueryContainer(NoteBytesMap command) {
@@ -802,6 +1042,7 @@ public abstract class Container<
     
     protected void closeStreams() {
         StreamUtils.safeClose(renderStreamChannel);
+  
         if (eventWriter != null) {
             eventWriter.shutdown();
         }
@@ -827,27 +1068,23 @@ public abstract class Container<
     public boolean isStreamActive() { return stateMachine.hasState(STATE_STREAM_CONNECTED); }
     public boolean hasError() { return stateMachine.hasState(STATE_ERROR); }
     public boolean hasRenderError() { return stateMachine.hasState(STATE_RENDER_ERROR); }
-    
+    public boolean isDestroying() { return stateMachine.hasState(STATE_DESTROYING); }
+    public boolean isDestroyed() { return stateMachine.hasState(STATE_DESTROYED); }
+    public boolean isOffScreen() { return stateMachine.hasState(STATE_OFF_SCREEN); }
     /**
      * Should this container be rendered?
      * Renderer uses this to decide - NOT the container's responsibility
      */
     public boolean shouldRender() {
-        // Don't render if in fatal error state
-        if (hasError()) {
-            return false;
-        }
+    
+        if(stateMachine.hasAnyState(
+            STATE_DESTROYING, 
+            STATE_DESTROYED, 
+            STATE_HIDDEN, 
+            STATE_OFF_SCREEN, 
+            STATE_ERROR
+        )) return false;
         
-        // Don't render if hidden
-        if (isHidden()) {
-            return false;
-        }
-        
-        // Don't render if destroyed/destroying
-        if (stateMachine.hasState(STATE_DESTROYED) || 
-            stateMachine.hasState(STATE_DESTROYING)) {
-            return false;
-        }
         
         // Must be visible
         return isVisible();

@@ -1,10 +1,11 @@
-package io.netnotes.engine.ui.layout;
+package io.netnotes.engine.ui.renderer.layout;
 
 import java.util.HashMap;
 
-import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
-import io.netnotes.engine.ui.BatchBuilder;
-import io.netnotes.engine.ui.Renderable;
+
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 

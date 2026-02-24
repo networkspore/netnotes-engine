@@ -1,11 +1,16 @@
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
-import io.netnotes.engine.ui.layout.GroupCallbackEntry;
-import io.netnotes.engine.ui.layout.GroupLayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutContext;
-import io.netnotes.engine.ui.layout.LayoutData;
-import io.netnotes.engine.ui.layout.LayoutGroup;
+import io.netnotes.engine.ui.PooledRegion;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.SpatialRegionPool;
+import io.netnotes.engine.ui.VisibilityPredicate;
+import io.netnotes.engine.ui.renderer.layout.GroupCallbackEntry;
+import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutContext;
+import io.netnotes.engine.ui.renderer.layout.LayoutData;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
@@ -32,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -100,7 +106,7 @@ public abstract class Renderable<
     protected S requestedRegion = null;
     protected boolean layoutInProgress = false;
  
-    protected Map<String,GSE> pendingGroups  = new HashMap<>();
+    protected final ConcurrentHashMap<String,GSE> childGroups  = new ConcurrentHashMap<>();
     
     // ===== Floating =====
 
@@ -475,7 +481,10 @@ public abstract class Renderable<
         
         // Notify render system if we're root
         if (parent == null && onRenderRequest != null) {
+            Log.logMsg("[Renderable:" + getName() + "] invalidate → firing onRenderRequest");
             onRenderRequest.accept(self());
+        }else if (parent == null) {
+            Log.logMsg("[Renderable:" + getName() + "] invalidate → onRenderRequest is NULL, render lost");
         }
     }
     
@@ -570,10 +579,22 @@ public abstract class Renderable<
      * @param clipRegion The clip region in absolute coordinates
      */
     public void toBatch(B batch, S clipRegion) {
-        if (!isEffectivelyVisible() || isInvisible()) {
+        Log.logMsg("[Renderable:" + getName() + "] toBatch children check"
+        + " visible=" + isVisible()
+        + " STATE_EFFECTIVELY_VISIBLE=" + stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_VISIBLE)
+        + " childrenDirty=" + childrenDirty
+        + " children=" + children.size()
+        + " renderableChildren=" + children.stream()
+            .filter(c -> c.getRenderingParent() == this)
+            .map(R::getName)
+            .collect(Collectors.joining(","))
+    );
+
+        if (!isVisible()) {
+            Log.logMsg("[Renderable:" + getName() + "] toBatch notVisible exiting");
             return;
         }
-        
+      
         // Calculate absolute bounds
         try (PooledRegion<S> absBoundsPooled = regionPool.obtainPooled()) {
             S absBounds = absBoundsPooled.get();
@@ -586,7 +607,13 @@ public abstract class Renderable<
                 node = node.getRenderingParent();
             }
             
+            Log.logMsg("[Renderable:" + getName() + "] toBatch renderingParent: " +(node == null ? "renderingParent null " : node.getName()));
+            
             if (!absBounds.intersects(clipRegion)) {
+                 Log.logMsg("[Renderable:" + getName() + "] toBatch absBounds does not intersect exiting:"
+                    + "absBound:" + (absBounds != null ? absBounds.toString() : "null")
+                    + "clipRegion: " + (clipRegion != null ? clipRegion.toString() : "null")
+                );
                 return;
             }
             
@@ -606,8 +633,11 @@ public abstract class Renderable<
                         renderClip.copyFrom(absoluteDamage.intersection(clipRegion));
                         
                         batch.pushClipRegion(renderClip);
+                        Log.logMsg("[Renderable:" + getName() + "] renderingSelf");
                         renderSelf(batch);
                         batch.popClipRegion();
+                    }catch(Exception clipException){
+                         Log.logError("[Renderable:" + getName() + "] toBatch clipException ", clipException);
                     }
                     
                     if (localDamage != null) {
@@ -618,14 +648,20 @@ public abstract class Renderable<
                         regionPool.recycle(absoluteDamage);
                         absoluteDamage = null;
                     }
+                }else{
+                    Log.logMsg("[Renderable:" + getName() + "] not renderingself");
                 }
                 
                 // Render children in layer order
                 if (childrenDirty) {
                     renderChildrenByLayer(batch, childClip);
                     childrenDirty = false;
+                }else{
+                    Log.logMsg("[Renderable:" + getName() + "] childrenNotDirty");
                 }
             }
+        }catch(Exception e){
+             Log.logError("[Renderable:" + getName() + "] toBatch failed:", e);
         }
     }
 
@@ -633,6 +669,7 @@ public abstract class Renderable<
      * Render children sorted by layer and z-index
      */
     protected void renderChildrenByLayer(B batch, S childClip) {
+         Log.logMsg("[Renderable:" + getName() + "] renderChildrenByLayer");
         // Get rendering children (those in our rendering subtree)
         List<R> renderChildren = children.stream()
             .filter(c -> c.getRenderingParent() == this)
@@ -640,9 +677,14 @@ public abstract class Renderable<
                 .comparingInt(R::getLayerIndex)
                 .thenComparingInt(R::getZOrder))
             .collect(Collectors.toList());
-        
+        Log.logMsg("[Renderable:" + getName() + "] renderChildren: " + renderChildren.size());
         for (R child : renderChildren) {
-            child.toBatch(batch, childClip);
+            Log.logMsg("[Renderable:" + getName() + "] toBatch: " + child.getName());
+            try {
+                child.toBatch(batch, childClip);
+            } catch (Exception e) {
+                Log.logError("[Renderable:" + getName() + "] toBatch failed for child: " + child.getName(), e);
+            }
         }
     }
 
@@ -1402,11 +1444,6 @@ public abstract class Renderable<
         }
     }
 
-
-
-
-
-
     /**
      * Apply layout data - IMMEDIATE application for incremental layout
      * 
@@ -1416,7 +1453,12 @@ public abstract class Renderable<
      * @param layoutData Data carrier (spatialRegion != null means damaged)
      */
     void applyLayoutData(LD layoutData) {
-        // NO DEFERRAL - must apply immediately for incremental layout
+        Log.logMsg("[Renderable:" + getName() + "] applyLayoutData"
+            + "\n\t applyLayoutData region=" + (layoutData.hasRegion() ? layoutData.getSpatialRegion().toString() : "null")
+            + "\n\t onRenderRequest: " + (onRenderRequest != null)
+            + "\n\t parent==null:    " + (parent == null)
+        );
+
         layoutInProgress = true;
         try {
             // Apply spatial changes - IMMEDIATE
@@ -1433,6 +1475,10 @@ public abstract class Renderable<
         } finally {
             layoutInProgress = false;
         }
+        Log.logMsg("[Renderable:" + getName() + "] applyLayoutData after invalidate"
+            + "\n\t localDamage:     " + (localDamage != null)
+            + "\n\t absoluteDamage:  " + (absoluteDamage != null)
+        );
     }
 
     /**
@@ -1596,8 +1642,8 @@ public abstract class Renderable<
     /**
      * Create a group
      */
-    protected void createPendingGroup(String groupId) {
-        pendingGroups.putIfAbsent(groupId, createGroupStateEntry());
+    protected void createChildGroup(String groupId) {
+        childGroups.putIfAbsent(groupId, createGroupStateEntry());
     }
     
     protected abstract GSE createGroupStateEntry();
@@ -1605,23 +1651,25 @@ public abstract class Renderable<
     /**
      * Add renderable to group
      */
-    protected void addToPendingGroup(R renderable, String groupId) {
-        createPendingGroup(groupId);
-        GSE state = pendingGroups.get(groupId);
+    protected void addToChildGroup(R renderable, String groupId) {
+        createChildGroup(groupId);
+        GSE state = childGroups.get(groupId);
         
         // Remove from any existing group
-        for (GSE otherState : pendingGroups.values()) {
+        for (GSE otherState : childGroups.values()) {
             otherState.getMembers().remove(renderable);
         }
-        
         state.getMembers().add(renderable);
+        Log.logMsg("[Renderable:" + getName() + "] addToChildGroup " + renderable.getName()
+            + " groupId=" + groupId
+        );
     }
     
     /**
      * Get group ID for renderable
      */
-    protected String getPendingLayoutGroupIdByRenderable(R renderable) {
-        for (Map.Entry<String, GSE> entry : pendingGroups.entrySet()) {
+    protected String getChildLayoutGroupIdByRenderable(R renderable) {
+        for (Map.Entry<String, GSE> entry : childGroups.entrySet()) {
             if (entry.getValue().getMembers().contains(renderable)) {
                 return entry.getKey();
             }
@@ -1632,8 +1680,8 @@ public abstract class Renderable<
     /**
      * Remove renderable from its group
      */
-    protected void removePendingGroupMember(R renderable) {
-        Iterator<Entry<String, GSE>> it = pendingGroups.entrySet().iterator();
+    protected void removeChildGroupMember(R renderable) {
+        Iterator<Entry<String, GSE>> it = childGroups.entrySet().iterator();
         while (it.hasNext()) {
             Entry<String, GSE> stateEntry = it.next();
             GSE state = stateEntry.getValue();
@@ -1649,93 +1697,84 @@ public abstract class Renderable<
     /**
      * Destroy a group
      */
-    protected void destroyPendingGroup(String groupId) {
-        pendingGroups.remove(groupId);
+    protected void destroyChildGroup(String groupId) {
+        childGroups.remove(groupId);
     }
     
     /**
      * Register callback for a group
      */
-    protected void registerPendingGroupCallback(String groupId, GCE callbackEntry) {
-        createPendingGroup(groupId);
-        GSE state = pendingGroups.get(groupId);
+    protected void registerChildGroupCallback(String groupId, GCE callbackEntry) {
+        createChildGroup(groupId);
+        GSE state = childGroups.get(groupId);
         state.getCallbacks().put(callbackEntry.getCallbackId(), callbackEntry);
     }
 
-    protected void unregisterPendingGroupCallback(String groupId, String callbackId){
-        GSE state = pendingGroups.get(groupId);
+    protected void unregisterChildGroupCallback(String groupId, String callbackId){
+        GSE state = childGroups.get(groupId);
         state.getCallbacks().remove(callbackId);
         if(state.getCallbacks().size() == 0 && state.getMembers().size() == 0){
-            pendingGroups.remove(groupId);
+            childGroups.remove(groupId);
         }
     }
     
     /**
      * Get all group IDs
      */
-    Set<String> getPendingGroupIds() {
-        return pendingGroups.keySet();
+    Set<String> getChildGroupIds() {
+        return childGroups.keySet();
     }
     
     /**
      * Get group state
      */
-    GSE getPendingGroupState(String groupId) {
-        return pendingGroups.get(groupId);
+    GSE getChildGroupState(String groupId) {
+        return childGroups.get(groupId);
     }
 
-    private GCE getPendingLayoutGroupCallback(String groupId, String callbackId){
-        GSE groupState = pendingGroups.get(groupId);
+    private GCE getChildLayoutGroupCallback(String groupId, String callbackId){
+        GSE groupState = childGroups.get(groupId);
         if(groupState == null){ return null; }
         return groupState.getCallbacks().get(callbackId);
     }
 
-    public Map<String,GSE> getPendingGroups(){
-        return pendingGroups;
+    public Map<String,GSE> getChildGroups(){
+        return childGroups;
     }    
     
-    Map<String,GSE> collectPendingGroups(){
-        Map<String,GSE> groups = new HashMap<>(pendingGroups);
-        destroyPendingGroups();
-       
-        for (R child : getChildren()) {
-            collectPendingGroupsFrom(child, groups);
+    Map<String,GSE> collectChildGroups(){
+        Map<String,GSE> copy = new HashMap<>();
+        for (Map.Entry<String,GSE> entry : childGroups.entrySet()) {
+            GSE snapshot = createGroupStateEntry();
+            snapshot.getMembers().addAll(entry.getValue().getMembers());
+            snapshot.getCallbacks().putAll(entry.getValue().getCallbacks());
+            copy.put(entry.getKey(), snapshot);
         }
-
-        return groups;
+        return copy;
     }
 
-    private void collectPendingGroupsFrom(R child, Map<String,GSE> groups){
-        if (!child.hasPendingGroups()) {
-            return;
-        }
-        Map<String,GSE> childGroups = child.getPendingGroups();
-        groups.putAll(childGroups);
-        child.destroyPendingGroups();
-    }
 
-    protected void destroyPendingGroups(){
-        pendingGroups.clear();
-        pendingGroups = null;
+    protected void destroyChildGroups(){
+        childGroups.clear();
     }
 
     /**
      * Check if there are any pending groups
      */
-    public boolean hasPendingGroups() {
-        return !pendingGroups.isEmpty();
+    public boolean hasChildGroups() {
+        return childGroups != null && !childGroups.isEmpty();
     }
     
     /**
      * Clear all pending state
      */
     protected void clear() {
-        pendingGroups.clear();
+        childGroups.clear();
     }
     
 
 
-    public void clearPendingGroups() {
+    public void clearChildGroups() {
         clear();
     }
     
@@ -1752,7 +1791,7 @@ public abstract class Renderable<
         if (isAttachedToLayoutManager()) {
             layoutManager.createLayoutGroup(groupId);
         } else {
-            createPendingGroup(groupId);
+            createChildGroup(groupId);
         }
     }
 
@@ -1772,10 +1811,9 @@ public abstract class Renderable<
      * @param groupId group identifier to add the renderable to
      */
     public void addToLayoutGroup(R renderable, String groupId) {
-        if (isAttachedToLayoutManager() ) {
+        addToChildGroup(renderable, groupId);          // always
+        if (isAttachedToLayoutManager()) {
             layoutManager.addToLayoutGroup(renderable, groupId);
-        } else {
-            addToPendingGroup(renderable, groupId);
         }
     }
 
@@ -1783,7 +1821,7 @@ public abstract class Renderable<
         if(isAttachedToLayoutManager()){
             return layoutManager.getLayoutGroupCallback(groupId, callbackId);
         }else{
-            return getPendingLayoutGroupCallback(groupId, callbackId);
+            return getChildLayoutGroupCallback(groupId, callbackId);
         }
     }
     
@@ -1797,7 +1835,7 @@ public abstract class Renderable<
         if (isAttachedToLayoutManager() ) {
             return layoutManager.getLayoutGroupIdByRenderable(renderable);
         } else {
-            return getPendingLayoutGroupIdByRenderable(renderable);
+            return getChildLayoutGroupIdByRenderable(renderable);
         }
     }
     
@@ -1807,10 +1845,9 @@ public abstract class Renderable<
      * @param renderable renderable to remove
      */
     public void removeLayoutGroupMember(R renderable) {
-        if (isAttachedToLayoutManager() ) {
+        removeChildGroupMember(renderable);             // always
+        if (isAttachedToLayoutManager()) {
             layoutManager.removeLayoutGroupMember(renderable);
-        } else {
-            removePendingGroupMember(renderable);
         }
     }
     
@@ -1820,13 +1857,12 @@ public abstract class Renderable<
      * @param groupId group to destroy
      */
     public void destroyLayoutGroup(String groupId) {
-        if (isAttachedToLayoutManager() ) {
+        destroyChildGroup(groupId);                    // always
+        if (isAttachedToLayoutManager()) {
             layoutManager.destroyLayoutGroup(groupId);
-        } else {
-            destroyPendingGroup(groupId);
         }
     }
-    
+        
     /**
      * Register callback for a group
      * 
@@ -1863,11 +1899,10 @@ public abstract class Renderable<
      * @param predicate predicate to determine if the callback runs or null
      * @param callback callback to manage group members
      */
-    public void registerGroupCallback(String groupId,  GCE entry) {
-        if (isAttachedToLayoutManager() ) {
+    public void registerGroupCallback(String groupId, GCE entry) {
+        registerChildGroupCallback(groupId, entry);    // always
+        if (isAttachedToLayoutManager()) {
             layoutManager.registerLayoutGroupCallback(groupId, entry);
-        } else {
-            registerPendingGroupCallback(groupId, entry);
         }
     }
     
@@ -1878,10 +1913,9 @@ public abstract class Renderable<
     }
 
     public void unregisterLayoutGroupCallback(String groupId, String callbackId) {
-        if(isAttachedToLayoutManager()){
-            layoutManager.unregisterLayoutGroupCallback(groupId, callbackId);        
-        }else{
-            unregisterPendingGroupCallback(groupId, callbackId);
+        unregisterChildGroupCallback(groupId, callbackId);  // always
+        if (isAttachedToLayoutManager()) {
+            layoutManager.unregisterLayoutGroupCallback(groupId, callbackId);
         }
     }
 

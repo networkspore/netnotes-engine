@@ -19,6 +19,7 @@ public abstract class ContainerConfig <
     S extends SpatialRegion<?,S>,
     CCFG extends ContainerConfig<S,CCFG>
 > {
+    
     private S initialRegion = null;
     private Boolean resizable = null;
     private Boolean closable = null;

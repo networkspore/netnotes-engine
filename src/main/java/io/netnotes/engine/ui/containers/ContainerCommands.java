@@ -2,6 +2,7 @@ package io.netnotes.engine.ui.containers;
 
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
@@ -16,6 +17,11 @@ import io.netnotes.noteBytes.collections.NoteBytesPair;
  * EVENT commands FROM container utlize EventBytes, not ContainerCommands
  */
 public class ContainerCommands {
+
+    public static int BIT_IS_LAYOUT_MANAGED = 1 << Container.STATE_LAYOUT_MANAGED;
+    public static int BIT_IS_OFF_SCREEN = 1 << Container.STATE_OFF_SCREEN;
+    public static int BIT_IS_FOCUSED = (1 << Container.STATE_FOCUSED);
+    public static int BIT_IS_VISIBLE = (1 << Container.STATE_VISIBLE);
 
     public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
     public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
@@ -33,9 +39,11 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly MAXIMIZABLE = new NoteBytesReadOnly("maximizable");
     public static final NoteBytesReadOnly ICON = new NoteBytesReadOnly("icon");
     public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
+    
     public static final NoteBytesReadOnly IS_VISIBLE = new NoteBytesReadOnly( "is_visible");
     public static final NoteBytesReadOnly IS_FOCUSED = new NoteBytesReadOnly( "is_focused");
     public static final NoteBytesReadOnly IS_MANAGED = new NoteBytesReadOnly( "is_managed");
+    public static final NoteBytesReadOnly IS_OFF_SCREEN = new NoteBytesReadOnly("is_on_screen");
 
     public static final NoteBytesReadOnly CONTENT_BOUNDS = new NoteBytesReadOnly("CONTENT_BOUNDS");
 
@@ -270,21 +278,60 @@ public class ContainerCommands {
         return msg;
     }
     
+     public static NoteBytesMap containerResized(
+        NoteBytes containerId,
+        NoteBytes regionBytesObj
+     ){
+        NoteBytesMap msg = new NoteBytesMap();
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_REGION_CHANGED);
+        msg.put(ContainerCommands.CONTAINER_ID, containerId);
+        msg.put(Keys.PAYLOAD, regionBytesObj);
+        return msg;
+     }
 
     /**
      * Container resized event
+     * (setManaged / offscreeen flags default false)
      */
-    public static NoteBytesMap containerResized(
+    public static NoteBytesMap containerRegionChanged(
         NoteBytes containerId,
-        NoteBytes regionBytesArray,
-        boolean isManaged
+        NoteBytes regionBytesObj,
+        int stateFlags
     ) {
         NoteBytesMap msg = new NoteBytesMap();
-        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_RESIZE);
+        msg.put(Keys.EVENT, EventBytes.EVENT_CONTAINER_REGION_CHANGED);
         msg.put(ContainerCommands.CONTAINER_ID, containerId);
-        msg.put(Keys.PAYLOAD, regionBytesArray);
-        msg.put(ContainerCommands.IS_MANAGED, isManaged);
+        msg.put(Keys.STATE_FLAGS, stateFlags);
+        msg.put(Keys.PAYLOAD, regionBytesObj);
+     
         return msg;
     }
+
+    public static NoteBytesMap containerRegionChanged(
+        NoteBytes containerId,
+        NoteBytes regionBytesObj,
+        boolean isManaged,
+        boolean isOffScreen
+    ) {
+        return containerRegionChanged(
+            containerId, 
+            regionBytesObj, 
+            createRegionChangedStateFlags(isManaged, isOffScreen)
+        );
+    }
+
+    public static int createRegionChangedStateFlags(boolean isManaged, boolean isOffScreen){
+        int state = 0;
+        if (isManaged) {
+            state |= BIT_IS_LAYOUT_MANAGED;
+        }
+        if (isOffScreen) {
+            state |= BIT_IS_OFF_SCREEN;
+        }
+        return state;
+    }
     
+    public static NoteBytesReadOnly getNoteBoolean(boolean b){
+        return b ? NoteBoolean.TRUE : NoteBoolean.FALSE;
+    }
 }

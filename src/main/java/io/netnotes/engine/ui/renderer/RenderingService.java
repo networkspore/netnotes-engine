@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.containers;
+package io.netnotes.engine.ui.renderer;
 
 
 import io.netnotes.engine.io.ContextPath;
@@ -17,8 +17,9 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.state.BitFlagStateMachine;
-import io.netnotes.engine.ui.RenderingServiceStates;
-import io.netnotes.engine.ui.UIRenderer;
+import io.netnotes.engine.ui.containers.Container;
+import io.netnotes.engine.ui.containers.ContainerCommands;
+import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 import java.util.HashMap;
@@ -47,7 +48,7 @@ public class RenderingService extends FlowProcess {
     private final BitFlagStateMachine state;
     
     // ===== RENDERER MANAGEMENT =====
-    private final Map<NoteBytesReadOnly, UIRenderer<?,?,?,?,?>> renderers = new ConcurrentHashMap<>();
+    private final Map<NoteBytesReadOnly, Renderer<?,?,?,?,?>> renderers = new ConcurrentHashMap<>();
     private final NoteBytesReadOnly systemDefaultRendererId;
     
     // ===== MESSAGE DISPATCH =====
@@ -56,7 +57,7 @@ public class RenderingService extends FlowProcess {
     /**
      * Constructor with system default renderer
      */
-    public RenderingService(String name, UIRenderer<?,?,?,?,?> systemDefaultRenderer) {
+    public RenderingService(String name, Renderer<?,?,?,?,?> systemDefaultRenderer) {
         super(name, ProcessType.BIDIRECTIONAL);
         this.state = new BitFlagStateMachine(name);
         
@@ -72,7 +73,7 @@ public class RenderingService extends FlowProcess {
     
     // ===== RENDERER REGISTRATION =====
     
-    public void registerRenderer(UIRenderer<?,?,?,?,?> renderer) {
+    public void registerRenderer(Renderer<?,?,?,?,?> renderer) {
         if (renderer == null || renderer.getId() == null) {
             throw new IllegalArgumentException("rendererId and renderer required");
         }
@@ -100,7 +101,7 @@ public class RenderingService extends FlowProcess {
             throw new IllegalArgumentException("Cannot unregister system default renderer");
         }
         
-        UIRenderer<?,?,?,?,?> renderer = renderers.get(rendererId);
+        Renderer<?,?,?,?,?> renderer = renderers.get(rendererId);
         if (renderer != null && renderer.getContainerCount() > 0) {
             throw new IllegalStateException(
                 "Cannot unregister renderer with active containers: " + rendererId
@@ -122,7 +123,7 @@ public class RenderingService extends FlowProcess {
     public NoteBytes selectRendererId(NoteBytes rendererId) {
         // TIER 1: Explicit renderer
         if (rendererId != null && !rendererId.isEmpty()) {
-            UIRenderer<?,?,?,?,?> renderer = renderers.get(rendererId);
+            Renderer<?,?,?,?,?> renderer = renderers.get(rendererId);
             
             if (renderer == null) {
                 throw new IllegalArgumentException("Renderer not found: " + rendererId);
@@ -168,7 +169,7 @@ public class RenderingService extends FlowProcess {
         Log.logMsg("[RenderingService] Started at: " + contextPath);
         
         // Check if default renderer is active
-        UIRenderer<?,?,?,?,?> defaultRenderer = renderers.get(systemDefaultRendererId);
+        Renderer<?,?,?,?,?> defaultRenderer = renderers.get(systemDefaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
             Log.logMsg("[RenderingService] Default renderer active");
             state.addState(RenderingServiceStates.UI_RENDERER_ACTIVE);
@@ -195,6 +196,7 @@ public class RenderingService extends FlowProcess {
         msgExecMap.put(ContainerCommands.SHOW_CONTAINER, this::handleContainerCmd);
         msgExecMap.put(ContainerCommands.HIDE_CONTAINER, this::handleContainerCmd);
         msgExecMap.put(ContainerCommands.FOCUS_CONTAINER, this::handleContainerCmd);
+        msgExecMap.put(ContainerCommands.UPDATE_CONTAINER, this::handleContainerCmd);
         msgExecMap.put(ContainerCommands.MAXIMIZE_CONTAINER, this::handleContainerCmd);
         msgExecMap.put(ContainerCommands.RESTORE_CONTAINER, this::handleContainerCmd);
         msgExecMap.put(ContainerCommands.QUERY_CONTAINER, this::handleContainerCmd);
@@ -247,7 +249,7 @@ public class RenderingService extends FlowProcess {
         NoteBytes rendererId = selectRendererId(rendererIdBytes);
         
 
-        UIRenderer<?,?,?,?,?> renderer = rendererId != null ? renderers.get(rendererId) : null;
+        Renderer<?,?,?,?,?> renderer = rendererId != null ? renderers.get(rendererId) : null;
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
@@ -299,7 +301,7 @@ public class RenderingService extends FlowProcess {
      */
     private CompletableFuture<Void> forwardToRenderer(NoteBytes rendererId, NoteBytesMap msg, RoutedPacket packet) {
      
-        UIRenderer<?,?,?,?,?> renderer = renderers.get(rendererId);
+        Renderer<?,?,?,?,?> renderer = renderers.get(rendererId);
         
         if (renderer == null) {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
@@ -350,8 +352,8 @@ public class RenderingService extends FlowProcess {
         // Try each renderer until one accepts it
         boolean handled = false;
         
-        for (Map.Entry<NoteBytesReadOnly, UIRenderer<?,?,?,?,?>> entry : renderers.entrySet()) {
-            UIRenderer<?,?,?,?,?> renderer = entry.getValue();
+        for (Map.Entry<NoteBytesReadOnly, Renderer<?,?,?,?,?>> entry : renderers.entrySet()) {
+            Renderer<?,?,?,?,?> renderer = entry.getValue();
             
             if (renderer.canHandleStreamFrom(fromPath)) {
                 Log.logMsg("[RenderingService] Routing stream to renderer: " + entry.getKey());
@@ -385,14 +387,14 @@ public class RenderingService extends FlowProcess {
     /**
      * Get renderer by ID
      */
-    public UIRenderer<?,?,?,?,?> getRenderer(NoteBytesReadOnly rendererId) {
+    public Renderer<?,?,?,?,?> getRenderer(NoteBytesReadOnly rendererId) {
         return renderers.get(rendererId);
     }
     
     /**
      * Get system default renderer
      */
-    public UIRenderer<?,?,?,?,?> getSystemDefaultRenderer() {
+    public Renderer<?,?,?,?,?> getSystemDefaultRenderer() {
         return renderers.get(systemDefaultRendererId);
     }
     
@@ -421,7 +423,7 @@ public class RenderingService extends FlowProcess {
      */
     public int getTotalContainerCount() {
         return renderers.values().stream()
-            .mapToInt(UIRenderer::getContainerCount)
+            .mapToInt(Renderer::getContainerCount)
             .sum();
     }
     
@@ -457,7 +459,7 @@ public class RenderingService extends FlowProcess {
      * Find container by ID across all renderers
      */
     public Container<?,?,?,?> findContainer(ContainerId containerId) {
-        for (UIRenderer<?,?,?,?,?> renderer : renderers.values()) {
+        for (Renderer<?,?,?,?,?> renderer : renderers.values()) {
             Container<?,?,?,?> container = renderer.getContainer(containerId);
             if (container != null) {
                 return container;
@@ -476,7 +478,7 @@ public class RenderingService extends FlowProcess {
         
         // Shutdown all renderers
         List<CompletableFuture<Void>> futures = renderers.values().stream()
-            .map(UIRenderer::shutdown)
+            .map(Renderer::shutdown)
             .toList();
         
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))

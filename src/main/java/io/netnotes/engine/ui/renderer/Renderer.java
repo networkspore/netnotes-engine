@@ -1,5 +1,5 @@
 // AbstractUIRenderer.java
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
@@ -16,6 +16,8 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.containers.*;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -41,13 +43,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * - doCreateContainer() - actual container creation
  * - handleRenderCommand() - renderer-specific rendering
  */
-public abstract class UIRenderer <
+public abstract class Renderer <
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     CLM extends ContainerLayoutManager<S,T>,
     CCFG extends ContainerConfig<S,CCFG>,
     T extends Container<P,S,CCFG,T>
 > {
+
+    @FunctionalInterface
+    public interface UIReplyExec {
+        void reply(RoutedPacket packet, NoteBytesReadOnly message);
+    }
+
 
     private final NoteBytesReadOnly rendererId;
     
@@ -72,7 +80,7 @@ public abstract class UIRenderer <
      * 
      * @param rendererName Name for this renderer (used in logging and state machine)
      */
-    protected UIRenderer(String rendererName, NoteBytesReadOnly rendererId, CLM containerLayoutManager) {
+    protected Renderer(String rendererName, NoteBytesReadOnly rendererId, CLM containerLayoutManager) {
         this.rendererId = rendererId;
         this.name = rendererName;
         this.state = new ConcurrentBitFlagStateMachine(rendererName + "-state");
@@ -132,6 +140,7 @@ public abstract class UIRenderer <
         msgMap.put(ContainerCommands.SHOW_CONTAINER, this::handleShowContainer);
         msgMap.put(ContainerCommands.HIDE_CONTAINER, this::handleHideContainer);
         msgMap.put(ContainerCommands.FOCUS_CONTAINER, this::handleFocusContainer);
+        msgMap.put(ContainerCommands.UPDATE_CONTAINER, this::handleUpdateContainer);
         msgMap.put(ContainerCommands.MAXIMIZE_CONTAINER, this::handleMaximizeContainer);
         msgMap.put(ContainerCommands.RESTORE_CONTAINER, this::handleRestoreContainer);
         msgMap.put(ContainerCommands.QUERY_CONTAINER, this::handleQueryContainer);
@@ -265,11 +274,58 @@ public abstract class UIRenderer <
 
     public void onFocusRevoked(T container){
       
-        if(container != null && focusedContainerId.equals(container.getId())){
+        if(container != null && focusedContainerId != null && focusedContainerId.equals(container.getId())){
             focusedContainerId = null;
             state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
         }
     }
+
+    /**
+     * Remove a container from all base-class tracking and update renderer state.
+     * Subclasses call this from onContainerDestroyed() instead of repeating bookkeeping.
+     * After deregistration, calls onContainerUnregistered() as a narrow hook for
+     * renderer-specific teardown (e.g. notifying the layout manager).
+     */
+    public final CompletableFuture<Void> removeContainer(ContainerId containerId) {
+        return rendererExecutor.execute(() -> {
+            Log.logMsg("[" + name + "] Removing container: " + containerId);
+
+            T container = containers.remove(containerId);
+            if (container == null) {
+                Log.logError("[" + name + "] removeContainer: not found: " + containerId);
+                return;
+            }
+
+            if (containers.isEmpty()) {
+                state.removeState(RendererStates.HAS_CONTAINERS);
+                state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
+            }
+
+            if (container.getOwnerPath() != null) {
+                List<ContainerId> ownerList = ownerContainers.get(container.getOwnerPath());
+                if (ownerList != null) {
+                    ownerList.remove(containerId);
+                    if (ownerList.isEmpty()) {
+                        ownerContainers.remove(container.getOwnerPath());
+                    }
+                }
+            }
+
+            if (containerId.equals(focusedContainerId)) {
+                focusedContainerId = null;
+                state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
+            }
+
+            onContainerUnregistered(container);
+        });
+    }
+
+    /**
+     * Hook called by removeContainer() after all base-class bookkeeping is done.
+     * Subclasses override to notify the layout manager or perform renderer-specific cleanup.
+     * Default is a no-op so renderers without layout managers work unchanged.
+     */
+    protected void onContainerUnregistered(T container) {}
     
     // ===== MESSAGE HANDLING =====
     
@@ -490,6 +546,21 @@ public abstract class UIRenderer <
         }
         
         return container.handleFocusContainer(msg)
+            .thenAccept(v -> replySuccess(packet))
+            .exceptionally(ex -> {
+                replyError(packet, ex.getMessage());
+                return null;
+            });
+    }
+
+    private CompletableFuture<Void> handleUpdateContainer(NoteBytesMap msg, RoutedPacket packet) {
+        T container = getContainerFromMsg(msg);
+        if (container == null) {
+            replyError(packet, "Container not found");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return container.handleUpdateContainer(msg)
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());

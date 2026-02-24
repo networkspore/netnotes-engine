@@ -1,8 +1,8 @@
-package io.netnotes.engine.ui.layout;
+package io.netnotes.engine.ui.renderer.layout;
 
-import io.netnotes.engine.ui.BatchBuilder;
-import io.netnotes.engine.ui.Renderable;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
 
 /**
  * LayoutData - Desired output state from layout calculation

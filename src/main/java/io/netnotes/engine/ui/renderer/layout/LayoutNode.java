@@ -1,14 +1,14 @@
-package io.netnotes.engine.ui.layout;
+package io.netnotes.engine.ui.renderer.layout;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
-import io.netnotes.engine.ui.BatchBuilder;
-import io.netnotes.engine.ui.Renderable;
-import io.netnotes.engine.ui.RenderableStates;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.RenderableStates;
 
 /**
  * LayoutNode - Tree node for layout calculation
@@ -75,7 +75,10 @@ public abstract class LayoutNode<
     }
 
     public void injectToCalculatedData(){
-        S calculatedRegion = calculatedLayout.getSpatialRegion();
+
+        S calculatedRegion = calculatedLayout != null
+            ? calculatedLayout.getSpatialRegion()
+            : null;
 
         if (calculatedRegion == null) {
             if (renderable.hasRequestedRegion()) {
@@ -138,7 +141,7 @@ public abstract class LayoutNode<
      * All state changes flow through here, regardless of calculation path
      */
     private void injectEffectiveStates(StateSnapshot snap, LD layoutData) {
-        R parentRenderable = parent.getRenderable();
+        R parentRenderable = parent != null ? parent.getRenderable() : null;
         boolean effectivelyVisible = parentRenderable != null ? parentRenderable.isEffectivelyVisible() : true;
         boolean effectivelyEnabled = parentRenderable != null ? parentRenderable.isEffectivelyEnabled() : true;
 

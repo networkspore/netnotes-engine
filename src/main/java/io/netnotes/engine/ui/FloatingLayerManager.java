@@ -3,9 +3,12 @@ package io.netnotes.engine.ui;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import io.netnotes.engine.ui.layout.LayoutCallback;
-import io.netnotes.engine.ui.layout.LayoutContext;
-import io.netnotes.engine.ui.layout.LayoutData;
+
+import io.netnotes.engine.ui.renderer.BatchBuilder;
+import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutContext;
+import io.netnotes.engine.ui.renderer.layout.LayoutData;
 
 public class FloatingLayerManager<
     B extends BatchBuilder<S>,

@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 
