@@ -39,8 +39,6 @@ public abstract class LayoutNode<
     protected R positionAnchor = null;
     protected G group = null;
 
-  
-
     public LayoutNode(R renderable) {
         this.renderable = renderable;
     }
@@ -234,6 +232,14 @@ public abstract class LayoutNode<
         if (group != null) {
             group.addMember(self());
         }
+    }
+
+    public boolean isSizedByChildren() {
+        R r = getRenderable();
+        if(r != null){
+            return r.isSizedByChildren();
+        }
+        return false;
     }
     
     public G getGroup() {

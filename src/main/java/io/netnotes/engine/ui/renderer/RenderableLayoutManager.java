@@ -195,7 +195,7 @@ public abstract class RenderableLayoutManager<
     public void registerRenderable(R renderable, LCB callback) {
         registerRenderableInternal(renderable, callback);
         
-        Map<String, GSE>  pendingGroups = renderable.collectPendingGroups();
+        Map<String, GSE>  pendingGroups = renderable.collectChildGroups();
         if(!pendingGroups.isEmpty()){
             registerPendingGroups(pendingGroups);
         }
@@ -213,9 +213,8 @@ public abstract class RenderableLayoutManager<
         renderableRegistry.put(renderable, node);
         
         buildParentChildRelations(node);
-   
-        // Only mark layout dirty - visibility computed during layout
         markLayoutDirty(renderable);
+        dirtyAffectedAncestors(node);
         
         Log.logMsg("[LayoutManager:" + containerName + "] Registered: " + renderable.getName());
        
@@ -253,6 +252,21 @@ public abstract class RenderableLayoutManager<
             for (L member : group.getMembers()) {
                 markLayoutDirty(member.getRenderable());
             }
+        }
+    }
+
+    private void dirtyAffectedAncestors(L node) {
+        if (node.isFloating()) return;
+        
+        L current = node.getParent();
+        while (current != null) {
+            markLayoutDirty(current.getRenderable());
+            
+            if (!current.isSizedByChildren()) {
+                break;
+            }
+            
+            current = current.isFloating() ? null : current.getParent();
         }
     }
 
@@ -311,14 +325,15 @@ public abstract class RenderableLayoutManager<
                 cleanupNode(childNode);
             }
         }
-        
-        renderable.cleanup();
+     
         dirtyLayoutNodes.remove(node);
-        
+        dirtyAffectedAncestors(node);
         L parent = node.getParent();
         if (parent != null) {
             parent.getChildren().remove(node);
         }
+
+        renderable.removedFromLayout();
     }
     
     /**
@@ -434,7 +449,8 @@ public abstract class RenderableLayoutManager<
 
     // ===== INCREMENTAL LAYOUT + VISIBILITY =====
 
-    private void performUpdate() {
+  
+    /*private void performUpdate() {
         // Now we're on uiExecutor thread
         uiExecutor.beginDeferredSection();
         try {
@@ -442,10 +458,10 @@ public abstract class RenderableLayoutManager<
         } finally {
             uiExecutor.endDeferredSection();
         }
-    }
+    } */
 
 
-    protected void performUpdateInternal() {
+    protected void performUpdate() {
         long startTime = System.nanoTime();
         
         Set<L> currentLayoutDirty = dirtyLayoutNodes;
@@ -707,16 +723,11 @@ public abstract class RenderableLayoutManager<
         G group = createGroupIfAbsent(groupId);
         node.setGroup(group);
         for (L member : group.getMembers()) {
-            dirtyLayoutNodes.add(member);
+            markLayoutDirty(member.getRenderable());
         }
 
-         L parentNode = node.getParent();
-        if (parentNode != null) {
-            markLayoutDirty(parentNode.getRenderable());
-        }
+        dirtyAffectedAncestors(node);
     
-            
-        requestLayout();
     }
 
     public String getRenderableGroupId(R renderable){
@@ -756,6 +767,7 @@ public abstract class RenderableLayoutManager<
             }
             
             markLayoutDirty(renderable);
+            dirtyAffectedAncestors(node); 
         }
     }
 
@@ -849,6 +861,16 @@ public abstract class RenderableLayoutManager<
      * Unregister floating renderable
      */
     public void unregisterFloating(R renderable) {
+        if(isCurrentThread()){
+            unregisterFloatingInternal(renderable);
+        }else{
+            uiExecutor.executeFireAndForget(()->{
+                unregisterFloatingInternal(renderable);
+            });
+        }
+    }
+
+    protected void unregisterFloatingInternal(R renderable){
         L node = floatingRegistry.remove(renderable);
         if (node != null) {
             dirtyFloatingNodes.remove(node);
@@ -856,7 +878,7 @@ public abstract class RenderableLayoutManager<
             if (pendingFocusRequest == renderable) {
                 pendingFocusRequest = null;
             }
-            renderable.cleanup();
+            renderable.removedFromLayout();
             Log.logMsg("[LayoutManager:" + containerName + "] Unregistered floating: " + renderable.getName());
         }
     }
@@ -1045,7 +1067,7 @@ public abstract class RenderableLayoutManager<
         L node = renderableRegistry.get(renderable);
         if (node != null) {
             pendingRequestNodes.add(node);
-            
+            dirtyAffectedAncestors(node); 
             if (!batchingRequests) {
                 requestLayout();
             }

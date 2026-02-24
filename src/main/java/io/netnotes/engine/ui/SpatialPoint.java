@@ -3,6 +3,8 @@ package io.netnotes.engine.ui;
 import io.netnotes.noteBytes.NoteBytesObject;
 
 public abstract class SpatialPoint<P> {
+
+    public abstract int getDimensionCount();
     
     public abstract P subtract(P point);
 

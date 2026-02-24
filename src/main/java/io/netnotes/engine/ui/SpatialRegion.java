@@ -33,6 +33,8 @@ public abstract class SpatialRegion<
     public abstract boolean equals(Object other);
     public abstract boolean equals(S other);
 
+    public abstract int getDimensionCount();
+
      /**
      * Copy region state from renderable
      */

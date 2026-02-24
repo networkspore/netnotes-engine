@@ -1,6 +1,7 @@
 package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.ui.PooledRegion;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.SpatialRegionPool;
@@ -140,7 +141,7 @@ public abstract class Renderable<
     protected RenderableLayoutManagerHandle<R, LCB,G,GCE, GCB> layoutManager = null;
     protected Consumer<R> onRenderRequest = null;
     protected BiConsumer<S,S> notifyOnRegionChanged = null;
-    protected Consumer<R> onCleaningUp = null;
+    protected Consumer<R> notifyRemovedFromLayout = null;
     protected VisibilityPredicate<R> visibilityPolicy = null;
     protected BiConsumer<R, Boolean> onVisibilityChanged = null;
     protected BiConsumer<R, Boolean> onFocusChanged = null;
@@ -172,8 +173,8 @@ public abstract class Renderable<
     public void setVisibilityPolicy(VisibilityPredicate<R> visibilityPolicy){
         this.visibilityPolicy = visibilityPolicy;
     }
-    public void setOnCleaningUp(Consumer<R> onCleaningUp){
-        this.onCleaningUp = onCleaningUp;
+    public void setNotifyRemovedFromLayout(Consumer<R> notifyRemovedFromLayout){
+        this.notifyRemovedFromLayout = notifyRemovedFromLayout;
     }
     public abstract SpatialRegionPool<S> getRegionPool();
 
@@ -287,10 +288,10 @@ public abstract class Renderable<
     }
     
     public void clearRequestedRegion(){
-        S region = requestedRegion;
+        S oldRequestedRegion = requestedRegion;
         requestedRegion = null;
-        if(region != null){
-            regionPool.recycle(region);
+        if(oldRequestedRegion != null){
+            regionPool.recycle(oldRequestedRegion);
         }
     }
     
@@ -393,23 +394,12 @@ public abstract class Renderable<
         return copy;
     }
 
-    public S getEffectiveRegion() {
-        if(isHidden()) return null;
-        return getRegion();
-    }
-
     public S getAbsoluteRegion() {
         S copy = regionPool.obtain();
         copy.copyFrom(region);
         copy.setPosition(region.getAbsolutePosition());
         return copy;
     }
-
-    public S getEffectiveAbsoluteRegion(){
-        if(isHidden()) return null;
-        return getAbsoluteRegion();
-    }
-
   
     /**
      * Check if a point is within this renderable
@@ -511,6 +501,14 @@ public abstract class Renderable<
         absoluteDamage.setParentAbsolutePosition(
             region.getParentAbsolutePosition()
         );
+    }
+
+    public boolean isSizedByChildren(){
+        int dims = getRegion().getDimensionCount();
+        for (int i = 0; i < dims; i++) {
+            if (getSizePreference(i) == SizePreference.FIT_CONTENT) return true;
+        }
+        return false;
     }
     
    /**
@@ -1058,16 +1056,15 @@ public abstract class Renderable<
     protected void onDisabled() {}
 
     /*Clean up handlers if not needed*/
-    protected void onCleanup() { }
+    protected void onRemovedFromLayout() { }
 
     /* Called by layoutmanager when renderable is removed 
      * to be destroyed
      */
-    protected void cleanup() {
+    protected void removedFromLayout() {
+        if(notifyRemovedFromLayout != null){ notifyRemovedFromLayout.accept(self()); }
         clearLayoutManager();
-        //Called before destruction so Renderable could be cloned
-       
-        if(onCleaningUp != null){ onCleaningUp.accept(self()); }
+    
         // Recycle damage regions
         if (localDamage != null) {
             regionPool.recycle(localDamage);
@@ -1077,16 +1074,28 @@ public abstract class Renderable<
             regionPool.recycle(absoluteDamage);
             absoluteDamage = null;
         }
-
-        stateMachine.clearAllStates();
-        stateMachine.addState(RenderableStates.DESTROYED);
-        
-        cleanupEventHandlers();
-    
         // Child callbacks no longer needed
-        childCallbacks.clear();
-        onCleanup();
+ 
+        onRemovedFromLayout();
 
+    }
+
+    public void destroy(){
+        stateMachine.addState(RenderableStates.DESTROYED);
+        childGroups.clear();
+        childCallbacks.clear();
+        stateMachine.clearAllStates();
+        cleanupEventHandlers();
+        if(region != null){
+            S oldRegion = region;
+            region = null;
+            regionPool.recycle(oldRegion);
+        }
+        if(requestedRegion != null){
+            S oldRegion = requestedRegion;
+            requestedRegion = null;
+            regionPool.recycle(oldRegion);
+        }
     }
 
     public void setEnabled(boolean enabled) {
@@ -1407,6 +1416,7 @@ public abstract class Renderable<
     }
 
     public void clearLayoutManager() {
+
         this.layoutManager = null;
     }
 
@@ -1753,6 +1763,14 @@ public abstract class Renderable<
         return copy;
     }
 
+    // ====== Size Preference ======
+
+    public abstract SizePreference getSizePreference(int axis);
+
+
+    public abstract int getPreferredSize(int axis); 
+    public abstract int getMinSize(int axis);
+
 
     protected void destroyChildGroups(){
         childGroups.clear();
@@ -1762,7 +1780,7 @@ public abstract class Renderable<
      * Check if there are any pending groups
      */
     public boolean hasChildGroups() {
-        return childGroups != null && !childGroups.isEmpty();
+        return !childGroups.isEmpty();
     }
     
     /**
