@@ -20,6 +20,8 @@ public abstract class SpatialRegion<
 
     public abstract P getPosition();
 
+    public abstract S subtractPosition(P position);
+
     public abstract boolean absEquals(S other);
 
     public abstract void transformByParent(S region);
@@ -62,6 +64,8 @@ public abstract class SpatialRegion<
      * Calculate union with another region (bounding volume)
      */
     public abstract  S union(S other);
+
+   
     
     /**
      * Mutate this region to be the union with other

@@ -148,9 +148,10 @@ public abstract class ContainerHandle<
     protected FocusTraversalStrategy strategy = FocusTraversalStrategy.TAB_INDEX_THEN_TREE;
     protected R focused = null;
     protected boolean manageFocus = true;
-
+    protected boolean isLayoutInProgress = false;
+     private boolean wasRenderRequested = false;
     // Event filtering
-    private EventFilterList filterList = new EventFilterList();
+    private EventFilterList filterList;
 
     public static class ContainerPredicate implements Predicate<RoutedEvent>{
         @Override
@@ -206,6 +207,7 @@ public abstract class ContainerHandle<
         this.containerConfig = builder.containerConfig;
         this.renderingServicePath = builder.renderingServicePath;
         this.ioDaemonPath = builder.ioDaemonPath;
+        this.filterList = builder.filterList == null ? new EventFilterList() : builder.filterList;
         this.regionPool = builder.regionPool == null ? createRegionPool() : builder.regionPool;
         this.eventsFactory = createEventsFactory(regionPool);
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
@@ -213,9 +215,10 @@ public abstract class ContainerHandle<
         this.stateMachine.setSerialExecutor(uiExecutor);
  
         //this.ioDaemonPath = builder.ioDaemonPath == null ? CoreConstants.IO_DAEMON_PATH : builder.ioDaemonPath;
-        this.filterList = builder.filterList;
+        
         this.floatingLayerManager = createFloatingLayerManager();
         this.renderableLayoutManager = createRenderableLayoutManager(floatingLayerManager);
+        this.renderableLayoutManager.setLayoutStateListener(this::layoutStateListener);
         this.renderableLayoutManager.setFocusRequester(this::requestFocusInternal);
         setupRoutedMessageMap();
         setupEventHandlers();
@@ -1166,17 +1169,8 @@ public abstract class ContainerHandle<
                 return;
             }
 
-            NoteBytes commandToSend = command;
-            if (command.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                NoteBytesMap commandMap = preprocessOutgoingRenderCommand(command.getAsNoteBytesMap());
-                if (commandMap == null) {
-                    return;
-                }
-                commandToSend = commandMap.toNoteBytes();
-            }
-            
             try {
-                renderWriter.write(commandToSend);
+                renderWriter.write(command);
                 renderWriter.flush();
             } catch (IOException ex) {
                 throw new CompletionException(ex);
@@ -1184,14 +1178,6 @@ public abstract class ContainerHandle<
         });
     }
 
-    /**
-     * Hook for renderer-specific outbound command processing.
-     *
-     * Return {@code null} to drop the command.
-     */
-    protected NoteBytesMap preprocessOutgoingRenderCommand(NoteBytesMap command) {
-        return command;
-    }
 
     
     protected CompletableFuture<Void> sendToService(NoteBytesMap command) {
@@ -1296,7 +1282,11 @@ public abstract class ContainerHandle<
 
         
     protected void renderableRequestRender(R renderable) {
-        uiExecutor.executeFireAndForget(()->renderableRequestRenderInternal(renderable));
+        if(uiExecutor.isCurrentThread()){
+            renderableRequestRenderInternal(renderable);
+        }else{
+            uiExecutor.executeFireAndForget(()->renderableRequestRenderInternal(renderable));
+        }
     }
 
     private void renderableRequestRenderInternal(R renderable){
@@ -1363,10 +1353,31 @@ public abstract class ContainerHandle<
 
 
     protected abstract B createBatch();
+    
    
 
+    protected void layoutStateListener(boolean inProgress){
+        this.isLayoutInProgress = inProgress;
+        if(!isLayoutInProgress && wasRenderRequested){
+            wasRenderRequested = false;
+            renderInternal();
+        }
+    }
+
     private void render(){
-        uiExecutor.executeFireAndForget(this::renderInternal);
+        if(uiExecutor.isCurrentThread()){
+            checkLayoutProgress();
+        }else{
+            uiExecutor.executeFireAndForget(this::checkLayoutProgress);
+        }
+    }
+
+    protected void checkLayoutProgress(){
+        if(!isLayoutInProgress){
+            renderInternal();
+        }else{
+            wasRenderRequested = true;
+        }
     }
 
     /**

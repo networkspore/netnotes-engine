@@ -11,4 +11,6 @@ public abstract class SpatialPoint<P> {
     public abstract P add(P point);
 
     public abstract NoteBytesObject toNoteBytes();
+
+    
 }

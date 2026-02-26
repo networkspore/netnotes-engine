@@ -1,6 +1,7 @@
 package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.ui.FloatingLayerManager;
+import io.netnotes.engine.ui.PooledRegion;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 
@@ -107,8 +108,7 @@ public abstract class RenderableLayoutManager<
     protected Set<L> dirtyLayoutNodes = new LinkedHashSet<>();
     protected final Set<L> pendingRequestNodes = new LinkedHashSet<>();
     
-    
-    
+    private Consumer<Boolean> layoutStateListener; 
 
     private boolean batchingRequests = false;
     
@@ -158,6 +158,9 @@ public abstract class RenderableLayoutManager<
             queueFocusRequest(renderable);
         }
     }
+    public void setLayoutStateListener(Consumer<Boolean> layoutStateListener){
+        this.layoutStateListener = layoutStateListener;
+    }
 
     private boolean isRegistered(R renderable) {
         return renderableRegistry.containsKey(renderable)
@@ -194,11 +197,6 @@ public abstract class RenderableLayoutManager<
      */
     public void registerRenderable(R renderable, LCB callback) {
         registerRenderableInternal(renderable, callback);
-        
-        Map<String, GSE>  pendingGroups = renderable.collectChildGroups();
-        if(!pendingGroups.isEmpty()){
-            registerPendingGroups(pendingGroups);
-        }
     }
 
     private void registerRenderableInternal(R renderable, LCB callback){
@@ -216,16 +214,22 @@ public abstract class RenderableLayoutManager<
         markLayoutDirty(renderable);
         dirtyAffectedAncestors(node);
         
-        Log.logMsg("[LayoutManager:" + containerName + "] Registered: " + renderable.getName());
-       
+        Log.logMsg("[LayoutManager] Registered: " + renderable.getName());
+    
         for (R child : renderable.getChildren()) {
             if (!renderableRegistry.containsKey(child)) {
                 LCB childCallback = renderable.getChildCallback(child);
                 registerRenderableInternal(child, childCallback);
             }
         }
+
         renderable.setLayoutManager(new ManagerHandle());
-       
+
+
+        Map<String, GSE> pendingGroups = renderable.collectChildGroups();
+        if (!pendingGroups.isEmpty()) {
+            registerPendingGroups(pendingGroups);
+        }
     }
 
     private void registerPendingGroups(Map<String, GSE> pendingGroups){
@@ -450,18 +454,21 @@ public abstract class RenderableLayoutManager<
     // ===== INCREMENTAL LAYOUT + VISIBILITY =====
 
   
-    /*private void performUpdate() {
-        // Now we're on uiExecutor thread
-        uiExecutor.beginDeferredSection();
+    private void performUpdate() {
+        if( layoutStateListener != null){
+            layoutStateListener.accept(true);
+        }
         try {
             performUpdateInternal();
         } finally {
-            uiExecutor.endDeferredSection();
+            if(layoutStateListener != null){
+                layoutStateListener.accept(false);
+            }
         }
-    } */
+    } 
 
 
-    protected void performUpdate() {
+    protected void performUpdateInternal() {
         long startTime = System.nanoTime();
         
         Set<L> currentLayoutDirty = dirtyLayoutNodes;
@@ -633,17 +640,16 @@ public abstract class RenderableLayoutManager<
         L node = createRenderableNode(renderable);
         node.setCallback(callback);
         node.setPositionAnchor(anchor);
-
         floatingRegistry.put(renderable, node);
         floatingLayer.add(renderable);
-        
-        // Don't build parent-child relations for floating
-        // They render independently
-        
         renderable.setLayoutManager(new ManagerHandle());
         markFloatingDirty(renderable);
         
-        Log.logMsg("[LayoutManager:" + containerName + "] Registered floating: " + renderable.getName());
+        // Damage the rendering parent so it recomposites with the new floating layer
+        R renderingParent = renderable.getRenderingParent();
+        if (renderingParent != null) {
+            renderingParent.invalidate();
+        }
     }
 
     /**
@@ -666,6 +672,7 @@ public abstract class RenderableLayoutManager<
     public void migrateToRegular(R renderable) {
         L node = floatingRegistry.remove(renderable);
         if (node != null) {
+            damageRenderingParentAtFloatingRegion(renderable);
             dirtyFloatingNodes.remove(node);
             floatingLayer.remove(renderable);
             renderableRegistry.put(renderable, node);
@@ -870,9 +877,30 @@ public abstract class RenderableLayoutManager<
         }
     }
 
+    private void damageRenderingParentAtFloatingRegion(R renderable) {
+        R renderingParent = renderable.getRenderingParent();
+        if (renderingParent == null) return;
+        
+        S absoluteRegion = renderable.getEffectiveAbsoluteRegion();
+        if (absoluteRegion == null) return;
+        
+        // Convert absolute region to rendering parent's local space
+        S parentAbsolute = renderingParent.getAbsoluteRegion();
+        try (PooledRegion<S> pooled = renderable.getRegionPool().obtainPooled()) {
+            S localDamage = pooled.get();
+            localDamage.copyFrom(absoluteRegion);
+            localDamage.subtractPosition(parentAbsolute.getPosition());
+            renderingParent.invalidate(localDamage);
+        } finally {
+            renderable.getRegionPool().recycle(absoluteRegion);
+            renderable.getRegionPool().recycle(parentAbsolute);
+        }
+    }
+
     protected void unregisterFloatingInternal(R renderable){
         L node = floatingRegistry.remove(renderable);
         if (node != null) {
+            damageRenderingParentAtFloatingRegion(renderable);
             dirtyFloatingNodes.remove(node);
             floatingLayer.remove(renderable);
             if (pendingFocusRequest == renderable) {

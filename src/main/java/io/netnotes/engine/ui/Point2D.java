@@ -56,6 +56,11 @@ public class Point2D extends SpatialPoint<Point2D> {
     public Point2D add(Point2D point) {
         return new Point2D(this.x + point.x, this.y + point.y);
     }
+
+    @Override
+    public int getDimensionCount() {
+        return 2;
+    }
     
     
 }

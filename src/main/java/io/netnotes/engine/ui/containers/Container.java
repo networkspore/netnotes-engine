@@ -381,63 +381,45 @@ public abstract class Container<
 
     
     protected void dispatchCommand(NoteBytesMap command) {
-        NoteBytesMap commandToDispatch = preprocessIncomingRenderCommand(command);
-        if (commandToDispatch == null) {
-            return;
-        }
-
-        NoteBytes cmd = commandToDispatch.get(Keys.CMD);
+        NoteBytes cmd = command.get(Keys.CMD);
         if (cmd == null) {
             Log.logError("[Container:" + id + "] No cmd in command");
             return;
         }
 
-        Log.logNoteBytes("[Container: "+ getTitle()+"]", commandToDispatch);
+        Log.logNoteBytes("[Container: "+ getTitle()+"]", command);
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
-            final NoteBytesMap dispatchPayload = commandToDispatch;
-            
             containerExecutor.execute(()->{
                 try {
-                    executor.execute(dispatchPayload);
+                    executor.execute(command);
                 } catch (Exception e) {
                     Log.logError("[Container:" + id + "] Error executing command '" + cmd + "': " + e.getMessage());
                 }
             });
-           
         } else {
             Log.logError("[Container:" + id + "] Unknown command: " + cmd);
         }
     }
 
     /**
-     * Hook for renderer-specific inbound command processing.
-     *
-     * Return {@code null} to drop the command.
-     */
-    protected NoteBytesMap preprocessIncomingRenderCommand(NoteBytesMap command) {
-        return command;
-    }
-
-    /**
      * Hook for renderer-specific handling of batch-level content bounds metadata.
+     * Called on the containerExecutor.
      */
     protected void onBatchContentBounds(NoteBytes contentBounds, NoteBytesMap batchCommand) {}
 
     /**
-     * Hook for renderer-specific preprocessing of commands inside a container batch.
+     * Handles a container_batch command.
      *
-     * Return {@code null} to drop the nested command.
+     * Runs entirely inline — this method is always invoked from within a
+     * containerExecutor task (via dispatchCommand), so the whole batch is processed
+     * atomically in a single executor slot without re-queuing.
      */
-    protected NoteBytesMap preprocessBatchCommand(NoteBytesMap command, NoteBytesMap parentBatch) {
-        return command;
-    }
-
     private CompletableFuture<Void> handleContainerBatch(NoteBytesMap command) {
-        NoteBytes contentBounds = command.get(ContainerCommands.CONTENT_BOUNDS);
-        if (contentBounds != null) {
-            onBatchContentBounds(contentBounds, command);
+        NoteBytes contentBoundsBytes = command.get(ContainerCommands.CONTENT_BOUNDS);
+        if (contentBoundsBytes != null) {
+            onBatchContentBounds(contentBoundsBytes, command);
         }
 
         NoteBytes batchBytes = command.get(ContainerCommands.BATCH_COMMANDS);
@@ -447,40 +429,35 @@ public abstract class Container<
         }
 
         NoteBytesReadOnly[] batchArray = batchBytes.getAsNoteBytesArrayReadOnly().getAsArray();
+        Log.logMsg("[Container] handleContainerBatch array:" + batchArray.length);
 
-        return containerExecutor.execute(() -> {
-            for (NoteBytesReadOnly next : batchArray) {
-                if (next == null || next.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                    continue;
-                }
-
-                NoteBytesMap nested = preprocessBatchCommand(next.getAsNoteBytesMap(), command);
-                if (nested == null) {
-                    continue;
-                }
-
-                NoteBytes nestedCmd = nested.get(Keys.CMD);
-                if (nestedCmd == null) {
-                    Log.logError("[Container:" + id + "] Nested command missing cmd");
-                    continue;
-                }
-
-                MessageExecutor batchExecutor = batchMsgMap.get(nestedCmd);
-                MessageExecutor executor = batchExecutor != null ? batchExecutor : msgMap.get(nestedCmd);
-
-                if (executor != null) {
-                    try {
-                        executor.execute(nested);
-                    } catch (Exception e) {
-                        Log.logError("[Container:" + id + "] Error executing nested command '" +
-                            nestedCmd + "': " + e.getMessage());
-                    }
-                } else {
-                    Log.logError("[Container:" + id + "] Unknown nested command: " + nestedCmd);
-                }
+        for (NoteBytesReadOnly next : batchArray) {
+            if (next == null || next.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                continue;
             }
-            onBatchComplete();
-        });
+
+            NoteBytesMap nested = next.getAsNoteBytesMap();
+            NoteBytes nestedCmd = nested.get(Keys.CMD);
+            if (nestedCmd == null) {
+                Log.logError("[Container:" + id + "] Nested command missing cmd");
+                continue;
+            }
+
+            // batchMsgMap handlers run inline; msgMap handlers may re-queue — prefer batchMsgMap
+            MessageExecutor batchExecutor = batchMsgMap.get(nestedCmd);
+            if (batchExecutor != null) {
+                try {
+                    batchExecutor.execute(nested);
+                } catch (Exception e) {
+                    Log.logError("[Container:" + id + "] Error executing batch command '" +
+                        nestedCmd + "': " + e.getMessage());
+                }
+            } else {
+                Log.logError("[Container:" + id + "] Unknown batch command (not in batchMsgMap): " + nestedCmd);
+            }
+        }
+        onBatchComplete();
+        return CompletableFuture.completedFuture(null);
     }
 
     /**

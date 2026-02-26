@@ -237,7 +237,7 @@ public abstract class LayoutNode<
     public boolean isSizedByChildren() {
         R r = getRenderable();
         if(r != null){
-            return r.isSizedByChildren();
+            return r.isSizedByContent();
         }
         return false;
     }

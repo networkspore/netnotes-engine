@@ -7,6 +7,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
 import java.util.List;
 
 /**
@@ -29,9 +32,6 @@ public final class SerializedVirtualExecutor {
 
     private final ThreadLocal<Boolean> onDispatcherThread = ThreadLocal.withInitial(() -> false);
     
-    private final ThreadLocal<Integer> deferDepth = ThreadLocal.withInitial(() -> 0);
-    private final BlockingQueue<Runnable> deferredQueue = new LinkedBlockingQueue<>();
-    private final AtomicBoolean drainScheduled = new AtomicBoolean(false);
 
     public SerializedVirtualExecutor() {
         dispatcher = Thread.ofVirtual().name("SerialVT-Dispatcher").start(this::dispatchLoop);
@@ -68,13 +68,17 @@ public final class SerializedVirtualExecutor {
         if(f != null && f.isCancelled()){
             return;
         }
-        try {
-            T result = task.call();
-            if(f != null){
-                f.complete(result);
+        if(f == null){
+            try{
+                task.call();
+            }catch(Exception e){
+                Log.logError("[SerializedVirtualExecutor]", "runTask", e);
             }
-        } catch (Throwable t) {
-            if(f != null){
+        }else{
+            try {
+                T result = task.call();
+                f.complete(result);
+            } catch (Throwable t) {
                 f.completeExceptionally(t);
             }
         }
@@ -123,10 +127,10 @@ public final class SerializedVirtualExecutor {
    
      public void executeFireAndForget(Runnable runnable) {
         if (onDispatcherThread.get()) {
-            if (deferDepth.get() > 0) {
-                deferredQueue.add(runnable);
-            } else {
+            try{
                 runnable.run();
+            }catch(Exception e){
+                Log.logError("[SerializedVirtualExecutor]", "executeFireAndForget", e);
             }
             return;
         }
@@ -203,54 +207,7 @@ public final class SerializedVirtualExecutor {
         });
     }
 
-    public void beginDeferredSection() {
-        if (!onDispatcherThread.get()) {
-            throw new IllegalStateException("Deferred section must be on dispatcher thread");
-        }
-        deferDepth.set(deferDepth.get() + 1);
-    }
 
-    public void endDeferredSection() {
-        if (!onDispatcherThread.get()) {
-            throw new IllegalStateException("Deferred section must be on dispatcher thread");
-        }
-
-
-        int depth = deferDepth.get() - 1;
-        deferDepth.set(depth);
-
-
-        if (depth == 0 && !deferredQueue.isEmpty()) {
-            scheduleDrainIfNeeded();
-        }
-    }
-
-    private void scheduleDrainIfNeeded() {
-        if (drainScheduled.compareAndSet(false, true)) {
-            queue.add(new SimpleTask(this::drainDeferredQueue));
-        }
-    }
-
-    private void drainDeferredQueue() {
-        long start = System.nanoTime();
-        long maxNanos = 2_000_000;
-
-
-        try {
-            while (System.nanoTime() - start < maxNanos) {
-                Runnable task = deferredQueue.poll();
-                if (task == null) break;
-                task.run();
-            }
-        } finally {
-            drainScheduled.set(false);
-        }
-
-
-        if (!deferredQueue.isEmpty()) {
-            scheduleDrainIfNeeded();
-        }
-    }
 
     /**
      * Initiates graceful shutdown. Previously submitted tasks will execute,

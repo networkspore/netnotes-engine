@@ -400,6 +400,14 @@ public abstract class Renderable<
         copy.setPosition(region.getAbsolutePosition());
         return copy;
     }
+
+    public S getEffectiveAbsoluteRegion(){
+        if(isEffectivelyVisible() && !isHidden()){
+            return getAbsoluteRegion();
+        }else{
+            return null;
+        }
+    }
   
     /**
      * Check if a point is within this renderable
@@ -503,13 +511,7 @@ public abstract class Renderable<
         );
     }
 
-    public boolean isSizedByChildren(){
-        int dims = getRegion().getDimensionCount();
-        for (int i = 0; i < dims; i++) {
-            if (getSizePreference(i) == SizePreference.FIT_CONTENT) return true;
-        }
-        return false;
-    }
+    public abstract boolean isSizedByContent();
     
    /**
      * Propagate damage to parent
@@ -1081,6 +1083,7 @@ public abstract class Renderable<
     }
 
     public void destroy(){
+        onDestroying();
         stateMachine.addState(RenderableStates.DESTROYED);
         childGroups.clear();
         childCallbacks.clear();
@@ -1097,6 +1100,8 @@ public abstract class Renderable<
             regionPool.recycle(oldRegion);
         }
     }
+
+    protected void onDestroying(){ }
 
     public void setEnabled(boolean enabled) {
         updateRequestState(RenderableStates.STATE_ENABLED_DESIRED, enabled);

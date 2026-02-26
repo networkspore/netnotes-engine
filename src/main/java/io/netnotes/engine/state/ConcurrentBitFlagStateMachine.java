@@ -1059,7 +1059,11 @@ public class ConcurrentBitFlagStateMachine {
         if(serialExec == null){
             run.run();
         }else{
-            serialExec.executeFireAndForget(run);
+            if(serialExec.isCurrentThread()){
+                run.run();
+            }else{
+                serialExec.executeFireAndForget(run);
+            }
         }
     }
 
