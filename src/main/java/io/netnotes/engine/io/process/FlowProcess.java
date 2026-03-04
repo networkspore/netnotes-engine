@@ -5,6 +5,7 @@ import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.noteBytes.*;
 import io.netnotes.noteBytes.collections.*;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 
 import java.time.Duration;
@@ -24,7 +25,7 @@ import java.util.function.Function;
  * - Node processes get ScopedProcessInterface
  */
 public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
-    
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
     // ===== IDENTITY =====
     protected ContextPath contextPath;
     protected FlowProcessId processId;
@@ -111,8 +112,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         this.startTime = System.currentTimeMillis();
         
         Log.logMsg("[FlowProcess] Initialized: " + contextPath + 
-            " (name: " + name + ", parent: " + parentPath + 
-            ", interface: " + registryInterface.getClass().getSimpleName() + ")");
+            "\n\t (name: " + name + ", parent: " + parentPath + 
+            ",\n\t interface: " + registryInterface.getClass().getSimpleName() + ")", LOG_LEVEL);
     }
 
 
@@ -187,18 +188,18 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     public void emit(RoutedPacket packet) {
         if (!alive) {
-            Log.logMsg("[FlowProcess:" + contextPath + "] Cannot emit - process not alive");
+            Log.logMsg("[FlowProcess:" + contextPath + "] Cannot emit - process not alive", LOG_LEVEL);
             return;
         }
         
         Log.logMsg("[FlowProcess.emit]: source:" + packet.getSourcePath() + 
-            " Destination:" + (packet.getDestinationPath() != null ? packet.getDestinationPath() : "broadcast"));
+            "\n\tDestination:" + (packet.getDestinationPath() != null ? packet.getDestinationPath() : "broadcast"), LOG_LEVEL);
         
         try {
             int lag = outgoingPublisher.submit(packet);
             if (lag > 100) {
                 Log.logMsg("WARNING: " + contextPath + 
-                    " downstream lagging (buffer: " + lag + ")");
+                    " downstream lagging (buffer: " + lag + ")", LOG_LEVEL);
             }
         } catch (Exception e) {
             Log.logError("Error emitting packet: " + e.getMessage());
@@ -231,7 +232,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     public void emitTo(ContextPath destination, NoteBytesReadOnly payload) {
         // ADD THIS LOGGING
-        Log.logMsg("[FlowProcess:" + contextPath + "] emitTo " + destination);
+        Log.logMsg("[FlowProcess:" + contextPath + "] emitTo " + destination, LOG_LEVEL);
         
         emit(RoutedPacket.createDirect(contextPath, destination, payload));
     }
@@ -240,15 +241,15 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
     
     @Override
     public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber) {
-        Log.logMsg("[FlowProcess:" + contextPath + "] subscribe() called");
-        Log.logMsg("  Subscriber: " + subscriber.getClass().getSimpleName());
-        Log.logMsg("  Process alive: " + alive);
-        Log.logMsg("  Publisher closed: " + outgoingPublisher.isClosed());
-        Log.logMsg("  Current subscribers: " + getSubscriberCount());
+        Log.logMsg("[FlowProcess:" + contextPath + "] subscribe() called"
+            + "\n\t  Subscriber: " + subscriber.getClass().getSimpleName()
+            + "\n\t  Process alive: " + alive
+            + "\n\t  Publisher closed: " + outgoingPublisher.isClosed()
+            + "\n\t  Current subscribers: " + getSubscriberCount(), LOG_LEVEL);
         
         outgoingPublisher.subscribe(subscriber);
 
-        Log.logMsg("  Subscribers after subscribe: " + getSubscriberCount());
+        Log.logMsg("  Subscribers after subscribe: " + getSubscriberCount(), LOG_LEVEL);
     }
 
     public void subscribe(Flow.Subscriber<? super RoutedPacket> subscriber, 
@@ -287,7 +288,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             // Temporarily log every call to see when it changes
             if (contextPath != null && contextPath.toString().contains("container-service")) {
                 Log.logMsg("[FlowProcess:" + contextPath + "] getSubscriberCount() = " + count + 
-                    " (thread: " + Thread.currentThread().getName() + ")");
+                    " (thread: " + Thread.currentThread().getName() + ")", LOG_LEVEL);
             }
             
             return count;
@@ -313,7 +314,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         
         @Override
         public void onSubscribe(Flow.Subscription subscription) {
-            Log.logMsg("[ProcessSubscriber:" + contextPath + "] onSubscribe called");
+            Log.logMsg("[ProcessSubscriber:" + contextPath + "] onSubscribe called", LOG_LEVEL);
             
             // Generate unique ID for this subscription
             NoteBytes subscriptionId = NoteUUID.createLocalUUID64();
@@ -322,19 +323,19 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             incomingSubscriptions.put(subscriptionId, subscription);
             
             Log.logMsg("[ProcessSubscriber:" + contextPath + "] Subscription ACCEPTED as " + 
-                subscriptionId + " (total: " + incomingSubscriptions.size() + ")");
+                subscriptionId + " (total: " + incomingSubscriptions.size() + ")", LOG_LEVEL);
             
             // Request items from this new subscription
             requestMore(subscription);
             
             Log.logMsg("[ProcessSubscriber:" + contextPath + "] Initial request sent to " + 
-                subscriptionId);
+                subscriptionId, LOG_LEVEL);
         }
             
         @Override
         public void onNext(RoutedPacket packet) {
             if (!alive) {
-                Log.logMsg("[ProcessSubscriber:" + contextPath + "] Ignoring packet - not alive");
+                Log.logMsg("[ProcessSubscriber:" + contextPath + "] Ignoring packet - not alive", LOG_LEVEL);
                 return;
             }
 
@@ -343,24 +344,25 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             if (destination != null && !destination.equals(contextPath)) {
                 // Packet is for someone else, ignore it
                 Log.logMsg("[ProcessSubscriber:" + contextPath + "] Ignoring packet from " + 
-                    packet.getSourcePath() + " to " + destination + " (not for me)");
+                    packet.getSourcePath() + " to " + destination + " (not for me)", LOG_LEVEL);
                 return;
             }
             
             Log.logMsg("[ProcessSubscriber:" + contextPath + "] Processing packet from " + 
-                packet.getSourcePath() + " to " + (destination != null ? destination : "broadcast"));
+                packet.getSourcePath() + " to " + (destination != null ? destination : "broadcast"), LOG_LEVEL);
             
             pending.decrementAndGet();
             
             // CHECK IF THIS IS A REPLY FIRST
             if (packet.hasMetadata(ProcessKeys.CORRELATION_ID)) {
                 NoteBytes corrId = packet.getMetadata(ProcessKeys.CORRELATION_ID);
-                Log.logMsg("[ProcessSubscriber:" + contextPath + "] Packet has correlationId: " + corrId);
+                Log.logMsg("[ProcessSubscriber:" + contextPath + "] Packet has correlationId: " + corrId, LOG_LEVEL);
                 
                 // Try to handle as reply - if it was consumed, don't process as message
                 CompletableFuture<RoutedPacket> pendingRequest = pendingRequests.remove(corrId);
                 if (pendingRequest != null) {
-                    Log.logMsg("[ProcessSubscriber:" + contextPath + "] Reply consumed by pending request, skipping handleMessage");
+                    Log.logMsg("[ProcessSubscriber:" + contextPath + "]"
+                        +"\n\tReply consumed by pending request, skipping handleMessage", LOG_LEVEL);
                     pendingRequest.complete(packet);
                     
                     if (shouldRequestMore()) {
@@ -370,7 +372,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
                 }
                 
                 // No pending request found, might be an unsolicited message with correlationId
-                Log.logMsg("[ProcessSubscriber:" + contextPath + "] No pending request for correlationId, processing as regular message");
+                Log.logMsg("[ProcessSubscriber:" + contextPath + "]" 
+                    + "\n\tNo pending request for correlationId, processing as regular message", LOG_LEVEL);
             }
             
             // Process as regular message
@@ -389,14 +392,13 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         
         @Override
         public void onError(Throwable throwable) {
-            Log.logMsg("[ProcessSubscriber:" + contextPath + "] onError called: " + 
-                throwable.getMessage());
+            Log.logError("[ProcessSubscriber:" + contextPath + "] onError called", throwable);
             onStreamError(throwable);
         }
         
         @Override
         public void onComplete() {
-            Log.logMsg("[ProcessSubscriber:" + contextPath + "] onComplete called");
+            Log.logMsg("[ProcessSubscriber:" + contextPath + "] onComplete called", LOG_LEVEL);
             // Don't complete the process just because one subscription ended
             // The process stays alive as long as it has other subscriptions
         }
@@ -483,7 +485,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             .withMetadata(ProcessKeys.CORRELATION_ID, correlationId)
             .withMetadata(ProcessKeys.REPLY_TO, contextPath.getSegments());
         
-        Log.logMsg("[FlowProcess:" + contextPath + "] Emitting request to " + targetPath);
+        Log.logMsg("[FlowProcess:" + contextPath + "] Emitting request to " + targetPath, LOG_LEVEL);
 
         emit(request);
 
@@ -823,7 +825,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         killed = true;
         alive = false;
         
-        Log.logMsg("[FlowProcess:" + contextPath + "] kill() called");
+        Log.logMsg("[FlowProcess:" + contextPath + "] kill() called", LOG_LEVEL);
         
         // Cancel all incoming subscriptions
         for (Flow.Subscription subscription : incomingSubscriptions.values()) {
@@ -839,7 +841,7 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
             f.completeExceptionally(new CancellationException("Process killed")));
         pendingRequests.clear();
         
-        Log.logMsg("  Closing outgoingPublisher (subscribers: " + getSubscriberCount() + ")");
+        Log.logMsg("  Closing outgoingPublisher (subscribers: " + getSubscriberCount() + ")", LOG_LEVEL);
         outgoingPublisher.close();
         completionFuture.complete(null);
     }
@@ -848,8 +850,8 @@ public abstract class FlowProcess implements Flow.Publisher<RoutedPacket> {
         alive = false;
         endTime = System.currentTimeMillis();
         
-        Log.logMsg("[FlowProcess:" + contextPath + "] complete() called");
-        Log.logMsg("  Closing outgoingPublisher (subscribers: " + getSubscriberCount() + ")");
+        Log.logMsg("[FlowProcess:" + contextPath + "] complete() called" +
+            "\n\tClosing outgoingPublisher (subscribers: " + getSubscriberCount() + ")", LOG_LEVEL);
         
         outgoingPublisher.close();
         virtualExecutor.shutdown();

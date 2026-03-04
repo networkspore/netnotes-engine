@@ -3,14 +3,16 @@ package io.netnotes.engine.ui.renderer;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesArray;
+import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 
 
 /**
@@ -22,14 +24,16 @@ import java.util.Deque;
  */
 public abstract class BatchBuilder
     <S extends SpatialRegion<?,S>
-> {
+> implements AutoCloseable {
 
     protected final NoteBytesArray commands;
     protected final Deque<S> clipStack;
+    protected final SpatialRegionPool<S> regionPool;
     
-    protected BatchBuilder() {
+    protected BatchBuilder(SpatialRegionPool<S> regionPool) {
         this.commands = new NoteBytesArray();
         this.clipStack = new ArrayDeque<>();
+        this.regionPool = regionPool;
     }
     
     /**
@@ -43,10 +47,8 @@ public abstract class BatchBuilder
     /**
      * Pop the current clip region
      */
-    public void popClipRegion() {
-        if (!clipStack.isEmpty()) {
-            clipStack.pop();
-        }
+    public S popClipRegion() {
+        return !clipStack.isEmpty() ? clipStack.pop() : null;
     }
     
     /**
@@ -72,26 +74,27 @@ public abstract class BatchBuilder
         if (clipStack.isEmpty()) return false;
         return !clipStack.peek().intersects(region);
     }
-    
-    /**
-     * Build final batch command
-     */
-    public NoteBytesObject build() {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, ContainerCommands.CONAINER_BATCH),
-            new NoteBytesPair(ContainerCommands.BATCH_COMMANDS, commands)
-        });
-    }
 
     /**
      * Build final batch command
      */
-    public NoteBytesObject build(S contentBounds) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, ContainerCommands.CONAINER_BATCH),
-            new NoteBytesPair(ContainerCommands.CONTENT_BOUNDS, contentBounds.toNoteBytes()),
-            new NoteBytesPair(ContainerCommands.BATCH_COMMANDS, commands)
-        });
+    public NoteBytesObject build(S contentBounds, List<S> damageRegions) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, ContainerCommands.CONAINER_BATCH);
+        if(contentBounds != null){
+            map.put(ContainerCommands.CONTENT_BOUNDS, contentBounds.toNoteBytes());
+        }
+        if(damageRegions != null && !damageRegions.isEmpty()){
+            NoteBytes[] regionArray = new NoteBytes[damageRegions.size()];
+            for(int i = 0; i< damageRegions.size() ; i++){
+                S region = damageRegions.get(i);
+                regionArray[i] = region.toNoteBytes();
+            }
+            map.put(ContainerCommands.DAMAGE_REGIONS, new NoteBytesArrayReadOnly(regionArray));
+        }
+        map.put(ContainerCommands.BATCH_COMMANDS, commands);
+    
+        return map.toNoteBytes();
     }
     
     /**
@@ -118,15 +121,22 @@ public abstract class BatchBuilder
     /**
      * Check if batch is empty
      */
-    public boolean isEmpty() {
+    public boolean isBatchEmpty() {
         return commands.isEmpty();
     }
     
     /**
      * Clear all commands and clip regions
      */
-    public void clear() {
+    public void clearBatch() {
         commands.clear();
-        clipStack.clear();
+        while (!clipStack.isEmpty()) {
+            regionPool.recycle(clipStack.pop());
+        }
+    }
+
+    @Override
+    public void close(){
+        clearBatch();
     }
 }

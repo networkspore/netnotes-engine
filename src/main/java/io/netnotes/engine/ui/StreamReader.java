@@ -11,6 +11,7 @@ import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.processing.AsyncNoteBytesWriter;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 
 /**
@@ -25,7 +26,7 @@ import io.netnotes.engine.utils.virtualExecutors.ExecutorConsumer;
 public class StreamReader {
     private final PipedOutputStream outputStream;
     private final AsyncNoteBytesWriter writer;
-
+    private final String name;
     private Map<String, ExecutorConsumer<NoteBytes>> m_consumerMap = new ConcurrentHashMap<>();
 
     private CompletableFuture<Void> streamFuture;
@@ -33,7 +34,7 @@ public class StreamReader {
     public StreamReader(String name) {
         outputStream = new PipedOutputStream();
         this.writer = new AsyncNoteBytesWriter(outputStream);
-
+        this.name = name;
     }
 
 
@@ -80,7 +81,7 @@ public class StreamReader {
                 }
                 
 
-                Log.logMsg("[ProgressTracking] Progress stream complete");
+                Log.logMsg("[ProgressTracking:"+name+"] Progress stream complete", LogLevel.GENERAL);
 
                 
             } catch (IOException e) {

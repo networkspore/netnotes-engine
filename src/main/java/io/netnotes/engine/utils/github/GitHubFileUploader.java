@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import com.google.gson.stream.JsonWriter;
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.files.FileStreamUtils;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
@@ -92,7 +93,7 @@ public class GitHubFileUploader {
                 String responseBody = GitHubAPI.readResponse(conn);
 
                 if (status >= 200 && status < 300) {
-                    Log.logMsg("Upload successful!");
+                    Log.logMsg("Upload successful!", LogLevel.GENERAL);
                     return true;
                 } else {
                     Log.logError("Upload failed: " + status);

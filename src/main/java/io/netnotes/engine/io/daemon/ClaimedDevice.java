@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -20,11 +21,11 @@ import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
-import io.netnotes.engine.ui.containers.ContainerHandle.EventDispatcher;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolObjects;
+import io.netnotes.engine.ui.renderer.ContainerHandle.EventDispatcher;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.capabilities.DeviceCapabilitySet;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.DeviceState;
@@ -54,6 +55,7 @@ import io.netnotes.engine.io.process.StreamChannel;
  */
 public class ClaimedDevice extends FlowProcess implements InputDevice {
     
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
 
     private final NoteBytesReadOnly deviceId;
     private final ContextPath devicePath;
@@ -172,7 +174,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     
     @Override
     public void onStart() {
-        Log.logMsg("ClaimedDevice starting: " + devicePath);
+        Log.logMsg("ClaimedDevice starting: " + devicePath, LOG_LEVEL);
         
         // Request control stream TO IODaemon (for sending control messages)
         requestStreamChannel(ioDaemonPath)
@@ -224,7 +226,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         VirtualExecutors.getVirtualExecutor().execute(() -> {
        
         
-            Log.logMsg("Event stream ready: " + devicePath);
+            Log.logMsg("Event stream ready: " + devicePath, LOG_LEVEL);
             
             try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream(channel.getChannelStream(),StreamUtils.PIPE_BUFFER_SIZE))) {
                 channel.getReadyFuture().complete(null);
@@ -345,7 +347,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      * at any time to fully tear down.
      */
     private void handleDeviceDisconnectedNotification(NoteBytesMap msg) {
-        Log.logMsg("[ClaimedDevice:" + deviceId + "] Physical USB disconnect received from daemon");
+        Log.logMsg("[ClaimedDevice:" + deviceId + "] Physical USB disconnect received from daemon", LOG_LEVEL);
 
         // Stop the incoming event stream — there will be no more events until
         // the device is reclaimed after a reattach.
@@ -355,7 +357,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         DeviceDisconnectHandler handler = this.onDeviceDisconnected;
         
         if (shouldKeepAlive) {
-            Log.logMsg("[ClaimedDevice:" + deviceId + "] keepAlive=true, device kept idle for potential reattach");
+            Log.logMsg("[ClaimedDevice:" + deviceId + "] keepAlive=true, device kept idle for potential reattach", LOG_LEVEL);
         }
         
         if (handler != null) {
@@ -366,14 +368,14 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             }
         } else if (!shouldKeepAlive) {
             Log.logMsg("[ClaimedDevice:" + deviceId +
-                "] No onDeviceDisconnected handler and keepAlive=false; device is idle until explicitly released");
+                "] No onDeviceDisconnected handler and keepAlive=false; device is idle until explicitly released", LOG_LEVEL);
         }
     }
 
     // ===== ENCRYPTION NEGOTIATION =====
     
     private void handleEncryptionOffer(NoteBytesMap offer) {
-        Log.logMsg("Encryption offered for device: " + getName());
+        Log.logMsg("Encryption offered for device: " + getName(), LOG_LEVEL);
         
         try {
             byte[] serverPublicKey = offer.get(Keys.PUBLIC_KEY).getBytes();
@@ -394,7 +396,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
                 new NoteBytesPair(Keys.PUBLIC_KEY, new NoteBytes(clientPublicKey))
             });
             sendDeviceControlMessage(accept);
-            Log.logMsg("Encryption accept sent");
+            Log.logMsg("Encryption accept sent", LOG_LEVEL);
             
         } catch (Exception e) {
             Log.logError("Encryption offer failed: " + e.getMessage());
@@ -403,13 +405,13 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     }
     
     private void handleEncryptionReady(NoteBytesMap ready) {
-        Log.logMsg("Encryption ready for device: " + getName());
+        Log.logMsg("Encryption ready for device: " + getName(), LOG_LEVEL);
         
         try {
             byte[] serverIV = ready.get(Keys.AES_IV).getBytes();
             encryptionSession.finalizeEncryption(serverIV);
             
-            Log.logMsg("Device encryption active: " + getName());
+            Log.logMsg("Device encryption active: " + getName(), LOG_LEVEL);
             
         } catch (Exception e) {
             Log.logError("Encryption finalization failed: " + e.getMessage());
@@ -449,7 +451,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         controlWriteExec.executeFireAndForget(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
-                Log.logMsg("[ClaimedDevice] Control stream not yet ready, waiting: " + deviceId);
+                Log.logMsg("[ClaimedDevice] Control stream not yet ready, waiting: " + deviceId, LOG_LEVEL);
                 try {
                     controlStreamWriter = outgoingControlStream.getReadyWriter()
                         .orTimeout(2, TimeUnit.SECONDS)
@@ -495,7 +497,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         controlWriteExec.executeFireAndForget(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
-                Log.logMsg("[ClaimedDevice] Control stream not yet ready for ack, waiting: " + deviceId);
+                Log.logMsg("[ClaimedDevice] Control stream not yet ready for ack, waiting: " + deviceId, LOG_LEVEL);
                 try {
                     controlStreamWriter = outgoingControlStream.getReadyWriter()
                         .orTimeout(2, TimeUnit.SECONDS)

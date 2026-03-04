@@ -21,6 +21,7 @@ import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 import java.util.HashMap;
 import java.util.List;
@@ -44,7 +45,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Failure: future completes exceptionally → reply ERROR with message
  */
 public class RenderingService extends FlowProcess {
-    
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
+
     private final BitFlagStateMachine state;
     
     // ===== RENDERER MANAGEMENT =====
@@ -80,7 +82,8 @@ public class RenderingService extends FlowProcess {
         NoteBytesReadOnly rendererId = renderer.getId();
 
         if(renderers.containsValue(renderer)){
-            Log.logMsg("[RenderingService.registerRenderer] renderer: "+renderer.getName() +":" + rendererId  + " exists, skipping registration" );
+            Log.logMsg("[RenderingService.registerRenderer] renderer: "
+                +renderer.getName() +":" + rendererId  + " exists, skipping registration", LOG_LEVEL );
             return;
         }
 
@@ -92,7 +95,7 @@ public class RenderingService extends FlowProcess {
         Log.logMsg(String.format(
             "[RenderingService] Registered renderer '%s': %s",
             rendererId, renderer.getDescription()
-        ));
+        ), LOG_LEVEL);
     }
     
     
@@ -111,7 +114,7 @@ public class RenderingService extends FlowProcess {
         renderers.remove(rendererId);
  
         
-        Log.logMsg("[RenderingService] Unregistered renderer: " + rendererId);
+        Log.logMsg("[RenderingService] Unregistered renderer: " + rendererId, LOG_LEVEL);
     }
     
     /**
@@ -140,19 +143,19 @@ public class RenderingService extends FlowProcess {
     
     private void setupStateTransitions() {
         state.onStateAdded(RenderingServiceStates.INITIALIZING, (old, now, bit) -> {
-            Log.logMsg("[RenderingService] Initializing...");
+            Log.logMsg("[RenderingService] Initializing...", LOG_LEVEL);
         });
         
         state.onStateAdded(RenderingServiceStates.READY, (old, now, bit) -> {
-            Log.logMsg("[RenderingService] Ready - accepting requests");
+            Log.logMsg("[RenderingService] Ready - accepting requests", LOG_LEVEL);
         });
         
         state.onStateAdded(RenderingServiceStates.SHUTTING_DOWN, (old, now, bit) -> {
-            Log.logMsg("[RenderingService] Shutting down...");
+            Log.logMsg("[RenderingService] Shutting down...", LOG_LEVEL);
         });
         
         state.onStateAdded(RenderingServiceStates.STOPPED, (old, now, bit) -> {
-            Log.logMsg("[RenderingService] Stopped");
+            Log.logMsg("[RenderingService] Stopped", LOG_LEVEL);
         });
         
         state.onStateAdded(RenderingServiceStates.ERROR, (old, now, bit) -> {
@@ -166,12 +169,12 @@ public class RenderingService extends FlowProcess {
     public CompletableFuture<Void> run() {
         state.addState(RenderingServiceStates.INITIALIZING);
         
-        Log.logMsg("[RenderingService] Started at: " + contextPath);
+        Log.logMsg("[RenderingService] Started at: " + contextPath, LOG_LEVEL);
         
         // Check if default renderer is active
         Renderer<?,?,?,?,?> defaultRenderer = renderers.get(systemDefaultRendererId);
         if (defaultRenderer != null && defaultRenderer.isActive()) {
-            Log.logMsg("[RenderingService] Default renderer active");
+            Log.logMsg("[RenderingService] Default renderer active", LOG_LEVEL);
             state.addState(RenderingServiceStates.UI_RENDERER_ACTIVE);
         }
         
@@ -179,7 +182,7 @@ public class RenderingService extends FlowProcess {
         state.addState(RenderingServiceStates.READY);
         state.addState(RenderingServiceStates.ACCEPTING_REQUESTS);
         
-        Log.logMsg("[RenderingService] Initialization complete, service running");
+        Log.logMsg("[RenderingService] Initialization complete, service running", LOG_LEVEL);
         return CompletableFuture.completedFuture(null);
     }
     
@@ -214,7 +217,7 @@ public class RenderingService extends FlowProcess {
         NoteBytesReadOnly payload = packet.getPayload();
         if(payload == null || payload.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
             String msg = "[RenderingService] Invalid payload";
-            Log.logMsg(msg);
+            Log.logMsg(msg, LOG_LEVEL);
             reply(packet, ProtocolObjects.getErrorObject(msg));
             return CompletableFuture.completedFuture(null);
         }
@@ -230,7 +233,7 @@ public class RenderingService extends FlowProcess {
                 return msgExec.execute(msg, packet);
             }else{
                 String msg1 = "[RenderingService] RendererId required, for this type of command";
-                Log.logMsg(msg1);
+                Log.logMsg(msg1, LOG_LEVEL);
                 reply(packet, ProtocolObjects.getErrorObject(msg1));
                 return CompletableFuture.completedFuture(null);
             }
@@ -255,7 +258,7 @@ public class RenderingService extends FlowProcess {
             reply(packet, ProtocolObjects.getErrorObject("Renderer not found: " + rendererId));
             return CompletableFuture.completedFuture(null);
         }
-        Log.logMsg("[RenderingService] fording containerCmd to renderer");
+        Log.logMsg("[RenderingService] fording containerCmd to renderer", LOG_LEVEL);
         // Forward to renderer and handle result
         return renderer.handleMessage(msg, packet)
             .exceptionally(ex -> {
@@ -347,7 +350,7 @@ public class RenderingService extends FlowProcess {
         if (fromPath == null) {
             throw new IllegalStateException("No source path provided");
         }
-        Log.logMsg("[RenderingService] Stream channel received from: " + fromPath);
+        Log.logMsg("[RenderingService] Stream channel received from: " + fromPath, LOG_LEVEL);
         // Find which renderer should handle this stream
         // Try each renderer until one accepts it
         boolean handled = false;
@@ -356,12 +359,12 @@ public class RenderingService extends FlowProcess {
             Renderer<?,?,?,?,?> renderer = entry.getValue();
             
             if (renderer.canHandleStreamFrom(fromPath)) {
-                Log.logMsg("[RenderingService] Routing stream to renderer: " + entry.getKey());
+                Log.logMsg("[RenderingService] Routing stream to renderer: " + entry.getKey(), LOG_LEVEL);
                 renderer.handleStreamChannel(channel, fromPath);
                 // Request event stream back via service
                 requestStreamChannel(fromPath)
                     .thenAccept(eventChannel -> {
-                        Log.logMsg("[ConsoleUIRenderer] Event stream established, routing to container");
+                        Log.logMsg("[ConsoleUIRenderer] Event stream established, routing to container", LOG_LEVEL);
                         renderer.handleEventStream(eventChannel, fromPath);
                     })
                     .exceptionally(ex -> {
@@ -474,7 +477,7 @@ public class RenderingService extends FlowProcess {
         state.addState(RenderingServiceStates.SHUTTING_DOWN);
         state.removeState(RenderingServiceStates.ACCEPTING_REQUESTS);
         
-        Log.logMsg("[RenderingService] Shutting down all renderers...");
+        Log.logMsg("[RenderingService] Shutting down all renderers...", LOG_LEVEL);
         
         // Shutdown all renderers
         List<CompletableFuture<Void>> futures = renderers.values().stream()
@@ -489,7 +492,7 @@ public class RenderingService extends FlowProcess {
                 state.removeState(RenderingServiceStates.READY);
                 state.addState(RenderingServiceStates.STOPPED);
                 
-                Log.logMsg("[RenderingService] Shutdown complete");
+                Log.logMsg("[RenderingService] Shutdown complete", LOG_LEVEL);
             });
     }
     

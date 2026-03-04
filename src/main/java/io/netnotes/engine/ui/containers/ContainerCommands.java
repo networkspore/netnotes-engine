@@ -20,36 +20,37 @@ public class ContainerCommands {
 
     public static int BIT_IS_LAYOUT_MANAGED = 1 << Container.STATE_LAYOUT_MANAGED;
     public static int BIT_IS_OFF_SCREEN = 1 << Container.STATE_OFF_SCREEN;
-    public static int BIT_IS_FOCUSED = (1 << Container.STATE_FOCUSED);
-    public static int BIT_IS_VISIBLE = (1 << Container.STATE_VISIBLE);
+    public static int BIT_IS_FOCUSED = 1 << Container.STATE_FOCUSED;
+    public static int BIT_IS_VISIBLE = 1 << Container.STATE_VISIBLE;
 
-    public static final NoteBytesReadOnly CONTAINER_ID  = new NoteBytesReadOnly("container_id");
-    public static final NoteBytesReadOnly RENDERER_ID = new NoteBytesReadOnly("renderer_id");
-    public static final NoteBytesReadOnly X = new NoteBytesReadOnly("x");
-    public static final NoteBytesReadOnly Y = new NoteBytesReadOnly("y");
+    public static final NoteBytesReadOnly CONTAINER_ID      = new NoteBytesReadOnly("container_id");
+    public static final NoteBytesReadOnly RENDERER_ID       = new NoteBytesReadOnly("renderer_id");
+    public static final NoteBytesReadOnly X                 = new NoteBytesReadOnly("x");
+    public static final NoteBytesReadOnly Y                 = new NoteBytesReadOnly("y");
     
-    public static final NoteBytesReadOnly COORDINATES = new NoteBytesReadOnly(   "coordinates");
-    public static final NoteBytesReadOnly DIMENSIONS = new NoteBytesReadOnly("dimensions");
-    public static final NoteBytesReadOnly REGION = new NoteBytesReadOnly("region");
+    public static final NoteBytesReadOnly COORDINATES       = new NoteBytesReadOnly(   "coordinates");
+    public static final NoteBytesReadOnly DIMENSIONS        = new NoteBytesReadOnly("dimensions");
+    public static final NoteBytesReadOnly REGION            = new NoteBytesReadOnly("region");
     
-    public static final NoteBytesReadOnly RESIZABLE = new NoteBytesReadOnly("resizable");
-    public static final NoteBytesReadOnly CLOSABLE = new NoteBytesReadOnly("closable");
-    public static final NoteBytesReadOnly MOVABLE = new NoteBytesReadOnly("movable");
-    public static final NoteBytesReadOnly MINIMIZABLE = new NoteBytesReadOnly("minimizable");
-    public static final NoteBytesReadOnly MAXIMIZABLE = new NoteBytesReadOnly("maximizable");
-    public static final NoteBytesReadOnly ICON = new NoteBytesReadOnly("icon");
-    public static final NoteBytesReadOnly METADATA = new NoteBytesReadOnly( "metadata");
+    public static final NoteBytesReadOnly RESIZABLE         = new NoteBytesReadOnly("resizable");
+    public static final NoteBytesReadOnly CLOSABLE          = new NoteBytesReadOnly("closable");
+    public static final NoteBytesReadOnly MOVABLE           = new NoteBytesReadOnly("movable");
+    public static final NoteBytesReadOnly MINIMIZABLE       = new NoteBytesReadOnly("minimizable");
+    public static final NoteBytesReadOnly MAXIMIZABLE       = new NoteBytesReadOnly("maximizable");
+    public static final NoteBytesReadOnly ICON              = new NoteBytesReadOnly("icon");
+    public static final NoteBytesReadOnly METADATA          = new NoteBytesReadOnly( "metadata");
     
-    public static final NoteBytesReadOnly IS_VISIBLE = new NoteBytesReadOnly( "is_visible");
-    public static final NoteBytesReadOnly IS_FOCUSED = new NoteBytesReadOnly( "is_focused");
-    public static final NoteBytesReadOnly IS_MANAGED = new NoteBytesReadOnly( "is_managed");
-    public static final NoteBytesReadOnly IS_OFF_SCREEN = new NoteBytesReadOnly("is_on_screen");
+    public static final NoteBytesReadOnly IS_VISIBLE        = new NoteBytesReadOnly( "is_visible");
+    public static final NoteBytesReadOnly IS_FOCUSED        = new NoteBytesReadOnly( "is_focused");
+    public static final NoteBytesReadOnly IS_MANAGED        = new NoteBytesReadOnly( "is_managed");
+    public static final NoteBytesReadOnly IS_OFF_SCREEN     = new NoteBytesReadOnly("is_on_screen");
 
-    public static final NoteBytesReadOnly CONTENT_BOUNDS = new NoteBytesReadOnly("CONTENT_BOUNDS");
+    public static final NoteBytesReadOnly CONTENT_BOUNDS    = new NoteBytesReadOnly("cpmtemt_bounds");
+    public static final NoteBytesReadOnly DAMAGE_REGIONS     = new NoteBytesReadOnly( "damage_bounds");
 
-    public static final NoteBytesReadOnly GENERATION    = new NoteBytesReadOnly("generation");
-    public static final NoteBytesReadOnly BATCH_COMMANDS = new NoteBytesReadOnly( "batch_cmds");
-
+    public static final NoteBytesReadOnly GENERATION        = new NoteBytesReadOnly("generation");
+    public static final NoteBytesReadOnly BATCH_COMMANDS    = new NoteBytesReadOnly( "batch_cmds");
+    
 
     // ===== LIFECYCLE COMMANDS =====
     public static final NoteBytesReadOnly CREATE_CONTAINER = 

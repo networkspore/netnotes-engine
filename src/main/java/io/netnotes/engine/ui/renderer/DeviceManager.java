@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.containers;
+package io.netnotes.engine.ui.renderer;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -7,6 +7,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.daemon.ClaimedDevice;
 import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytes;
@@ -33,10 +34,10 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  * 
  */
 public abstract class DeviceManager<
-    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?,?,?,?>,
+    H extends ContainerHandle<?,H,?,?,?,DM,?,?,?,?,?,?,?,?,?,?,?>,
     DM extends DeviceManager<H,DM>
 > {
-    
+    private static LogLevel LOG_LEVEL = LogLevel.GENERAL;
     // ===== CORE STATE =====
     protected H handle;
     protected NoteBytesReadOnly deviceId;
@@ -69,7 +70,7 @@ public abstract class DeviceManager<
             }
             this.handle = handle;
             Log.logMsg("[DeviceManager:" + getDeviceType() + "] Attached to handle: " + 
-                handle.getId());
+                handle.getId(), LOG_LEVEL);
             onAttached(handle);
         });
     }
@@ -85,7 +86,7 @@ public abstract class DeviceManager<
                 new IllegalStateException("DeviceManager not attached to handle"));
         }
         
-        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Enabling device: " + deviceId);
+        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Enabling device: " + deviceId, LOG_LEVEL);
         
         return claimDevice() 
             .thenCompose(device -> {
@@ -101,7 +102,7 @@ public abstract class DeviceManager<
                     .thenCompose(v -> onDeviceEnabled(device))
                     .thenApply(v -> {
                         Log.logMsg("[DeviceManager:" + device.getDeviceType() + 
-                            "] Device enabled, source: " + deviceSourcePath);
+                            "] Device enabled, source: " + deviceSourcePath, LOG_LEVEL);
                         return device;
                     });
             })
@@ -120,11 +121,11 @@ public abstract class DeviceManager<
     public final CompletableFuture<Void> disable() {
         if (handle == null || deviceSourcePath == null) {
             Log.logMsg("[DeviceManager:" + getDeviceType() + 
-                "] Disable called but not enabled");
+                "] Disable called but not enabled", LOG_LEVEL);
             return CompletableFuture.completedFuture(null);
         }
         
-        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Disabling device: " + deviceId);
+        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Disabling device: " + deviceId, LOG_LEVEL);
         
         return serialExec.submit(() -> {
             cleanupEventRouting();
@@ -134,7 +135,7 @@ public abstract class DeviceManager<
         .thenCompose(v -> releaseDevice())
         .thenRun(() -> {
             deviceSourcePath = null;
-            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Device disabled");
+            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Device disabled", LOG_LEVEL);
         })
         .exceptionally(ex -> {
             Log.logError("[DeviceManager:" + getDeviceType() + 
@@ -149,7 +150,7 @@ public abstract class DeviceManager<
      * Package-private - only ContainerHandle should call this
      */
     final CompletableFuture<Void> detach() {
-        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Detaching from handle");
+        Log.logMsg("[DeviceManager:" + getDeviceType() + "] Detaching from handle", LOG_LEVEL);
         
         return disable().thenRun(() -> {
             handle = null;
@@ -207,7 +208,7 @@ public abstract class DeviceManager<
             this.dispatcher = d;
             device.setEventDispatcher(dispatcher);
             
-            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Event dispatcher attached");
+            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Event dispatcher attached", LOG_LEVEL);
         })
         .thenCompose(v->requiresExclusiveAccess())
         .thenCompose(required->{
@@ -245,7 +246,8 @@ public abstract class DeviceManager<
                         })
                         .thenRun(()->{
                             dispatcher = null;
-                            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Event dispatcher removed");
+                            Log.logMsg("[DeviceManager:" + getDeviceType() + "] Event dispatcher removed"
+                                , LOG_LEVEL);
                         });
                 }
                 return CompletableFuture.completedFuture(null);

@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.containers;
+package io.netnotes.engine.ui.renderer;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -15,10 +15,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
-import io.netnotes.engine.ui.renderer.RenderableLayoutManager;
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
 import io.netnotes.engine.ui.renderer.layout.LayoutContext;
 import io.netnotes.engine.ui.renderer.layout.LayoutData;
@@ -52,9 +48,15 @@ import io.netnotes.engine.ui.FloatingLayerManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.SpatialRegionPool;
+import io.netnotes.engine.ui.containers.Container;
+import io.netnotes.engine.ui.containers.ContainerCommands;
+import io.netnotes.engine.ui.containers.ContainerConfig;
+import io.netnotes.engine.ui.containers.ContainerEventsFactory;
+import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.ui.containers.containerEvents.ContainerRegionChangedEvent;
 import io.netnotes.engine.ui.containers.containerEvents.RoutedContainerEvent;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
@@ -93,7 +95,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
  */
 public abstract class ContainerHandle<
     B extends BatchBuilder<S>,
-    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,RP,EF,CCFG,BLD>,
+    H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,RP,EF,CCFG,CRE,DA,BLD>,
     P extends SpatialPoint<P>,
     R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
     S extends SpatialRegion<P,S>,
@@ -106,9 +108,12 @@ public abstract class ContainerHandle<
     RP extends SpatialRegionPool<S>,
     EF extends ContainerEventsFactory<P,S>,
     CCFG extends ContainerConfig<S,CCFG>,
+    CRE extends ContainerRegionChangedEvent<P,S>,
+    DA extends DamageAccumulator<P,S>,
     BLD extends ContainerHandle.Builder<H,RP,S,CCFG,BLD>
 > extends FlowProcess {
-    
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
+
     // ===== CREATION PARAMETERS =====
     protected final ContainerId containerId;
     protected final CCFG containerConfig;
@@ -156,11 +161,11 @@ public abstract class ContainerHandle<
     public static class ContainerPredicate implements Predicate<RoutedEvent>{
         @Override
         public boolean test(RoutedEvent event) {
-            return !(event instanceof RoutedContainerEvent );
+            return event instanceof RoutedContainerEvent;
         }
     }
 
-    private Predicate<RoutedEvent> containerPredicate = new ContainerPredicate();
+    private Predicate<RoutedEvent> containerPredicate;
 
     protected final ConcurrentBitFlagStateMachine stateMachine;
 
@@ -172,6 +177,9 @@ public abstract class ContainerHandle<
     protected boolean dimensionsInitialized = false;
 
     protected final RP regionPool;
+
+    protected final DA damageAccumulator;;
+    
 
     @FunctionalInterface
     public interface EventDispatcher {
@@ -193,7 +201,6 @@ public abstract class ContainerHandle<
     protected BiConsumer<R,R> onRenderableChanged = null;
     protected Consumer<H> notifyOnClosed = null;
     protected BiConsumer<H,Boolean> notifyOnRenderingChanged = null;
-    protected Consumer<H> layoutCallback = null;
     protected Consumer<H> notifyOnInitialized = null; 
     protected volatile boolean applyingLayout = false;
     /**
@@ -209,6 +216,8 @@ public abstract class ContainerHandle<
         this.ioDaemonPath = builder.ioDaemonPath;
         this.filterList = builder.filterList == null ? new EventFilterList() : builder.filterList;
         this.regionPool = builder.regionPool == null ? createRegionPool() : builder.regionPool;
+        this.damageAccumulator = createDamageAcculator(regionPool);
+        this.containerPredicate = createContainerPredicate();
         this.eventsFactory = createEventsFactory(regionPool);
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
         //runs state changes on UI executor, deffers if during layout
@@ -240,6 +249,9 @@ public abstract class ContainerHandle<
 
     protected abstract RM createRenderableLayoutManager(FLM manager);
 
+    protected abstract Predicate<RoutedEvent> createContainerPredicate();
+
+    protected abstract DA createDamageAcculator(RP pool);
 
     public void addFloating(R element, LCB callback, R anchor) {
         element.makeFloating(anchor);
@@ -261,12 +273,11 @@ public abstract class ContainerHandle<
     private void setupBaseStateHandler() {
 
         stateMachine.onStateAdded(Container.STATE_INITIALIZED, (old, now, bit) -> {
-            updatedInitialzation();
             handleInitialized();
         });
 
         stateMachine.onStateAdded(Container.STATE_STREAM_READY,  (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Stream now READY");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Stream now READY", LOG_LEVEL);
             stateMachine.removeState(Container.STATE_STREAM_ERROR);
             updateIsRendering();
             handleOnStreamReady();
@@ -284,14 +295,14 @@ public abstract class ContainerHandle<
         });
 
         stateMachine.onStateAdded(Container.STATE_VISIBLE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now VISIBLE");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now VISIBLE", LOG_LEVEL);
             stateMachine.removeState(Container.STATE_HIDDEN);
             updateIsRendering(true);
             handleOnVisible();
         });
         
         stateMachine.onStateRemoved(Container.STATE_VISIBLE, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now HIDDEN");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now HIDDEN", LOG_LEVEL);
             stateMachine.removeState(Container.STATE_FOCUSED);
             stateMachine.addState(Container.STATE_HIDDEN);
             updateIsRendering();
@@ -299,17 +310,17 @@ public abstract class ContainerHandle<
         });
         
         stateMachine.onStateAdded(Container.STATE_FOCUSED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Now FOCUSED");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Now FOCUSED", LOG_LEVEL);
             handleOnFocused();
         });
         
         stateMachine.onStateRemoved(Container.STATE_FOCUSED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] Focus lost");
+            Log.logMsg("[ContainerHandle:" + containerId + "] Focus lost", LOG_LEVEL);
             handleOnFocusLost();
         });
         
         stateMachine.onStateAdded(Container.STATE_DESTROYED, (old, now, bit) -> {
-            Log.logMsg("[ContainerHandle:" + containerId + "] DESTROYED");
+            Log.logMsg("[ContainerHandle:" + containerId + "] DESTROYED", LOG_LEVEL);
             if (stateMachine.hasState(Container.STATE_DESTROYING)) {
                 stateMachine.removeState(Container.STATE_DESTROYING);
             }
@@ -377,7 +388,9 @@ public abstract class ContainerHandle<
     }
 
     protected void handleOnFocused() {
-        Log.logMsg("[ContainerHandle:" + getName() + "] onFocused - renderSnapshot " + renderReadySnapshot);
+        Log.logMsg("[ContainerHandle:" + getName() + "] onFocused - renderSnapshot " + renderReadySnapshot
+            , LOG_LEVEL
+        );
         if (notifyOnFocused != null) {
             notifyOnFocused.accept(self());
         }
@@ -414,64 +427,19 @@ public abstract class ContainerHandle<
         this.notifyOnMove = onMove;
     }
 
-    /**
-     * Called by LayoutManager during registration
-     * This establishes the handle → layout manager connection
-     * 
-     * @param callback Callback to trigger layout recalculation
-     */
-    public void setLayoutCallback(Consumer<H> callback) {
-        this.layoutCallback = callback;
-    }
-
-   
-    /**
-     * Request layout recalculation
-     * Called by resize handler or when renderable changes
-     */
-    protected void requestLayout() {
-        // Don't request layout if we're currently applying layout
-        // (prevents infinite recursion)
-        if (applyingLayout) {
-            return;
-        }
-        
-        if (layoutCallback != null) {
-            layoutCallback.accept(self());
-        }
-    }
-
-    /**
-     * Called by LayoutManager before applying layout
-     * Prevents recursive layout requests
-     */
-    public void beginLayoutApplication() {
-        applyingLayout = true;
-    }
-
-    /**
-     * Called by LayoutManager after applying layout
-     * Re-enables layout requests
-     */
-    public void endLayoutApplication() {
-        applyingLayout = false;
-    }
-
-
-  
 
     public void setRenderableChangeListener(BiConsumer<R,R> listener) {
         this.onRenderableChanged = listener;
     }
 
-    protected void updatedInitialzation(){
-        dimensionsInitialized = true;
-        if(rootRenderable != null){    
-            applyRegionToRenderable(rootRenderable, allocatedRegion);
-        }
+    protected void applyRegionToRenderable( 
+        R currentRenderable, 
+        S region,
+        boolean isLayoutManaged,
+        boolean isOffscreen
+    ){
+        currentRenderable.updateRegion(region, isLayoutManaged, isOffscreen);
     }
-    
-    protected abstract void applyRegionToRenderable(R currentRenderable, S allocatedRegion);
 
     protected void updateIsRendering() {
         updateIsRendering(false);
@@ -486,6 +454,7 @@ public abstract class ContainerHandle<
             + "\n\t STATE_HIDDEN:           " + stateMachine.hasState(Container.STATE_HIDDEN)
             + "\n\t rootRenderable!=null:   " + (rootRenderable != null)
             + "\n\t prev renderReady:       " + prev
+        , LOG_LEVEL
         );
         renderReadySnapshot = renderStream != null && 
             stateMachine.hasState(Container.STATE_STREAM_READY) &&
@@ -493,12 +462,6 @@ public abstract class ContainerHandle<
             stateMachine.hasState(Container.STATE_VISIBLE) &&
             !stateMachine.hasState(Container.STATE_HIDDEN);
 
-        Log.logMsg("[ContainerHandle:" + getName() + "] updateIsRendering result"
-            + "\n\t rendrenderableRequestRenderInternalerReadySnapshot:    " + renderReadySnapshot
-            + "\n\t changed:                " + (renderReadySnapshot != prev)
-            + "\n\t willRender:             " + (rootRenderable != null && renderReadySnapshot 
-                                                && (forceRender || renderReadySnapshot != prev))
-        );
 
 
         if(notifyOnRenderingChanged != null && renderReadySnapshot != prev){
@@ -646,7 +609,7 @@ public abstract class ContainerHandle<
     // ===== BUILDER =====
 
     public static abstract class Builder<
-        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,RP,?,CCFG,BLD>,
+        H extends ContainerHandle<?,H,?,?,S,?,?,?,?,?,?,RP,?,CCFG,?,?,BLD>,
         RP extends SpatialRegionPool<S>,
         S extends SpatialRegion<?,S>,
         CCFG extends ContainerConfig<S,CCFG>,
@@ -743,7 +706,7 @@ public abstract class ContainerHandle<
   
     @Override
     public CompletableFuture<Void> run() {
-        Log.logMsg("[ContainerHandle] Started, auto-creating container: " + containerId);
+        Log.logMsg("[ContainerHandle] Started, auto-creating container: " + containerId, LOG_LEVEL);
         
         return create();
     }
@@ -787,7 +750,7 @@ public abstract class ContainerHandle<
         createCmd.put(Keys.CONFIG, containerConfig.toNoteBytes());
         createCmd.put(ContainerCommands.RENDERER_ID, rendererId);
         
-        Log.logNoteBytes("[ContainerHandle] requesting container creation", createCmd);
+        Log.logNoteBytes("[ContainerHandle] requesting container creation", createCmd, LOG_LEVEL);
         return request(renderingServicePath, createCmd.toNoteBytesReadOnly(), Duration.ofMillis(500))
             .thenCompose(response -> {
                 NoteBytesMap responseMap = response.getPayload().getAsNoteBytesMap();
@@ -798,12 +761,12 @@ public abstract class ContainerHandle<
                 }
                 parseCreationResponse(responseMap);
 
-                Log.logMsg("[ContainerHandle] Container created successfully: " + containerId);
+                Log.logMsg("[ContainerHandle] Container created successfully: " + containerId, LOG_LEVEL);
                 stateMachine.addState(Container.STATE_INITIALIZED);
                
                 return requestStreamChannel(renderingServicePath);
             }).thenAccept(channel -> {
-                Log.logMsg("[ContainerHandle] Render stream established");
+                Log.logMsg("[ContainerHandle:"+getName()+"] Render stream received", LOG_LEVEL);
                 this.renderStream = channel;
                 this.renderWriter = new NoteBytesWriter(channel.getChannelStream());
 
@@ -812,8 +775,9 @@ public abstract class ContainerHandle<
                         if(ex == null){
                             stateMachine.addState(Container.STATE_STREAM_READY);
                         }else{
-                            stateMachine.addState(Container.STATE_STREAM_ERROR);
+                            Log.logError("[ContainerHandle:"+getName()+"]" + "create() error", ex);
                             streamError = ex;
+                            stateMachine.addState(Container.STATE_STREAM_ERROR);
                         }
                         stateMachine.removeState(Container.STATE_CREATING);
                     });
@@ -834,7 +798,7 @@ public abstract class ContainerHandle<
 
 
     protected void parseCreationResponse(NoteBytesMap responseMap){
-        Log.logNoteBytes("[ContainerHandle] creation responded", responseMap);
+        Log.logNoteBytes("[ContainerHandle] creation responded", responseMap, LOG_LEVEL);
 
         NoteBytes isVisibleBytes = responseMap.get(ContainerCommands.IS_VISIBLE);
         NoteBytes isManagedBytes = responseMap.get(ContainerCommands.IS_MANAGED);
@@ -854,64 +818,102 @@ public abstract class ContainerHandle<
         boolean isManaged = isManagedBytes != null && isManagedBytes.getAsBoolean();
         boolean isOffScreen = isOffScreenBytes != null && isOffScreenBytes.getAsBoolean();
         S region = regionBytes != null ? createRegionFromNoteBytes(regionBytes) : null;
-        applyAllocatedRegionFromRenderer(region, isManaged, isOffScreen);
+          
+        applyAllocatedRegionEvent(region, isManaged, isOffScreen);
+
+    
     }
 
 
     protected abstract S createRegionFromNoteBytes(NoteBytes noteBytes);
 
+    public boolean isLayoutManaged(){
+        return stateMachine.hasState(Container.STATE_LAYOUT_MANAGED);
+    }
+
+    public boolean isOffScreen(){
+        return stateMachine.hasState(Container.STATE_OFF_SCREEN);
+    }
+
+     private boolean changeRegionState(boolean isLayoutManaged, boolean isOffScreen){
+        boolean isChanged = false;
+        if(isLayoutManaged){
+            if(!stateMachine.hasState(Container.STATE_LAYOUT_MANAGED)){
+                stateMachine.addState(Container.STATE_LAYOUT_MANAGED);
+                isChanged = true;
+            }
+        }else{
+            if(stateMachine.hasState(Container.STATE_LAYOUT_MANAGED)){
+                stateMachine.removeState(Container.STATE_LAYOUT_MANAGED);
+                isChanged = true;
+            }
+        }
+        if(isOffScreen){
+            if(!stateMachine.hasState(Container.STATE_OFF_SCREEN)){
+                stateMachine.addState(Container.STATE_OFF_SCREEN);
+                isChanged = true;
+            }
+        }else{
+            if(stateMachine.hasState(Container.STATE_OFF_SCREEN)){
+                stateMachine.removeState(Container.STATE_OFF_SCREEN);
+                isChanged = true;
+            }
+        }
+
+        return isChanged;
+    }
     /**
      * Apply region/state updates provided by the renderer.
-     *
-     * This is the generic wiring point for the renderer -> handle bounds path.
      */
-    protected final void applyAllocatedRegionFromRenderer(S region, boolean isLayoutManaged, boolean isOffScreen) {
-        if (isLayoutManaged) {
-            stateMachine.addState(Container.STATE_LAYOUT_MANAGED);
-        } else {
-            stateMachine.removeState(Container.STATE_LAYOUT_MANAGED);
-        }
-
-        if (isOffScreen) {
-            stateMachine.addState(Container.STATE_OFF_SCREEN);
-        } else {
-            stateMachine.removeState(Container.STATE_OFF_SCREEN);
-        }
-
+    protected final void applyAllocatedRegionEvent(S region, boolean isLayoutManaged, boolean isOffScreen) {
+       
         if (region == null) {
             return;
         }
 
-        boolean changed = allocatedRegion == null || !regionsEqual(allocatedRegion, region);
+        boolean regionChanged = allocatedRegion == null || !regionsEqual(allocatedRegion, region);
+        boolean stateChanged = changeRegionState(isLayoutManaged, isOffScreen);
 
         if (allocatedRegion == null) {
             allocatedRegion = region.copy();
             dimensionsInitialized = true;
+            
         } else {
             allocatedRegion.copyFrom(region);
             dimensionsInitialized = true;
         }
+        
+        regionPool.recycle(region);
 
-        if (!changed) {
+        if (!regionChanged && !stateChanged) {
+
+            Log.logMsg("[ContainerHandle: "+getName()+"] noChange"
+                + "\n\tregion: " + regionChanged
+                + "\n\tstate: " + stateChanged
+            , LOG_LEVEL);
             return;
         }
 
         if (rootRenderable != null) {
-            applyRegionToRenderable(rootRenderable, allocatedRegion);
+            Log.logMsg("[ContainerHandle: "+getName()+"]"
+                + "\n\tregionChanged: " + regionChanged
+                + "\n\tstateChanged: " + stateChanged
+                + "\n\tallocatedRegion: " + allocatedRegion
+                + "\n\trootRenderable:" + rootRenderable.getName()
+            , LOG_LEVEL);
+            applyRegionToRenderable(rootRenderable, allocatedRegion, isLayoutManaged, isOffScreen);
+        }else{
+            Log.logMsg("[ContainerHandle: "+getName()+"]"
+                + "\n\tregionChanged: " + regionChanged
+                + "\n\tstateChanged: " + stateChanged
+                + "\n\tallocatedRegion: " + allocatedRegion
+                + "\n\trootRenderable: null"
+            , LOG_LEVEL);
         }
-        requestLayout();
 
         if (notifyOnRegionChanged != null) {
             notifyOnRegionChanged.accept(self());
         }
-    }
-
-    protected final void applyAllocatedRegionFromRenderer(S region, int stateFlags) {
-        applyAllocatedRegionFromRenderer(
-            region,
-            (stateFlags & ContainerCommands.BIT_IS_LAYOUT_MANAGED) != 0,
-            (stateFlags & ContainerCommands.BIT_IS_OFF_SCREEN) != 0
-        );
     }
 
 
@@ -921,9 +923,11 @@ public abstract class ContainerHandle<
     public void onStop() {
         StateSnapshot snap = stateMachine.getSnapshot();
         if(snap.hasState(Container.STATE_DESTROYING) || snap.hasState(Container.STATE_DESTROYED)){
-            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId);
+            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId, LOG_LEVEL);
         }else{
-            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId + " verifying closed.");
+            Log.logMsg("[ContainerHandle:" + getId() + "] Container stopped: " + containerId 
+                + " verifying closed."
+                , LOG_LEVEL);
             close();
         }
     }
@@ -959,12 +963,12 @@ public abstract class ContainerHandle<
         }
         
         if (fromPath.equals(renderingServicePath)) {
-            Log.logMsg("[ContainerHandle] Event stream received");
+            Log.logMsg("[ContainerHandle] Event stream received", LOG_LEVEL);
         
             this.eventChannel = channel;
             
             VirtualExecutors.getVirtualExecutor().execute(() -> {
-                Log.logMsg("[ContainerHandle] Event stream read thread started");
+                Log.logMsg("[ContainerHandle] Event stream read thread started", LOG_LEVEL);
                 try (
                     NoteBytesReader reader = new NoteBytesReader(
                         new PipedInputStream(channel.getChannelStream(), 
@@ -973,7 +977,7 @@ public abstract class ContainerHandle<
                 ) {
                     channel.getReadyFuture().complete(null);
                     eventStreamReadyFuture.complete(null);
-                    Log.logMsg("[ContainerHandle] Event stream reader active");
+                    Log.logMsg("[ContainerHandle] Event stream reader active", LOG_LEVEL);
                     
                     NoteBytes nextBytes = reader.nextNoteBytes();
                     
@@ -985,7 +989,7 @@ public abstract class ContainerHandle<
                         nextBytes = reader.nextNoteBytes();
                     }
                     
-                    Log.logMsg("[ContainerHandle] Event stream reader stopped");
+                    Log.logMsg("[ContainerHandle] Event stream reader stopped", LOG_LEVEL);
                 } catch (IOException e) {
                     Log.logError("[ContainerHandle] Event stream error: " + e.getMessage());
                     throw new CompletionException(e);
@@ -1029,9 +1033,12 @@ public abstract class ContainerHandle<
 
     public void dispatchEvent(RoutedEvent event) {
         uiExecutor.executeFireAndForget(()->{
-       
-            if(containerPredicate == null || !containerPredicate.test(event)){
-                eventHandlerRegistry.dispatch(event);
+            Log.logImportant("[ContainerHandle:"+getName()+"] dispatchEvent: " + event.getClass().getSimpleName());
+
+            if(containerPredicate != null && containerPredicate.test(event)){
+                if(eventHandlerRegistry.dispatch(event)){
+                    //consume?
+                }
             }
         
             if (event.isConsumed() || rootRenderable == null) {
@@ -1044,7 +1051,7 @@ public abstract class ContainerHandle<
                     Log.logMsg("[ContainerHandle:" + containerId + 
                         "] Event filtered: " + 
                         EventBytes.getEventName(event.getEventTypeBytes()) +
-                        " from " + event.getSourcePath());
+                        " from " + event.getSourcePath(), LOG_LEVEL);
                     return;
                 }
             }
@@ -1162,10 +1169,10 @@ public abstract class ContainerHandle<
     
     protected void sendRenderCommand(NoteBytes command) {
         renderStream.getWriteExecutor().execute(()->{
-            Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command);
+            Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command, LogLevel.GENERAL);
             
             if (!renderStream.isActive() || renderStream.isClosed()) {
-                Log.logMsg("[ContainerHandle] Render stream is closed, skipping");
+                Log.logMsg("[ContainerHandle] Render stream is closed, skipping", LOG_LEVEL);
                 return;
             }
 
@@ -1235,52 +1242,69 @@ public abstract class ContainerHandle<
     }
 
     public CompletableFuture<Void> setRenderable(R renderable, LCB callback) {
-        return uiExecutor.execute(() -> {
-            R old = rootRenderable;
-            if(old == renderable){
-                return;
-            }
-            if (old != null) {
-                old.unregisterRenderable();
-                old.setRenderRequest(null);
-                if (onRenderableUnregistered != null) {
-                    onRenderableUnregistered.accept(old);
-                }
-            }
-            
-            this.rootRenderable = renderable;
-            resetFocusInternal();
-
-            if (onRenderableChanged != null && old != renderable) {
-                onRenderableChanged.accept(old, renderable);
-            }
-            
-            if (renderable != null && old != renderable) {
-                renderable.setRenderRequest(this::renderableRequestRender);
-                
-                renderableLayoutManager.registerRenderable(renderable, callback);
-                
-                if (dimensionsInitialized && allocatedRegion != null) {
-                    applyRegionToRenderable(renderable, allocatedRegion);
-                }else{
-                    Log.logMsg("[ContainerHandle: "+getName()+"] setRenderable:"
-                        + "\n\t dimensionsInitialized: " + dimensionsInitialized
-                        + "\n\t allocatedRegion: " + allocatedRegion != null ? allocatedRegion.toString() : "null"
-                    );
-                }
-                
-                if (onRenderableRegistered != null) {
-                    onRenderableRegistered.accept(renderable);
-                }
-
-                /*if (renderReadySnapshot) {
-                    renderableLayoutManager.flushLayout().thenRun(this::render);
-                }*/
-            }
-        });
+        if(uiExecutor.isCurrentThread()){
+            setRenderableInternal(renderable, callback);
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return uiExecutor.execute(() -> {
+            setRenderableInternal(renderable, callback);
+            });
+        }
     }
 
+    private void setRenderableInternal(R renderable, LCB callback){
+        R old = rootRenderable;
+        if(old == renderable){
+            return;
+        }
+        if (old != null) {
+            old.unregisterRenderable();
+            old.setRenderRequest(null);
+            old.setDamageAccumulator(null);
+            damageAccumulator.clear();
+            if (onRenderableUnregistered != null) {
+                onRenderableUnregistered.accept(old);
+            }
+        }
         
+        this.rootRenderable = renderable;
+        resetFocusInternal();
+
+        if (onRenderableChanged != null && old != renderable) {
+            onRenderableChanged.accept(old, renderable);
+        }
+        
+        if (renderable != null && old != renderable) {
+            renderable.setRenderRequest(this::renderableRequestRender);
+            renderable.setDamageAccumulator(this::accumulateDamage);
+          
+            renderableLayoutManager.registerRenderable(renderable, callback);
+            
+            if (dimensionsInitialized && allocatedRegion != null) {
+                applyRegionToRenderable(renderable, allocatedRegion, isLayoutManaged(), isOffScreen());
+            }else{
+                renderable.requestLayoutUpdate();
+
+                Log.logMsg("[ContainerHandle: "+getName()+"] setRenderable:"
+                    + "\n\t dimensionsInitialized: " + dimensionsInitialized
+                    + "\n\t allocatedRegion: " + (allocatedRegion != null ? allocatedRegion.toString() : "null")
+                , LOG_LEVEL);
+
+                renderable.requestLayoutUpdate();
+            }
+            
+            renderable.invalidate();
+            if (onRenderableRegistered != null) {
+                onRenderableRegistered.accept(renderable);
+            }
+        
+        }
+    }
+
+    private void accumulateDamage(S absoluteRegion) {
+        damageAccumulator.add(absoluteRegion);
+    }
+
     protected void renderableRequestRender(R renderable) {
         if(uiExecutor.isCurrentThread()){
             renderableRequestRenderInternal(renderable);
@@ -1290,27 +1314,29 @@ public abstract class ContainerHandle<
     }
 
     private void renderableRequestRenderInternal(R renderable){
-        Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender"
-            + "\n\t from:               " + renderable.getName()
-            + "\n\t isRoot:             " + (rootRenderable == renderable)
-            + "\n\t renderReadySnapshot:" + renderReadySnapshot
-            + "\n\t needsRender:        " + (rootRenderable != null && rootRenderable.needsRender())
-        );
+
         if (rootRenderable != renderable) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - stale renderable");
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - stale renderable"
+                    , LOG_LEVEL
+                );
                 return; // Stale request from old renderable
             }
             
             if (!renderReadySnapshot) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - not ready");
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - not ready"
+                    , LOG_LEVEL
+                );
                 return; // Not ready to render yet
             }
             
             if (!rootRenderable.needsRender()) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - needsRender=false");
+                Log.logMsg("[ContainerHandle:" + getName() + "]"
+                    +" renderableRequestRender DROPPED - needsRender=false"
+                    , LOG_LEVEL
+                );
                 return; // Already rendered
             }
-            Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender → render");
+           
             render();
     }
 
@@ -1329,16 +1355,20 @@ public abstract class ContainerHandle<
     }
 
     private Void clearRenderableInternal(){
-          if (this.rootRenderable != null) {
+        R oldRenderable = this.rootRenderable;
+        this.rootRenderable = null;
+        if (oldRenderable != null) {
             // Async unregister
-            renderableLayoutManager.unregisterRenderableTree(rootRenderable);
-            rootRenderable.setRenderRequest(null);
+            renderableLayoutManager.unregisterRenderableTree(oldRenderable);
             
+            oldRenderable.setRenderRequest(null);
+            oldRenderable.setDamageAccumulator(null);
+            damageAccumulator.clear();
             if (onRenderableUnregistered != null) {
-                onRenderableUnregistered.accept(rootRenderable);
+                onRenderableUnregistered.accept(oldRenderable);
             }
         }
-        this.rootRenderable = null;
+    
         return null;
     }
 
@@ -1384,33 +1414,39 @@ public abstract class ContainerHandle<
      * Perform actual render - runs on serialExec
      */
     private void renderInternal() {
-        Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal"
-            + "\n\t rootRenderable: " + (rootRenderable != null ? rootRenderable.getName() : "null")
-        );
-        B batch = createBatch();
-        rootRenderable.toBatch(batch);
+        Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender → render", LOG_LEVEL);
+        try(
+            B batch = createBatch();
+            DA accumulator = damageAccumulator;
+        ){
+          
+            rootRenderable.toBatch(batch);
+            
+            if (batch.isBatchEmpty()) {
+                Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal SKIPPED - batch empty", LOG_LEVEL);
+                rootRenderable.clearRenderFlag();
+                return;
+            }
+            List<S> damageRegions = accumulator.drainRegions();
+
+            NoteBytes batchCommand = buildBatchCommand(batch, damageRegions);
         
-        if (batch.isEmpty()) {
-            Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal SKIPPED - batch empty");
+            Log.logNoteBytes("[ContainerHandle: "+getName()+"]", batchCommand, LOG_LEVEL);
+            sendRenderCommand(batchCommand);
+            
             rootRenderable.clearRenderFlag();
-            return;
+        }catch(Exception e){
+            Log.logError("[ContainerHandle: "+getName()+"] renderInternal exception", e);
+            throw new RuntimeException(e);
         }
-        Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal → sendRenderCommand");
-        NoteBytes batchCommand = buildBatchCommand(batch);
-    
-        Log.logNoteBytes("[ContainerHandle: "+getName()+"]", batchCommand);
-        sendRenderCommand(batchCommand);
-        
-        rootRenderable.clearRenderFlag();
-      
     }
 
     /**
      * Hook for renderer-specific batch metadata.
      */
-    protected NoteBytes buildBatchCommand(B batch) {
+    protected NoteBytes buildBatchCommand(B batch, List<S> damage) {
         S contentBounds = getContentBoundsForBatch(batch);
-        return contentBounds != null ? batch.build(contentBounds) : batch.build();
+        return batch.build(contentBounds, damage);
     }
 
     /**
@@ -1452,15 +1488,17 @@ public abstract class ContainerHandle<
     private void handleContainerRendered(RoutedEvent event) {
         onContainerRendered(event);
     }
+
+    protected abstract CRE checkRegionChangedEventInstance(RoutedEvent event);
     
-    private void handleContainerRegionChanged(RoutedEvent event) {
-        if (event instanceof ContainerRegionChangedEvent<?, ?> rawRegionEvent) {
-            @SuppressWarnings("unchecked")
-            ContainerRegionChangedEvent<P,S> regionEvent =
-                (ContainerRegionChangedEvent<P,S>) rawRegionEvent;
-            applyAllocatedRegionFromRenderer(regionEvent.getRegion(), regionEvent.getStateFlags());
+    private void handleContainerRegionChanged(RoutedEvent event) 
+    {
+        CRE regionEvent = checkRegionChangedEventInstance(event);
+        if(regionEvent != null){
+            onContainerRegionChanged(regionEvent);
+        }else{
+            Log.logError("[ContainerHandle:"+getName()+"] handleContainerRegionChanged invalid event: " + event.getClass().getSimpleName());
         }
-        onContainerRegionChanged(event);
     }
     
     private void handleContainerClosed(RoutedEvent event) {
@@ -1485,7 +1523,14 @@ public abstract class ContainerHandle<
     
  
     protected abstract void onContainerRendered(RoutedEvent event);
-    protected abstract void onContainerRegionChanged(RoutedEvent event);
+    
+    protected void onContainerRegionChanged(CRE event){
+        boolean isLayoutManaged = event.isLayoutManaged();
+        boolean isOffscreen = event.isOffScreen();
+        S eventRegion = event.getAndConsumeRegion();
+        
+        applyAllocatedRegionEvent(eventRegion, isLayoutManaged, isOffscreen);
+    }
 
 
 
@@ -1504,7 +1549,7 @@ public abstract class ContainerHandle<
 
     protected void onContainerShown() {
         stateMachine.addState(Container.STATE_VISIBLE);
-        Log.logMsg("[ContainerHandle:" + getName() + "] Container shown");
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container shown", LOG_LEVEL);
     }
 
     public boolean isVisible() {
@@ -1513,17 +1558,17 @@ public abstract class ContainerHandle<
     
     protected void onContainerHidden() {
         stateMachine.removeState(Container.STATE_VISIBLE);
-        Log.logMsg("[ContainerHandle:" + getName() + "] Container hidden");
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container hidden", LOG_LEVEL);
     }
     
     protected void onContainerFocusGained() {
         stateMachine.addState(Container.STATE_FOCUSED);
-        Log.logMsg("[ContainerHandle:" + getName() + "] Container focused");
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container focused", LOG_LEVEL);
     }
     
     protected void onContainerFocusLost() {
         stateMachine.removeState(Container.STATE_FOCUSED);
-        Log.logMsg("[ContainerHandle:" + getName() + "] Container focus lost");
+        Log.logMsg("[ContainerHandle:" + getName() + "] Container focus lost", LOG_LEVEL);
     }
 
 
@@ -1731,7 +1776,7 @@ public abstract class ContainerHandle<
     }
 
     protected void onContainerClosed() {
-        Log.logMsg("[ContainerHandle:" + containerId + "] Container closed");
+        Log.logMsg("[ContainerHandle:" + containerId + "] Container closed", LOG_LEVEL);
         stateMachine.removeState(Container.STATE_STREAM_READY);
         
         CompletableFuture.allOf(
@@ -1790,7 +1835,7 @@ public abstract class ContainerHandle<
                 return daemon.createSession(sessionId, pid)
                     .thenCompose(session -> {
                         Log.logMsg("[ContainerHandle:" + containerId + 
-                            "] IODaemon session created: " + sessionId);
+                            "] IODaemon session created: " + sessionId, LOG_LEVEL);
                         return setIdoDaemonSession(session);
                     });
         });
@@ -1833,7 +1878,7 @@ public abstract class ContainerHandle<
                 return shutdownFuture
                     .thenRun(() -> {
                         Log.logMsg("[ContainerHandle:" + containerId + 
-                            "] IODaemon session closed");
+                            "] IODaemon session closed", LOG_LEVEL);
                     })
                     .exceptionally(ex -> {
                         Log.logError("[ContainerHandle:" + containerId + 
@@ -1869,7 +1914,7 @@ public abstract class ContainerHandle<
     public CompletableFuture<Void> removeDeviceManager(NoteBytes id) {
         return uiExecutor.submit(() -> deviceManagers.remove(id)).thenCompose(manager->{
             if(manager != null){
-                Log.logMsg("[ContainerHandle:" + containerId + "] Device manager removed: " + id);
+                Log.logMsg("[ContainerHandle:" + containerId + "] Device manager removed: " + id, LOG_LEVEL);
                 return manager.detach();
             }
             return CompletableFuture.completedFuture(null);

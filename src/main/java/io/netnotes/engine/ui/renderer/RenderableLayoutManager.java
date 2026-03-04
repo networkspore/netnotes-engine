@@ -14,6 +14,7 @@ import io.netnotes.engine.ui.renderer.layout.LayoutData;
 import io.netnotes.engine.ui.renderer.layout.LayoutGroup;
 import io.netnotes.engine.ui.renderer.layout.LayoutNode;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.SerializedDebouncedExecutor;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -74,6 +75,7 @@ public abstract class RenderableLayoutManager<
     G extends LayoutGroup<B,R,P,S,LD,LC,GCB,L,GCE,G>,
     L extends LayoutNode<B,R,P,S,LD,LC,LCB,GCB,G,L>
 > {
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
     // Initial minimal delay
     public static final long DEFAULT_DEBOUNCE_MS = 3;
     protected final SerializedVirtualExecutor uiExecutor;
@@ -106,7 +108,6 @@ public abstract class RenderableLayoutManager<
     // ===== DIRTY TRACKING =====
     protected Set<L> dirtyFloatingNodes = new LinkedHashSet<>();
     protected Set<L> dirtyLayoutNodes = new LinkedHashSet<>();
-    protected final Set<L> pendingRequestNodes = new LinkedHashSet<>();
     
     private Consumer<Boolean> layoutStateListener; 
 
@@ -200,7 +201,7 @@ public abstract class RenderableLayoutManager<
     }
 
     private void registerRenderableInternal(R renderable, LCB callback){
-        if (renderable.layoutManager != null) {
+       if (renderable.layoutManager != null) {
             renderable.layoutManager.unregister(renderable);
         }
 
@@ -209,13 +210,8 @@ public abstract class RenderableLayoutManager<
         L node = createRenderableNode(renderable);
         node.setCallback(callback);
         renderableRegistry.put(renderable, node);
-        
         buildParentChildRelations(node);
-        markLayoutDirty(renderable);
-        dirtyAffectedAncestors(node);
-        
-        Log.logMsg("[LayoutManager] Registered: " + renderable.getName());
-    
+
         for (R child : renderable.getChildren()) {
             if (!renderableRegistry.containsKey(child)) {
                 LCB childCallback = renderable.getChildCallback(child);
@@ -225,11 +221,12 @@ public abstract class RenderableLayoutManager<
 
         renderable.setLayoutManager(new ManagerHandle());
 
-
         Map<String, GSE> pendingGroups = renderable.collectChildGroups();
         if (!pendingGroups.isEmpty()) {
             registerPendingGroups(pendingGroups);
         }
+
+        Log.logMsg("[LayoutManager] Registered: " + renderable.getName(), LOG_LEVEL);
     }
 
     private void registerPendingGroups(Map<String, GSE> pendingGroups){
@@ -259,20 +256,28 @@ public abstract class RenderableLayoutManager<
         }
     }
 
+    /**
+     * Marks ancestors dirty up the tree while isSizedByChildren() holds.
+     * Does NOT dirty the node itself — callers are responsible for that.
+     */
     private void dirtyAffectedAncestors(L node) {
         if (node.isFloating()) return;
-        
         L current = node.getParent();
         while (current != null) {
-            markLayoutDirty(current.getRenderable());
-            
-            if (!current.isSizedByChildren()) {
-                break;
-            }
-            
+            dirtyLayoutNodes.add(current);
+            if (!current.isSizedByChildren()) break;
             current = current.isFloating() ? null : current.getParent();
         }
     }
+
+    private void dirtyAffectedDescendants(L node) {
+        for (L child : node.getChildren()) {
+            if (child.isManaged()) {
+                addToDirtySet(child);
+            }
+        }
+    }
+
 
     /**
      * Unregister a renderable
@@ -289,7 +294,7 @@ public abstract class RenderableLayoutManager<
         L node = renderableRegistry.remove(renderable);
         if (node != null) {
             cleanupNode(node);
-            Log.logMsg("[LayoutManager:" + containerName + "] Unregistered: " + renderable.getName());
+            Log.logMsg("[LayoutManager:" + containerName + "] Unregistered: " + renderable.getName(), LOG_LEVEL);
         }
     }
         
@@ -366,17 +371,23 @@ public abstract class RenderableLayoutManager<
      */
     public void markLayoutDirty(R renderable) {
         L node = renderableRegistry.get(renderable);
-        if (node != null) {
-            G group = node.getGroup();
-            if (group != null) {
-                // Mark all group members dirty
-                for (L member : group.getMembers()) {
-                    dirtyLayoutNodes.add(member);
-                }
-            } else {
-                dirtyLayoutNodes.add(node);
+        if (node == null) return;
+        addToDirtySet(node);
+        requestLayout();
+    }
+
+    private void addToDirtySet(L node) {
+        G group = node.getGroup();
+        if (group != null) {
+            for (L member : group.getMembers()) {
+                dirtyLayoutNodes.add(member);
+                dirtyAffectedDescendants(member);
+                dirtyAffectedAncestors(member);
             }
-            requestLayout();
+        } else {
+            dirtyLayoutNodes.add(node);
+            dirtyAffectedDescendants(node);
+            dirtyAffectedAncestors(node);
         }
     }
 
@@ -386,20 +397,9 @@ public abstract class RenderableLayoutManager<
      */
     public void markLayoutDirtyImmediate(R renderable) {
         L node = renderableRegistry.get(renderable);
-        if (node != null) {
-            G group = node.getGroup();
-            if (group != null) {
-                // Mark all group members dirty
-                for (L member : group.getMembers()) {
-                    dirtyLayoutNodes.add(member);
-                }
-            } else {
-                dirtyLayoutNodes.add(node);
-            }
-            
-            // Execute immediately - bypasses debouncing
-            layoutDebouncer.executeNow(this::performUpdate);
-        }
+        if (node == null) return;
+        addToDirtySet(node);
+        layoutDebouncer.executeNow(this::performUpdate);
     }
 
     /**
@@ -412,30 +412,12 @@ public abstract class RenderableLayoutManager<
         }
         return CompletableFuture.completedFuture(null);
     }
-    
-    /**
-     * Mark a renderable tree as layout dirty (parent + all children)
-     */
-    public void markLayoutDirtyTree(R renderable) {
-        L node = renderableRegistry.get(renderable);
-        if (node != null) {
-            markNodeLayoutDirtyRecursive(node);
-            requestLayout();
-        }
-    }
-    
-    protected void markNodeLayoutDirtyRecursive(L node) {
-        dirtyLayoutNodes.add(node);
-        for (L child : node.getChildren()) {
-            markNodeLayoutDirtyRecursive(child);
-        }
-    }
-    
-    public void markVisibilityDirty(R renderable) {
-        markLayoutDirty(renderable);
-    }
+       
 
     protected void requestLayout() {
+        if(batchingRequests){
+            return;
+        }
         layoutDebouncer.submit(
             this::performUpdate, 
             debounceDelayMs, 
@@ -474,7 +456,7 @@ public abstract class RenderableLayoutManager<
         Set<L> currentLayoutDirty = dirtyLayoutNodes;
         Set<L> currentFloatingDirty = dirtyFloatingNodes;
 
-        Log.logMsg("[LayoutManager] currentLayoutDirt: " + currentLayoutDirty.size());
+        Log.logMsg("[LayoutManager] currentLayoutDirt: " + currentLayoutDirty.size(), LOG_LEVEL);
 
         dirtyLayoutNodes = new LinkedHashSet<>();
         dirtyFloatingNodes = new LinkedHashSet<>();
@@ -484,7 +466,7 @@ public abstract class RenderableLayoutManager<
         allDirtyNodes.addAll(currentFloatingDirty);
 
         int allDirtyNodesSize = allDirtyNodes.size();
-         Log.logMsg("[LayoutManager] allDirtyNodesSize: " + currentLayoutDirty.size());
+         Log.logMsg("[LayoutManager] allDirtyNodesSize: " + currentLayoutDirty.size(), LOG_LEVEL);
         // Now process the snapshot
         if (!allDirtyNodes.isEmpty()) {
             try {
@@ -509,7 +491,7 @@ public abstract class RenderableLayoutManager<
         Log.logMsg(String.format(
             "[LayoutManager:%s] Update %.2fms (nodes: %d, nextDebounce: %dms, avgExec: %.2fms)",
             containerName, updateTimeMs, allDirtyNodesSize, nextDebounce, avgExecutionTimeMs
-        ));
+        ), LOG_LEVEL);
     }
 
     protected void performUnifiedLayoutUpdate(Set<L> dirtyNodes) {
@@ -601,15 +583,13 @@ public abstract class RenderableLayoutManager<
 
         renderable.applyLayoutData(calculatedLayout);
 
-        // Layout changed spatial or visibility state — register damage so
-        // toBatch has something to render. Without this, applyLayoutData
-        // sets the region but no render ever fires.
-        if (calculatedLayout.hasRegion() || calculatedLayout.hasStateChanges()) {
+        // Region changes always require repaint.
+        // State-only repaint decisions are handled by Renderable.applyStateChanges().
+        if (calculatedLayout.hasRegion()) {
             renderable.invalidate();
         }
 
         node.clear();
-        recycleLayoutData(calculatedLayout);
     }
 
     protected abstract void recycleLayoutData(LD layoutData);
@@ -725,7 +705,7 @@ public abstract class RenderableLayoutManager<
         }
 
         node = node == null ? floatingNode : node;
-        Log.logMsg("[RenderableLayoutManager] addToGroupInternal r:" + node.getName());
+        Log.logMsg("[RenderableLayoutManager] addToGroupInternal r:" + node.getName(), LOG_LEVEL);
         
         G group = createGroupIfAbsent(groupId);
         node.setGroup(group);
@@ -907,7 +887,8 @@ public abstract class RenderableLayoutManager<
                 pendingFocusRequest = null;
             }
             renderable.removedFromLayout();
-            Log.logMsg("[LayoutManager:" + containerName + "] Unregistered floating: " + renderable.getName());
+            Log.logMsg("[LayoutManager:" + containerName + "] Unregistered floating: " + renderable.getName()
+            , LOG_LEVEL);
         }
     }
 
@@ -971,16 +952,6 @@ public abstract class RenderableLayoutManager<
         @Override
         public void markLayoutDirty(R renderable) {
             RenderableLayoutManager.this.markLayoutDirty(renderable);
-        }
-        
-        @Override
-        public void markVisibilityDirty(R renderable) {
-            RenderableLayoutManager.this.markVisibilityDirty(renderable);
-        }
-        
-        @Override
-        public void markRequestPending(R renderable) {
-            RenderableLayoutManager.this.markRequestPending(renderable);
         }
         
         @Override
@@ -1077,7 +1048,7 @@ public abstract class RenderableLayoutManager<
     
     public void endRequestBatch() {
         batchingRequests = false;
-        if (!pendingRequestNodes.isEmpty()) {
+        if (!dirtyLayoutNodes.isEmpty()) {
             requestLayout();
         }
     }
@@ -1091,17 +1062,6 @@ public abstract class RenderableLayoutManager<
         }
     }
     
-    protected void markRequestPending(R renderable) {
-        L node = renderableRegistry.get(renderable);
-        if (node != null) {
-            pendingRequestNodes.add(node);
-            dirtyAffectedAncestors(node); 
-            if (!batchingRequests) {
-                requestLayout();
-            }
-        }
-    }
-
     private long calculateAdaptiveDebounce(double executionTimeMs, int dirtyNodeCount) {
         // Update exponential moving average of execution time
         if (avgExecutionTimeMs == 0.0) {

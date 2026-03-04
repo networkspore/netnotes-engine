@@ -44,10 +44,13 @@ public final class RenderableStates {
     public static final int STATE_EFFECTIVELY_ENABLED = 14;
     public static final int STATE_EFFECTIVELY_VISIBLE = 15;
 
-    public static final int DESTROYED = 16;
+    public static final int STATE_CONTAINER_LAYOUT_MANAGED = 16;
+    public static final int STATE_CONTAINER_OFF_SCREEN = 17;
+
+    public static final int DESTROYED = 18;
 
     public static boolean isVisible(StateSnapshot snap){ 
-        return !snap.hasState(STATE_HIDDEN) && !snap.hasState(STATE_INVISIBLE) && snap.hasState(STATE_EFFECTIVELY_VISIBLE);
+        return !snap.hasState(STATE_HIDDEN) && !snap.hasState(STATE_CONTAINER_OFF_SCREEN) && !snap.hasState(STATE_INVISIBLE) && snap.hasState(STATE_EFFECTIVELY_VISIBLE);
     }
     
     public static boolean isShowing(StateSnapshot snap){ return snap.hasState(STATE_RENDERABLE); }

@@ -7,6 +7,7 @@ import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
 import java.util.List;
@@ -26,6 +27,8 @@ import java.util.concurrent.CompletableFuture;
  * - Update configuration when settings change
  */
 public class IODaemonManager {
+    private final static LogLevel LOG_LEVEL = LogLevel.GENERAL;
+
     private final String ioDaemonName;
     private final ContextPath ioDaemonPath;
     private final ProcessRegistryInterface registry;
@@ -52,7 +55,7 @@ public class IODaemonManager {
     public CompletableFuture<IODaemonDetection.DetectionResult> detect() {
         return IODaemonDetection.detect(VirtualExecutors.getVirtualExecutor())
             .thenApply(result -> {
-                Log.logMsg("[IODaemonManager] Detection result:\n" + result);
+                Log.logMsg("[IODaemonManager] Detection result:\n" + result, LOG_LEVEL);
                 return result;
             });
     }
@@ -105,18 +108,18 @@ public class IODaemonManager {
                     IODaemon existing = (IODaemon) registry.getProcess(ioDaemonPath);
                     
                     if (existing != null && existing.isAlive() && existing.isConnected()) {
-                        Log.logMsg("[IODaemonManager] IODaemon already registered and running");
+                        Log.logMsg("[IODaemonManager] IODaemon already registered and running", LOG_LEVEL);
                         return CompletableFuture.completedFuture(ioDaemonPath);
                     } else {
                         // Registered but not healthy - clean it up
-                        Log.logMsg("[IODaemonManager] Cleaning up stale registration");
+                        Log.logMsg("[IODaemonManager] Cleaning up stale registration", LOG_LEVEL);
                         registry.unregisterProcess(ioDaemonPath);
                     }
                 }
                 
                 // Try to start service if not running
                 if (!result.processRunning && result.serviceInstalled) {
-                    Log.logMsg("[IODaemonManager] Service installed but not running, attempting to start");
+                    Log.logMsg("[IODaemonManager] Service installed but not running, attempting to start", LOG_LEVEL);
                     
                     return IODaemonDetection.startService(VirtualExecutors.getVirtualExecutor())
                         .thenCompose(started -> {
@@ -158,7 +161,7 @@ public class IODaemonManager {
     private CompletableFuture<ContextPath> registerAndStart() {
         String actualSocketPath = ioDaemonSocketPath;
         
-        Log.logMsg("[IODaemonManager] Registering IODaemon at: " + actualSocketPath);
+        Log.logMsg("[IODaemonManager] Registering IODaemon at: " + actualSocketPath, LOG_LEVEL);
         
         IODaemon ioDaemon = new IODaemon(ioDaemonName, actualSocketPath);
         
@@ -171,7 +174,7 @@ public class IODaemonManager {
         
         return registry.startProcess(ioDaemonPath)
             .thenApply(v -> {
-                Log.logMsg("[IODaemonManager] IODaemon registered and started at: " + ioDaemonPath);
+                Log.logMsg("[IODaemonManager] IODaemon registered and started at: " + ioDaemonPath, LOG_LEVEL);
                 return ioDaemonPath;
             })
             .exceptionally(ex -> {
@@ -228,7 +231,7 @@ public class IODaemonManager {
         ContextPath path = getIODaemonPath();
         if (path == null) {
             // Not running, nothing to do
-            Log.logMsg("[IODaemonManager] IODaemon not running, no reconfiguration needed");
+            Log.logMsg("[IODaemonManager] IODaemon not running, no reconfiguration needed", LOG_LEVEL);
             return CompletableFuture.completedFuture(null);
         }
         
@@ -247,7 +250,7 @@ public class IODaemonManager {
 
         ioDaemonSocketPath = newSocketPath;
         
-        Log.logMsg("[IODaemonManager] Reconfiguring socket path to: " + newSocketPath);
+        Log.logMsg("[IODaemonManager] Reconfiguring socket path to: " + newSocketPath, LOG_LEVEL);
         daemon.kill();
         registry.unregisterProcess(path);
     
@@ -264,7 +267,7 @@ public class IODaemonManager {
             return registerAndStart();
         })
         .thenRun(() -> {
-            Log.logMsg("[IODaemonManager] IODaemon reconfigured successfully");
+            Log.logMsg("[IODaemonManager] IODaemon reconfigured successfully", LOG_LEVEL);
         });
     }
     
@@ -302,7 +305,7 @@ public class IODaemonManager {
                 return daemon.createSession(sessionId, pid)
                     .thenApply(session -> {
                         discoverySession = session;
-                        Log.logMsg("[IODaemonManager] Discovery session created: " + sessionId);
+                        Log.logMsg("[IODaemonManager] Discovery session created: " + sessionId, LOG_LEVEL);
                         return session;
                     });
             });
@@ -318,7 +321,7 @@ public class IODaemonManager {
         return getDiscoverySession()
             .thenCompose(session -> session.discoverDevices())
             .thenApply(devices -> {
-                Log.logMsg("[IODaemonManager] Discovered " + devices.size() + " devices");
+                Log.logMsg("[IODaemonManager] Discovered " + devices.size() + " devices", LOG_LEVEL);
                 return devices;
             });
     }
@@ -353,7 +356,7 @@ public class IODaemonManager {
         
         return shutdownFuture
             .thenRun(() -> {
-                Log.logMsg("[IODaemonManager] Discovery session closed");
+                Log.logMsg("[IODaemonManager] Discovery session closed", LOG_LEVEL);
             })
             .exceptionally(ex -> {
                 Log.logError("[IODaemonManager] Discovery session close error: " + 

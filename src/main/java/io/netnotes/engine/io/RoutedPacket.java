@@ -169,7 +169,6 @@ public final class RoutedPacket {
      * Get all metadata
      */
     public NoteBytesMap getAllMetadata() {
-        Log.logMsg("[RoutedPacket] get All metadata " + (metadata != null ? metadata.size() : "null"));
         return new NoteBytesMap(metadata.getHashMap());
     }
     

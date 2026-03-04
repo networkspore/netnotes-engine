@@ -42,6 +42,7 @@ import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.noteBytes.processing.NoteBytesReader;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -63,6 +64,7 @@ import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
  * Hierarchy: IODaemon → (sessionId namespace) → ClaimedDevice
  */
 public class IODaemon extends FlowProcess {
+    private final static LogLevel LOG_LEVEL = LogLevel.GENERAL;
     public final NoteBytesReadOnly DAEMON_VERSION = new NoteBytesReadOnly(1);
 
     public static final class SESSION_CMDS {
@@ -189,7 +191,7 @@ public class IODaemon extends FlowProcess {
         }
         ChannelWriter deviceStream = deviceStreams.get(deviceId);
         if(deviceStream == null){
-            Log.logMsg("[IODaemon] deviceStream not available for: " + deviceId);
+            Log.logMsg("[IODaemon] deviceStream not available for: " + deviceId, LOG_LEVEL);
             return true;
         }
         SerializedVirtualExecutor exec = deviceStream.getWriteExec();
@@ -199,7 +201,7 @@ public class IODaemon extends FlowProcess {
                 NoteBytesWriter writer = deviceStream.getWriter();
              
                 if (writer == null) {
-                    Log.logMsg("[IODaemon] device stream waiting: " + deviceId);
+                    Log.logMsg("[IODaemon] device stream waiting: " + deviceId, LOG_LEVEL);
                     try{
                         writer = deviceStream.getReadyWriter()
                             .orTimeout(2, TimeUnit.SECONDS)
@@ -238,12 +240,12 @@ public class IODaemon extends FlowProcess {
     
     @Override
     public void onStart() {
-        Log.logMsg("IODaemon starting");
+        Log.logMsg("IODaemon starting", LOG_LEVEL);
     }
     
     @Override
     public void onStop() {
-        Log.logMsg("IODaemon stopping");
+        Log.logMsg("IODaemon stopping", LOG_LEVEL);
         handleDisconnect();
     }
 
@@ -285,13 +287,14 @@ public class IODaemon extends FlowProcess {
      */
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("Received control stream from: " + fromPath);
+        Log.logMsg("Received control stream from: " + fromPath, LOG_LEVEL);
         
         VirtualExecutors.getVirtualExecutor().execute(() -> {
  
             try (NoteBytesReader reader = new NoteBytesReader(new PipedInputStream( channel.getChannelStream(), StreamUtils.PIPE_BUFFER_SIZE))) {
                 channel.getReadyFuture().complete(null);
-                 Log.logMsg("[IODaemon.handleStreamChannel] active, from: " + fromPath + " waiting for commands...");
+                Log.logMsg("[IODaemon.handleStreamChannel] active, from: " + fromPath 
+                    + " waiting for commands...", LOG_LEVEL);
                 NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
                 while (nextBytes != null && connected) {
                     if (nextBytes.getType() == NoteBytesMetaData.STRING_TYPE) {
@@ -303,7 +306,7 @@ public class IODaemon extends FlowProcess {
                             // Forward control message to daemon
                             // Write routed message: [STRING:deviceId][OBJECT:payload]
                             writeToDaemon(deviceIdBytes, payload);
-                            Log.logMsg("Forwarded control message for device: " + deviceIdBytes);
+                            Log.logMsg("Forwarded control message for device: " + deviceIdBytes, LOG_LEVEL);
                          
                         }
                     }
@@ -394,7 +397,7 @@ public class IODaemon extends FlowProcess {
                             throw new IOException("Handshake rejected");
                         }
                         
-                        Log.logMsg("Connected");
+                        Log.logMsg("Connected", LOG_LEVEL);
                         connected = true;
                    
                     }catch(IOException e){
@@ -402,7 +405,7 @@ public class IODaemon extends FlowProcess {
                         throw new CompletionException("Handshake failed", e);
                     }
                 }else{
-                    Log.logMsg("Already connected");
+                    Log.logMsg("Already connected", LOG_LEVEL);
                 }
 
             }, VirtualExecutors.getVirtualExecutor());
@@ -424,7 +427,7 @@ public class IODaemon extends FlowProcess {
                 while (running && connected) {
                     NoteBytesReadOnly first = daemonReader.nextNoteBytesReadOnly();
                     if (first == null) {
-                        Log.logMsg("Connection closed by daemon");
+                        Log.logMsg("Connection closed by daemon", LOG_LEVEL);
                         break;
                     }
                     
@@ -568,7 +571,7 @@ public class IODaemon extends FlowProcess {
     
                 reply(request, response.toNoteBytes());
                 
-                Log.logMsg("[IODaemon] Created session: " + sessionId);
+                Log.logMsg("[IODaemon] Created session: " + sessionId, LOG_LEVEL);
             })
             .exceptionally(ex -> {
                 NoteBytesMap error = new NoteBytesMap();
@@ -604,7 +607,7 @@ public class IODaemon extends FlowProcess {
                 response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
                 reply(request, response.toNoteBytes());
                 
-                Log.logMsg("[IODaemon] Destroyed session: " + sessionId);
+                Log.logMsg("[IODaemon] Destroyed session: " + sessionId, LOG_LEVEL);
             })
             .exceptionally(ex -> {
                 replyError(request, ex.getMessage());
@@ -750,7 +753,7 @@ public class IODaemon extends FlowProcess {
         // Auto-reattach logic: if any keepAlive devices are now available, reclaim them
         attemptAutoReattach();
         
-        Log.logMsg("Device list synced to registry: " + discoveredDevices.getAllDevices().size() + " devices");
+        Log.logMsg("Device list synced to registry: " + discoveredDevices.getAllDevices().size() + " devices", LOG_LEVEL);
     }
     
     /**
@@ -768,7 +771,7 @@ public class IODaemon extends FlowProcess {
         discoveredDevices.addOrUpdateDevice(map);
         notifyRegistryChanged();
         
-        Log.logMsg("[IODaemon] Device attached: " + deviceId);
+        Log.logMsg("[IODaemon] Device attached: " + deviceId, LOG_LEVEL);
         
         // Check if any keepAlive device is waiting for this deviceId
         attemptAutoReattachForDevice(deviceId);
@@ -793,7 +796,7 @@ public class IODaemon extends FlowProcess {
         discoveredDevices.markDetached(deviceId);
         notifyRegistryChanged();
         
-        Log.logMsg("[IODaemon] Device detached: " + deviceId);
+        Log.logMsg("[IODaemon] Device detached: " + deviceId, LOG_LEVEL);
     }
     
     /**
@@ -815,7 +818,7 @@ public class IODaemon extends FlowProcess {
                     discoveredDevices.getDevice(deviceId);
                 
                 if (deviceInfo != null && !deviceInfo.claimed()) {
-                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId);
+                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId, LOG_LEVEL);
                     attemptReclaim(session, device, deviceInfo);
                 }
             }
@@ -841,7 +844,7 @@ public class IODaemon extends FlowProcess {
                     discoveredDevices.getDevice(deviceId);
                 
                 if (deviceInfo != null && !deviceInfo.claimed()) {
-                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId);
+                    Log.logMsg("[IODaemon] Auto-reattaching keepAlive device: " + deviceId, LOG_LEVEL);
                     attemptReclaim(session, device, deviceInfo);
                 }
             }
@@ -923,7 +926,7 @@ public class IODaemon extends FlowProcess {
         if(session != null){
             session.handleDeviceReleased(deviceId);
         }else{
-            Log.logMsg("[IODaemon] session not found for release: " + sessionId + ":" + deviceId);
+            Log.logMsg("[IODaemon] session not found for release: " + sessionId + ":" + deviceId, LOG_LEVEL);
             completeDeviceRelease(deviceId);
         }
         
@@ -942,7 +945,7 @@ public class IODaemon extends FlowProcess {
     private void handleAccept(NoteBytesMap map) {
         NoteBytes statusBytes = map.get(Keys.STATUS);
         if (statusBytes != null) {
-            Log.logMsg("Daemon: " + statusBytes.getAsString());
+            Log.logMsg("Daemon: " + statusBytes.getAsString(), LOG_LEVEL);
         }
     }
     
@@ -959,7 +962,7 @@ public class IODaemon extends FlowProcess {
         connected = false;
         running = false;
 
-        Log.logMsg("Socket disconnected, notifying sessions...");
+        Log.logMsg("Socket disconnected, notifying sessions...", LOG_LEVEL);
 
         // Take a snapshot of sessions before clearing maps.
         List<ClientSession> sessionsSnapshot = getSessions();
@@ -996,7 +999,7 @@ public class IODaemon extends FlowProcess {
         establsihConnectionFuture = null;
         handshakeFuture = null;
         Log.logMsg("Disconnected from daemon, processed " +
-            sessionsSnapshot.size() + " sessions");
+            sessionsSnapshot.size() + " sessions", LOG_LEVEL);
     }
 
     /**
@@ -1006,7 +1009,9 @@ public class IODaemon extends FlowProcess {
      */
     private void notifySessionDisconnect(ClientSession session) {
         if (!session.isHealthy() || session.state.hasState(ClientStateFlags.DISCONNECTING)) {
-            Log.logMsg("Session " + session.sessionId + " already disconnecting, skipping notification");
+            Log.logMsg("Session " + session.sessionId + " already disconnecting, skipping notification"
+                , LOG_LEVEL
+            );
             return;
         }
 
@@ -1059,7 +1064,7 @@ public class IODaemon extends FlowProcess {
         if(deviceStream != null){
             deviceStream.shutdown();
         }            
-        Log.logMsg("Cleaned up streams for device: " + deviceId);
+        Log.logMsg("Cleaned up streams for device: " + deviceId, LOG_LEVEL);
     }
 
     private CompletableFuture<Void> releaseDevice(NoteBytes sessionId, NoteBytes deviceId){

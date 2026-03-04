@@ -32,8 +32,6 @@ public interface RenderableLayoutManagerHandle<R, LCB,G,GCE, GCB> {
     // ===== DIRTY MARKING =====
     
     void markLayoutDirty(R renderable);
-    void markVisibilityDirty(R renderable);
-    void markRequestPending(R renderable);
     
     // ===== LIFECYCLE =====
     

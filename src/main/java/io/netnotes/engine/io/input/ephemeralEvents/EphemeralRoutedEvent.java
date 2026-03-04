@@ -5,6 +5,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 /**
  * EphemeralRoutedEvent - Base class for ephemeral events
@@ -48,7 +49,7 @@ public abstract class EphemeralRoutedEvent extends RoutedEvent implements AutoCl
         eventType.close();
         flag[0] *= 0;
         if(flag[0] != 0){
-            Log.logMsg("Flag not updated:" + flag[0]);
+            Log.logMsg("Flag not updated:" + flag[0], LogLevel.ERROR);
         }
     }
 }

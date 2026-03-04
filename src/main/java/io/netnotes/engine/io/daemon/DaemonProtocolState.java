@@ -9,6 +9,7 @@ import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.state.StateEventRegistry.ClientStates;
 import io.netnotes.engine.state.StateEventRegistry.DeviceStates;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -141,7 +142,7 @@ public class DaemonProtocolState {
             
             state.onStateAdded(DeviceStateFlags.BACKPRESSURE_ACTIVE, (old, now, bit) -> {
                 state.addState(DeviceStateFlags.EVENT_BUFFERING);
-                Log.logMsg("Backpressure on device " + deviceId);
+                Log.logMsg("Backpressure on device " + deviceId, LogLevel.GENERAL);
             });
             
             state.onStateAdded(DeviceStateFlags.PAUSED, (old, now, bit) -> {
@@ -189,7 +190,7 @@ public class DaemonProtocolState {
             boolean enabled = capabilities.enableCapability(mode);
             
             if (enabled) {
-                Log.logMsg("Enabled mode '" + mode + "' for device " + deviceId);
+                Log.logMsg("Enabled mode '" + mode + "' for device " + deviceId, LogLevel.GENERAL);
             } else {
                 Log.logError("Failed to enable mode '" + mode + "': " + 
                                  capabilities.getEnableFailureReason(mode));

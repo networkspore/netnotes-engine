@@ -224,6 +224,10 @@ public abstract class LayoutNode<
         this.callback = callback;
     }
 
+    public boolean isManaged(){
+        return callback != null || group != null;
+    }
+
     public void setGroup(G group) {
         if (this.group != null) {
             this.group.removeMember(self());

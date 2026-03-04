@@ -8,6 +8,7 @@ import io.netnotes.noteBytes.*;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -30,6 +31,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 4. Registry marks device as claimed
  */
 public class DiscoveredDeviceRegistry {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
     
     private static final CapabilityRegistry CAPABILITY_REGISTRY = DeviceCapabilitySet.getRegistry();
 
@@ -95,7 +98,7 @@ public class DiscoveredDeviceRegistry {
             }
         }
         
-        Log.logMsg("Discovered " + discoveredDevices.size() + " devices");
+        Log.logMsg("Discovered " + discoveredDevices.size() + " devices", LOG_LEVEL);
     }
     
     /**
@@ -197,7 +200,8 @@ public class DiscoveredDeviceRegistry {
                 if (capName != null && CAPABILITY_REGISTRY.isRegistered(capName)) {
                     caps.addAvailableCapability(capName);
                 } else {
-                    Log.logMsg("Unknown capability bit: " + i);
+                    Log.logError("[DiscoveredDeviceRegistry] DeviceCapabilitySet:" 
+                        + "\n\tUnknown capability bit: " + i);
                 }
             }
         }
@@ -209,7 +213,7 @@ public class DiscoveredDeviceRegistry {
             Log.logMsg("Device capabilities: " + 
                 Arrays.stream(names)
                     .map(NoteBytes::getAsString)
-                    .toList());
+                    .toList(), LOG_LEVEL);
         }
         
         return caps;
@@ -331,7 +335,7 @@ public class DiscoveredDeviceRegistry {
         if (device != null) {
             discoveredDevices.put(deviceId, device.claim());
             claimedDevices.add(deviceId);
-            Log.logMsg("Marked device " + deviceId + " as claimed");
+            Log.logMsg("Marked device " + deviceId + " as claimed", LOG_LEVEL);
         }
     }
     
@@ -345,7 +349,7 @@ public class DiscoveredDeviceRegistry {
                 device.usbDevice, device.capabilities, false
             ));
             claimedDevices.remove(deviceId);
-            Log.logMsg("Marked device " + deviceId + " as released");
+            Log.logMsg("Marked device " + deviceId + " as released", LOG_LEVEL);
         }
     }
     
@@ -368,7 +372,7 @@ public class DiscoveredDeviceRegistry {
             );
             
             discoveredDevices.put(deviceInfo.usbDevice.deviceId, deviceInfo);
-            Log.logMsg("Added/updated device: " + deviceInfo.usbDevice.deviceId);
+            Log.logMsg("Added/updated device: " + deviceInfo.usbDevice.deviceId, LOG_LEVEL);
             
         } catch (Exception e) {
             Log.logError("Failed to add/update device: " + e.getMessage());
@@ -394,7 +398,7 @@ public class DiscoveredDeviceRegistry {
             );
             
             discoveredDevices.put(deviceId, updatedDevice);
-            Log.logMsg("Marked device " + deviceId + " as detached");
+            Log.logMsg("Marked device " + deviceId + " as detached", LOG_LEVEL);
         }
     }
     
@@ -450,7 +454,8 @@ public class DiscoveredDeviceRegistry {
     // ===== DEBUG =====
     
     public void printDevices() {
-        Log.logMsg("=== Discovered Devices ===");
+   
+        StringBuilder sb = new StringBuilder("=== Discovered Devices ===");
         for (DeviceDescriptorWithCapabilities device : discoveredDevices.values()) {
             IODaemonProtocol.USBDeviceDescriptor usb = device.usbDevice;
             String usbDeviceInfo = String.format("  %s: %s (type=%s, claimed=%s)%n",
@@ -458,10 +463,11 @@ public class DiscoveredDeviceRegistry {
                 usb.product != null ? usb.product : "Unknown",
                 usb.getDeviceType(),
                 device.claimed);
-            Log.logMsg("    Device Info:: " + usbDeviceInfo);
-            Log.logMsg("    Available modes: " + device.capabilities.getAvailableModes());
-            Log.logMsg("    Capabilities: " + device.capabilities.getAvailableCapabilities());
+            sb.append("\n\t Device Info:: " + usbDeviceInfo
+                + "\n\t Available modes: " + device.capabilities.getAvailableModes()
+                + "\n\t Capabilities: " + device.capabilities.getAvailableCapabilities());
         }
-        Log.logMsg("==========================");
+        sb.append("==========================");
+        Log.logMsg(sb.toString(), LogLevel.GENERAL);
     }
 }

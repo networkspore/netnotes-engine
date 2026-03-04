@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 /**
  * FlowProcessService - Instance-based process registry
@@ -28,7 +29,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * ```
  */
 public class FlowProcessService {
-    
+    private static final LogLevel LOGGING_LEVEL = LogLevel.GENERAL;
     // Path → Process
     private final ConcurrentHashMap<ContextPath, FlowProcess> processes = 
         new ConcurrentHashMap<>();
@@ -55,7 +56,7 @@ public class FlowProcessService {
      * Security is handled by who controls interface creation
      */
     public FlowProcessService() {
-        Log.logMsg("[FlowProcessService] New registry instance created");
+        Log.logMsg("[FlowProcessService] New registry instance created",LOGGING_LEVEL);
     }
     
     public ProcessRegistryInterface getRegistryInterface(){
@@ -75,7 +76,7 @@ public class FlowProcessService {
         ContextPath parentPath,
         ProcessRegistryInterface interfaceForNewProcess
     ) {
-        Log.logMsg("[FlowProcessService] registering " + process.getName() + "...");
+        Log.logMsg("[FlowProcessService] registering " + process.getName() + "...", LOGGING_LEVEL);
         if (processes.containsKey(path)) {
             throw new IllegalStateException("Process already registered at: " + path);
         }
@@ -98,7 +99,7 @@ public class FlowProcessService {
         
         Log.logMsg("[ProcessService] Registered: " + path +
             " (parent: " + parentPath + ", stream: " + 
-            streamCapable.getOrDefault(path, false) + ")");
+            streamCapable.getOrDefault(path, false) + ")", LOGGING_LEVEL);
         
         return path;
     }
@@ -146,7 +147,7 @@ public class FlowProcessService {
             childPaths.forEach(this::unregisterProcess);
         }
         
-        Log.logMsg("[ProcessService] Unregistered: " + path);
+        Log.logMsg("[ProcessService] Unregistered: " + path, LOGGING_LEVEL);
     }
     
     /**
@@ -157,9 +158,9 @@ public class FlowProcessService {
         FlowProcess downstream = processes.get(downstreamPath);
         
         // ADD THESE LOGS
-        Log.logMsg("[FlowProcessService] connect() called: " + upstreamPath + " → " + downstreamPath);
-        Log.logMsg("  Upstream process exists: " + (upstream != null));
-        Log.logMsg("  Downstream process exists: " + (downstream != null));
+        Log.logMsg("[FlowProcessService] connect() called: " + upstreamPath + " → " + downstreamPath
+            + "\n\t  Upstream process exists: " + (upstream != null)
+            + "\n\t Downstream process exists: " + (downstream != null), LOGGING_LEVEL);
         
         if (upstream == null) {
             Log.logError("[FlowProcessService] Upstream process not found: " + upstreamPath);
@@ -171,19 +172,19 @@ public class FlowProcessService {
         }
         
         // ADD THIS LOG
-        Log.logMsg("  Upstream subscribers before: " + upstream.getSubscriberCount());
+        Log.logMsg("  Upstream subscribers before: " + upstream.getSubscriberCount(), LOGGING_LEVEL);
         
         // Subscribe downstream to upstream
         upstream.subscribe(downstream.getSubscriber());
         
         // ADD THIS LOG
-        Log.logMsg("  Upstream subscribers after: " + upstream.getSubscriberCount());
+        Log.logMsg("  Upstream subscribers after: " + upstream.getSubscriberCount(), LOGGING_LEVEL);
         
         // Track connection
         connections.computeIfAbsent(downstreamPath, k -> ConcurrentHashMap.newKeySet())
             .add(upstreamPath);
         
-        Log.logMsg("[ProcessService] Connected: " + upstreamPath + " → " + downstreamPath);
+        Log.logMsg("[ProcessService] Connected: " + upstreamPath + " → " + downstreamPath, LOGGING_LEVEL);
     }
     
     /**
@@ -195,7 +196,7 @@ public class FlowProcessService {
             upstreams.remove(upstreamPath);
         }
         
-        Log.logMsg("[ProcessService] Disconnected: " + upstreamPath + " ⊣ " + downstreamPath);
+        Log.logMsg("[ProcessService] Disconnected: " + upstreamPath + " ⊣ " + downstreamPath, LOGGING_LEVEL);
     }
     
     /**
@@ -217,21 +218,21 @@ public class FlowProcessService {
         }
 
         Log.logMsg("[FlowProcessService] Starting process: " + path + 
-            " (type: " + process.getClass().getSimpleName() + ")");
+            "\n\t(type: " + process.getClass().getSimpleName() + ")", LOGGING_LEVEL);
         
         // Start the process in background
         CompletableFuture<Void> startupFuture = new CompletableFuture<>();
         
         CompletableFuture.runAsync(() -> {
             try {
-                Log.logMsg("[FlowProcessService] Calling onStart() for " + path);
+                Log.logMsg("[FlowProcessService] Calling onStart() for " + path, LOGGING_LEVEL);
                 process.onStart();
                 
-                Log.logMsg("[FlowProcessService] Calling run() for " + path);
+                Log.logMsg("[FlowProcessService] Calling run() for " + path, LOGGING_LEVEL);
                 CompletableFuture<Void> runFuture = process.run();
                 
                 Log.logMsg("[FlowProcessService] run() returned future for " + path + 
-                    " (completed: " + runFuture.isDone() + ")");
+                    " (completed: " + runFuture.isDone() + ")",LOGGING_LEVEL);
                 
                 // Wait for run() to complete (startup phase)
                 runFuture.whenComplete((v, ex) -> {
@@ -242,7 +243,7 @@ public class FlowProcessService {
                         startupFuture.completeExceptionally(ex);
                     } else {
                         Log.logMsg("[FlowProcessService] Process " + path + 
-                            " startup complete, now running");
+                            " startup complete, now running", LOGGING_LEVEL);
                         startupFuture.complete(null);
                     }
                 });
@@ -250,7 +251,7 @@ public class FlowProcessService {
                 // SEPARATELY: Wait for process completion (lifetime)
                 // This doesn't block startup, it just sets up cleanup
                 process.getCompletionFuture().whenComplete((v, ex) -> {
-                    Log.logMsg("[FlowProcessService] Process " + path + " completed");
+                    Log.logMsg("[FlowProcessService] Process " + path + " completed", LOGGING_LEVEL);
                     try {
                         process.onStop();
                     } catch (Exception e) {
@@ -411,7 +412,7 @@ public class FlowProcessService {
         parents.clear();
         connections.clear();
         streamCapable.clear();
-        Log.logMsg("[ProcessService] Shutdown complete");
+        Log.logMsg("[ProcessService] Shutdown complete", LogLevel.GENERAL);
     }
 
     /**

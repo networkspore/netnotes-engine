@@ -310,7 +310,7 @@ public class EventBytes {
         // Container events
         register(EVENT_CONTAINER_FOCUS_GAINED, "focus_gained", "Container gained focus", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_FOCUS_LOST, "focus_lost", "Container lost focus", EventCategory.CONTAINER);
-        register(EVENT_CONTAINER_REGION_CHANGED, "resize", "Container resized", EventCategory.CONTAINER);
+        register(EVENT_CONTAINER_REGION_CHANGED, "resize", "Container region changed", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_MOVE, "move", "Container moved", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_CLOSED, "close", "Container closed", EventCategory.CONTAINER);
         register(EVENT_CONTAINER_MINIMIZE, "minimize", "Container minimized", EventCategory.CONTAINER);

@@ -17,7 +17,7 @@ import java.util.List;
  * 
  * Features:
  * - Periodic sampling of heap usage
- * - Pressure level detection (LOW/MEDIUM/HIGH/CRITICAL)
+ * - Pressure level detection (LOW/MEDIUM/GENERAL/CRITICAL)
  * - Listener pattern for reactive components
  * - Optional automatic GC triggering at CRITICAL level
  */
@@ -28,7 +28,7 @@ public class MemoryPressureMonitor {
     public enum PressureLevel {
         LOW(0.0, 0.60),
         MEDIUM(0.60, 0.75),
-        HIGH(0.75, 0.85),
+        GENERAL(0.75, 0.85),
         CRITICAL(0.85, 1.0);
         
         final double minThreshold;

@@ -5,6 +5,7 @@ import io.netnotes.engine.crypto.DHKeyExchange;
 import io.netnotes.engine.crypto.EncryptedSession;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 /**
  * DeviceEncryptionSession - Per-device encryption handler
@@ -21,7 +22,6 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * 6. All subsequent device events are encrypted/decrypted with this session
  */
 public class DeviceEncryptionSession {
-    
     private final String deviceId;
     private final ContextPath devicePath;
     
@@ -56,7 +56,7 @@ public class DeviceEncryptionSession {
             throw new Exception("Failed to derive shared secret");
         }
         
-        Log.logMsg("Encryption keys exchanged for device: " + devicePath);
+        Log.logMsg("Encryption keys exchanged for device: " + devicePath, LogLevel.GENERAL);
     }
     
     /**
@@ -78,7 +78,7 @@ public class DeviceEncryptionSession {
         keyExchange = null;
         
         active = true;
-        Log.logMsg("Encryption session active for device: " + devicePath);
+        Log.logMsg("Encryption session active for device: " + devicePath, LogLevel.GENERAL);
     }
     
     /**

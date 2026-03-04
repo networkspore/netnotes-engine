@@ -6,6 +6,7 @@ import io.netnotes.noteBytes.*;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -82,7 +83,7 @@ public class DeviceCapabilitySet {
         // Log all state changes for debugging
         availableCapabilities.onStateChanged((oldState, newState) -> {
             if (!oldState.equals(newState)) {
-                Log.logMsg("[" + name + "] Available capabilities updated");
+                Log.logMsg("[" + name + "] Available capabilities updated", LogLevel.GENERAL);
             }
         });
     }

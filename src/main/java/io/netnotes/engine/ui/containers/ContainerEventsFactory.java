@@ -35,6 +35,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 public abstract class ContainerEventsFactory<
     P extends SpatialPoint<P>,
@@ -163,7 +164,7 @@ public abstract class ContainerEventsFactory<
      * Deserializes a RoutedPacket into a typed InputEvent.
      */
     public RoutedEvent from( ContextPath sourcePath, NoteBytes packet) {
-
+   
         if (packet.getType() == NoteBytesMetaData.NOTE_BYTES_ENCRYPTED_TYPE) {
             return new EncryptedInputEvent(sourcePath, packet);
         }
@@ -183,7 +184,7 @@ public abstract class ContainerEventsFactory<
         NoteBytes payloadNote = body.get(Keys.PAYLOAD);
 
         String description = EventBytes.getEventDescription(typeBytes); // for validation
-        Log.logMsg("[RoutedEventFactory.from] Deserializing event: " + description);
+        Log.logMsg("[RoutedEventFactory.from] Deserializing event: " + description, LogLevel.GENERAL);
 
         
         int flags = stateFlags != null ?stateFlags.getAsInt() : 0;

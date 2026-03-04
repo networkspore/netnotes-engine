@@ -26,6 +26,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 
@@ -77,6 +78,7 @@ public abstract class Renderable<
     G extends LayoutGroup<B,R,P,S,LD,LC,GCB,?,GCE,G>,
     R extends Renderable<B,P,S,LC,LD,LCB,GCB,GCE,GSE,G,R>
 > {
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
 
     private Map<R, LCB> childCallbacks = new HashMap<>();
 
@@ -145,6 +147,8 @@ public abstract class Renderable<
     protected VisibilityPredicate<R> visibilityPolicy = null;
     protected BiConsumer<R, Boolean> onVisibilityChanged = null;
     protected BiConsumer<R, Boolean> onFocusChanged = null;
+    private Consumer<S> damageAccumulator = null;
+
     /**
      * Constructor
      * 
@@ -252,8 +256,11 @@ public abstract class Renderable<
     }
 
     public void addChild(R child, LCB callback){
-        
-        uiExecutor.executeFireAndForget(() -> addChildInternal(child, callback));
+        if(uiExecutor.isCurrentThread()){
+            addChildInternal(child, callback);
+        }else{
+            uiExecutor.executeFireAndForget(() -> addChildInternal(child, callback));
+        }
     }
 
     private void addChildInternal(R child, LCB callback) {
@@ -265,7 +272,9 @@ public abstract class Renderable<
         
         children.add(child);
         child.parent = self();
-        
+        childrenDirty = true;
+        child.setDamageAccumulator(this.damageAccumulator);
+
         if (callback != null) {
             childCallbacks.put(child, callback);
         }
@@ -274,7 +283,8 @@ public abstract class Renderable<
       
         
         if (layoutManager != null) layoutManager.registerChild(child, childCallbacks.get(child));
-        child.markVisibilityDirty();
+        child.requestLayoutUpdate();
+
     }
 
 
@@ -307,11 +317,14 @@ public abstract class Renderable<
     public boolean hasRequestedRegion() {
         return requestedRegion != null;
     }
-    
-    private void notifyRequestPending() {
-        if (layoutManager != null) layoutManager.markRequestPending(self());
+
+    protected void notifyContentChanged(){
+        if(isSizedByContent()){
+            requestLayoutUpdate();
+        }
+        invalidate();
     }
-    
+
     public void setPosition(P position) {
         // Silent no-op while hidden - use setHiddenRegion() for explicit staging
         if (isHidden()) {
@@ -320,7 +333,7 @@ public abstract class Renderable<
         
         ensureRequestedRegion();
         requestedRegion.setPosition(position);
-        notifyRequestPending();
+        requestLayoutUpdate();
     }
     
     /***
@@ -331,7 +344,32 @@ public abstract class Renderable<
     public void setRegion(S region) {
         ensureRequestedRegion();
         requestedRegion.copyFrom(region);
-        notifyRequestPending();
+        requestLayoutUpdate();
+    }
+
+    protected void applyRegionState(boolean isLayoutManaged, boolean isOffScreen){
+        if(isLayoutManaged && isOffScreen){
+            stateMachine.addStates(
+                RenderableStates.STATE_CONTAINER_LAYOUT_MANAGED, 
+                RenderableStates.STATE_CONTAINER_OFF_SCREEN);
+        }else if(isLayoutManaged){
+            stateMachine.addState(RenderableStates.STATE_CONTAINER_LAYOUT_MANAGED);
+            stateMachine.removeState(RenderableStates.STATE_CONTAINER_OFF_SCREEN);
+        }else if(isOffScreen){
+            stateMachine.addState(RenderableStates.STATE_CONTAINER_OFF_SCREEN);
+            stateMachine.removeState(RenderableStates.STATE_CONTAINER_LAYOUT_MANAGED);
+        }else{
+            stateMachine.removeStates(
+                RenderableStates.STATE_CONTAINER_OFF_SCREEN,
+                RenderableStates.STATE_CONTAINER_LAYOUT_MANAGED
+            );
+        }
+    }
+
+    void updateRegion(S region, boolean isLayoutManaged, boolean isOffScreen) {
+        ensureRequestedRegion();
+        requestedRegion.copyFrom(region);
+        requestLayoutUpdate();
     }
 
     public void setBounds(S bounds){
@@ -343,22 +381,26 @@ public abstract class Renderable<
     }
     
     public void removeChild(R child) {
-        uiExecutor.execute(() -> removeChildInternal(child));
+        if(uiExecutor.isCurrentThread()){
+            removeChildInternal(child);
+        }else{
+            uiExecutor.execute(() -> removeChildInternal(child));
+        }
     }
 
     protected void removeChildInternal(R child) {
         boolean removed = children.remove(child);
         if (!removed) return;
+        childrenDirty = true;
         
         // Damage the region where child was
         if (child.region != null && !child.region.isEmpty()) {
             S parentLocalDamage = regionPool.obtain();
             parentLocalDamage.copyFrom(child.region);
-            parentLocalDamage.transformByParent(child.region);
-            invalidateChild(parentLocalDamage);
+            propagateDamageUp(parentLocalDamage);
             regionPool.recycle(parentLocalDamage);
         }
-        
+        child.setDamageAccumulator(null);
         childCallbacks.remove(child);
         child.parent = null;
         child.stateMachine.removeState(RenderableStates.STATE_ATTACHED);
@@ -371,6 +413,7 @@ public abstract class Renderable<
     public void setZOrder(int z) {
         if (this.zOrder != z) {
             this.zOrder = z;
+            this.childrenDirty = true;
             if (parent != null) {
                 parent.sortChildren();
                 parent.invalidate();
@@ -380,6 +423,7 @@ public abstract class Renderable<
     
     protected void sortChildren() {
         children.sort(Comparator.comparingInt(Renderable::getZOrder));
+        childrenDirty = true;
     }
     
     // ===== SPATIAL OPERATIONS =====
@@ -447,6 +491,7 @@ public abstract class Renderable<
      * @param localRegion Region to invalidate in local coordinates, null for full invalidation
      */
     public void invalidate(S localRegion) {
+      
         // Accumulate local damage
         if (localRegion == null) {
             // Full invalidation - replace any existing damage
@@ -473,16 +518,13 @@ public abstract class Renderable<
         
         // Update absolute damage (reuses existing absoluteDamage object)
         updateAbsoluteDamage();
-        
+        reportDamage(absoluteDamage);
         // Propagate to parent (uses temporary region from pool, recycled immediately)
         propagateDamageToParent();
         
         // Notify render system if we're root
         if (parent == null && onRenderRequest != null) {
-            Log.logMsg("[Renderable:" + getName() + "] invalidate → firing onRenderRequest");
             onRenderRequest.accept(self());
-        }else if (parent == null) {
-            Log.logMsg("[Renderable:" + getName() + "] invalidate → onRenderRequest is NULL, render lost");
         }
     }
     
@@ -509,9 +551,11 @@ public abstract class Renderable<
         absoluteDamage.setParentAbsolutePosition(
             region.getParentAbsolutePosition()
         );
+      
     }
 
     public abstract boolean isSizedByContent();
+    public abstract boolean isSizedByParent();
     
    /**
      * Propagate damage to parent
@@ -528,7 +572,7 @@ public abstract class Renderable<
             parentLocalDamage.copyFrom(localDamage);
             parentLocalDamage.transformByParent(region);
             
-            damageTarget.invalidateChild(parentLocalDamage);
+            damageTarget.propagateDamageUp(parentLocalDamage);
         }
     }
 
@@ -538,7 +582,7 @@ public abstract class Renderable<
      * @param childDamageInOurLocalSpace Damage region in our local coordinate space
      *                                   (caller will recycle this after we return)
      */
-    protected void invalidateChild(S childDamageInOurLocalSpace) {
+    protected void propagateDamageUp(S childDamageInOurLocalSpace) {
         childrenDirty = true;
         
         if (localDamage == null) {
@@ -554,6 +598,7 @@ public abstract class Renderable<
         propagateDamageToParent();
         
         if (parent == null && onRenderRequest != null) {
+            Log.logMsg("[Renderable: " + getName() +"] invalidateChild called renderRequest - localDamage: " + localDamage, LogLevel.IMPORTANT);
             onRenderRequest.accept(self());
         }
     }
@@ -579,19 +624,10 @@ public abstract class Renderable<
      * @param clipRegion The clip region in absolute coordinates
      */
     public void toBatch(B batch, S clipRegion) {
-        Log.logMsg("[Renderable:" + getName() + "] toBatch children check"
-        + " visible=" + isVisible()
-        + " STATE_EFFECTIVELY_VISIBLE=" + stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_VISIBLE)
-        + " childrenDirty=" + childrenDirty
-        + " children=" + children.size()
-        + " renderableChildren=" + children.stream()
-            .filter(c -> c.getRenderingParent() == this)
-            .map(R::getName)
-            .collect(Collectors.joining(","))
-    );
+        
 
         if (!isVisible()) {
-            Log.logMsg("[Renderable:" + getName() + "] toBatch notVisible exiting");
+            Log.logMsg("[Renderable:" + getName() + "] toBatch notVisible exiting", LOG_LEVEL);
             return;
         }
       
@@ -607,13 +643,11 @@ public abstract class Renderable<
                 node = node.getRenderingParent();
             }
             
-            Log.logMsg("[Renderable:" + getName() + "] toBatch renderingParent: " +(node == null ? "renderingParent null " : node.getName()));
-            
             if (!absBounds.intersects(clipRegion)) {
                  Log.logMsg("[Renderable:" + getName() + "] toBatch absBounds does not intersect exiting:"
                     + "absBound:" + (absBounds != null ? absBounds.toString() : "null")
                     + "clipRegion: " + (clipRegion != null ? clipRegion.toString() : "null")
-                );
+                , LOG_LEVEL);
                 return;
             }
             
@@ -622,18 +656,14 @@ public abstract class Renderable<
                 S childClip = childClipPooled.get();
                 childClip.copyFrom(absBounds.intersection(clipRegion));
                 
-                boolean shouldRenderSelf = false;
-                if (absoluteDamage != null) {
-                    shouldRenderSelf = absoluteDamage.intersects(clipRegion);
-                }
-                
+                boolean shouldRenderSelf = absoluteDamage != null && absBounds.intersects(clipRegion);
+
                 if (shouldRenderSelf) {
                     try (PooledRegion<S> renderClipPooled = regionPool.obtainPooled()) {
                         S renderClip = renderClipPooled.get();
-                        renderClip.copyFrom(absoluteDamage.intersection(clipRegion));
+                        renderClip.copyFrom(absBounds.intersection(clipRegion)); // ← absBounds, not absoluteDamage
                         
                         batch.pushClipRegion(renderClip);
-                        Log.logMsg("[Renderable:" + getName() + "] renderingSelf");
                         renderSelf(batch);
                         batch.popClipRegion();
                     }catch(Exception clipException){
@@ -649,15 +679,20 @@ public abstract class Renderable<
                         absoluteDamage = null;
                     }
                 }else{
-                    Log.logMsg("[Renderable:" + getName() + "] not renderingself");
+                    Log.logMsg("[Renderable:" + getName() + "] not renderingself", LOG_LEVEL);
                 }
                 
                 // Render children in layer order
                 if (childrenDirty) {
-                    renderChildrenByLayer(batch, childClip);
-                    childrenDirty = false;
+                    try{
+                        renderChildrenByLayer(batch, childClip);
+                    }catch(Exception e){
+                        Log.logError("[Renderable:" + getName() + "] toBatch.renderChildrenByLayer", e);
+                    }finally{
+                        childrenDirty = false;
+                    }
                 }else{
-                    Log.logMsg("[Renderable:" + getName() + "] childrenNotDirty");
+                    Log.logMsg("[Renderable:" + getName() + "] childrenNotDirty", LOG_LEVEL);
                 }
             }
         }catch(Exception e){
@@ -669,7 +704,6 @@ public abstract class Renderable<
      * Render children sorted by layer and z-index
      */
     protected void renderChildrenByLayer(B batch, S childClip) {
-         Log.logMsg("[Renderable:" + getName() + "] renderChildrenByLayer");
         // Get rendering children (those in our rendering subtree)
         List<R> renderChildren = children.stream()
             .filter(c -> c.getRenderingParent() == this)
@@ -677,9 +711,8 @@ public abstract class Renderable<
                 .comparingInt(R::getLayerIndex)
                 .thenComparingInt(R::getZOrder))
             .collect(Collectors.toList());
-        Log.logMsg("[Renderable:" + getName() + "] renderChildren: " + renderChildren.size());
+        
         for (R child : renderChildren) {
-            Log.logMsg("[Renderable:" + getName() + "] toBatch: " + child.getName());
             try {
                 child.toBatch(batch, childClip);
             } catch (Exception e) {
@@ -883,12 +916,12 @@ public abstract class Renderable<
 
     public void attachAsRoot() {
         stateMachine.addState(RenderableStates.STATE_ATTACHED);
-        markVisibilityDirty();
+        requestLayoutUpdate();
     }
     
     public void detachFromRoot() {
         stateMachine.removeState(RenderableStates.STATE_ATTACHED);
-        markVisibilityDirty();
+        requestLayoutUpdate();
     }
 
   
@@ -903,14 +936,14 @@ public abstract class Renderable<
         
             // Clear both modifiers - let effective state flow through
             stateMachine.removeStates(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_INVISIBLE_DESIRED);
-            markVisibilityDirty();
+            requestLayoutUpdate();
         } else if(!visible && !stateMachine.hasState(RenderableStates.STATE_HIDDEN_DESIRED)) {
             if(visibilityPolicy != null && !visibilityPolicy.allowVisibilityChange(self(), visible)){
                 return;
             }
             // Default to HIDDEN (collapses space - most common case)
             stateMachine.addState(RenderableStates.STATE_HIDDEN_DESIRED);
-            markVisibilityDirty();
+            requestLayoutUpdate();
         }
     }
 
@@ -935,10 +968,10 @@ public abstract class Renderable<
         ) {
             stateMachine.addState(RenderableStates.STATE_HIDDEN_DESIRED);
             stateMachine.removeState(RenderableStates.STATE_INVISIBLE_DESIRED); // Mutually exclusive
-            markVisibilityDirty();
+            requestLayoutUpdate();
         } else if(!hidden && state.hasState(RenderableStates.STATE_HIDDEN_DESIRED)){
             stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED);
-            markVisibilityDirty();
+            requestLayoutUpdate();
         }
     }
     
@@ -953,11 +986,11 @@ public abstract class Renderable<
             || state.hasState(RenderableStates.STATE_HIDDEN_DESIRED)
         )) {
             stateMachine.setState(RenderableStates.STATE_INVISIBLE_DESIRED);
-            stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED); // Mutually exclusive
-            markVisibilityDirty();
+            stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED);
+            requestLayoutUpdate();
         } else if(!invisible && state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)){
             stateMachine.removeState(RenderableStates.STATE_INVISIBLE_DESIRED);
-            markVisibilityDirty();
+            requestLayoutUpdate();
         }
     }
             
@@ -1038,7 +1071,7 @@ public abstract class Renderable<
     public boolean shouldRender() {
         
         boolean shouldRender =  stateMachine.hasState(RenderableStates.STATE_RENDERABLE) && needsRender();
-        Log.logMsg("[ContainerHandle] + shouldRender()? " + shouldRender);
+        Log.logMsg("[ContainerHandle] + shouldRender()? " + shouldRender, LOG_LEVEL);
         return shouldRender;
     }
   
@@ -1125,9 +1158,6 @@ public abstract class Renderable<
     }
 
  
-    protected void markVisibilityDirty() {
-        if (layoutManager != null) layoutManager.markVisibilityDirty(self());
-    }
 
 
 
@@ -1170,6 +1200,20 @@ public abstract class Renderable<
             attachAsRoot();
         } else {
             detachFromRoot();
+        }
+    }
+
+    public void setDamageAccumulator(Consumer<S> accumulator) {
+        this.damageAccumulator = accumulator;
+        // Propagate to children — they share the same frame accumulator
+        for (R child : getChildren()) {
+            child.setDamageAccumulator(accumulator);
+        }
+    }
+
+    private void reportDamage(S absoluteRegion) {
+        if (damageAccumulator != null) {
+            damageAccumulator.accept(absoluteRegion.copy());
         }
     }
 
@@ -1264,10 +1308,7 @@ public abstract class Renderable<
      * @return true if there's any damage to render
      */
     public boolean needsRender() {
-         
         boolean needsRender =  localDamage != null || absoluteDamage != null || childrenDirty;
-
-        Log.logMsg("[Renderable: "+getName()+"] + needsRender? " + needsRender + "localDmg: " + localDamage + " absDmg:" + absoluteDamage + " chrnDrty:" + childrenDirty);
         return needsRender;
     }
 
@@ -1290,6 +1331,10 @@ public abstract class Renderable<
             absoluteDamage = null;
         }
         childrenDirty = false;
+    }
+
+    public S copyAbsoluteDamage(){
+        return absoluteDamage == null ? null : absoluteDamage.copy();
     }
 
 
@@ -1468,15 +1513,9 @@ public abstract class Renderable<
      * @param layoutData Data carrier (spatialRegion != null means damaged)
      */
     void applyLayoutData(LD layoutData) {
-        Log.logMsg("[Renderable:" + getName() + "] applyLayoutData"
-            + "\n\t applyLayoutData region=" + (layoutData.hasRegion() ? layoutData.getSpatialRegion().toString() : "null")
-            + "\n\t onRenderRequest: " + (onRenderRequest != null)
-            + "\n\t parent==null:    " + (parent == null)
-        );
-
         layoutInProgress = true;
         try {
-            // Apply spatial changes - IMMEDIATE
+
             if (layoutData.hasRegion()) {
                 applySpatialChange(layoutData.getSpatialRegion());
             }
@@ -1490,10 +1529,6 @@ public abstract class Renderable<
         } finally {
             layoutInProgress = false;
         }
-        Log.logMsg("[Renderable:" + getName() + "] applyLayoutData after invalidate"
-            + "\n\t localDamage:     " + (localDamage != null)
-            + "\n\t absoluteDamage:  " + (absoluteDamage != null)
-        );
     }
 
     /**
@@ -1506,28 +1541,25 @@ public abstract class Renderable<
             clearRequestedRegion();
             return;
         }
-        
-       
 
-        if(notifyOnRegionChanged != null){
-            S oldRegion = regionPool.obtain();
-            oldRegion.copyFrom(region);
-            
-    
-            region.copyFrom(newRegion);
-            clearRequestedRegion();
-            
-            invalidate(newRegion);
-            uiExecutor.executeFireAndForget(()->{
-                notifyOnRegionChanged.accept(oldRegion, region);
-            });
-            
-        }else{
+        S oldRegion = regionPool.obtain();
+        oldRegion.copyFrom(region);
 
-            region.copyFrom(newRegion);
-            clearRequestedRegion();
-            
-            invalidate(newRegion);
+        region.copyFrom(newRegion);
+        clearRequestedRegion();
+
+        // Damage must include both old and new occupied areas to clear vacated pixels.
+        try (PooledRegion<S> pooledDamage = regionPool.obtainPooled()) {
+            S damage = pooledDamage.get();
+            damage.copyFrom(oldRegion);
+            damage.unionInPlace(region);
+            invalidate(damage);
+        }
+
+        if (notifyOnRegionChanged != null) {
+            notifyOnRegionChanged.accept(oldRegion, region);
+        } else {
+            regionPool.recycle(oldRegion);
         }
     }
 
@@ -1545,6 +1577,8 @@ public abstract class Renderable<
      * State machine callbacks execute on uiExecutor (deferred)
      */
     private void applyStateChanges(LD layoutData) {
+        StateSnapshot beforeState = stateMachine.getSnapshot();
+
         // Apply MODIFIER states (may have been set by callback)
         applyStateIfPresent(layoutData.getHidden(), RenderableStates.STATE_HIDDEN);
         applyStateIfPresent(layoutData.getInvisible(), RenderableStates.STATE_INVISIBLE);
@@ -1565,6 +1599,43 @@ public abstract class Renderable<
             }else{
                 stateMachine.removeState(RenderableStates.STATE_RENDERABLE);
             }
+        }
+
+        handleStateTransitionDamage(beforeState, stateMachine.getSnapshot());
+    }
+
+    private void handleStateTransitionDamage(StateSnapshot beforeState, StateSnapshot afterState) {
+        boolean wasVisible = RenderableStates.isVisible(beforeState);
+        boolean isVisibleNow = RenderableStates.isVisible(afterState);
+
+        if (wasVisible && !isVisibleNow) {
+            childrenDirty = false;
+            invalidate();
+            clearOwnDamage();
+            return;
+        }
+
+        if (!wasVisible && isVisibleNow) {
+            childrenDirty = true;
+            invalidate();
+            return;
+        }
+
+        boolean wasEffectivelyEnabled = beforeState.hasState(RenderableStates.STATE_EFFECTIVELY_ENABLED);
+        boolean isEffectivelyEnabledNow = afterState.hasState(RenderableStates.STATE_EFFECTIVELY_ENABLED);
+        if (wasEffectivelyEnabled != isEffectivelyEnabledNow) {
+            invalidate();
+        }
+    }
+
+    private void clearOwnDamage() {
+        if (localDamage != null) {
+            regionPool.recycle(localDamage);
+            localDamage = null;
+        }
+        if (absoluteDamage != null) {
+            regionPool.recycle(absoluteDamage);
+            absoluteDamage = null;
         }
     }
 
@@ -1675,9 +1746,6 @@ public abstract class Renderable<
             otherState.getMembers().remove(renderable);
         }
         state.getMembers().add(renderable);
-        Log.logMsg("[Renderable:" + getName() + "] addToChildGroup " + renderable.getName()
-            + " groupId=" + groupId
-        );
     }
     
     /**
@@ -1788,17 +1856,10 @@ public abstract class Renderable<
         return !childGroups.isEmpty();
     }
     
-    /**
-     * Clear all pending state
-     */
-    protected void clear() {
-        childGroups.clear();
-    }
-    
 
 
     public void clearChildGroups() {
-        clear();
+        childGroups.clear();
     }
     
 

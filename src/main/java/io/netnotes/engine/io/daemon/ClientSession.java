@@ -4,6 +4,7 @@ package io.netnotes.engine.io.daemon;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.io.daemon.DaemonProtocolState.ClientStateFlags;
 import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.io.daemon.DiscoveredDeviceRegistry.DeviceDescriptorWithCapabilities;
@@ -40,6 +41,8 @@ import java.util.stream.Collectors;
  * 4. Shutdown via shutdown() or emergencyShutdown()
  */
 public class ClientSession {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
     
     // ===== MODE CONSTANTS =====
     public static class Modes {
@@ -147,7 +150,7 @@ public class ClientSession {
      * Initialize session - replaces FlowProcess.onStart()
      */
     public void init() {
-        Log.logMsg("[ClientSession:" + sessionId + "] Starting session for PID " + clientPid);
+        Log.logMsg("[ClientSession:" + sessionId + "] Starting session for PID " + clientPid, LOG_LEVEL);
         
         state.addState(ClientStateFlags.CONNECTED);
         state.addState(ClientStateFlags.AUTHENTICATED);
@@ -157,11 +160,11 @@ public class ClientSession {
     
     private void setupStateTransitions() {
         state.onStateAdded(ClientStateFlags.AUTHENTICATED, (old, now, bit) -> {
-            Log.logMsg("[ClientSession:" + sessionId + "] Authenticated");
+            Log.logMsg("[ClientSession:" + sessionId + "] Authenticated", LOG_LEVEL);
         });
         
         state.onStateAdded(ClientStateFlags.DISCONNECTING, (old, now, bit) -> {
-            Log.logMsg("[ClientSession:" + sessionId + "] Disconnecting...");
+            Log.logMsg("[ClientSession:" + sessionId + "] Disconnecting...", LOG_LEVEL);
         });
         
         state.onStateAdded(ClientStateFlags.ERROR_STATE, (old, now, bit) -> {
@@ -207,7 +210,7 @@ public class ClientSession {
     @Deprecated
     public void handleDeviceList(NoteBytesMap map) {
         // No-op: registry is updated centrally in IODaemon
-        Log.logMsg("[ClientSession:" + sessionId + "] handleDeviceList called (deprecated path)");
+        Log.logError("[ClientSession:" + sessionId + "] handleDeviceList called (deprecated path)");
     }
     
     // ===== CLAIM =====
@@ -333,7 +336,7 @@ public class ClientSession {
     public CompletableFuture<Void> releaseDevice(NoteBytes deviceId) {
         ClaimedDevice claimedDevice = getClaimedDevices().get(deviceId);
         if (claimedDevice == null || !claimedDevice.getSessionId().equals(sessionId)) {
-            Log.logMsg("[ClientSession:" + sessionId + "] Device not claimed: " + deviceId);
+            Log.logMsg("[ClientSession:" + sessionId + "] Device not claimed: " + deviceId, LOG_LEVEL);
             return CompletableFuture.completedFuture(null);
         }
 
@@ -380,7 +383,7 @@ public class ClientSession {
         PendingDevice pendingDevice = pendingClaims.remove(deviceId);
         if(pendingDevice == null){
             Log.logMsg("[ClientSession:" + sessionId + 
-                "] pending device does not exist: " + deviceId);
+                "] pending device does not exist: " + deviceId, LOG_LEVEL);
             releaseDevice(deviceId);
             return;
         }
@@ -388,7 +391,7 @@ public class ClientSession {
 
         if (future.isDone()) {
             Log.logMsg("[ClientSession:" + sessionId + 
-                "] Claim future already completed for: " + deviceId);
+                "] Claim future already completed for: " + deviceId, LOG_LEVEL);
             return;
         }
 
@@ -436,10 +439,10 @@ public class ClientSession {
         
         if (future != null && !future.isDone()) {
             future.complete(null);
-            Log.logMsg("[ClientSession:" + sessionId + "] Device release confirmed: " + deviceId);
+            Log.logMsg("[ClientSession:" + sessionId + "] Device release confirmed: " + deviceId, LOG_LEVEL);
         } else if (future == null) {
             Log.logMsg("[ClientSession:" + sessionId + 
-                "] Received release confirmation for unknown device: " + deviceId);
+                "] Received release confirmation for unknown device: " + deviceId, LOG_LEVEL);
         }
     }
 
@@ -493,7 +496,7 @@ public class ClientSession {
         }
         
         Log.logMsg("[ClientSession:" + sessionId + "] Releasing " + 
-            getClaimedDevices().size() + " devices");
+            getClaimedDevices().size() + " devices", LOG_LEVEL);
         
         for (ClaimedDevice device : getClaimedDevices().values()) {
             
@@ -514,7 +517,7 @@ public class ClientSession {
                 // Update discovery state
                 daemon.getDiscoveredDevices().markReleased(deviceId);
                 
-                Log.logMsg("[ClientSession:" + sessionId + "] Released: " + deviceId);
+                Log.logMsg("[ClientSession:" + sessionId + "] Released: " + deviceId, LOG_LEVEL);
                 
             } catch (Exception e) {
                 Log.logError("[ClientSession:" + sessionId + "] Error releasing device " + 
@@ -533,7 +536,7 @@ public class ClientSession {
      * Releases devices and notifies daemon
      */
     public CompletableFuture<Void> shutdown() {
-        Log.logMsg("[ClientSession:" + sessionId + "] Shutdown requested");
+        Log.logMsg("[ClientSession:" + sessionId + "] Shutdown requested", LOG_LEVEL);
         
         state.addState(ClientStateFlags.DISCONNECTING);
         CompletableFuture<List<DeviceDescriptorWithCapabilities>> pendingDiscovery = discoveryFuture;
@@ -571,7 +574,7 @@ public class ClientSession {
                 state.removeState(ClientStateFlags.AUTHENTICATED);
                 state.removeState(ClientStateFlags.CONNECTED);
                 
-                Log.logMsg("[ClientSession:" + sessionId + "] Session stopped");
+                Log.logMsg("[ClientSession:" + sessionId + "] Session stopped", LOG_LEVEL);
             });
     }
     
@@ -579,7 +582,7 @@ public class ClientSession {
      * Emergency shutdown - when daemon socket is already disconnected
      */
     public void emergencyShutdown() {
-        Log.logMsg("[ClientSession:" + sessionId + "] Emergency shutdown");
+        Log.logMsg("[ClientSession:" + sessionId + "] Emergency shutdown", LOG_LEVEL);
         
         state.addState(ClientStateFlags.DISCONNECTING);
         state.addState(ClientStateFlags.ERROR_STATE);
@@ -641,7 +644,7 @@ public class ClientSession {
             Log.logMsg("[ClientSession:" + sessionId +
                 "] Socket disconnected; " + 
                 (keepAlive ? "keepAlive=true" : "onDisconnect handler registered") +
-                ", session kept alive");
+                ", session kept alive", LOG_LEVEL);
             state.removeState(ClientStateFlags.CONNECTED);
             
             if (handler != null) {
@@ -653,8 +656,8 @@ public class ClientSession {
             }
         } else {
             // No handler and keepAlive=false — default path: tear down immediately.
-            Log.logMsg("[ClientSession:" + sessionId +
-                "] Socket disconnected; no onDisconnect handler and keepAlive=false, performing emergency shutdown");
+            Log.logMsg("[ClientSession:" + sessionId +"] Socket disconnected; no onDisconnect handler"
+                + "\n\tkeepAlive=false, performing emergency shutdown", LOG_LEVEL);
             // Note: do NOT clear the shared discoveredDevices registry - it belongs to IODaemon
             emergencyShutdown();
         }

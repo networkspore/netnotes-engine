@@ -28,6 +28,7 @@ import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 // ContainerEventSerializer removed from base - event format is renderer-specific, see subclass on*Granted() impls
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
@@ -53,8 +54,10 @@ public abstract class Container<
     CCFG extends ContainerConfig<S,CCFG>,
     T extends Container<P,S,CCFG,T>
 > {
-    
-    
+
+    public static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
+
+    public static final int WRITER_TIMEOUT_SEC = 2;
 
     // ===== CONTAINER STATE BIT POSITIONS =====
     
@@ -262,7 +265,7 @@ public abstract class Container<
         });
         
         stateMachine.onStateRemoved(STATE_ERROR, (old, now, bit) -> {
-            Log.logMsg("[Container:" + id + "] ERROR state cleared");
+            Log.logMsg("[Container:" + id + "] ERROR state cleared", LOG_LEVEL);
         });
         
         // RENDER_ERROR: Transient render failure
@@ -271,7 +274,7 @@ public abstract class Container<
         });
         
         stateMachine.onStateRemoved(STATE_RENDER_ERROR, (old, now, bit) -> {
-            Log.logMsg("[Container:" + id + "] RENDER_ERROR cleared");
+            Log.logMsg("[Container:" + id + "] RENDER_ERROR cleared", LOG_LEVEL);
         });
         
         // STREAM_CONNECTED: Stream established
@@ -308,7 +311,7 @@ public abstract class Container<
     // ===== LIFECYCLE =====
     
     public CompletableFuture<Void> initialize() {
-        Log.logMsg("[Container:" + id + "] Initializing");
+        Log.logMsg("[Container:" + id + "] Initializing", LOG_LEVEL);
         
         return initializeRenderer()
             .thenRun(() -> {
@@ -319,7 +322,7 @@ public abstract class Container<
                 } else {
                     stateMachine.addState(STATE_HIDDEN);
                 }
-                Log.logMsg("[Container:" + id + "] Initialized" + (startVisible ? "" : " hidden"));
+                Log.logMsg("[Container:" + id + "] Initialized" + (startVisible ? "" : " hidden"), LOG_LEVEL);
             })
             .exceptionally(ex -> {
                 Log.logError("[Container:" + id + "] Failed to initialize: " + ex.getMessage());
@@ -332,7 +335,7 @@ public abstract class Container<
     // ===== STREAM HANDLING =====
     
     public void handleRenderStream(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("[Container:" + id + "] Render stream received from: " + fromPath);
+        Log.logMsg("[Container:" + id + "] Render stream received from: " + fromPath, LOG_LEVEL);
         
         if (renderStreamChannel == null) {
             this.renderStreamChannel = channel;
@@ -347,7 +350,7 @@ public abstract class Container<
                     channel.getReadyFuture().complete(null);
                     stateMachine.addState(STATE_STREAM_READY);
                     
-                    Log.logMsg("[Container:" + id + "] Render stream reader active");
+                    Log.logMsg("[Container:" + id + "] Render stream reader active", LOG_LEVEL);
                     
                     NoteBytesReadOnly nextBytes = reader.nextNoteBytesReadOnly();
                     
@@ -366,14 +369,14 @@ public abstract class Container<
                 }
             }, VirtualExecutors.getVirtualExecutor())
                 .thenRun(() -> {
-                    Log.logMsg("[Container:" + id + "] Render stream completed");
+                    Log.logMsg("[Container:" + id + "] Render stream completed", LOG_LEVEL);
                     stateMachine.removeState(STATE_STREAM_CONNECTED);
                 });
         }
     }
     
     public void handleEventStream(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("[Container:" + id + "] Event stream established to: " + fromPath);
+        Log.logMsg("[Container:" + id + "] Event stream established to: " + fromPath, LOG_LEVEL);
 
         this.eventWriter = new ChannelWriter(channel);
     }
@@ -387,7 +390,7 @@ public abstract class Container<
             return;
         }
 
-        Log.logNoteBytes("[Container: "+ getTitle()+"]", command);
+        Log.logNoteBytes("[Container: "+ getTitle()+"]", command, LogLevel.GENERAL);
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
@@ -407,8 +410,11 @@ public abstract class Container<
      * Hook for renderer-specific handling of batch-level content bounds metadata.
      * Called on the containerExecutor.
      */
-    protected void onBatchContentBounds(NoteBytes contentBounds, NoteBytesMap batchCommand) {}
+    protected abstract S handleBatchContentBounds(NoteBytes contentBounds);
 
+    protected abstract S[] handleBatchDamageRegions(NoteBytes damageRegions);
+
+    protected abstract void handleBatchBounds(S contentBounds, S[] damageRegions);
     /**
      * Handles a container_batch command.
      *
@@ -418,9 +424,12 @@ public abstract class Container<
      */
     private CompletableFuture<Void> handleContainerBatch(NoteBytesMap command) {
         NoteBytes contentBoundsBytes = command.get(ContainerCommands.CONTENT_BOUNDS);
-        if (contentBoundsBytes != null) {
-            onBatchContentBounds(contentBoundsBytes, command);
-        }
+        NoteBytes damageRegionsBytes = command.get(ContainerCommands.DAMAGE_REGIONS);
+   
+        S contentBounds =handleBatchContentBounds(contentBoundsBytes);
+        S[] damageRegions = handleBatchDamageRegions(damageRegionsBytes);
+        
+        handleBatchBounds(contentBounds, damageRegions);
 
         NoteBytes batchBytes = command.get(ContainerCommands.BATCH_COMMANDS);
         if (batchBytes == null || batchBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
@@ -429,7 +438,6 @@ public abstract class Container<
         }
 
         NoteBytesReadOnly[] batchArray = batchBytes.getAsNoteBytesArrayReadOnly().getAsArray();
-        Log.logMsg("[Container] handleContainerBatch array:" + batchArray.length);
 
         for (NoteBytesReadOnly next : batchArray) {
             if (next == null || next.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
@@ -477,24 +485,23 @@ public abstract class Container<
     
     public void emitEvent(NoteBytes event) {
         if (eventWriter == null) {
-            Log.logNoteBytes("[Container:" + id + "] Cannot emit event - no event stream", event);
+            Log.logNoteBytes("[Container:" + id + "] Cannot emit event - no event stream", event, LogLevel.GENERAL);
             return;
         }
 
-        Log.logNoteBytes("[Container.emitEvent]", event);
+        Log.logNoteBytes("[Container.emitEvent]", event, LogLevel.GENERAL);
 
         SerializedVirtualExecutor eventWriterExecutor =eventWriter.getWriteExec();
         if(eventWriterExecutor.isShutdown()){
-            Log.logNoteBytes("[Container:" + id + "] Cannot emit event executor shutdown", event);
+            Log.logNoteBytes("[Container:" + id + "] Cannot emit event executor shutdown", event, LogLevel.GENERAL);
             return;
         }
         eventWriterExecutor.execute(()->{
             NoteBytesWriter writer = eventWriter.getWriter();
             if (writer == null) {
-                Log.logMsg("[Container] event stream waiting: " + getId());
                 try{
                     writer = eventWriter.getReadyWriter()
-                        .orTimeout(2, TimeUnit.SECONDS)
+                        .orTimeout(WRITER_TIMEOUT_SEC, TimeUnit.SECONDS)
                         .join();
                     
                 }catch(Exception e){
@@ -562,7 +569,6 @@ public abstract class Container<
      * Grant focus - renderer calls this to approve focus request
      */
     public CompletableFuture<Void> grantFocus() {
-        Log.logMsg("[Container].grantFocus");
         // Clear immediately so request scanners stop re-queueing while grant is pending.
         stateMachine.removeState(STATE_FOCUS_REQUESTED);
 
@@ -739,12 +745,12 @@ public abstract class Container<
                 return;
             }
             stateMachine.addState(STATE_DESTROYING);
-            Log.logMsg("[Container:" + id + "] Destroying");
+            Log.logMsg("[Container:" + id + "] Destroying", LOG_LEVEL);
         
             closeStreams();
             stateMachine.addState(STATE_DESTROYED);
             containerExecutor.shutdown();
-            Log.logMsg("[Container:" + id + "] Destroyed");
+            Log.logMsg("[Container:" + id + "] Destroyed", LOG_LEVEL);
 
             onDestroyGranted();
         })
@@ -937,7 +943,7 @@ public abstract class Container<
         if(focusFuture == null) {
             focusFuture = new CompletableFuture<>();
             stateMachine.addState(STATE_FOCUS_REQUESTED);
-            Log.logMsg("[Container " +id+ "].requestFocus" );
+            Log.logMsg("[Container " +id+ "].requestFocus" , LOG_LEVEL);
             notifyRequestMade();
         }
         return focusFuture;

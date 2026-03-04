@@ -20,6 +20,7 @@ import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.containers.*;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 import java.util.*;
@@ -50,6 +51,8 @@ public abstract class Renderer <
     CCFG extends ContainerConfig<S,CCFG>,
     T extends Container<P,S,CCFG,T>
 > {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
 
     @FunctionalInterface
     public interface UIReplyExec {
@@ -103,28 +106,28 @@ public abstract class Renderer <
     
      private void setupBaseStateTransitions() {
         state.onStateAdded(RendererStates.INITIALIZING, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] Initializing..."));
+            Log.logMsg("[" + name + "] Initializing...", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.READY, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] Ready"));
+            Log.logMsg("[" + name + "] Ready", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.HAS_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] First container created"));
+            Log.logMsg("[" + name + "] First container created", LOG_LEVEL));
         
         state.onStateRemoved(RendererStates.HAS_CONTAINERS, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] No containers remaining"));
+            Log.logMsg("[" + name + "] No containers remaining", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] Container focused"));
+            Log.logMsg("[" + name + "] Container focused", LOG_LEVEL));
         
         state.onStateRemoved(RendererStates.HAS_FOCUSED_CONTAINER, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] No container focused"));
+            Log.logMsg("[" + name + "] No container focused", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.SHUTTING_DOWN, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] Shutting down..."));
+            Log.logMsg("[" + name + "] Shutting down...", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.STOPPED, (old, now, bit) -> 
-            Log.logMsg("[" + name + "] Stopped"));
+            Log.logMsg("[" + name + "] Stopped", LOG_LEVEL));
         
         state.onStateAdded(RendererStates.ERROR, (old, now, bit) -> 
             Log.logError("[" + name + "] ERROR"));
@@ -189,7 +192,7 @@ public abstract class Renderer <
                 state.removeState(RendererStates.READY);
                 state.addState(RendererStates.STOPPED);
                 
-                Log.logMsg("[" + name + "] Shutdown complete");
+                Log.logMsg("[" + name + "] Shutdown complete", LOG_LEVEL);
             })
             .exceptionally(ex -> {
                 state.addState(RendererStates.ERROR);
@@ -288,7 +291,7 @@ public abstract class Renderer <
      */
     public final CompletableFuture<Void> removeContainer(ContainerId containerId) {
         return rendererExecutor.execute(() -> {
-            Log.logMsg("[" + name + "] Removing container: " + containerId);
+            Log.logMsg("[" + name + "] Removing container: " + containerId, LOG_LEVEL);
 
             T container = containers.remove(containerId);
             if (container == null) {
@@ -374,7 +377,7 @@ public abstract class Renderer <
     
     private CompletableFuture<Void> handleCreateContainer(NoteBytesMap msg, RoutedPacket packet) {
         state.addState(RendererStates.CREATING_CONTAINER);
-        Log.logMsg("[UIRenderer "+name+"] creating container...");
+        Log.logMsg("[UIRenderer "+name+"] creating container...", LOG_LEVEL);
         try {
   
             // Parse common parameters
@@ -410,7 +413,7 @@ public abstract class Renderer <
                 .thenCompose(container -> {
                     // Track container
                     containers.put(containerId, container);
-                    Log.logMsg("[UIRenderer "+name+"] tracking container: " + containerId);
+                    Log.logMsg("[UIRenderer "+name+"] tracking container: " + containerId, LOG_LEVEL);
                     // Track by owner
                     ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
                         .add(containerId);
@@ -422,7 +425,7 @@ public abstract class Renderer <
                     
                     return container.initialize()
                         .thenCompose(v->{
-                            Log.logMsg("[UiRenderer] container initialized, executing onContainerCreated");
+                            Log.logMsg("[UiRenderer] container initialized, executing onContainerCreated", LOG_LEVEL);
                             return onContainerCreated(container);
                         })
                         .thenAccept(response -> {

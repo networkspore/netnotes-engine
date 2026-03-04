@@ -26,9 +26,9 @@ public class LoggingHelpers {
     public enum LogLevel{
         NONE(0),
         GENERAL(1),
-        HIGH_PRIORITY(2),
+        IMPORTANT(2),
         ERROR(3),
-        ALL(4);
+        VERBOSE(4);
 
         private final int value;
 
@@ -38,6 +38,15 @@ public class LoggingHelpers {
 
         public int getValue() {
             return this.value;
+        }
+
+        public static LogLevel from(int value){
+            for (LogLevel level : LogLevel.values()) {
+                if (level.value == value) {
+                    return level;
+                }
+            }
+            return VERBOSE;
         }
     }
 
@@ -55,7 +64,7 @@ public class LoggingHelpers {
         // Timeout for individual log operations
         private static final long LOG_TIMEOUT_MS = 2000;
         
-        private static volatile int logLevel = LogLevel.ALL.getValue();
+        private static volatile int logLevel = LogLevel.GENERAL.getValue();
 
         public static File createTimedLogFile() {
             return createTimedLogFile(logName);
@@ -79,6 +88,12 @@ public class LoggingHelpers {
                 Log.logLevel = level;
             });
         }
+
+        public static LogLevel getLogLevel(){
+            return LogLevel.from(logLevel);
+        }
+
+
 
         public static CompletableFuture<Void> setLogFile(File file){
             return logExecutor.execute(() -> {
@@ -118,39 +133,47 @@ public class LoggingHelpers {
             );
         }
 
-        public static CompletableFuture<Void> logJson(String scope, JsonObject json) {
-            return enqueue(LogLevel.ALL.getValue(), () ->{
+        public static CompletableFuture<Void> logJson(String scope, JsonObject json, LogLevel logLevel) {
+            return enqueue(logLevel.value, () ->{
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 write("**" + scope + "**\n" + gson.toJson(json) + "\n");
             });
         }
 
-        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytes nb) {
+        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytes nb, LogLevel logLevel) {
             if(nb == null){
-                return enqueue(LogLevel.ALL.getValue(), () -> {
+                return enqueue(logLevel.value, () -> {
                     write("**" + scope + "**\n" + "null" + "\n");
                 });
             }
             
-            return enqueue(LogLevel.ALL.getValue(), () -> {
+            return enqueue(logLevel.value, () -> {
                 writeLogNoteBytes(logFile, nb);
             });
         }
 
-        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytesMap map) {
+        public static CompletableFuture<Void> logNoteBytes(String scope, NoteBytesMap map, LogLevel logLevel) {
             if(map == null){
-                return enqueue(LogLevel.ALL.getValue(), () -> {
+                return enqueue(logLevel.value, () -> {
                     write("**" + scope + "**\n" + "null" + "\n");
                 });
             }
    
-            return enqueue(LogLevel.ALL.getValue(), () -> {
+            return enqueue(logLevel.value, () -> {
                 writeLogNoteBytes(logFile, scope, map);
             });
         }
 
-        public static CompletableFuture<Void> logMsg(String msg) {
-            return enqueue(LogLevel.ALL.getValue(), () -> {
+        public static CompletableFuture<Void> logImportant(String msg) {
+            return logMsg(msg, LogLevel.IMPORTANT);
+        }
+
+        public static CompletableFuture<Void> logGeneral(String msg) {
+            return logMsg(msg, LogLevel.GENERAL);
+        }
+
+        public static CompletableFuture<Void> logMsg(String msg, LogLevel level) {
+            return enqueue(level.value, () -> {
                 write(msg + "\n");
             });
         }
@@ -162,7 +185,7 @@ public class LoggingHelpers {
          */
         private static CompletableFuture<Void> enqueue(int priority, Runnable action) {
             // Skip if priority too low
-            if (priority > logLevel) {
+            if (checkPriority(priority)) {
                 return CompletableFuture.completedFuture(null);
             }
             
@@ -197,11 +220,11 @@ public class LoggingHelpers {
             }
         }
 
-        boolean shouldLog(int priority) {
-            return priority >= logLevel;
+        public static boolean checkPriority(int priority) {
+            return priority <= logLevel;
         }
 
-        boolean shouldLog(LogLevel priority) {
+        static boolean shouldLog(LogLevel priority) {
             return priority.getValue() <= logLevel;
         }
         
