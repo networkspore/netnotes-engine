@@ -7,18 +7,9 @@ import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.renderer.BatchBuilder;
 import io.netnotes.engine.ui.renderer.Renderable;
 
-/**
- * Context for layout calculation
- * 
- * HIDDEN SEMANTICS:
- * - invisible: children can calculate (parent provides bounds)
- * - hidden: children cannot calculate (parent bounds = null)
- * 
- * Null region forces explicit handling - no accidental calculations against phantom space.
- */
 public abstract class LayoutContext<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
+    R extends Renderable<B,P,S,L,LC,LD,LCB,?,?,?,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LD extends LayoutData<B,R,S,LD,?>,
@@ -26,115 +17,116 @@ public abstract class LayoutContext<
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,L>,
     L extends LayoutNode<B,R,P,S,LD,LC,LCB,?,?,L>
 > {
-    private L node = null;
+    private L node   = null;
     private L parent = null;
     protected boolean parentEffectivelyVisible = true;
-    protected boolean parentEffectivelyEnabled = true;
+    private S measuredContentBounds = null;
+
 
     public LayoutContext() {}
 
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     public void initialize(L node) {
-        this.node = node;
+        this.node   = node;
         this.parent = node.getParent();
         this.parentEffectivelyVisible = true;
-        this.parentEffectivelyEnabled = true;
-        
+
         if (parent != null) {
-            R parentRenderable = parent.getRenderable();
-            this.parentEffectivelyVisible = parentRenderable.isEffectivelyVisible();
-            this.parentEffectivelyEnabled = parentRenderable.isEffectivelyEnabled();
+            LD parentCalculated = parent.getCalculatedLayout();
+            if (parentCalculated != null && parentCalculated.getEffectivelyVisible() != null) {
+                this.parentEffectivelyVisible = parentCalculated.getEffectivelyVisible();
+            } else {
+                this.parentEffectivelyVisible = parent.getRenderable().isEffectivelyVisible();
+            }
         }
     }
 
     public void reset() {
-        this.node = null;
-        this.parent = null;
+        measuredContentBounds = null;
+        this.node                   = null;
+        this.parent                 = null;
         this.parentEffectivelyVisible = true;
-        this.parentEffectivelyEnabled = true;
     }
 
-    public boolean getParentEffectivelyVisible() {
-        return parentEffectivelyVisible;
-    }
 
-    public boolean getParentEffectivelyEnabled() {
-        return parentEffectivelyEnabled;
-    }
+    // ── Parent geometry ───────────────────────────────────────────────────────
 
     /**
-     * Parent region for layout calculation
-     * 
-     * Returns null if parent is hidden - child must handle explicitly.
-     * Returns valid region if parent is invisible - child can calculate.
+     * The region within which this node should lay itself out.
+     *
+     * Returns null if the parent is hidden — the callback must not produce
+     * geometry. Returns a valid region if the parent is invisible — the node
+     * still occupies space.
+     *
+     * Uses the parent's in-flight calculatedLayout if available (parent was
+     * dirty this pass), otherwise the live committed region.
+     *
+     * The returned region is a fresh pool copy; callers are responsible for
+     * recycling it.
      */
     public S getParentRegion() {
-        L parent = node.getParent();
-        if (parent == null) {
-            return null;
+        if (parent == null) return null;
+
+        LD parentCalculated = parent.getCalculatedLayout();
+        if (parentCalculated != null && parentCalculated.hasRegion()) {
+            S copy = parent.getRenderable().getRegionPool().obtain();
+            copy.copyFrom(parentCalculated.getSpatialRegion());
+            return copy;
         }
 
-        // Invisible parent = valid bounds, children can calculate
         return parent.getRenderable().getRegion();
     }
 
+    // ── Current node geometry ─────────────────────────────────────────────────
+
     public S getCurrentRegion() {
-        R renderable = node.getRenderable();
-        if( renderable.isHidden()) {
-            return null;
-        }
-        return renderable.getRegion();
-    }
-    
-    public S getCurrentAbsoluteRegion() {
-        R renderable = node.getRenderable();
-        if( renderable.isHidden()) {
-            return null;
-        }
-        return renderable.getAbsoluteRegion();
+        R r = node.getRenderable();
+        return r.isHidden() ? null : r.getRegion();
     }
 
-    
-    L getParentNode() {
-        return node.getParent();
+    public S getCurrentAbsoluteRegion() {
+        R r = node.getRenderable();
+        return r.isHidden() ? null : r.getAbsoluteRegion();
     }
-    
-    public R getRenderable() {
-        return node.getRenderable();
-    }
-    
+
     public S getRequestedRegion() {
         return node.getRenderable().getRequestedRegion();
     }
-    
+
     public boolean hasRequestedRegion() {
         return node.getRenderable().hasRequestedRegion();
     }
 
-     public R getSibling(int index) {
-        L parent = node.getParent();
+    public S getMeasuredContentBounds() {
+        return measuredContentBounds;
+    }
+
+    void setContentMeasurement(S contentBounds) {
+        this.measuredContentBounds = contentBounds;
+    }
+
+    // ── Sibling access ────────────────────────────────────────────────────────
+
+    public R getSibling(int index) {
         if (parent == null) return null;
-        
         List<L> siblings = parent.getChildren();
         if (index < 0 || index >= siblings.size()) return null;
-        
-        L sibling = siblings.get(index);
-        return sibling.getRenderable();
-     }
-    
+        return siblings.get(index).getRenderable();
+    }
+
     public S getSiblingProposedRegion(int index) {
         R sibling = getSibling(index);
         if (sibling == null) return null;
-
         S requested = sibling.getRequestedRegion();
-        if (requested != null) return requested;
-        return sibling.getRegion();
+        return requested != null ? requested : sibling.getRegion();
     }
 
-    public R getRoot(){
+    // ── Viewport / anchor ─────────────────────────────────────────────────────
+
+    public R getRoot() {
         R root = getRenderable();
-        while (root.getParent() != null) {
-            root = root.getParent();
-        }
+        while (root.getParent() != null) root = root.getParent();
         return root;
     }
 
@@ -142,57 +134,36 @@ public abstract class LayoutContext<
         return getRoot().getRegion();
     }
 
-    /**
-     * Anchor region for floating positioning
-     * Returns null if anchor is hidden - undefined position
-     */
-    public S getAnchorAbsoluteRegion() {
-        L node = getNode();
-        if (!node.isFloating()) {
-            return null;
-        }
-        
-        R anchor = node.getPositionAnchor();
-        if (anchor == null) {
-            return null;
-        }
-        
-        if (anchor.isHidden()) {
-            return null;
-        }
-        
-        return anchor.getAbsoluteRegion();
-    }
-    
-    public S getAnchorRegion() {
-        L node = getNode();
-        if (!node.isFloating()) {
-            return null;
-        }
-        
-        R anchor = node.getPositionAnchor();
-        if (anchor == null) {
-            return null;
-        }
-        
-        if (anchor.isHidden()) {
-            return null;
-        }
-        
-        return anchor.getRegion();
-    }
-    
     public boolean wouldOverflowViewport(S region) {
-        S viewport = getViewportRegion();
-        return !viewport.contains(region);
-    }
-    
-    protected L getNode() {
-        return node;
+        return !getViewportRegion().contains(region);
     }
 
-    @SuppressWarnings("unchecked")
-    protected LC self() {
-        return (LC) this;
+    public S getAnchorAbsoluteRegion() {
+        L n = getNode();
+        if (!n.isFloating()) return null;
+        R anchor = n.getPositionAnchor();
+        if (anchor == null || anchor.isHidden()) return null;
+        return anchor.getAbsoluteRegion();
     }
+
+    public S getAnchorRegion() {
+        L n = getNode();
+        if (!n.isFloating()) return null;
+        R anchor = n.getPositionAnchor();
+        if (anchor == null || anchor.isHidden()) return null;
+        return anchor.getRegion();
+    }
+
+    // ── Accessors ─────────────────────────────────────────────────────────────
+
+    public boolean getParentEffectivelyVisible() { return parentEffectivelyVisible; }
+    public R       getRenderable()               { return node.getRenderable(); }
+
+    protected L getNode()    { return node; }
+    L getParentNode()        { return parent; }
+
+    @SuppressWarnings("unchecked")
+    protected LC self()      { return (LC) this; }
+
+
 }

@@ -45,7 +45,7 @@ public class ContainerCommands {
     public static final NoteBytesReadOnly IS_MANAGED        = new NoteBytesReadOnly( "is_managed");
     public static final NoteBytesReadOnly IS_OFF_SCREEN     = new NoteBytesReadOnly("is_on_screen");
 
-    public static final NoteBytesReadOnly CONTENT_BOUNDS    = new NoteBytesReadOnly("cpmtemt_bounds");
+    public static final NoteBytesReadOnly CONTENT_BOUNDS    = new NoteBytesReadOnly("content_bounds");
     public static final NoteBytesReadOnly DAMAGE_REGIONS     = new NoteBytesReadOnly( "damage_bounds");
 
     public static final NoteBytesReadOnly GENERATION        = new NoteBytesReadOnly("generation");

@@ -17,7 +17,8 @@ public abstract class SpatialRegion<
     public static final NoteBytesReadOnly PARENT_ABS_Y = new NoteBytesReadOnly("parentAbsY");
 
     public abstract void setPosition(P point);
-
+    public abstract void setToIdentityPosition();
+    
     public abstract P getPosition();
 
     public abstract S subtractPosition(P position);

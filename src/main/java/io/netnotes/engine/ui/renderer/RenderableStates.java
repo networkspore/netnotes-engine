@@ -26,28 +26,30 @@ public final class RenderableStates {
     public static final int STATE_RENDERABLE = 6;
     public static final int STATE_HIDDEN = 7;
     
+    // ===== LIFECYCLE =====
+    public static final int STATE_STARTED = 8;
+    
     // ===== INTERNAL =====
 
-    public static final int STATE_NEEDS_FULL_RENDER = 8;
-    public static final int STATE_VISIBILITY_DIRTY = 9;
+    public static final int STATE_NEEDS_FULL_RENDER = 9;
+    public static final int STATE_VISIBILITY_DIRTY = 10;
 
     // ===== HIERARCHY =====
-    public static final int STATE_ATTACHED = 10;
+    public static final int STATE_ATTACHED = 11;
 
     // ===== INTERACTION =====
-    public static final int STATE_PRESSED = 11;
     public static final int STATE_FOCUSED = 12;
     public static final int STATE_HOVERED = 13;
+    public static final int STATE_PRESSED = 14;
 
     // ===== RESOLUTION LAYER =====
 
-    public static final int STATE_EFFECTIVELY_ENABLED = 14;
-    public static final int STATE_EFFECTIVELY_VISIBLE = 15;
+    public static final int STATE_EFFECTIVELY_VISIBLE = 16;
 
-    public static final int STATE_CONTAINER_LAYOUT_MANAGED = 16;
-    public static final int STATE_CONTAINER_OFF_SCREEN = 17;
+    public static final int STATE_CONTAINER_LAYOUT_MANAGED = 17;
+    public static final int STATE_CONTAINER_OFF_SCREEN = 18;
 
-    public static final int DESTROYED = 18;
+    public static final int DESTROYED = 19;
 
     public static boolean isVisible(StateSnapshot snap){ 
         return !snap.hasState(STATE_HIDDEN) && !snap.hasState(STATE_CONTAINER_OFF_SCREEN) && !snap.hasState(STATE_INVISIBLE) && snap.hasState(STATE_EFFECTIVELY_VISIBLE);

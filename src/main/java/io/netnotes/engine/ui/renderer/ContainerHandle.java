@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
 import io.netnotes.engine.ui.renderer.layout.LayoutContext;
@@ -97,10 +98,10 @@ public abstract class ContainerHandle<
     B extends BatchBuilder<S>,
     H extends ContainerHandle<B,H,P,R,S,DM,RM,FLM,LC,LD,LCB,RP,EF,CCFG,CRE,DA,BLD>,
     P extends SpatialPoint<P>,
-    R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
+    R extends Renderable<B,P,S,?,LC,LD,LCB,?,?,?,R>,
     S extends SpatialRegion<P,S>,
     DM extends DeviceManager<H,DM>,
-    RM extends RenderableLayoutManager<B,R,P,S,LC,LD,LCB,?,?,?,?,?>,
+    RM extends RenderableLayoutManager<B,R,P,S,LC,LD,LCB,?,?,?,?>,
     FLM extends FloatingLayerManager<B,R,P,S,LC,LD,LCB>,
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
     LD extends LayoutData<B,R,S,LD,?>,
@@ -113,6 +114,8 @@ public abstract class ContainerHandle<
     BLD extends ContainerHandle.Builder<H,RP,S,CCFG,BLD>
 > extends FlowProcess {
     private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
+    private static final long DIAGNOSTIC_LOG_THROTTLE_MS = 250;
+    private static final LogLevel ROUTINE_DIAGNOSTIC_LOG_LEVEL = LogLevel.GENERAL;
 
     // ===== CREATION PARAMETERS =====
     protected final ContainerId containerId;
@@ -153,8 +156,10 @@ public abstract class ContainerHandle<
     protected FocusTraversalStrategy strategy = FocusTraversalStrategy.TAB_INDEX_THEN_TREE;
     protected R focused = null;
     protected boolean manageFocus = true;
-    protected boolean isLayoutInProgress = false;
-     private boolean wasRenderRequested = false;
+    private boolean isLayoutInProgress = false;
+    private boolean wasRenderRequested = false;
+
+    private final Map<String, Long> diagnosticLogTimes = new HashMap<>();
     // Event filtering
     private EventFilterList filterList;
 
@@ -202,7 +207,75 @@ public abstract class ContainerHandle<
     protected Consumer<H> notifyOnClosed = null;
     protected BiConsumer<H,Boolean> notifyOnRenderingChanged = null;
     protected Consumer<H> notifyOnInitialized = null; 
-    protected volatile boolean applyingLayout = false;
+
+    private boolean isLayoutDiagnosticEnabled(RenderableLayoutManager.DiagnosticMode minimum) {
+        return renderableLayoutManager != null
+            && renderableLayoutManager.isDiagnosticModeEnabled(minimum);
+    }
+
+    private void logLayoutDiagnostic(
+        String message,
+        RenderableLayoutManager.DiagnosticMode minimum,
+        LogLevel level
+    ) {
+        if (!isLayoutDiagnosticEnabled(minimum)) {
+            return;
+        }
+        Log.logMsg(message, level);
+    }
+
+    private void logDiagnosticThrottled(
+        String key,
+        Supplier<String> messageSupplier,
+        RenderableLayoutManager.DiagnosticMode minimum,
+        LogLevel level
+    ) {
+        if (!isLayoutDiagnosticEnabled(minimum)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long last = diagnosticLogTimes.get(key);
+        if (last != null && (now - last) < DIAGNOSTIC_LOG_THROTTLE_MS) {
+            return;
+        }
+        diagnosticLogTimes.put(key, now);
+        Log.logMsg(messageSupplier.get(), level);
+    }
+
+    private String renderDiagnosticState() {
+        boolean managerExecuting = renderableLayoutManager.isLayoutExecuting();
+        boolean managerInProgress = isLayoutInProgress;
+        boolean pendingLayout = renderableLayoutManager.hasPendingLayout();
+        boolean needsRender = rootRenderable != null && rootRenderable.needsRender();
+        boolean damageEmpty = damageAccumulator.isEmpty();
+        return String.format(
+            "containerLayoutInProgress=%s, managerExecuting=%s, managerInProgress=%s, pendingLayout=%s, needsRender=%s, damageEmpty=%s",
+            isLayoutInProgress,
+            managerExecuting,
+            managerInProgress,
+            pendingLayout,
+            needsRender,
+            damageEmpty
+        );
+    }
+
+    private void logRenderDropped(
+        String reason,
+        RenderableLayoutManager.DiagnosticMode minimum,
+        LogLevel level
+    ) {
+        logLayoutDiagnostic(
+            String.format(
+                "[ContainerHandle:%s] render dropped: %s (%s)",
+                getName(),
+                reason,
+                renderDiagnosticState()
+            ),
+            minimum,
+            level
+        );
+    }
+
     /**
      * Private constructor - use Builder
      */
@@ -259,7 +332,6 @@ public abstract class ContainerHandle<
     }
 
     public void removeFloating(R element) {
-        renderableLayoutManager.unregisterFloating(element);
         element.makeStatic();
     }
 
@@ -862,12 +934,25 @@ public abstract class ContainerHandle<
 
         return isChanged;
     }
+
     /**
      * Apply region/state updates provided by the renderer.
      */
     protected final void applyAllocatedRegionEvent(S region, boolean isLayoutManaged, boolean isOffScreen) {
-       
+        if (uiExecutor.isCurrentThread()) {
+            applyAllocatedRegionEventInternal(region, isLayoutManaged, isOffScreen);
+        }else{
+            S captured = region.copy();
+            regionPool.recycle(region);
+            uiExecutor.executeFireAndForget(()->applyAllocatedRegionEventInternal(captured, isLayoutManaged, isOffScreen));
+        }
+    }
+
+
+    private void applyAllocatedRegionEventInternal(S region, boolean isLayoutManaged, boolean isOffScreen) {
+
         if (region == null) {
+            changeRegionState(isLayoutManaged, isOffScreen);
             return;
         }
 
@@ -915,8 +1000,6 @@ public abstract class ContainerHandle<
             notifyOnRegionChanged.accept(self());
         }
     }
-
-
 
    
     @Override
@@ -1168,11 +1251,23 @@ public abstract class ContainerHandle<
     // ===== RENDER COMMAND SENDING =====
     
     protected void sendRenderCommand(NoteBytes command) {
+        if (renderStream == null || renderWriter == null) {
+            logRenderDropped(
+                "render command could not be sent because stream or writer is null",
+                RenderableLayoutManager.DiagnosticMode.FAILURES,
+                LogLevel.IMPORTANT
+            );
+            return;
+        }
         renderStream.getWriteExecutor().execute(()->{
             Log.logNoteBytes("[ContainerHandle.sendRenderCommand]", command, LogLevel.GENERAL);
             
             if (!renderStream.isActive() || renderStream.isClosed()) {
-                Log.logMsg("[ContainerHandle] Render stream is closed, skipping", LOG_LEVEL);
+                logRenderDropped(
+                    "render command could not be sent because render stream is closed",
+                    RenderableLayoutManager.DiagnosticMode.FAILURES,
+                    LogLevel.IMPORTANT
+                );
                 return;
             }
 
@@ -1183,6 +1278,7 @@ public abstract class ContainerHandle<
                 throw new CompletionException(ex);
             }
         });
+       
     }
 
 
@@ -1283,8 +1379,7 @@ public abstract class ContainerHandle<
             if (dimensionsInitialized && allocatedRegion != null) {
                 applyRegionToRenderable(renderable, allocatedRegion, isLayoutManaged(), isOffScreen());
             }else{
-                renderable.requestLayoutUpdate();
-
+               
                 Log.logMsg("[ContainerHandle: "+getName()+"] setRenderable:"
                     + "\n\t dimensionsInitialized: " + dimensionsInitialized
                     + "\n\t allocatedRegion: " + (allocatedRegion != null ? allocatedRegion.toString() : "null")
@@ -1292,8 +1387,16 @@ public abstract class ContainerHandle<
 
                 renderable.requestLayoutUpdate();
             }
+
+            if (renderReadySnapshot) {
+                renderableLayoutManager.flushLayout().thenRun(() -> {
+                    if (rootRenderable == renderable && renderReadySnapshot) {
+                        render();
+                    }
+                });
+            }
             
-            renderable.invalidate();
+        
             if (onRenderableRegistered != null) {
                 onRenderableRegistered.accept(renderable);
             }
@@ -1313,31 +1416,41 @@ public abstract class ContainerHandle<
         }
     }
 
-    private void renderableRequestRenderInternal(R renderable){
-
+    private void renderableRequestRenderInternal(R renderable) {
         if (rootRenderable != renderable) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - stale renderable"
-                    , LOG_LEVEL
-                );
-                return; // Stale request from old renderable
-            }
-            
-            if (!renderReadySnapshot) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender DROPPED - not ready"
-                    , LOG_LEVEL
-                );
-                return; // Not ready to render yet
-            }
-            
-            if (!rootRenderable.needsRender()) {
-                Log.logMsg("[ContainerHandle:" + getName() + "]"
-                    +" renderableRequestRender DROPPED - needsRender=false"
-                    , LOG_LEVEL
-                );
-                return; // Already rendered
-            }
-           
-            render();
+            logRenderDropped(
+                String.format(
+                    "stale render request from %s while root is %s",
+                    renderable != null ? renderable.getName() : "null",
+                    rootRenderable != null ? rootRenderable.getName() : "null"
+                ),
+                RenderableLayoutManager.DiagnosticMode.SUMMARY,
+                ROUTINE_DIAGNOSTIC_LOG_LEVEL
+            );
+            return;
+        }
+        if (!renderReadySnapshot) {
+            logRenderDropped(
+                "render stream not ready",
+                RenderableLayoutManager.DiagnosticMode.SUMMARY,
+                ROUTINE_DIAGNOSTIC_LOG_LEVEL
+            );
+            return;
+        }
+
+
+        if (!rootRenderable.needsRender() && damageAccumulator.isEmpty()) {
+            logRenderDropped(
+                String.format(
+                    "request arrived with no pending damage or dirty renderables (committingNodes=%s)",
+                    renderableLayoutManager.summarizeCommittingNodes()
+                ),
+                RenderableLayoutManager.DiagnosticMode.TRACE,
+                ROUTINE_DIAGNOSTIC_LOG_LEVEL
+            );
+            return;
+        }
+        render();
     }
 
     public CompletableFuture<R> getRenderable() {
@@ -1385,8 +1498,8 @@ public abstract class ContainerHandle<
     protected abstract B createBatch();
     
    
-
-    protected void layoutStateListener(boolean inProgress){
+   
+     protected void layoutStateListener(boolean inProgress){
         this.isLayoutInProgress = inProgress;
         if(!isLayoutInProgress && wasRenderRequested){
             wasRenderRequested = false;
@@ -1407,38 +1520,90 @@ public abstract class ContainerHandle<
             renderInternal();
         }else{
             wasRenderRequested = true;
+            logDiagnosticThrottled(
+                "check-layout-deferred:" + getName(),
+                () -> String.format(
+                    "[ContainerHandle:%s] render waiting on layout (%s)",
+                    getName(),
+                    renderDiagnosticState()
+                ),
+                RenderableLayoutManager.DiagnosticMode.TRACE,
+                ROUTINE_DIAGNOSTIC_LOG_LEVEL
+            );
         }
     }
+    
+
+    
+
 
     /**
      * Perform actual render - runs on serialExec
      */
     private void renderInternal() {
-        Log.logMsg("[ContainerHandle:" + getName() + "] renderableRequestRender → render", LOG_LEVEL);
-        try(
-            B batch = createBatch();
-            DA accumulator = damageAccumulator;
-        ){
-          
+        if (rootRenderable == null) {
+            logRenderDropped(
+                "renderInternal invoked with no root renderable",
+                RenderableLayoutManager.DiagnosticMode.FAILURES,
+                LogLevel.IMPORTANT
+            );
+            return;
+        }
+        logLayoutDiagnostic(
+            "[ContainerHandle:" + getName() + "] renderableRequestRender → render ("
+                + renderDiagnosticState() + ")",
+            RenderableLayoutManager.DiagnosticMode.TRACE,
+            ROUTINE_DIAGNOSTIC_LOG_LEVEL
+        );
+
+        List<S> damageRegions = null;
+        try (B batch = createBatch()) {
             rootRenderable.toBatch(batch);
-            
-            if (batch.isBatchEmpty()) {
-                Log.logMsg("[ContainerHandle:" + getName() + "] renderInternal SKIPPED - batch empty", LOG_LEVEL);
-                rootRenderable.clearRenderFlag();
-                return;
+            if (allocatedRegion != null) {
+                floatingLayerManager.toBatch(batch, allocatedRegion);
             }
-            List<S> damageRegions = accumulator.drainRegions();
+
+            // Drain after toBatch — ownership of regions transfers to us.
+            // We are responsible for recycling them after use.
+            damageRegions = damageAccumulator.drainRegions();
+
+            if (batch.isBatchEmpty() && damageRegions.isEmpty()) {
+                logRenderDropped(
+                    String.format(
+                        "batch builder and damage accumulator were both empty (committingNodes=%s)",
+                        renderableLayoutManager.summarizeCommittingNodes()
+                    ),
+                    RenderableLayoutManager.DiagnosticMode.TRACE,
+                    ROUTINE_DIAGNOSTIC_LOG_LEVEL
+                );
+                renderableLayoutManager.clearIdleCommittingNodes();
+                rootRenderable.clearRenderFlag();
+                return; // damageRegions is empty so nothing to recycle
+            }
 
             NoteBytes batchCommand = buildBatchCommand(batch, damageRegions);
-        
-            Log.logNoteBytes("[ContainerHandle: "+getName()+"]", batchCommand, LOG_LEVEL);
+            Log.logNoteBytes("[ContainerHandle: " + getName() + "]", batchCommand, LOG_LEVEL);
             sendRenderCommand(batchCommand);
-            
+            renderableLayoutManager.notifyRenderDispatched();
             rootRenderable.clearRenderFlag();
-        }catch(Exception e){
-            Log.logError("[ContainerHandle: "+getName()+"] renderInternal exception", e);
+
+        } catch (Exception e) {
+            Log.logError("[ContainerHandle: " + getName() + "] renderInternal exception", e);
+            // If toBatch threw before drainRegions, accumulator still holds its regions —
+            // leave them for the next render pass; they remain valid damage.
+            // If drainRegions already ran, recycle what we drained so regions aren't leaked.
             throw new RuntimeException(e);
+        } finally {
+            recycleDamageRegions(damageRegions);
         }
+    }
+
+    private void recycleDamageRegions(List<S> regions) {
+        if (regions == null || regions.isEmpty()) return;
+        for (S region : regions) {
+            regionPool.recycle(region);
+        }
+        regions.clear();
     }
 
     /**
@@ -1446,7 +1611,18 @@ public abstract class ContainerHandle<
      */
     protected NoteBytes buildBatchCommand(B batch, List<S> damage) {
         S contentBounds = getContentBoundsForBatch(batch);
-        return batch.build(contentBounds, damage);
+        NoteBytes result = batch.build(contentBounds, damage);
+
+        // Both contentBounds and damage regions have been serialized into result.
+        // Recycle them now — no caller above us holds a reference to either.
+        if (contentBounds != null) {
+            regionPool.recycle(contentBounds);
+        }
+        for (S region : damage) {
+            regionPool.recycle(region);
+        }
+
+        return result;
     }
 
     /**
@@ -1741,6 +1917,19 @@ public abstract class ContainerHandle<
     
     public RM getRenderableLayoutManager(){
         return renderableLayoutManager;
+    }
+
+    public CompletableFuture<Void> setLayoutDiagnosticMode(
+        RenderableLayoutManager.DiagnosticMode diagnosticMode
+    ) {
+        return uiExecutor.execute(() -> {
+            diagnosticLogTimes.clear();
+            renderableLayoutManager.setDiagnosticMode(diagnosticMode);
+        });
+    }
+
+    public CompletableFuture<RenderableLayoutManager.DiagnosticMode> getLayoutDiagnosticMode() {
+        return uiExecutor.submit(renderableLayoutManager::getDiagnosticMode);
     }
 
     public CompletableFuture<Void> focusNext() {

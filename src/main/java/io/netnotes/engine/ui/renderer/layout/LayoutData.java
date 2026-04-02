@@ -15,14 +15,16 @@ import io.netnotes.engine.ui.renderer.Renderable;
  */
 public abstract class LayoutData<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,?,S,?,LD,?,?,?,?,?,R>,
+    R extends Renderable<B,?,S,?,?,LD,?,?,?,?,?,R>,
     S extends SpatialRegion<?,S>,
     LD extends LayoutData<B,R,S,LD,LDB>,
     LDB extends LayoutData.Builder<B,R,S,LD,LDB>
 > {
     protected S spatialRegion;
 
-    
+    // ── Per-axis change flags ─────────────────────────────────────────────────
+    protected int axisChangeMask = 0;
+
     protected Boolean invisible;
     protected Boolean hidden;
     protected Boolean enabled;
@@ -63,6 +65,7 @@ public abstract class LayoutData<
         enabled = null;
         effectivelyVisible = null;
         effectivelyEnabled = null;
+        axisChangeMask = 0;
     }
     /**
      * Apply desired state to renderable
@@ -101,6 +104,28 @@ public abstract class LayoutData<
    // }
 
 
+    // ── Axis flag accessors ───────────────────────────────────────────────────
+
+    public boolean hasAxisChange(int axis)  { return (axisChangeMask & (1 << axis)) != 0; }
+    public void    setAxisChange(int axis)  { axisChangeMask |= (1 << axis); }
+    public void    clearAxisChange(int axis){ axisChangeMask &= ~(1 << axis); }
+    public boolean hasAnyAxisChange()       { return axisChangeMask != 0; }
+
+
+    /**
+     * Axis-selective merge: copy the values of flagged axes from this
+     * layout data's spatial region into {@code target}, starting from
+     * {@code current} for any axes that were not set.
+     *
+     * This is the only place where the axis flags are consumed. The result
+     * in {@code target} is a merged region: unchanged axes come from
+     * {@code current}; changed axes come from this layout data's region.
+     *
+     * Implementations copy {@code current} into {@code target} first, then
+     * selectively overwrite each flagged axis from {@code spatialRegion}.
+     */
+    public abstract void mergeIntoRegion(S current, S target);
+
     public void collapseRegion(){ spatialRegion.collapse(); }
     
     // ===== QUERIES (NO LOGIC) =====
@@ -138,7 +163,7 @@ public abstract class LayoutData<
      */
     public abstract static class Builder<
         B extends BatchBuilder<S>,
-        R extends Renderable<B,?,S,?,LD,?,?,?,?,?,R>,
+        R extends Renderable<B,?,S,?,?,LD,?,?,?,?,?,R>,
         S extends SpatialRegion<?,S>,
         LD extends LayoutData<B,R,S,LD,LDB>,
         LDB extends LayoutData.Builder<B,R,S,LD,LDB>

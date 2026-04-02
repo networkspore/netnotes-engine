@@ -10,3 +10,4 @@ netnotes-log.txt
 **/*.erg
 **/*.back
 **/back/
+**/logs

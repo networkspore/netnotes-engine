@@ -390,7 +390,7 @@ public abstract class Container<
             return;
         }
 
-        Log.logNoteBytes("[Container: "+ getTitle()+"]", command, LogLevel.GENERAL);
+        Log.logNoteBytes("[Container: "+ getTitle()+"]", command, LogLevel.IMPORTANT);
         
         MessageExecutor executor = msgMap.get(cmd);
         if (executor != null) {
@@ -426,7 +426,7 @@ public abstract class Container<
         NoteBytes contentBoundsBytes = command.get(ContainerCommands.CONTENT_BOUNDS);
         NoteBytes damageRegionsBytes = command.get(ContainerCommands.DAMAGE_REGIONS);
    
-        S contentBounds =handleBatchContentBounds(contentBoundsBytes);
+        S contentBounds = handleBatchContentBounds(contentBoundsBytes);
         S[] damageRegions = handleBatchDamageRegions(damageRegionsBytes);
         
         handleBatchBounds(contentBounds, damageRegions);

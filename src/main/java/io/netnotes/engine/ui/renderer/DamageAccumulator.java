@@ -10,16 +10,28 @@ import io.netnotes.engine.ui.SpatialRegionPool;
 public class DamageAccumulator<
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>
-> implements AutoCloseable {
-    private static final int MAX_REGIONS = 8;
+>  {
+    private static final int COLLAPSE_THRESHOLD = 32; 
+
+    private int collapseThreshold;
+    
     private final List<S> regions = new ArrayList<>(4);
     private final SpatialRegionPool<S> pool;
     
-    public DamageAccumulator(SpatialRegionPool<S> pool) {
+    public DamageAccumulator(SpatialRegionPool<S> pool){
+        this(pool, COLLAPSE_THRESHOLD);
+    }
+
+    public DamageAccumulator(SpatialRegionPool<S> pool, int collapseThreshold) {
         this.pool = pool;
+        this.collapseThreshold = collapseThreshold;
     }
     
     public void add(S region) {
+        if (region.isEmpty()) {
+            pool.recycle(region);
+            return;
+        }
         for (int i = 0; i < regions.size(); i++) {
             S existing = regions.get(i);
             if (existing.contains(region)) {
@@ -29,27 +41,32 @@ public class DamageAccumulator<
             if (region.contains(existing)) {
                 pool.recycle(existing);
                 regions.set(i, region);
-                return;
+                // Don't return — the new region might absorb more entries
+                region = regions.get(i); // continue with promoted region
+                // remove and re-add to continue checking remaining entries
+                regions.remove(i);
+                i--;
+                continue;
             }
             if (existing.intersects(region)) {
                 S merged = existing.union(region);
                 pool.recycle(existing);
                 pool.recycle(region);
-                regions.set(i, merged);
-                return;
+                regions.remove(i);
+                i--;
+                region = merged; // continue merging with the rest
+                continue;
             }
         }
-        
         regions.add(region);
-        
-        if (regions.size() > MAX_REGIONS) {
-            collapseToUnion();
-        }
     }
     
     public List<S> drainRegions() {
+        if (regions.size() > collapseThreshold) {
+            collapseToUnion();
+        }
         List<S> snapshot = new ArrayList<>(regions);
-        regions.clear();
+        regions.clear(); 
         return snapshot;
     }
     
@@ -70,8 +87,18 @@ public class DamageAccumulator<
         regions.add(union);
     }
 
-    @Override
-    public void close() throws Exception {
-        clear();
+    public boolean isEmpty(){
+        return regions.isEmpty();
     }
+
+
+    public int getCollapseThreshold() {
+        return collapseThreshold;
+    }
+
+    public void setCollapseThreshold(int collapseThreshold) {
+        this.collapseThreshold = collapseThreshold;
+    }
+
+    
 }

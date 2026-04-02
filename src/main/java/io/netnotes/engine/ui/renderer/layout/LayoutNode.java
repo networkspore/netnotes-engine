@@ -11,162 +11,310 @@ import io.netnotes.engine.ui.renderer.Renderable;
 import io.netnotes.engine.ui.renderer.RenderableStates;
 
 /**
- * LayoutNode - Tree node for layout calculation
- * 
- * UNIFIED STATE INJECTION: All factory methods return region only.
- * computeEffectiveStates() injects ALL state after calculation.
- * 
- * GROUP CALLBACK SUPPORT: Nodes can belong to groups with predicated callbacks
- * that execute once for all members when the first member is encountered.
+ * LayoutNode - One node in the layout tree, paired 1:1 with a Renderable.
+ *
+ * TWO-CALLBACK MODEL:
+ *
+ *   contentCallback  — answers "what size do I need to fit my content?"
+ *                      fires on-demand, bottom-up, when a parent or group
+ *                      callback calls context.getMeasuredSize() on this node.
+ *                      null if this node is not content-sized.
+ *                      Fires at most once per pass (gated by contentMeasured).
+ *
+ *   layoutCallback   — answers "given my committed space, how do I arrange
+ *                      things / what is my position?"
+ *                      fires top-down during the normal depth-sorted pass.
+ *                      null if this node is purely reactive (accepts whatever
+ *                      its parent or group sets).
+ *
+ * Either or both callbacks may be null. A node with both null is still
+ * managed if it belongs to a member group — the group's callbacks speak
+ * for it.
+ *
+ * OWNED GROUPS:
+ * A node owns the groups whose members are its direct children.
+ * The manager fires owned groups immediately after committing this node,
+ * so group callbacks always have valid parent geometry.
+ *
+ * SINGLE COMMIT:
+ * calculatedLayout is committed by applyNode() exactly once per pass.
+ * Content callbacks and group callbacks only populate calculatedLayout —
+ * they never touch apply. resetForPass() clears per-pass state.
  */
 public abstract class LayoutNode<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,LCB,GCB,?,?,G,R>,
+    R extends Renderable<B,P,S,L,LC,LD,LCB,GCB,?,G,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LD extends LayoutData<B,R,S,LD,?>,
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,L>,
     LCB extends LayoutCallback<B,R,P,S,LC,LD,LCB>,
     GCB extends GroupLayoutCallback<B,R,P,S,LD,LC,L,GCB>,
-    G extends LayoutGroup<B,R,P,S,LD,LC,GCB,L,?,G>,
+    G extends LayoutGroup<B,R,P,S,LD,LC,GCB,L,G>,
     L extends LayoutNode<B,R,P,S,LD,LC,LCB,GCB,G,L>
 > {
     protected final R renderable;
     protected L parent;
-    private LCB callback;
+
+  
+
+    /**
+     * Fires top-down during the normal pass.
+     * Answers: given my space, how do I position / arrange things?
+     * null if this node is purely reactive.
+     */
+    private LCB layoutCallback;
+
+    /**
+     * The result of whichever callback(s) have fired so far this pass.
+     * May be partially populated (content axes only) before the layout
+     * callback fires and adds position/fill axes.
+     * Committed to the renderable exactly once by applyNode().
+     */
     LD calculatedLayout;
-    private final List<L> children = new ArrayList<>();
+    private LC inFlightContext = null;
+    /**
+     * True once contentCallback has fired this pass.
+     * Prevents redundant re-measurement when multiple ancestors ask for
+     * getMeasuredSize() on the same content-sized node.
+     */
+    boolean contentMeasured = false;
+
+    private final List<L> children    = new ArrayList<>();
+    private final List<G> ownedGroups = new ArrayList<>();
+
+    /** The group this node is a MEMBER of (at most one). */
+    private G memberGroup = null;
+
     protected R positionAnchor = null;
-    protected G group = null;
 
     public LayoutNode(R renderable) {
         this.renderable = renderable;
     }
+
+    public LC  getInFlightContext()        { return inFlightContext; }
+    public void setInFlightContext(LC ctx) { this.inFlightContext = ctx; }
+    // ── Per-pass reset ────────────────────────────────────────────────────────
+
+    /**
+     * Reset all per-pass state. Called by the manager at the start of each
+     * layout pass before any node is visited.
+     */
+    public void resetForPass() {
+        contentMeasured   = false;
+        inFlightContext   = null;
+    }
+    
+    public boolean isContentMeasured(){
+        return contentMeasured;
+    }
+
+    public void setContentMeasured(boolean contentMeasured) {
+        this.contentMeasured = contentMeasured;
+    }
+
+    // ── Tree management ───────────────────────────────────────────────────────
 
     public void addChild(L child) {
         children.add(child);
         child.parent = self();
     }
 
-    public S getRequestedRegion() {
-        return renderable.getRequestedRegion();
+    public void removeChild(L child) {
+        children.remove(child);
+        child.parent = null;
     }
 
-    @SuppressWarnings("unchecked")
-    public L self() {
-        return (L) this;
+    // ── Owned group management ────────────────────────────────────────────────
+
+    public void addOwnedGroup(G group) {
+        if (!ownedGroups.contains(group)) {
+            ownedGroups.add(group);
+            group.setOwner(self());
+        }
     }
 
-    public String getName() { return renderable.getName(); }
+    public void removeOwnedGroup(G group) {
+        ownedGroups.remove(group);
+        if (group.getOwner() == self()) {
+            group.setOwner(null);
+        }
+    }
+
+    public List<G> getOwnedGroups() { return ownedGroups; }
+
+    // ── Member group management ───────────────────────────────────────────────
+
+    public void setMemberGroup(G group) {
+        if (this.memberGroup != null) {
+            this.memberGroup.removeMember(self());
+        }
+        this.memberGroup = group;
+        if (group != null) {
+            group.addMember(self());
+        }
+    }
+
+    public G       getMemberGroup()    { return memberGroup; }
+    public boolean isGroupMember()     { return memberGroup != null; }
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
 
     /**
-     * Calculate layout for this node
-     * If part of a group and first member reached, executes group callbacks
-     * Otherwise executes individual callback
+     * Set both callbacks at once. Either may be null.
+     *
+     * @param contentCallback fires on-demand for content measurement, or null
+     * @param layoutCallback  fires top-down during the pass, or null
      */
-    public void calculate(LC context) {
-        // If part of a group and it's already calculated, skip
-        if (callback != null) {
-            calculatedLayout = callback.calculate(context);
-        }
-        injectToCalculatedData();
+    public void setLayoutCallback(LCB layoutCallback) {
+        this.layoutCallback  = layoutCallback;
     }
 
-    public void injectToCalculatedData(){
+    public LCB getLayoutCallback()  { return layoutCallback; }
 
-        S calculatedRegion = calculatedLayout != null
-            ? calculatedLayout.getSpatialRegion()
-            : null;
+    public boolean isManaged() {
+        return layoutCallback != null || memberGroup != null;
+    }
 
-        if (calculatedRegion == null) {
-            if (renderable.hasRequestedRegion()) {
-                calculatedRegion = renderable.getRequestedRegion();
-            } else {
-                calculatedRegion = renderable.getRegion();
+    /** True if this node participates in content-sized measurement. */
+    public boolean isSizedByContent() {
+        return renderable.isSizedByContent();
+    }
+
+    // ── Content measurement (bottom-up, on-demand) ────────────────────────────
+
+    /**
+     * Fire the content callback if it has not yet fired this pass.
+     *
+     * Called by LayoutContext.getMeasuredSize() when a parent or group
+     * callback needs this node's intrinsic size. The content callback
+     * may itself call getMeasuredSize() on its own children, recursing
+     * bottom-up naturally. The contentMeasured gate ensures each node's
+     * content callback fires at most once per pass regardless of how many
+     * ancestors request its measurement.
+     *
+     * After this method returns, calculatedLayout contains at least the
+     * content axes. Position and fill axes may be absent until the
+     * layout callback fires (or the parent group sets them).
+     *
+     * @param context a freshly initialised context for this node
+     */
+    public void measureContent(LC context) {
+        if (contentMeasured) return;
+        contentMeasured = true;
+
+        if (renderable.isSizedByContent()) {
+            renderable.measureContent(context);
+        }
+    }
+
+    // ── Layout calculation (top-down, during normal pass) ─────────────────────
+
+    /**
+     * Fire the layout callback. Called by the manager when it reaches this
+     * node in depth order and calculatedLayout is still null (no parent or
+     * group has pre-populated it).
+     *
+     * After this method returns, finalizeCalculatedLayout() is always called.
+     */
+    public void calculateLayout(LC context) {
+        if (layoutCallback != null) {
+            LD result = layoutCallback.calculate(context);
+            if (result != null) {
+                calculatedLayout = result;
             }
         }
-        
-        // Ensure we have a LayoutData instance
+        finalizeCalculatedLayout();
+    }
+
+    // ── Finalisation ──────────────────────────────────────────────────────────
+
+    /**
+     * Ensure calculatedLayout is complete and ready for applyNode():
+     *   1. Obtain a LayoutData from pool if still null
+     *   2. Ensure a spatial region exists (fallback to requested or live)
+     *   3. Flag all axes if none were flagged (first-frame guarantee)
+     *   4. Inject effectivelyVisible from the parent chain
+     *
+     * Called by:
+     *   - calculateLayout() after the layout callback
+     *   - The manager after firing a group callback for each member
+     *   - Directly by the manager for pre-populated nodes before applyNode()
+     */
+    public void finalizeCalculatedLayout() {
         if (calculatedLayout == null) {
             calculatedLayout = obtainLayoutData();
         }
-        
-        // Ensure we have a valid region
-        if (calculatedRegion == null) {
-            calculatedRegion = renderable.getRegionPool().obtain();
-            calculatedRegion.setToIdentity();
+
+        S region = calculatedLayout.getSpatialRegion();
+        if (region == null) {
+            if (renderable.hasRequestedRegion()) {
+                region = renderable.getRequestedRegion();
+            } else {
+                region = renderable.getRegion();
+            }
+            if (region == null) {
+                region = renderable.getRegionPool().obtain();
+                region.setToIdentity();
+            }
+            calculatedLayout.setSpatialRegion(region);
         }
 
-        calculatedLayout.setSpatialRegion(calculatedRegion);
-        
-        StateSnapshot snap = renderable.getStateMachine().getSnapshot();
-
-        injectEffectiveStates(snap, calculatedLayout);
-
-    }
-
-    protected boolean checkHiddenDesired(StateSnapshot snap){
-        boolean wasDesired = snap.hasState(RenderableStates.STATE_HIDDEN_DESIRED);
-        Boolean isDesired = calculatedLayout.getHidden();
-        if(isDesired != null){
-            return isDesired;
+        // First-frame guarantee — flag all axes if layout callback set none
+        if (!calculatedLayout.hasAnyAxisChange()) {
+            int n = renderable.getNumSpatialAxes();
+            for (int i = 0; i < n; i++) {
+                calculatedLayout.setAxisChange(i);
+            }
         }
-        return wasDesired;
+
+        injectEffectiveStates(renderable.getStateMachine().getSnapshot());
     }
 
+    private void injectEffectiveStates(StateSnapshot snap) {
+        boolean effectivelyVisible = true;
 
-    protected boolean checkInvisibleDesired(StateSnapshot snap){
-        boolean wasDesired = snap.hasState(RenderableStates.STATE_INVISIBLE_DESIRED);
-        Boolean isDesired = calculatedLayout.getInvisible();
-        if(isDesired != null){
-            return isDesired;
+        if (parent != null) {
+            LD parentCalculated = parent.getCalculatedLayout();
+            if (parentCalculated != null && parentCalculated.getEffectivelyVisible() != null) {
+                effectivelyVisible = parentCalculated.getEffectivelyVisible();
+            } else {
+                effectivelyVisible = parent.getRenderable().isEffectivelyVisible();
+            }
         }
-        return wasDesired;
-    }
 
-    protected boolean checkEnabledDesired(StateSnapshot snap){
-        boolean wasDesired = snap.hasState(RenderableStates.STATE_ENABLED_DESIRED);
-        Boolean isDesired = calculatedLayout.getEnabled();
-        if(isDesired != null){
-            return isDesired;
-        }
-        return wasDesired;
-    }
-
-  
-    /**
-     * UNIFIED STATE INJECTION - Single source of truth
-     * All state changes flow through here, regardless of calculation path
-     */
-    private void injectEffectiveStates(StateSnapshot snap, LD layoutData) {
-        R parentRenderable = parent != null ? parent.getRenderable() : null;
-        boolean effectivelyVisible = parentRenderable != null ? parentRenderable.isEffectivelyVisible() : true;
-        boolean effectivelyEnabled = parentRenderable != null ? parentRenderable.isEffectivelyEnabled() : true;
-
-        boolean hiddenDesired = checkHiddenDesired(snap);
-        boolean invisibleDesired = checkInvisibleDesired(snap);
-        boolean enabledDesired = checkEnabledDesired(snap);
-        
-        effectivelyEnabled = effectivelyEnabled && enabledDesired;
+        boolean hiddenDesired    = resolveHiddenDesired(snap);
+        boolean invisibleDesired = resolveInvisibleDesired(snap);
         effectivelyVisible = effectivelyVisible && !hiddenDesired && !invisibleDesired;
-        
-        // Inject RESOLVED states (always)
-        layoutData.setEffectivelyVisible(effectivelyVisible);
-        layoutData.setEffectivelyEnabled(effectivelyEnabled);
-        
-        // Inject MODIFIER states (only if changed)
+
+        calculatedLayout.setEffectivelyVisible(effectivelyVisible);
+
         if (hiddenDesired != renderable.hasState(RenderableStates.STATE_HIDDEN)) {
-            layoutData.setHidden(hiddenDesired);
+            calculatedLayout.setHidden(hiddenDesired);
         }
         if (invisibleDesired != renderable.hasState(RenderableStates.STATE_INVISIBLE)) {
-            layoutData.setInvisible(invisibleDesired);
-        }
-        if (enabledDesired != renderable.hasState(RenderableStates.STATE_ENABLED_DESIRED)) {
-            layoutData.setEnabled(enabledDesired);
+            calculatedLayout.setInvisible(invisibleDesired);
         }
     }
 
+    private boolean resolveHiddenDesired(StateSnapshot snap) {
+        Boolean fromData = calculatedLayout.getHidden();
+        return fromData != null ? fromData
+            : snap.hasState(RenderableStates.STATE_HIDDEN_DESIRED);
+    }
 
+    private boolean resolveInvisibleDesired(StateSnapshot snap) {
+        Boolean fromData = calculatedLayout.getInvisible();
+        return fromData != null ? fromData
+            : snap.hasState(RenderableStates.STATE_INVISIBLE_DESIRED);
+    }
+
+    // ── Post-apply cleanup ────────────────────────────────────────────────────
+
+    /**
+     * Release calculatedLayout to pool after applyNode() commits it.
+     * Called by the manager immediately after applyNode().
+     */
     public void clear() {
         if (calculatedLayout != null) {
             recycleLayoutData(calculatedLayout);
@@ -174,90 +322,26 @@ public abstract class LayoutNode<
         }
     }
 
-    // ===== ABSTRACT FACTORIES =====
-    
-    /**
-     * Obtain LayoutData from pool
-     */
+    // ── Abstract pool methods ─────────────────────────────────────────────────
+
     protected abstract LD obtainLayoutData();
-    
-    /**
-     * Recycle LayoutData to pool
-     */
     protected abstract void recycleLayoutData(LD layoutData);
 
-    // ===== GETTERS/SETTERS =====
+    // ── Queries ───────────────────────────────────────────────────────────────
 
-    public void setPositionAnchor(R anchor) {
-        this.positionAnchor = anchor;
-    }
-    
-    public R getPositionAnchor() {
-        return positionAnchor;
-    }
+    public LD       getCalculatedLayout()   { return calculatedLayout; }
+    public R        getRenderable()         { return renderable; }
+    public L        getParent()             { return parent; }
+    public List<L>  getChildren()           { return children; }
+    public String   getName()               { return renderable.getName(); }
+    public int      getDepth()              { return renderable.getDepth(); }
+    public boolean  isFloating()            { return renderable.isFloating(); }
 
-    public boolean isFloating() {
-        return renderable.isFloating();
-    }
+    public S getRequestedRegion()           { return renderable.getRequestedRegion(); }
 
-    public LD getCalculatedLayout() {
-        return calculatedLayout;
-    }
+    public void setPositionAnchor(R anchor) { this.positionAnchor = anchor; }
+    public R    getPositionAnchor()         { return positionAnchor; }
 
-    public R getRenderable() {
-        return renderable;
-    }
-
-    public L getParent() {
-        return parent;
-    }
-
-    public List<L> getChildren() {
-        return children;
-    }
-
-    public int getDepth() {
-        return renderable.getDepth();
-    }
-
-    public void setCallback(LCB callback) {
-        this.callback = callback;
-    }
-
-    public boolean isManaged(){
-        return callback != null || group != null;
-    }
-
-    public void setGroup(G group) {
-        if (this.group != null) {
-            this.group.removeMember(self());
-        }
-        this.group = group;
-        if (group != null) {
-            group.addMember(self());
-        }
-    }
-
-    public boolean isSizedByChildren() {
-        R r = getRenderable();
-        if(r != null){
-            return r.isSizedByContent();
-        }
-        return false;
-    }
-    
-    public G getGroup() {
-        return group;
-    }
-
-    public void clearGroupCalculation() {
-        if (calculatedLayout != null) {
-            recycleLayoutData(calculatedLayout);
-            calculatedLayout = null;
-        }
-    }
-
-    public boolean isGrouped() {
-        return group != null;
-    }
+    @SuppressWarnings("unchecked")
+    public L self() { return (L) this; }
 }

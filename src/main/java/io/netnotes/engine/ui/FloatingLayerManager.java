@@ -12,7 +12,7 @@ import io.netnotes.engine.ui.renderer.layout.LayoutData;
 
 public class FloatingLayerManager<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
+    R extends Renderable<B,P,S,?,LC,LD,?,LCB,?,?,?,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,

@@ -8,7 +8,7 @@ import io.netnotes.engine.ui.renderer.Renderable;
 @FunctionalInterface
 public interface LayoutCallback<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,LCB,?,?,?,?,R>,
+    R extends Renderable<B,P,S,?,LC,LD,?,LCB,?,?,?,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,

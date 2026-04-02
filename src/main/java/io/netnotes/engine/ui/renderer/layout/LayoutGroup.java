@@ -1,11 +1,9 @@
 package io.netnotes.engine.ui.renderer.layout;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableSet;
-import java.util.TreeSet;
 
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
@@ -13,260 +11,223 @@ import io.netnotes.engine.ui.renderer.BatchBuilder;
 import io.netnotes.engine.ui.renderer.Renderable;
 
 /**
- * LayoutGroup - Collection of renderables calculated together
- * 
- * Groups allow multiple UI elements to be laid out as a cohesive unit,
- * where each element may need information about its siblings.
- * 
- * CALLBACK STORAGE:
- * - Callbacks are registered on the GROUP, not individual nodes
- * - All members share the same callbacks
- * - Predicates determine which callbacks execute
- * 
- * EXECUTION MODEL:
- * - When first member is reached, executeCallbacks() is called
- * - Callbacks execute if their predicates pass
- * - Each callback receives ALL group members
- * - Callbacks set calculatedLayout on each member
+ * LayoutGroup - A set of sibling renderables laid out together by a shared
+ * callback, owned by their common parent node.
+ *
+ * TWO EXECUTION MODES:
+ *
+ *   executeContentCallbacks() — fires each member's contentCallback on-demand
+ *     during bottom-up measurement. Triggered when a parent asks for a
+ *     content-sized member's size via context.getMeasuredSize(). Gated by
+ *     contentMeasuredThisPass so the group only measures once per pass
+ *     regardless of how many ancestors request measurement.
+ *
+ *   executeLayoutCallback() — fires the group's single layout callback
+ *     top-down after the owner node is committed. The callback distributes
+ *     space across all members, reading content-sized members' already-
+ *     measured sizes as fixed constraints and setting remaining axes freely.
+ *
+ * NO PREDICATE SYSTEM:
+ * The old priority-sorted predicate infrastructure is replaced by the two
+ * execution modes. The predicate was always implicitly "is this a content
+ * measurement or a layout pass?" which is now structural.
+ *
+ * OWNERSHIP:
+ * Each group has exactly one owner — the parent LayoutNode whose direct
+ * children are the group's members. The owner fires the layout callback
+ * after its own commit. Content callbacks are triggered on-demand via
+ * getMeasuredSize() in LayoutContext.
+ *
+ * LAYOUT DATA ACCESS:
+ * The LayoutDataInterface pattern avoids generic pollution by closing over
+ * the correctly-typed node in an anonymous implementation. The interface is
+ * declared at the right generic scope so no casting is needed anywhere.
+ *
+ * SINGLE COMMIT INVARIANT:
+ * Group callbacks only populate members' calculatedLayout. applyNode()
+ * commits each member exactly once in depth order. Groups never call apply.
  */
 public abstract class LayoutGroup<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,?,GCB,GCE,?,G,R>,
+    R extends Renderable<B,P,S,L,LC,LD,?,GCB,?,G,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LD extends LayoutData<B,R,S,LD,?>,
     LC extends LayoutContext<B,R,P,S,LD,?,LC,L>,
     GCB extends GroupLayoutCallback<B,R,P,S,LD,LC,L,GCB>,
     L extends LayoutNode<B,R,P,S,LD,LC,?,GCB,G,L>,
-    GCE extends GroupCallbackEntry<G,GCB,GCE> ,
-    G extends LayoutGroup<B,R,P,S,LD,LC,GCB,L,GCE,G>
+    G extends LayoutGroup<B,R,P,S,LD,LC,GCB,L,G>
 > {
     private final String groupId;
+
+    /** The parent node that owns this group. Set at registration. */
+    private L owner = null;
+
     private final List<L> members = new ArrayList<>();
-    
-    // Map for fast lookup by callback ID
-    private final Map<String, GCE> callbackMap = new HashMap<>();
-    
-    //LayoutDataName, LayoutData interface (from layoutNode)
-    protected final HashMap<String,LayoutDataInterface<LD>> layoutDataInterfaces = new HashMap<>();
-    
-    // Set for sorted iteration (sorted by priority)
-    private final NavigableSet<GCE> callbackSet = new TreeSet<>();
-    
-    private int passCounter = 0;
-    private int minDepth = Integer.MAX_VALUE;
-    
+
+    /**
+     * Interface-based access to each member's calculatedLayout, keyed by name.
+     * Anonymous implementations close over the correctly-typed L node so no
+     * casting is needed. Passed to the layout callback so it can read and write
+     * member geometry without needing direct access to LayoutNode internals.
+     */
+    private final Map<String, LayoutDataInterface<LD>> layoutDataInterfaces
+        = new LinkedHashMap<>();
+
+    /**
+     * The single layout callback for this group.
+     * Fires top-down after the owner node is committed.
+     * Receives all member contexts and the layoutData interface map.
+     */
+    private GCB layoutCallback = null;
+
+    // ── Per-pass state ────────────────────────────────────────────────────────
+
+    /**
+     * True once the layout callback has fired this pass.
+     * Reset by resetForPass() at the start of each pass.
+     */
+    private boolean appliedThisPass = false;
+
+    /**
+     * True once content callbacks have fired for this group's members this pass.
+     * Prevents redundant re-measurement when multiple ancestors call
+     * getMeasuredSize() on members of this group.
+     */
+    private boolean contentMeasuredThisPass = false;
+
     public LayoutGroup(String groupId) {
         this.groupId = groupId;
     }
-    
-    // ===== MEMBER MANAGEMENT =====
-    
+
+    // ── Owner ─────────────────────────────────────────────────────────────────
+
+    public void setOwner(L owner)  { this.owner = owner; }
+    public L    getOwner()         { return owner; }
+
+    // ── Member management ─────────────────────────────────────────────────────
+
     public void addMember(L node) {
-        if (!members.contains(node)) {
-            members.add(node);
+        if (members.contains(node)) return;
+        members.add(node);
 
-            layoutDataInterfaces.put(node.getName(), new LayoutDataInterface<LD>() {
-                private L layoutNode = node;
-                
-                @Override
-                public String getLayoutDataName() {
-                    return layoutNode.getName();
-                }
+        // Anonymous implementation closes over the correctly-typed node.
+        // No casting required anywhere — generics stay clean.
+        layoutDataInterfaces.put(node.getName(), new LayoutDataInterface<LD>() {
+            private final L layoutNode = node;
 
-                @Override
-                public LD getLayoutData() {
-                    return layoutNode.calculatedLayout;
-                }
+            @Override
+            public String getName() {
+                return layoutNode.getName();
+            }
 
-                @Override
-                public void setLayoutData(LD layoutData) {
-                    layoutNode.calculatedLayout = layoutData;
-                }
-            });
+            @Override
+            public boolean hasLayoutData() {
+                return layoutNode.calculatedLayout != null;
+            }
 
-            minDepth = Math.min(minDepth, node.getDepth());
-        }
+            @Override
+            public LD getLayoutData() {
+                return layoutNode.calculatedLayout;
+            }
+
+            @Override
+            public void setLayoutData(LD data) {
+                layoutNode.calculatedLayout = data;
+            }
+        });
     }
-    
+
     public void removeMember(L node) {
         members.remove(node);
         layoutDataInterfaces.remove(node.getName());
-        if (members.isEmpty()) {
-            reset();
-        } else {
-            recalculateMinDepth();
-        }
     }
 
-    public void clearMembers(){
+    public void clearMembers() {
         members.clear();
         layoutDataInterfaces.clear();
-        reset();
     }
 
-    public void cleanup(){
+    public void cleanup() {
         clearMembers();
-        clearCallbacks();
-    }
-    
-    private void recalculateMinDepth() {
-        minDepth = Integer.MAX_VALUE;
-        for (L member : members) {
-            minDepth = Math.min(minDepth, member.getDepth());
-        }
-    }
-    
-    // ===== CALLBACK MANAGEMENT =====
-
-    /**
-     * Register a group callback with predicate and priority
-     * 
-     * @param callbackId Unique identifier for this callback
-     * @param predicate Condition that determines if callback should execute
-     * @param callback The callback to execute for the group
-     * @param priority Execution priority (lower numbers execute first)
-     */
-    public void registerCallback(GCE entry) {
-        // Remove old entry if exists
-        GCE oldEntry = callbackMap.remove(entry.getCallbackId());
-        if (oldEntry != null) {
-            callbackSet.remove(oldEntry);
-        }
-
-        callbackMap.put(entry.getCallbackId(),  entry);
-        callbackSet.add(entry);
-    }
-    
-    /**
-     * Unregister a callback
-     */
-    public void unregisterCallback(String callbackId) {
-        GCE entry = callbackMap.remove(callbackId);
-        if (entry != null) {
-            callbackSet.remove(entry);
-        }
-    }
-    
-    /**
-     * Clear all callbacks
-     */
-    public void clearCallbacks() {
-        callbackMap.clear();
-        callbackSet.clear();
-    }
-    
-    /**
-     * Check if a callback is registered
-     */
-    public boolean hasCallback(String callbackId) {
-        return callbackMap.containsKey(callbackId);
-    }
-    
-    /**
-     * Get a callback entry by ID
-     */
-    public GCE getCallback(String callbackId) {
-        return callbackMap.get(callbackId);
-    }
-    
-    /**
-     * Execute all callbacks whose predicates pass, in priority order
-     * Called when the first group member is encountered during layout
-     * 
-     * @param context Layout context (from first encoutnered member)
-     */
-    public void executeCallbacks(LC[] contexts) {
-        // Execute each callback whose predicate passes
-        for (GCE entry : callbackSet) {
-            // Check if predicate allows execution
-            if (entry.shouldExecute(self())) {
-                // Execute the group callback with all members
-                entry.getCallback().calculate(contexts, layoutDataInterfaces);
-            }
-        }
+        layoutCallback = null;
+        owner = null;
     }
 
-    public boolean hasAnyCallbacks(){
-        return !callbackSet.isEmpty();
+    // ── Layout callback ───────────────────────────────────────────────────────
+
+    public void setLayoutCallback(GCB callback)  { this.layoutCallback = callback; }
+    public GCB  getLayoutCallback()              { return layoutCallback; }
+    public boolean hasLayoutCallback()           { return layoutCallback != null; }
+
+    // ── Content execution (bottom-up, on-demand) ──────────────────────────────
+
+
+
+
+    public void markContentMeasuredThisPass() { contentMeasuredThisPass = true; }
+    // ── Layout execution (top-down, after owner commits) ──────────────────────
+
+    /**
+     * Fire the layout callback for this group.
+     *
+     * Called by the manager after the owner node is committed, so the callback
+     * has valid parent geometry. Content-sized members will already have their
+     * content axes populated in calculatedLayout from the bottom-up measurement
+     * phase. The callback reads those as fixed constraints via hasLayoutData()
+     * and getLayoutData(), and sets remaining axes freely via setLayoutData().
+     *
+     * All decisions about what to read and write belong to the callback.
+     * The layout system enforces nothing about axis overlap.
+     *
+     * @param contexts one freshly initialised context per member, in member order
+     */
+    public void executeLayoutCallback(LC[] contexts) {
+        if (layoutCallback == null) return;
+        layoutCallback.calculate(contexts, layoutDataInterfaces);
     }
 
-    LD getLayoutData(String nodeName){
-        LayoutDataInterface<LD> dataInterface = layoutDataInterfaces.get(nodeName);
-        if(dataInterface != null){
-            return dataInterface.getLayoutData();
-        }
-        return null;
+    // ── Pass state ────────────────────────────────────────────────────────────
+
+    public void markAppliedThisPass()          { appliedThisPass = true; }
+    public boolean hasAppliedThisPass()        { return appliedThisPass; }
+    public boolean hasContentMeasuredThisPass(){ return contentMeasuredThisPass; }
+
+    /**
+     * Reset all per-pass state. Called once at the start of each layout pass.
+     */
+    public void resetForPass() {
+        appliedThisPass         = false;
+        contentMeasuredThisPass = false;
     }
 
-    public interface LayoutDataInterface<LD>{
-        String getLayoutDataName();
-        LD getLayoutData();
-        void setLayoutData(LD layoutData);
-    }
+    // ── Queries ───────────────────────────────────────────────────────────────
+
+    public List<L>                              getMembers()              { return members; }
+    public int                                  getMemberCount()          { return members.size(); }
+    public String                               getGroupId()              { return groupId; }
+    public boolean                              isEmpty()                 { return members.isEmpty(); }
+    public Map<String, LayoutDataInterface<LD>> getLayoutDataInterfaces() { return layoutDataInterfaces; }
 
     @SuppressWarnings("unchecked")
-    protected G self() {
-        G self = (G) this;
-        return self;
-    }
-    
-    // ===== PASS MANAGEMENT =====
-    
-    public void incrementPass() {
-        passCounter++;
-        if (passCounter == members.size()) {
-            clearCalculatedData();
-        }
-    }
-    
-    private void clearCalculatedData() {
-        for (L member : members) {
-            member.clearGroupCalculation();
-        }
-        reset();
-    }
-    
-    public void reset() {
-        passCounter = 0;
-    }
-    
-    public int getPassCounter() {
-        return passCounter;
-    }
-    
-    // ===== STATE QUERIES =====
-    
+    protected G self() { return (G) this; }
 
-    public List<L> getMembers() {
-        return members;
-    }
-    
-    public int getMemberCount() {
-        return members.size();
-    }
-    
-    public String getGroupId() {
-        return groupId;
-    }
-    
-    public int getMinDepth() {
-        return minDepth;
-    }
-    
-    public boolean isEmpty() {
-        return members.isEmpty();
-    }
-    
-    public int getCallbackCount() {
-        return callbackSet.size();
-    }
-    
-    // == Group LayoutCallback API ==
+    // ── LayoutDataInterface ───────────────────────────────────────────────────
 
-    public void setLayoutDataForMember(L member, LD layoutData) {
-        
-        member.calculatedLayout = layoutData;
-              
+    /**
+     * Interface giving the layout callback read/write access to a member's
+     * calculatedLayout without exposing LayoutNode internals or requiring casts.
+     *
+     * hasLayoutData() lets the callback detect content-sized members that were
+     * already measured bottom-up. The callback reads that measurement as a
+     * fixed size constraint and decides what to set on remaining axes —
+     * the layout system enforces nothing about what may or may not be written.
+     * All axis decisions belong to the callback.
+     */
+    public interface LayoutDataInterface<LD> {
+        String  getName();
+        boolean hasLayoutData();
+        LD      getLayoutData();
+        void    setLayoutData(LD data);
     }
 }

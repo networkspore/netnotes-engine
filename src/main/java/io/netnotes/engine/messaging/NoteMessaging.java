@@ -234,7 +234,9 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly ITEM_DESCRIPTION      = new NoteBytesReadOnly("item_description");
         public static final NoteBytesReadOnly ITEM_PROTECTED        = new NoteBytesReadOnly("item_protected");
 
+
         public static final NoteBytesReadOnly MENU_ITEMS            = new NoteBytesReadOnly("menu_items");
+        public static final NoteBytesReadOnly VISIBLE_ITEMS         = new NoteBytesReadOnly("visible_items");
         public static final NoteBytesReadOnly HAS_BACK              = new NoteBytesReadOnly("has_back");
         public static final NoteBytesReadOnly PATH                  = new NoteBytesReadOnly("path");
 

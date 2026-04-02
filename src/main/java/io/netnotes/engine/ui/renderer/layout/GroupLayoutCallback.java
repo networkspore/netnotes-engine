@@ -1,7 +1,6 @@
 package io.netnotes.engine.ui.renderer.layout;
 
-import java.util.HashMap;
-
+import java.util.Map;
 
 import io.netnotes.engine.ui.renderer.BatchBuilder;
 import io.netnotes.engine.ui.renderer.Renderable;
@@ -12,7 +11,7 @@ import io.netnotes.engine.ui.SpatialRegion;
 @FunctionalInterface
 public interface GroupLayoutCallback<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,LC,LD,?,GCB,?,?,?,R>,
+    R extends Renderable<B,P,S,L,LC,LD,?,GCB,?,?,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LD extends LayoutData<B,R,S,LD,?>,
@@ -25,5 +24,5 @@ public interface GroupLayoutCallback<
      * @param contexts a context array containing a context for each group member
      * @param layoutDataInterface 
      */
-    void calculate(LC[] contexts, HashMap<String,LayoutDataInterface<LD>> layoutDataInterface);
+    void calculate(LC[] contexts, Map<String, LayoutDataInterface<LD>> layoutDataInterface);
 }
