@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils.virtualExecutors;
+package io.netnotes.engine.virtualExecutors;
 
 
 @FunctionalInterface

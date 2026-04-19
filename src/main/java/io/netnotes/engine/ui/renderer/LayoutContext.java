@@ -1,11 +1,10 @@
-package io.netnotes.engine.ui.renderer.layout;
+package io.netnotes.engine.ui.renderer;
 
 import java.util.List;
 
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
 
 public abstract class LayoutContext<
     B extends BatchBuilder<S>,
@@ -19,10 +18,10 @@ public abstract class LayoutContext<
 > {
     private L node   = null;
     private L parent = null;
-    protected boolean parentEffectivelyVisible = true;
+
+    protected boolean parentEffectivelyHidden = false;
+    protected boolean parentEffectivelyInvisible = false;
     private S measuredContentBounds = null;
-
-
     public LayoutContext() {}
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -30,15 +29,24 @@ public abstract class LayoutContext<
     public void initialize(L node) {
         this.node   = node;
         this.parent = node.getParent();
-        this.parentEffectivelyVisible = true;
+        this.parentEffectivelyHidden = false;
+        this.parentEffectivelyInvisible = false;
 
         if (parent != null) {
             LD parentCalculated = parent.getCalculatedLayout();
-            if (parentCalculated != null && parentCalculated.getEffectivelyVisible() != null) {
-                this.parentEffectivelyVisible = parentCalculated.getEffectivelyVisible();
-            } else {
-                this.parentEffectivelyVisible = parent.getRenderable().isEffectivelyVisible();
-            }
+            Boolean fromLayoutHidden = parentCalculated == null
+                ? null
+                : parentCalculated.getEffectivelyHidden();
+            Boolean fromLayoutInvisible = parentCalculated == null
+                ? null
+                : parentCalculated.getEffectivelyInvisible();
+
+            this.parentEffectivelyHidden = fromLayoutHidden != null
+                ? fromLayoutHidden
+                : parent.getRenderable().isEffectivelyHidden();
+            this.parentEffectivelyInvisible = fromLayoutInvisible != null
+                ? fromLayoutInvisible
+                : parent.getRenderable().isEffectivelyInvisible();
         }
     }
 
@@ -46,7 +54,8 @@ public abstract class LayoutContext<
         measuredContentBounds = null;
         this.node                   = null;
         this.parent                 = null;
-        this.parentEffectivelyVisible = true;
+        this.parentEffectivelyHidden = false;
+        this.parentEffectivelyInvisible = false;
     }
 
 
@@ -55,30 +64,31 @@ public abstract class LayoutContext<
     /**
      * The region within which this node should lay itself out.
      *
-     * Returns null if the parent is hidden — the callback must not produce
-     * geometry. Returns a valid region if the parent is invisible — the node
-     * still occupies space.
-     *
-     * Uses the parent's in-flight calculatedLayout if available (parent was
-     * dirty this pass), otherwise the live committed region.
-     *
      * The returned region is a fresh pool copy; callers are responsible for
      * recycling it.
      */
     public S getParentRegion() {
         if (parent == null) return null;
 
-        LD parentCalculated = parent.getCalculatedLayout();
-        if (parentCalculated != null && parentCalculated.hasRegion()) {
-            S copy = parent.getRenderable().getRegionPool().obtain();
-            copy.copyFrom(parentCalculated.getSpatialRegion());
-            return copy;
-        }
-
         return parent.getRenderable().getRegion();
     }
 
     // ── Current node geometry ─────────────────────────────────────────────────
+    public boolean isEffectivelyHidden(){
+        return parentEffectivelyHidden || isHidden();
+    }
+
+    public boolean isEffectivelyInvisible() {
+        return parentEffectivelyInvisible || isInvisible();
+    }
+
+    public boolean isHidden() {
+        return node.getRenderable().isHiddenDesired();
+    }
+
+    public boolean isInvisible() {
+        return node.getRenderable().isInvisibleDesired();
+    }
 
     public S getCurrentRegion() {
         R r = node.getRenderable();
@@ -142,7 +152,7 @@ public abstract class LayoutContext<
         L n = getNode();
         if (!n.isFloating()) return null;
         R anchor = n.getPositionAnchor();
-        if (anchor == null || anchor.isHidden()) return null;
+        if (anchor == null || anchor.isEffectivelyHidden()) return null;
         return anchor.getAbsoluteRegion();
     }
 
@@ -150,13 +160,15 @@ public abstract class LayoutContext<
         L n = getNode();
         if (!n.isFloating()) return null;
         R anchor = n.getPositionAnchor();
-        if (anchor == null || anchor.isHidden()) return null;
+        if (anchor == null || anchor.isEffectivelyHidden()) return null;
         return anchor.getRegion();
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
 
-    public boolean getParentEffectivelyVisible() { return parentEffectivelyVisible; }
+
+    public boolean getParentEffectivelyHidden()  { return parentEffectivelyHidden; }
+    public boolean getParentEffectivelyInvisible() { return parentEffectivelyInvisible; }
     public R       getRenderable()               { return node.getRenderable(); }
 
     protected L getNode()    { return node; }

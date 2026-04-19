@@ -44,8 +44,8 @@ import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
 /**
  * IODaemon - Socket manager for daemon connection
@@ -197,7 +197,7 @@ public class IODaemon extends FlowProcess {
         SerializedVirtualExecutor exec = deviceStream.getWriteExec();
 
         if(!exec.isShutdown()){
-            exec.executeFireAndForget(() -> {
+            exec.runRentrant(() -> {
                 NoteBytesWriter writer = deviceStream.getWriter();
              
                 if (writer == null) {
@@ -472,7 +472,7 @@ public class IODaemon extends FlowProcess {
         // Dispatch using message map
         MessageExecutor executor = m_execMsgMap.get(typeBytes);
         if (executor != null) {
-            daemonInternalExec.executeFireAndForget(()->{
+            daemonInternalExec.runRentrant(()->{
                 executor.execute(map);
             });
         } else {

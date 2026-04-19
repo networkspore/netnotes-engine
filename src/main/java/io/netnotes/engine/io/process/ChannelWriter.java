@@ -3,7 +3,7 @@ package io.netnotes.engine.io.process;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.engine.utils.streams.StreamUtils;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.noteBytes.processing.NoteBytesWriter;
 
 public class ChannelWriter{

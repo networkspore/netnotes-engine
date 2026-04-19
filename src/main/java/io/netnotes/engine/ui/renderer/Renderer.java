@@ -21,7 +21,7 @@ import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.containers.*;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;

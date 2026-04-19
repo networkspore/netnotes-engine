@@ -1,18 +1,16 @@
-package io.netnotes.engine.ui;
+package io.netnotes.engine.ui.renderer;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.SpatialPoint;
+import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
-import io.netnotes.engine.ui.renderer.layout.LayoutContext;
-import io.netnotes.engine.ui.renderer.layout.LayoutData;
 
 public class FloatingLayerManager<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,P,S,?,LC,LD,?,LCB,?,?,?,R>,
+    R extends Renderable<B,P,S,?,LC,LD,LCB,?,?,?,R>,
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>,
     LC extends LayoutContext<B,R,P,S,LD,LCB,LC,?>,
@@ -57,7 +55,7 @@ public class FloatingLayerManager<
             .thenComparingInt(R::getZOrder));
         
         for (R element : sorted) {
-            if (element.isEffectivelyVisible()) {
+            if (element.isVisible()){
                 element.toBatch(batch, viewportRegion);
             }
         }

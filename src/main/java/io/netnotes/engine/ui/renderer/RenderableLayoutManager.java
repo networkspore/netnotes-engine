@@ -1,20 +1,15 @@
 package io.netnotes.engine.ui.renderer;
 
-import io.netnotes.engine.ui.FloatingLayerManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.renderer.Renderable.GroupStateEntry;
 import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
-import io.netnotes.engine.ui.renderer.layout.LayoutContext;
-import io.netnotes.engine.ui.renderer.layout.LayoutData;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup;
-import io.netnotes.engine.ui.renderer.layout.LayoutNode;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
-import io.netnotes.engine.utils.virtualExecutors.SerializedDebouncedExecutor;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedDebouncedExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -117,11 +112,16 @@ public abstract class RenderableLayoutManager<
 
     protected Set<L> dirtyLayoutNodes   = new LinkedHashSet<>();
     protected Set<L> dirtyFloatingNodes = new LinkedHashSet<>();
+    // Nodes selected for the active pass that have not yet been committed.
+    private Set<L> currentPassNodes = null;
+    // Mutable traversal for the active pass; supports mid-pass subtree injection.
+    private List<L> currentPassTraversal = null;
+    // Index of the next node to process in currentPassTraversal.
+    private int currentPassCursor = 0;
 
     // ── Runtime state ─────────────────────────────────────────────────────────
 
     private volatile boolean batchingRequests = false;
-    private boolean drainingLayout            = false;
 
     /**
      * True while a layout pass is executing. Read by Renderable.invalidate()
@@ -129,6 +129,8 @@ public abstract class RenderableLayoutManager<
      * once from layoutStateListener(false) when the pass completes.
      */
     private boolean layoutExecuting = false;
+    private final Deque<Runnable> deferredInvalidations = new ArrayDeque<>();
+    private final Deque<Runnable> deferredTreeMutations = new ArrayDeque<>();
 
     private final Set<R> committingNodes     = new LinkedHashSet<>();
     private Consumer<Boolean> layoutStateListener = null;
@@ -184,13 +186,7 @@ public abstract class RenderableLayoutManager<
      * @param layoutCallback  fires top-down during the pass, or null
      */
     public void registerRenderable(R renderable, LCB layoutCallback) {
-        if(uiExecutor.isCurrentThread()){
-            registerRenderableInternal(renderable, layoutCallback);
-
-        }else{
-            uiExecutor.executeFireAndForget(() -> registerRenderableInternal(renderable, layoutCallback));
-            return;
-        }
+        uiExecutor.runRentrant(() -> registerRenderableInternal(renderable, layoutCallback));
     }
 
     private void registerRenderableInternal( R renderable, LCB layoutCallback ) {
@@ -236,11 +232,34 @@ public abstract class RenderableLayoutManager<
             GSE    groupState = entry.getValue();
 
             G group = groupRegistry.computeIfAbsent(groupId, id -> createEmptyGroup(id));
-            ownerNode.addOwnedGroup(group);
+            L existingOwner = group.getOwner();
+            if (existingOwner == null) {
+                ownerNode.addOwnedGroup(group);
+            } else if (existingOwner != ownerNode) {
+                logFailureDiagnosticThrottled(
+                    "group-owner-conflict-pending:" + groupId,
+                    () -> String.format(
+                        "[LayoutManager:%s] pending group '%s' owner conflict: existing=%s attempted=%s",
+                        containerName, groupId, existingOwner.getName(), ownerNode.getName()));
+                continue;
+            }
 
             for (R member : groupState.getMembers()) {
                 L memberNode = renderableRegistry.get(member);
-                if (memberNode != null && memberNode.getMemberGroup() != group) {
+                if (memberNode == null) continue;
+
+                L memberParent = memberNode.getParent();
+                if (memberParent != ownerNode) {
+                    String memberParentName = memberParent != null ? memberParent.getName() : "<none>";
+                    logFailureDiagnosticThrottled(
+                        "group-owner-member-parent-mismatch-pending:" + groupId + ":" + memberNode.getName(),
+                        () -> String.format(
+                            "[LayoutManager:%s] skipping member %s for group '%s': owner=%s memberParent=%s",
+                            containerName, memberNode.getName(), groupId, ownerNode.getName(), memberParentName));
+                    continue;
+                }
+
+                if (memberNode.getMemberGroup() != group) {
                     memberNode.setMemberGroup(group);
                 }
             }
@@ -258,8 +277,7 @@ public abstract class RenderableLayoutManager<
     }
 
     public void unregisterRenderable(R renderable) {
-        if (isCurrentThread()) unregisterRenderableInternal(renderable);
-        else uiExecutor.executeFireAndForget(() -> unregisterRenderableInternal(renderable));
+       uiExecutor.runRentrant(() -> unregisterRenderableInternal(renderable));
     }
 
     private void unregisterRenderableInternal(R renderable) {
@@ -297,7 +315,15 @@ public abstract class RenderableLayoutManager<
 
         for (R child : new ArrayList<>(renderable.getChildren())) {
             L childNode = renderableRegistry.remove(child);
-            if (childNode != null) cleanupNode(childNode);
+            if (childNode != null) {
+                cleanupNode(childNode);
+                // Mirror what unregisterRenderableInternal() does for the top-level node.
+                // Without this, descendants are stripped from the registry silently —
+                // their clearLayoutManager(), notifyRemovedFromLayout, onRemovedFromLayout(),
+                // and damage recycling are never called.
+                child.advanceRenderPhase(RenderPhase.DETACHED);
+                child.removedFromLayout();
+            }
         }
 
         dirtyLayoutNodes.remove(node);
@@ -306,6 +332,7 @@ public abstract class RenderableLayoutManager<
             parent.removeChild(node);
             dirtyAffectedAncestors(parent);
         }
+        requestLayout();
     }
 
     protected void buildParentChildRelations(L node) {
@@ -326,11 +353,7 @@ public abstract class RenderableLayoutManager<
     // =========================================================================
 
     public void markLayoutDirty(R renderable) {
-        if (!isCurrentThread()) {
-            uiExecutor.executeFireAndForget(() -> markLayoutDirtyInternal(renderable));
-        } else {
-            markLayoutDirtyInternal(renderable);
-        }
+        uiExecutor.runRentrant(() -> markLayoutDirtyInternal(renderable));
     }
 
     public void markLayoutDirtyImmediate(R renderable) {
@@ -366,13 +389,13 @@ public abstract class RenderableLayoutManager<
      * Content-sized nodes dirty ancestors upward.
      */
     private void addToDirtySet(L node) {
-        G group = node.getMemberGroup();
-        if (group != null) {
-            for (L member : group.getMembers()) {
+        G memberGroup = node.getMemberGroup();
+        if (memberGroup != null) {
+            for (L member : memberGroup.getMembers()) {
                 dirtyLayoutNodes.add(member);
                 dirtyAffectedAncestors(member);
             }
-            L owner = group.getOwner();
+            L owner = memberGroup.getOwner();
             if (owner != null) {
                 dirtyLayoutNodes.add(owner);
                 dirtyAffectedAncestors(owner);
@@ -380,6 +403,15 @@ public abstract class RenderableLayoutManager<
         } else {
             dirtyLayoutNodes.add(node);
             dirtyAffectedAncestors(node);
+            // Fan out to owned group members — the group callback will re-fire
+            // for this owner, so members need to be in the pass and their
+            // content-sized ancestors need accurate geometry.
+            for (G ownedGroup : node.getOwnedGroups()) {
+                for (L member : ownedGroup.getMembers()) {
+                    dirtyLayoutNodes.add(member);
+                    dirtyAffectedAncestors(member);
+                }
+            }
         }
     }
 
@@ -435,7 +467,36 @@ public abstract class RenderableLayoutManager<
         return !dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty();
     }
 
-    public boolean isLayoutExecuting() { return drainingLayout; }
+
+    /**
+     * Queue a structural tree mutation to run after the current pass.
+     * If no pass is active, the mutation runs immediately.
+     */
+    public void runWhenLayoutIdle(Runnable mutation) {
+        if (mutation == null) return;
+        if (!isCurrentThread()) {
+            uiExecutor.runLater(() -> runWhenLayoutIdle(mutation));
+            return;
+        }
+        if (layoutExecuting) {
+            deferredTreeMutations.addLast(mutation);
+            return;
+        }
+        mutation.run();
+    }
+
+    public void invalidateWhenLayoutIdle(Runnable invalidation) {
+        if(invalidation == null) return;
+        if(!isCurrentThread()){
+            uiExecutor.runLater(()->invalidateWhenLayoutIdle(invalidation));
+            return;
+        }
+        if(layoutExecuting){
+            deferredInvalidations.addLast(invalidation);
+            return;
+        }
+        invalidation.run();
+    }
 
     // =========================================================================
     // PASS EXECUTION
@@ -448,12 +509,14 @@ public abstract class RenderableLayoutManager<
         } finally {
             if (layoutStateListener != null) layoutStateListener.accept(false);
         }
+        drainDeferredTreeMutations();
     }
+
+
 
     protected final void performUpdateInternal() {
         long startTime = System.nanoTime();
 
-        // Swap dirty sets — mid-pass mutations go into the next-pass sets
         Set<L> currentLayoutDirty   = dirtyLayoutNodes;
         Set<L> currentFloatingDirty = dirtyFloatingNodes;
         dirtyLayoutNodes   = new LinkedHashSet<>();
@@ -471,29 +534,34 @@ public abstract class RenderableLayoutManager<
                 summarizeNodes(allDirty)));
         }
 
-        drainingLayout  = true;
+
         layoutExecuting = true;
+        currentPassNodes = allDirty;          // expose to isInCurrentPass()
         try {
             if (!allDirty.isEmpty()) {
                 try {
                     performUnifiedLayoutUpdate(allDirty);
                     onAfterLayoutPass(allDirty);
                 } catch (Exception e) {
-                    dirtyLayoutNodes.addAll(currentLayoutDirty);
-                    dirtyFloatingNodes.addAll(currentFloatingDirty);
                     Log.logError(String.format(
                         "[LayoutManager:%s] layout pass failed (nodes=%s)",
                         containerName, summarizeNodes(allDirty)), e);
+                    emmergencyReset(allDirty, currentLayoutDirty, currentFloatingDirty);
                     throw e;
                 }
             }
             applyPendingFocusRequest();
         } finally {
-            drainingLayout  = false;
-            layoutExecuting = false;
+            layoutExecuting  = false;
+            currentPassNodes = null;          // pass is over
+            currentPassTraversal = null;
+            currentPassCursor = 0;
         }
 
+        drainDefferedInvalidations();
+   
         long endTime = System.nanoTime();
+        
         double ms = (endTime - startTime) / 1_000_000.0;
         long nextDebounce = calculateAdaptiveDebounce(ms, dirtyCount);
         setDebounceDelay(nextDebounce);
@@ -504,10 +572,55 @@ public abstract class RenderableLayoutManager<
                 containerName, ms, dirtyCount, nextDebounce));
         }
 
-        // If mid-pass mutations produced new dirty nodes, schedule follow-up
         if (!dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty()) {
             requestLayout();
         }
+    }
+
+    private void emmergencyReset(
+        Set<L> allDirty, 
+        Set<L> currentLayoutDirty, 
+        Set<L> currentFloatingDirty
+    ){
+        for (L node : allDirty) {
+            node.clear();
+            node.setInFlightContext(null);
+        }
+        committingNodes.clear(); 
+        dirtyLayoutNodes.addAll(currentLayoutDirty);
+        dirtyFloatingNodes.addAll(currentFloatingDirty);
+    }
+
+    private void drainDeferredTreeMutations() {
+        while (!deferredTreeMutations.isEmpty()) {
+            Runnable mutation = deferredTreeMutations.pollFirst();
+            if (mutation == null) continue;
+            try {
+                mutation.run();
+            } catch (Exception e) {
+                Log.logError("[LayoutManager] deferred tree mutation failed", e);
+            }
+        }
+    }
+
+    protected void drainDefferedInvalidations(){
+        while(!deferredInvalidations.isEmpty()){
+            Runnable invalidation = deferredInvalidations.pollFirst();
+            if(invalidation == null) continue;
+            try{
+                invalidation.run();
+            } catch (Exception e){
+                Log.logError("[LayoutManager] deferred invalidation failed", e);
+            }
+        }
+    }
+
+    public boolean isInCurrentPass(R renderable) {
+        Set<L> pass = currentPassNodes;
+        if (pass == null) return false;
+        L node = renderableRegistry.get(renderable);
+        if (node == null) node = floatingRegistry.get(renderable);
+        return node != null && pass.contains(node);
     }
 
     protected void onAfterLayoutPass(Set<L> processedNodes) {}
@@ -517,19 +630,10 @@ public abstract class RenderableLayoutManager<
     // =========================================================================
 
     protected void performUnifiedLayoutUpdate(Set<L> dirtyNodes) {
-        // Reset all per-pass state on groups and nodes
-        for (G group : groupRegistry.values()) {
-            group.resetForPass();
-        }
-
+      
         Set<L> allDirty = new LinkedHashSet<>(dirtyNodes);
         expandDescendantsInto(allDirty);
 
-        // Reset per-pass node state after expansion so newly added nodes
-        // are also reset
-        for (L node : allDirty) {
-            node.resetForPass();
-        }
 
         List<L> sorted = depthSort(new ArrayList<>(allDirty));
 
@@ -537,9 +641,11 @@ public abstract class RenderableLayoutManager<
             "[LayoutManager:%s] layout pass count=%d nodes=%s",
             containerName, sorted.size(), summarizeNodes(sorted)));
 
-        runContentPrePass(sorted);
-
-        for (L node : sorted) {
+        runContentPrePass(sorted, allDirty);
+        currentPassTraversal = sorted;
+        currentPassCursor = 0;
+        while (currentPassTraversal != null && currentPassCursor < currentPassTraversal.size()) {
+            L node = currentPassTraversal.get(currentPassCursor++);
             processNode(node);
         }
     }
@@ -551,54 +657,65 @@ public abstract class RenderableLayoutManager<
         LC context = node.getInFlightContext();
         if (context == null) {
             context = createRenderableContext(node);
-            context.initialize(node);
             node.setInFlightContext(context);
         }
+        context.initialize(node);
 
         node.calculateLayout(context);
-        applyNode(node);
+        applyNode(node); //calls node.clear
+        markNodeCommitted(node);
+
+        // calculatedLayout is null after this point. fireOwnedGroups
+        // reads committed renderable state, not calculatedLayout.
         fireOwnedGroups(node);
 
         context.reset();
         recycleLayoutContext(context);
         node.setInFlightContext(null);
-        node.clear();
     }
 
+    private void markNodeCommitted(L node) {
+        Set<L> pass = currentPassNodes;
+        if (pass != null) {
+            pass.remove(node);
+        }
+    }
 
-
- 
     private void fireOwnedGroups(L ownerNode) {
         for (G group : ownerNode.getOwnedGroups()) {
-            if (group.hasAppliedThisPass()) continue;
+            if (group.getOwner() != ownerNode) continue;
 
             List<L> members = group.getMembers();
             LC[] contexts = createContextArray(members.size());
 
             for (int i = 0; i < members.size(); i++) {
                 L member = members.get(i);
-                LC ctx = member.getInFlightContext(); // reuse if content-measured
+                // Invariant: owner in pass → all members in pass (enforced by
+                // addToDirtySet fan-out + expandDescendantsInto). Violation here
+                // means a structural bug in dirty propagation.
+                if (currentPassNodes != null && !currentPassNodes.contains(member)) {
+                    logFailureDiagnosticThrottled(
+                        "group-member-not-in-pass:" + member.getName(),
+                        () -> String.format(
+                            "[LayoutManager:%s] group '%s' member '%s' missing from pass — owner '%s' in pass but member was not expanded",
+                            containerName, group.getGroupId(), member.getName(), ownerNode.getName()));
+                }
+                LC ctx = member.getInFlightContext();
                 if (ctx == null) {
                     ctx = createRenderableContext(member);
-                    ctx.initialize(member);
                     member.setInFlightContext(ctx);
                 }
+                ctx.initialize(member);
                 contexts[i] = ctx;
             }
 
             group.executeLayoutCallback(contexts);
-            group.markAppliedThisPass();
+    
 
-            // Finalize each member's calculatedLayout after group callback
-            // populates it — processNode will applyNode each member when
-            // the top-down pass reaches them, contexts released then
-            for (L member : members) {
-                member.finalizeCalculatedLayout();
-            }
         }
     }
 
-    private void runContentPrePass(List<L> dirtyNodes) {
+    private void runContentPrePass(List<L> dirtyNodes, Set<L> passNodes) {
         // dirtyNodes is depth-sorted ascending — reverse gives leaves first,
         // guaranteeing children are measured before parents with no group
         // coordination needed (all members are individually dirty)
@@ -606,19 +723,53 @@ public abstract class RenderableLayoutManager<
             L node = dirtyNodes.get(i);
             if (!node.isSizedByContent()) continue;
             if (node.isContentMeasured()) continue;
-            measureSingleNode(node);
+            measureSingleNode(node, passNodes);
         }
     }
 
 
-    private void measureSingleNode(L node) {
-        if (node.isContentMeasured()) return;
-        LC context = createRenderableContext(node);
+    private LC measureSingleNode(L node, Set<L> passNodes) {
+        LC context = node.getInFlightContext();
+        if (context == null) {
+            context = createRenderableContext(node);
+            node.setInFlightContext(context);
+        }
         context.initialize(node);
-        node.setInFlightContext(context);
-        node.measureContent(context);
-        // context stays alive — released after layout callback in processNode
+
+        if (!node.isContentMeasured()) {
+            List<L> managedChildren = new ArrayList<>();
+            for (L child : node.getChildren()) {
+                if (passNodes.contains(child)) {
+                    managedChildren.add(child);
+                } else {
+                    Log.logMsg("[LayoutManager] skipping removed child during measurement: "
+                        + child.getName(), LOG_LEVEL);
+                }
+            }
+            LC[] childContexts = createContextArray(managedChildren.size());
+            for (int i = 0; i < managedChildren.size(); i++) {
+                childContexts[i] = ensureChildMeasurementContext(managedChildren.get(i), passNodes);
+            }
+            node.measureContent(context, childContexts);
+        }
+
+        return context;
     }
+
+    private LC ensureChildMeasurementContext(L child, Set<L> passNodes) {
+        LC context = child.getInFlightContext();
+        if (context != null) return context;
+
+        if (child.isSizedByContent() && !child.isContentMeasured()) {
+            return measureSingleNode(child, passNodes);
+        }
+
+        context = createRenderableContext(child);
+        context.initialize(child);
+        child.setInFlightContext(context);
+        return context;
+    }
+
 
     // =========================================================================
     // APPLY
@@ -630,22 +781,21 @@ public abstract class RenderableLayoutManager<
      *
      * VISIBILITY FLIP:
      * If the node just became effectively visible, its children have never been
-     * laid out while visible. Queue the subtree for a follow-up pass. The node
-     * itself is committed — the renderer knows it exists. Children render only
-     * after the follow-up pass gives them valid geometry.
+     * laid out while visible. The subtree is injected to the current pass. 
      *
      * DAMAGE:
      * invalidate() fires inside applyLayoutData() via applySpatialChange().
      * Because layoutExecuting is true, Renderable.invalidate() suppresses the
      * render request — damage accumulates and the render fires once from
      * layoutStateListener(false) when the pass completes.
+     * 
      */
     private void applyNode(L node) {
         LD calculatedLayout = node.getCalculatedLayout();
         if (calculatedLayout == null) return;
 
         R renderable = node.getRenderable();
-        boolean wasEffectivelyVisible = renderable.isEffectivelyVisible();
+        boolean wasEffectivelyVisible = !renderable.isEffectivelyHidden();
 
         if (calculatedLayout.hasRegion()) {
             applyParentAbsolutePosition(node, calculatedLayout);
@@ -654,7 +804,9 @@ public abstract class RenderableLayoutManager<
         renderable.applyLayoutData(calculatedLayout);
         renderable.advanceRenderPhase(RenderPhase.APPLYING);
 
-        boolean becameVisible = !wasEffectivelyVisible && renderable.isEffectivelyVisible();
+        boolean becameVisible = !wasEffectivelyVisible && !renderable.isEffectivelyHidden();
+        boolean becameHidden = wasEffectivelyVisible && renderable.isEffectivelyHidden();
+
         if (becameVisible) {
             logSummaryDiagnostic(String.format(
                 "[LayoutManager:%s] %s became visible — queueing subtree for follow-up pass",
@@ -662,22 +814,71 @@ public abstract class RenderableLayoutManager<
             for (R child : renderable.getChildren()) {
                 markLayoutDirtySubtree(child);
             }
+        }else if (becameHidden) {
+            for (R child : renderable.getChildren()) {
+                injectSubtreeIntoCurrentPass(child);
+            }
         }
-
+        
         committingNodes.add(renderable);
         node.clear();
+    }
+
+    private void injectSubtreeIntoCurrentPass(R renderable) {
+        L root = renderableRegistry.get(renderable);
+        if (root == null) return;
+
+        Set<L> passNodes = currentPassNodes;
+        List<L> traversal = currentPassTraversal;
+        if (passNodes == null || traversal == null) {
+            // No active traversal to inject into — queue normally for next pass.
+            markLayoutDirtySubtree(renderable);
+            return;
+        }
+
+        List<L> injected = new ArrayList<>();
+        collectSubtreeForCurrentPass(root, injected, passNodes);
+        if (injected.isEmpty()) return;
+
+        int insertionPoint = Math.max(0, Math.min(currentPassCursor, traversal.size()));
+        traversal.addAll(injected);
+
+        List<L> tail = depthSort(new ArrayList<>(traversal.subList(insertionPoint, traversal.size())));
+        for (int i = 0; i < tail.size(); i++) {
+            traversal.set(insertionPoint + i, tail.get(i));
+        }
+    }
+
+    private void collectSubtreeForCurrentPass(L node, List<L> injected, Set<L> passNodes) {
+        if (passNodes.add(node)) {
+            injected.add(node);
+        }
+        for (L child : node.getChildren()) {
+            collectSubtreeForCurrentPass(child, injected, passNodes);
+        }
     }
 
     private void applyParentAbsolutePosition(L node, LD calculatedLayout) {
         L parent = node.getParent();
         if (parent == null) return;
 
+        // Group pass: owner and member are committed together — parentCalculated
+        // may still be live if the owner hasn't been cleared yet.
         LD parentCalculated = parent.getCalculatedLayout();
         if (parentCalculated != null && parentCalculated.hasRegion()) {
             calculatedLayout.getSpatialRegion().setParentAbsolutePosition(
                 parentCalculated.getSpatialRegion().getAbsolutePosition());
             return;
         }
+
+        // Linear pass: parent was already committed (node.clear() ran) before we
+        // reach this child, so getRegion() reflects the freshly applied position.
+        // Assert depth ordering held — a child must never appear above its parent.
+        assert parent.getDepth() < node.getDepth()
+            : "[LayoutManager] depth-sort violated: parent " + parent.getName()
+            + " depth=" + parent.getDepth()
+            + " >= child " + node.getName()
+            + " depth=" + node.getDepth();
 
         R parentRenderable = parent.getRenderable();
         S parentRegion = parentRenderable.getRegion();
@@ -816,8 +1017,7 @@ public abstract class RenderableLayoutManager<
     // =========================================================================
 
     public void createGroup(String groupId) {
-        if (isCurrentThread()) createGroupIfAbsent(groupId);
-        else uiExecutor.executeFireAndForget(() -> createGroupIfAbsent(groupId));
+        uiExecutor.runRentrant(() -> createGroupIfAbsent(groupId));
     }
 
     private G createGroupIfAbsent(String groupId) {
@@ -825,25 +1025,69 @@ public abstract class RenderableLayoutManager<
     }
 
     public void addToGroup(R renderable, String groupId) {
-        if (isCurrentThread()) addToGroupInternal(renderable, groupId);
-        else uiExecutor.executeFireAndForget(() -> addToGroupInternal(renderable, groupId));
+        uiExecutor.runRentrant(() -> addToGroupInternal(renderable, groupId));
     }
 
     private void addToGroupInternal(R renderable, String groupId) {
         L node  = renderableRegistry.get(renderable);
         G group = groupRegistry.computeIfAbsent(groupId, id -> createEmptyGroup(id));
         if (node == null) return;
-        node.setMemberGroup(group);
-        L parent = node.getParent();
-        if (parent != null && !parent.getOwnedGroups().contains(group)) {
-            parent.addOwnedGroup(group);
+
+        if (!bindGroupToMemberParent(node, group, groupId)) {
+            return;
         }
+        node.setMemberGroup(group);
+
+        // If the group has no layout callback yet, try to recover it from the
+        // owning renderable's local childGroups map. This handles the case where
+        // a child is added to a stack that was already registered with the manager
+        // — registerPendingGroups() only runs once at registration time and will
+        /*  not have seen this group if it was created afterward.
+        if (!group.hasLayoutCallback() && parent != null) {
+            R ownerRenderable = parent.getRenderable();
+            GSE pendingState  = ownerRenderable.getChildGroupState(groupId);
+            if (pendingState != null && pendingState.getLayoutCallback() != null) {
+                group.setLayoutCallback(pendingState.getLayoutCallback());
+            }
+        }*/
+
         markLayoutDirty(renderable);
     }
 
+    private boolean bindGroupToMemberParent(L memberNode, G group, String groupId) {
+        L parent = memberNode.getParent();
+        if (parent == null) {
+            logFailureDiagnosticThrottled(
+                "group-member-without-parent:" + groupId + ":" + memberNode.getName(),
+                () -> String.format(
+                    "[LayoutManager:%s] cannot add %s to group '%s': node has no parent",
+                    containerName, memberNode.getName(), groupId));
+            return false;
+        }
+
+        L owner = group.getOwner();
+        if (owner == null) {
+            parent.addOwnedGroup(group);
+            return true;
+        }
+
+        if (owner != parent) {
+            logFailureDiagnosticThrottled(
+                "group-owner-member-parent-mismatch:" + groupId + ":" + memberNode.getName(),
+                () -> String.format(
+                    "[LayoutManager:%s] cannot add %s to group '%s': owner=%s memberParent=%s",
+                    containerName, memberNode.getName(), groupId, owner.getName(), parent.getName()));
+            return false;
+        }
+
+        if (!parent.getOwnedGroups().contains(group)) {
+            parent.addOwnedGroup(group);
+        }
+        return true;
+    }
+
     public void removeFromGroup(R renderable) {
-        if (isCurrentThread()) removeFromGroupInternal(renderable);
-        else uiExecutor.executeFireAndForget(() -> removeFromGroupInternal(renderable));
+        uiExecutor.runRentrant(() -> removeFromGroupInternal(renderable));
     }
 
     private void removeFromGroupInternal(R renderable) {
@@ -859,8 +1103,7 @@ public abstract class RenderableLayoutManager<
     }
 
     public void destroyGroup(String groupId) {
-        if (isCurrentThread()) destroyGroupInternal(groupId);
-        else uiExecutor.executeFireAndForget(() -> destroyGroupInternal(groupId));
+        uiExecutor.runRentrant(() -> destroyGroupInternal(groupId));
     }
 
     private void destroyGroupInternal(String groupId) {
@@ -873,8 +1116,7 @@ public abstract class RenderableLayoutManager<
     }
 
     public void setGroupLayoutCallback(String groupId, GCB callback) {
-        if (isCurrentThread()) setGroupLayoutCallbackInternal(groupId, callback);
-        else uiExecutor.executeFireAndForget(() -> setGroupLayoutCallbackInternal(groupId, callback));
+        uiExecutor.runRentrant(() -> setGroupLayoutCallbackInternal(groupId, callback));
     }
 
     private void setGroupLayoutCallbackInternal(String groupId, GCB callback) {
@@ -1056,21 +1298,34 @@ public abstract class RenderableLayoutManager<
     // =========================================================================
 
     private class ManagerHandle implements RenderableLayoutManagerHandle<R, LCB, G, GCB> {
+       
+        private void runMutation(Runnable mutation) {
+            uiExecutor.runRentrant(() -> runMutation(mutation)); 
+        }
+
+        @Override public boolean isInCurrentPass(R r)           { return RenderableLayoutManager.this.isInCurrentPass(r); }
         @Override public void markLayoutDirty(R r)              { RenderableLayoutManager.this.markLayoutDirty(r); }
         @Override public void markLayoutDirtyImmediate(R r)     { RenderableLayoutManager.this.markLayoutDirtyImmediate(r); }
         @Override public CompletableFuture<Void> flushLayout()  { return RenderableLayoutManager.this.flushLayout(); }
-        @Override public void migrateToFloating(R r, R anchor)  { RenderableLayoutManager.this.migrateToFloating(r, anchor); }
-        @Override public void migrateToRegular(R r)             { RenderableLayoutManager.this.migrateToRegular(r); }
-        @Override public void registerChild(R child, LCB layoutCb) {
-            RenderableLayoutManager.this.registerRenderable(child, layoutCb);
+       
+        @Override public void migrateToFloating(R r, R anchor) { 
+            RenderableLayoutManager.this.runWhenLayoutIdle(
+                () ->RenderableLayoutManager.this.migrateToFloating(r, anchor)); 
         }
-        @Override public void unregister(R r)                   { RenderableLayoutManager.this.unregisterRenderable(r); }
-        @Override public void beginBatch()                      { RenderableLayoutManager.this.beginRequestBatch(); }
-        @Override public void endBatch()                        { RenderableLayoutManager.this.endRequestBatch(); }
-        @Override public boolean isLayoutExecuting()            { return RenderableLayoutManager.this.isCurrentlyExecutingLayout(); }
-
+        @Override public void migrateToRegular(R r) { 
+            RenderableLayoutManager.this.runWhenLayoutIdle(
+                () -> RenderableLayoutManager.this.migrateToRegular(r)); 
+        }
+        @Override public void registerChild(R child, LCB layoutCb) {
+            RenderableLayoutManager.this.runWhenLayoutIdle(
+                () -> RenderableLayoutManager.this.registerRenderableInternal(child, layoutCb));
+        }
+        @Override public void unregister(R r)                   { 
+            RenderableLayoutManager.this.runWhenLayoutIdle(
+                () -> RenderableLayoutManager.this.unregisterRenderableInternal(r));
+        }
         @Override public void requestFocus(R r) {
-            consumeFocusDesired(r);
+            RenderableLayoutManager.this.consumeFocusDesired(r);
             if (focusRequester != null && r != null && r.isFocusable()) {
                 if (pendingFocusRequest == r) pendingFocusRequest = null;
                 focusRequester.accept(r);
@@ -1079,11 +1334,17 @@ public abstract class RenderableLayoutManager<
             }
         }
 
-        @Override public void createLayoutGroup(String id)              { RenderableLayoutManager.this.createGroup(id); }
-        @Override public void addToLayoutGroup(R r, String id)          { RenderableLayoutManager.this.addToGroup(r, id); }
-        @Override public void removeLayoutGroupMember(R r)              { RenderableLayoutManager.this.removeFromGroup(r); }
-        @Override public void destroyLayoutGroup(String id)             { RenderableLayoutManager.this.destroyGroup(id); }
-        @Override public void setGroupLayoutCallback(String id, GCB cb) { RenderableLayoutManager.this.setGroupLayoutCallback(id, cb); }
+        @Override public void createLayoutGroup(String id)              { runMutation(()->RenderableLayoutManager.this.createGroup(id));  }
+        @Override public void addToLayoutGroup(R r, String id)          { runMutation(()->RenderableLayoutManager.this.addToGroup(r, id)); }
+        @Override public void removeLayoutGroupMember(R r)              { runMutation(()->RenderableLayoutManager.this.removeFromGroup(r)); }
+        @Override public void destroyLayoutGroup(String id)             { runMutation(()->RenderableLayoutManager.this.destroyGroup(id)); }
+        @Override public void setGroupLayoutCallback(String id, GCB cb) { runMutation(()->RenderableLayoutManager.this.setGroupLayoutCallback(id, cb)); }
         @Override public String getLayoutGroupIdByRenderable(R r)       { return RenderableLayoutManager.this.getRenderableGroupId(r); }
+        
+        @Override public void beginBatch()                      { RenderableLayoutManager.this.beginRequestBatch(); }
+        @Override public void endBatch()                        { RenderableLayoutManager.this.endRequestBatch(); }
+        @Override public boolean isLayoutExecuting()            { return RenderableLayoutManager.this.isCurrentlyExecutingLayout(); }
+        @Override public void runWhenLayoutIdle(Runnable mutation) { RenderableLayoutManager.this.runWhenLayoutIdle(mutation); }
+        @Override public void deferInvalidateWhenLayoutIdle(Runnable invalidation) { RenderableLayoutManager.this.invalidateWhenLayoutIdle(invalidation); }
     }
 }

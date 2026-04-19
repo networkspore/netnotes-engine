@@ -7,7 +7,7 @@ import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -70,6 +70,13 @@ public class BitFlagStateMachine {
             return false;
         }
 
+        public boolean hasAnyState(int... stateBits) {
+            for (int bit : stateBits) {
+                if (hasState(bit)) return true;
+            }
+            return false;
+        }
+
         @Override
         public String toString() {
             return String.format("StateSnapshot[version=%d, state=%s]", 
@@ -112,7 +119,7 @@ public class BitFlagStateMachine {
         if(serialExec == null){
             run.run();
         }else{
-            serialExec.executeFireAndForget(run);
+            serialExec.runRentrant(run);
         }
     }
 

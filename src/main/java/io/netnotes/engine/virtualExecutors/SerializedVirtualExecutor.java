@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils.virtualExecutors;
+package io.netnotes.engine.virtualExecutors;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -124,8 +124,15 @@ public final class SerializedVirtualExecutor {
         return submit(runnable, null);
     }
 
+    public void runLater(Runnable runnable){
+        if (shutdown.get()) {
+            return; // Just drop it
+        }
+        
+        queue.add(new SimpleTask(runnable));
+    }
    
-     public void executeFireAndForget(Runnable runnable) {
+    public void runRentrant(Runnable runnable) {
         if (onDispatcherThread.get()) {
             try{
                 runnable.run();

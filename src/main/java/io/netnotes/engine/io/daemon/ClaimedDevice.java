@@ -10,8 +10,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.noteBytes.NoteBytesObject;
@@ -448,7 +448,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             return;
         }
         
-        controlWriteExec.executeFireAndForget(() -> {
+        controlWriteExec.runRentrant(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
                 Log.logMsg("[ClaimedDevice] Control stream not yet ready, waiting: " + deviceId, LOG_LEVEL);
@@ -494,7 +494,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
             return;
         }
         
-        controlWriteExec.executeFireAndForget(() -> {
+        controlWriteExec.runRentrant(() -> {
             NoteBytesWriter controlStreamWriter = outgoingControlStream.getWriter();
             if (controlStreamWriter == null) {
                 Log.logMsg("[ClaimedDevice] Control stream not yet ready for ack, waiting: " + deviceId, LOG_LEVEL);

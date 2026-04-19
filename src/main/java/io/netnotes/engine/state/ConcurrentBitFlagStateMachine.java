@@ -8,7 +8,7 @@ import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -1059,11 +1059,7 @@ public class ConcurrentBitFlagStateMachine {
         if(serialExec == null){
             run.run();
         }else{
-            if(serialExec.isCurrentThread()){
-                run.run();
-            }else{
-                serialExec.executeFireAndForget(run);
-            }
+            serialExec.runRentrant(run);
         }
     }
 

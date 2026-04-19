@@ -8,8 +8,8 @@ import io.netnotes.engine.io.daemon.ClaimedDevice;
 import io.netnotes.engine.io.input.IEventFactory;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 

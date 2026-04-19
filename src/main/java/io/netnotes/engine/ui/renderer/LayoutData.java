@@ -1,8 +1,6 @@
-package io.netnotes.engine.ui.renderer.layout;
+package io.netnotes.engine.ui.renderer;
 
 import io.netnotes.engine.ui.SpatialRegion;
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
 
 /**
  * LayoutData - Desired output state from layout calculation
@@ -15,7 +13,7 @@ import io.netnotes.engine.ui.renderer.Renderable;
  */
 public abstract class LayoutData<
     B extends BatchBuilder<S>,
-    R extends Renderable<B,?,S,?,?,LD,?,?,?,?,?,R>,
+    R extends Renderable<B,?,S,?,?,LD,?,?,?,?,R>,
     S extends SpatialRegion<?,S>,
     LD extends LayoutData<B,R,S,LD,LDB>,
     LDB extends LayoutData.Builder<B,R,S,LD,LDB>
@@ -28,8 +26,8 @@ public abstract class LayoutData<
     protected Boolean invisible;
     protected Boolean hidden;
     protected Boolean enabled;
-    protected Boolean effectivelyVisible;
-    protected Boolean effectivelyEnabled;
+    protected Boolean effectivelyHidden;
+    protected Boolean effectivelyInvisible;
 
     protected LayoutData(){}
 
@@ -48,8 +46,9 @@ public abstract class LayoutData<
     public Boolean getHidden() { return hidden; }
     public Boolean getEnabled() { return enabled; }
 
-    public Boolean getEffectivelyVisible() { return effectivelyVisible; }
-    public Boolean getEffectivelyEnabled() { return effectivelyEnabled; }
+
+    public Boolean getEffectivelyHidden() { return effectivelyHidden; }
+    public Boolean getEffectivelyInvisible() { return effectivelyInvisible; }
 
     
     public boolean hasSpatialChanges() { return spatialRegion != null; }
@@ -63,8 +62,8 @@ public abstract class LayoutData<
         invisible = null;
         hidden = null;
         enabled = null;
-        effectivelyVisible = null;
-        effectivelyEnabled = null;
+        effectivelyHidden = null;
+        effectivelyInvisible = null;
         axisChangeMask = 0;
     }
     /**
@@ -91,13 +90,15 @@ public abstract class LayoutData<
         this.enabled = enabled;
     }
 
-    public void setEffectivelyVisible(boolean effectivelyVisible) {
-        this.effectivelyVisible = effectivelyVisible;
+    void setEffectivelyHidden(boolean effectivelyHidden) {
+        this.effectivelyHidden = effectivelyHidden;
     }
 
-    public void setEffectivelyEnabled(boolean effectivelyEnabled) {
-        this.effectivelyEnabled = effectivelyEnabled;
+    void setEffectivelyInvisible(boolean effectivelyInvisible) {
+        this.effectivelyInvisible = effectivelyInvisible;
     }
+
+
 
   //  public void setRenderable(boolean renderable) {
    //     this.renderable = renderable;
@@ -140,8 +141,8 @@ public abstract class LayoutData<
     }
     
     public boolean hasStateChanges() {
-        return invisible != null || hidden != null || enabled != null ||
-            effectivelyVisible != null || effectivelyEnabled != null; //|| renderable != null;
+        return invisible != null || hidden != null
+            || effectivelyHidden != null || effectivelyInvisible != null; 
     }
     
     
@@ -163,7 +164,7 @@ public abstract class LayoutData<
      */
     public abstract static class Builder<
         B extends BatchBuilder<S>,
-        R extends Renderable<B,?,S,?,?,LD,?,?,?,?,?,R>,
+        R extends Renderable<B,?,S,?,?,LD,?,?,?,?,R>,
         S extends SpatialRegion<?,S>,
         LD extends LayoutData<B,R,S,LD,LDB>,
         LDB extends LayoutData.Builder<B,R,S,LD,LDB>

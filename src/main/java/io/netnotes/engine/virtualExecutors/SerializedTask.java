@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils.virtualExecutors;
+package io.netnotes.engine.virtualExecutors;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;

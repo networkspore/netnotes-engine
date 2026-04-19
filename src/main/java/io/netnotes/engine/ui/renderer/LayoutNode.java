@@ -1,14 +1,13 @@
-package io.netnotes.engine.ui.renderer.layout;
+package io.netnotes.engine.ui.renderer;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
-import io.netnotes.engine.ui.renderer.RenderableStates;
+import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
+import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * LayoutNode - One node in the layout tree, paired 1:1 with a Renderable.
@@ -39,7 +38,7 @@ import io.netnotes.engine.ui.renderer.RenderableStates;
  * SINGLE COMMIT:
  * calculatedLayout is committed by applyNode() exactly once per pass.
  * Content callbacks and group callbacks only populate calculatedLayout —
- * they never touch apply. resetForPass() clears per-pass state.
+ * they never touch apply. clear() happens after apply state
  */
 public abstract class LayoutNode<
     B extends BatchBuilder<S>,
@@ -96,15 +95,7 @@ public abstract class LayoutNode<
     public void setInFlightContext(LC ctx) { this.inFlightContext = ctx; }
     // ── Per-pass reset ────────────────────────────────────────────────────────
 
-    /**
-     * Reset all per-pass state. Called by the manager at the start of each
-     * layout pass before any node is visited.
-     */
-    public void resetForPass() {
-        contentMeasured   = false;
-        inFlightContext   = null;
-    }
-    
+   
     public boolean isContentMeasured(){
         return contentMeasured;
     }
@@ -199,12 +190,13 @@ public abstract class LayoutNode<
      *
      * @param context a freshly initialised context for this node
      */
-    public void measureContent(LC context) {
+    public void measureContent(LC context, LC[] childContexts) {
         if (contentMeasured) return;
         contentMeasured = true;
 
         if (renderable.isSizedByContent()) {
-            renderable.measureContent(context);
+            S result = renderable.measureContent(childContexts);
+            context.setContentMeasurement(result);
         }
     }
 
@@ -218,6 +210,17 @@ public abstract class LayoutNode<
      * After this method returns, finalizeCalculatedLayout() is always called.
      */
     public void calculateLayout(LC context) {
+        if (calculatedLayout != null) {
+            // Pre-populated by a group callback. Individual callback must not fire.
+            // If this node is not a group member, that is a bug — log it.
+            if (!isGroupMember()) {
+                Log.logError("[LayoutNode:" + getName() +
+                    "] calculatedLayout pre-set but node is not a group member");
+            }
+            finalizeCalculatedLayout();
+            return;
+        }
+
         if (layoutCallback != null) {
             LD result = layoutCallback.calculate(context);
             if (result != null) {
@@ -234,7 +237,7 @@ public abstract class LayoutNode<
      *   1. Obtain a LayoutData from pool if still null
      *   2. Ensure a spatial region exists (fallback to requested or live)
      *   3. Flag all axes if none were flagged (first-frame guarantee)
-     *   4. Inject effectivelyVisible from the parent chain
+     *   4. Inject effective visibility states from the parent chain
      *
      * Called by:
      *   - calculateLayout() after the layout callback
@@ -254,8 +257,9 @@ public abstract class LayoutNode<
                 region = renderable.getRegion();
             }
             if (region == null) {
-                region = renderable.getRegionPool().obtain();
-                region.setToIdentity();
+                IllegalStateException t =  new IllegalStateException("Renderable.region is null");
+                Log.logError("[LayoutNode:" + renderable.getName() + "] finalizeCalculatedLayout", t);
+                throw t;
             }
             calculatedLayout.setSpatialRegion(region);
         }
@@ -268,45 +272,44 @@ public abstract class LayoutNode<
             }
         }
 
-        injectEffectiveStates(renderable.getStateMachine().getSnapshot());
+        injectEffectiveStates();
     }
 
-    private void injectEffectiveStates(StateSnapshot snap) {
-        boolean effectivelyVisible = true;
+    private void injectEffectiveStates() {
+        boolean parentEffectivelyHidden = false;
+        boolean parentEffectivelyInvisible = false;
 
         if (parent != null) {
-            LD parentCalculated = parent.getCalculatedLayout();
-            if (parentCalculated != null && parentCalculated.getEffectivelyVisible() != null) {
-                effectivelyVisible = parentCalculated.getEffectivelyVisible();
-            } else {
-                effectivelyVisible = parent.getRenderable().isEffectivelyVisible();
-            }
+            parentEffectivelyHidden = parent.getRenderable().isEffectivelyHidden();
+            parentEffectivelyInvisible = parent.getRenderable().isEffectivelyInvisible();
         }
 
-        boolean hiddenDesired    = resolveHiddenDesired(snap);
-        boolean invisibleDesired = resolveInvisibleDesired(snap);
-        effectivelyVisible = effectivelyVisible && !hiddenDesired && !invisibleDesired;
+        boolean hiddenDesired = resolveHiddenDesired();
+        boolean invisibleDesired = resolveInvisibleDesired();
+        boolean effectivelyHidden = parentEffectivelyHidden || hiddenDesired;
+        boolean effectivelyInvisible = parentEffectivelyInvisible || invisibleDesired;
 
-        calculatedLayout.setEffectivelyVisible(effectivelyVisible);
-
-        if (hiddenDesired != renderable.hasState(RenderableStates.STATE_HIDDEN)) {
-            calculatedLayout.setHidden(hiddenDesired);
+        boolean wasEffectivelyHidden = renderable.isEffectivelyHidden();
+        if(wasEffectivelyHidden != effectivelyHidden){
+            calculatedLayout.setEffectivelyHidden(effectivelyHidden);
         }
-        if (invisibleDesired != renderable.hasState(RenderableStates.STATE_INVISIBLE)) {
-            calculatedLayout.setInvisible(invisibleDesired);
+
+        boolean wasEffectivelyInvisible = renderable.isEffectivelyInvisible();
+        if(wasEffectivelyInvisible != effectivelyInvisible){
+            calculatedLayout.setEffectivelyInvisible(effectivelyInvisible);
         }
     }
 
-    private boolean resolveHiddenDesired(StateSnapshot snap) {
+    private boolean resolveHiddenDesired() {
         Boolean fromData = calculatedLayout.getHidden();
         return fromData != null ? fromData
-            : snap.hasState(RenderableStates.STATE_HIDDEN_DESIRED);
+            : renderable.hasState(RenderableStates.STATE_HIDDEN_DESIRED);
     }
 
-    private boolean resolveInvisibleDesired(StateSnapshot snap) {
+    private boolean resolveInvisibleDesired() {
         Boolean fromData = calculatedLayout.getInvisible();
         return fromData != null ? fromData
-            : snap.hasState(RenderableStates.STATE_INVISIBLE_DESIRED);
+            : renderable.hasState(RenderableStates.STATE_INVISIBLE_DESIRED);
     }
 
     // ── Post-apply cleanup ────────────────────────────────────────────────────
@@ -320,6 +323,8 @@ public abstract class LayoutNode<
             recycleLayoutData(calculatedLayout);
             calculatedLayout = null;
         }
+        contentMeasured = false;
+        inFlightContext = null;
     }
 
     // ── Abstract pool methods ─────────────────────────────────────────────────

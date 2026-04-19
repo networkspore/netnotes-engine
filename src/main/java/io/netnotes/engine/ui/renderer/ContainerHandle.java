@@ -14,11 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
-import io.netnotes.engine.ui.renderer.layout.LayoutContext;
-import io.netnotes.engine.ui.renderer.layout.LayoutData;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.daemon.ClientSession;
@@ -45,7 +42,6 @@ import io.netnotes.noteBytes.processing.NoteBytesWriter;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
-import io.netnotes.engine.ui.FloatingLayerManager;
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.ui.SpatialRegionPool;
@@ -60,8 +56,8 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
 import io.netnotes.engine.utils.streams.StreamUtils;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 
@@ -114,7 +110,6 @@ public abstract class ContainerHandle<
     BLD extends ContainerHandle.Builder<H,RP,S,CCFG,BLD>
 > extends FlowProcess {
     private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
-    private static final long DIAGNOSTIC_LOG_THROTTLE_MS = 250;
     private static final LogLevel ROUTINE_DIAGNOSTIC_LOG_LEVEL = LogLevel.GENERAL;
 
     // ===== CREATION PARAMETERS =====
@@ -156,8 +151,6 @@ public abstract class ContainerHandle<
     protected FocusTraversalStrategy strategy = FocusTraversalStrategy.TAB_INDEX_THEN_TREE;
     protected R focused = null;
     protected boolean manageFocus = true;
-    private boolean isLayoutInProgress = false;
-    private boolean wasRenderRequested = false;
 
     private final Map<String, Long> diagnosticLogTimes = new HashMap<>();
     // Event filtering
@@ -224,35 +217,15 @@ public abstract class ContainerHandle<
         Log.logMsg(message, level);
     }
 
-    private void logDiagnosticThrottled(
-        String key,
-        Supplier<String> messageSupplier,
-        RenderableLayoutManager.DiagnosticMode minimum,
-        LogLevel level
-    ) {
-        if (!isLayoutDiagnosticEnabled(minimum)) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        Long last = diagnosticLogTimes.get(key);
-        if (last != null && (now - last) < DIAGNOSTIC_LOG_THROTTLE_MS) {
-            return;
-        }
-        diagnosticLogTimes.put(key, now);
-        Log.logMsg(messageSupplier.get(), level);
-    }
 
     private String renderDiagnosticState() {
-        boolean managerExecuting = renderableLayoutManager.isLayoutExecuting();
-        boolean managerInProgress = isLayoutInProgress;
+        boolean managerExecuting = renderableLayoutManager.isCurrentlyExecutingLayout();
         boolean pendingLayout = renderableLayoutManager.hasPendingLayout();
         boolean needsRender = rootRenderable != null && rootRenderable.needsRender();
         boolean damageEmpty = damageAccumulator.isEmpty();
         return String.format(
-            "containerLayoutInProgress=%s, managerExecuting=%s, managerInProgress=%s, pendingLayout=%s, needsRender=%s, damageEmpty=%s",
-            isLayoutInProgress,
+            "managerExecuting=%s, pendingLayout=%s, needsRender=%s, damageEmpty=%s",
             managerExecuting,
-            managerInProgress,
             pendingLayout,
             needsRender,
             damageEmpty
@@ -300,7 +273,6 @@ public abstract class ContainerHandle<
         
         this.floatingLayerManager = createFloatingLayerManager();
         this.renderableLayoutManager = createRenderableLayoutManager(floatingLayerManager);
-        this.renderableLayoutManager.setLayoutStateListener(this::layoutStateListener);
         this.renderableLayoutManager.setFocusRequester(this::requestFocusInternal);
         setupRoutedMessageMap();
         setupEventHandlers();
@@ -857,7 +829,7 @@ public abstract class ContainerHandle<
             })
             .whenComplete((v, ex) -> {
                 if(ex != null){
-                    uiExecutor.executeFireAndForget(()->{
+                    uiExecutor.runLater(()->{
                         stateMachine.removeState(Container.STATE_CREATING);
                         stateMachine.addState(Container.STATE_STREAM_ERROR);
                         Log.logError("[ContainerHandle] Initialization failed: " + ex.getMessage());
@@ -944,7 +916,7 @@ public abstract class ContainerHandle<
         }else{
             S captured = region.copy();
             regionPool.recycle(region);
-            uiExecutor.executeFireAndForget(()->applyAllocatedRegionEventInternal(captured, isLayoutManaged, isOffScreen));
+            uiExecutor.runLater(()->applyAllocatedRegionEventInternal(captured, isLayoutManaged, isOffScreen));
         }
     }
 
@@ -1115,7 +1087,7 @@ public abstract class ContainerHandle<
 
 
     public void dispatchEvent(RoutedEvent event) {
-        uiExecutor.executeFireAndForget(()->{
+        uiExecutor.runRentrant(()->{
             Log.logImportant("[ContainerHandle:"+getName()+"] dispatchEvent: " + event.getClass().getSimpleName());
 
             if(containerPredicate != null && containerPredicate.test(event)){
@@ -1325,10 +1297,6 @@ public abstract class ContainerHandle<
         return renderingServicePath;
     }
 
-    protected void executeFireAndForget(Runnable run) {
-        uiExecutor.executeFireAndForget(run);
-    }
-
     protected CompletableFuture<Void> execute(Runnable run) {
         return uiExecutor.execute(run);
     }
@@ -1409,12 +1377,10 @@ public abstract class ContainerHandle<
     }
 
     protected void renderableRequestRender(R renderable) {
-        if(uiExecutor.isCurrentThread()){
-            renderableRequestRenderInternal(renderable);
-        }else{
-            uiExecutor.executeFireAndForget(()->renderableRequestRenderInternal(renderable));
-        }
+        uiExecutor.runRentrant(()->renderableRequestRenderInternal(renderable));
     }
+
+    private volatile boolean renderPendingAfterLayout = false;
 
     private void renderableRequestRenderInternal(R renderable) {
         if (rootRenderable != renderable) {
@@ -1450,6 +1416,7 @@ public abstract class ContainerHandle<
             );
             return;
         }
+        
         render();
     }
 
@@ -1499,44 +1466,16 @@ public abstract class ContainerHandle<
     
    
    
-     protected void layoutStateListener(boolean inProgress){
-        this.isLayoutInProgress = inProgress;
-        if(!isLayoutInProgress && wasRenderRequested){
-            wasRenderRequested = false;
-            renderInternal();
-        }
-    }
 
-    private void render(){
-        if(uiExecutor.isCurrentThread()){
-            checkLayoutProgress();
-        }else{
-            uiExecutor.executeFireAndForget(this::checkLayoutProgress);
-        }
-    }
-
-    protected void checkLayoutProgress(){
-        if(!isLayoutInProgress){
+    private void render() {
+        if (uiExecutor.isCurrentThread()) {
             renderInternal();
-        }else{
-            wasRenderRequested = true;
-            logDiagnosticThrottled(
-                "check-layout-deferred:" + getName(),
-                () -> String.format(
-                    "[ContainerHandle:%s] render waiting on layout (%s)",
-                    getName(),
-                    renderDiagnosticState()
-                ),
-                RenderableLayoutManager.DiagnosticMode.TRACE,
-                ROUTINE_DIAGNOSTIC_LOG_LEVEL
-            );
+        } else {
+            uiExecutor.runLater(this::renderInternal);
         }
     }
-    
 
     
-
-
     /**
      * Perform actual render - runs on serialExec
      */

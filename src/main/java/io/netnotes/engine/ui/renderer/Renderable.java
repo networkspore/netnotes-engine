@@ -8,10 +8,6 @@ import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.VisibilityPredicate;
 import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
 import io.netnotes.engine.ui.renderer.layout.LayoutCallback;
-import io.netnotes.engine.ui.renderer.layout.LayoutContext;
-import io.netnotes.engine.ui.renderer.layout.LayoutData;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup;
-import io.netnotes.engine.ui.renderer.layout.LayoutNode;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralRoutedEvent;
@@ -27,10 +23,11 @@ import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -85,9 +82,9 @@ public abstract class Renderable<
 
     private Map<R, LCB> childLayoutCallbacks  = new HashMap<>();
 
-    protected S localDamage = null;      // Damage in local coords (what region of THIS node changed)
-    protected S absoluteDamage = null;   // Damage in absolute coords (for efficient clipping)
+    protected S damage = null;
     protected boolean childrenDirty = false;
+    protected boolean pendingInvalidate = false;
 
     // ===== SPATIAL REGION POOL =====
     // Strategy: Thread-local pools eliminate allocation overhead
@@ -103,11 +100,10 @@ public abstract class Renderable<
     protected R parent = null;
     protected final List<R> children = new ArrayList<>();
     protected int zOrder = 0;
-    private List<R> sortedRenderChildren = null;
 
     
     // ===== LAYOUT - DIMENSION AGNOSTIC =====
-    protected S region;
+    protected S region = null;
     protected S requestedRegion = null;
  
     protected final ConcurrentHashMap<String,GSE> childGroups  = new ConcurrentHashMap<>();
@@ -148,10 +144,16 @@ public abstract class Renderable<
     protected BiConsumer<S,S> notifyOnRegionChanged = null;
     protected Consumer<R> notifyRemovedFromLayout = null;
     protected VisibilityPredicate<R> visibilityPolicy = null;
-    protected BiConsumer<R, Boolean> onVisibilityChanged = null;
+    protected BiConsumer<R, StateSnapshot> onVisibilityChanged = null;
     protected BiConsumer<R, Boolean> onFocusChanged = null;
     protected Consumer<S> damageAccumulator = null;
     protected RenderPhase renderPhase = RenderPhase.DETACHED;
+    protected boolean batching = false;
+
+    private R[] renderBuffer;
+    private R[] sortScratch;
+    private long[] sortKeys;
+    private int renderCount;
     /**
      * Constructor
      * 
@@ -166,14 +168,12 @@ public abstract class Renderable<
         this.region = regionPool.obtain();
         this.region.setToIdentity();
         
-        stateMachine.addState(RenderableStates.STATE_ENABLED_DESIRED);
-        
         setupBaseTransitions();
         setupStateTransitions();
         setupEventHandlers();
     }
     
-    public void setOnVisibilityChanged(BiConsumer<R, Boolean> onVisibilityChanged){
+    public void setOnVisibilityChanged(BiConsumer<R, StateSnapshot> onVisibilityChanged){
         this.onVisibilityChanged = onVisibilityChanged;
     }
 
@@ -216,22 +216,38 @@ public abstract class Renderable<
             }
             onHide();
         });
-        
+
         // Hdden state changes
-        stateMachine.onStateAdded(RenderableStates.STATE_HIDDEN, (old, now, bit) -> {
+        stateMachine.onStateAdded(RenderableStates.STATE_EFFECTIVELY_HIDDEN, (old, now, bit) -> {
             if(onVisibilityChanged != null){
-                onVisibilityChanged.accept(self(), false);
+                onVisibilityChanged.accept(self(), stateMachine.getSnapshot());
             }
 
             onHidden();
         });
         
-        stateMachine.onStateRemoved(RenderableStates.STATE_HIDDEN, (old, now, bit) -> {
+        stateMachine.onStateRemoved(RenderableStates.STATE_EFFECTIVELY_HIDDEN, (old, now, bit) -> {
             if(onVisibilityChanged != null){
-                onVisibilityChanged.accept(self(), true);
+                onVisibilityChanged.accept(self(), stateMachine.getSnapshot());
             }
             // Request layout to restore size
             onUnhide();
+        });
+
+        stateMachine.onStateAdded(RenderableStates.STATE_EFFECTIVELY_INVISIBLE, (old, now, bit) -> {
+            if(onVisibilityChanged != null){
+                onVisibilityChanged.accept(self(), stateMachine.getSnapshot());
+            }
+
+            onInvisible();
+        });
+        
+        stateMachine.onStateRemoved(RenderableStates.STATE_EFFECTIVELY_INVISIBLE, (old, now, bit) -> {
+            if(onVisibilityChanged != null){
+                onVisibilityChanged.accept(self(), stateMachine.getSnapshot());
+            }
+            // Request layout to restore size
+            onInvisibleRemoved();
         });
         
 
@@ -242,6 +258,10 @@ public abstract class Renderable<
         
         stateMachine.onStateRemoved(RenderableStates.STATE_FOCUSED, (old, now, bit) -> {
             onFocusLost();
+        });
+
+        stateMachine.onStateAdded(RenderableStates.DESTROYED, (old, now, bit) ->{
+            destroyInternal();
         });
     }
     
@@ -263,10 +283,23 @@ public abstract class Renderable<
 
     public void addChild(R child, LCB layoutCb){
         if(uiExecutor.isCurrentThread()){
-            addChildInternal(child, layoutCb);
+            runTreeMutationWhenLayoutIdle(() -> addChildInternal(child, layoutCb));
         }else{
-            uiExecutor.executeFireAndForget(() -> addChildInternal(child, layoutCb));
+            uiExecutor.runLater(
+                () -> runTreeMutationWhenLayoutIdle(() -> addChildInternal(child, layoutCb))
+            );
         }
+    }
+
+    private void runTreeMutationWhenLayoutIdle(Runnable mutation) {
+        RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = layoutManager;
+        if (lm != null && lm.isLayoutExecuting()) {
+            // Structural tree mutations must run after the pass so damage
+            // snapshots are computed from committed geometry.
+            lm.runWhenLayoutIdle(mutation);
+            return;
+        }
+        mutation.run();
     }
 
     private void addChildInternal(R child,LCB layoutCallback) {
@@ -279,7 +312,7 @@ public abstract class Renderable<
         children.add(child);
         child.parent = self();
         child.setDamageAccumulator(this.damageAccumulator);
-        invalidateRenderChildrenCache();
+        childrenDirty();
 
         if (layoutCallback  != null) childLayoutCallbacks.put(child, layoutCallback);
 
@@ -292,16 +325,10 @@ public abstract class Renderable<
         child.requestLayoutUpdate();
     }
 
-    void invalidateRenderChildrenCache() {
-        sortedRenderChildren = null;
+    void childrenDirty() {
         childrenDirty = true;
     }
 
-    private void invalidateRenderChildrenCache(R renderable) {
-        if (renderable != null) {
-            renderable.invalidateRenderChildrenCache();
-        }
-    }
 
 
     // ===== REQUESTED REGION SYSTEM =====
@@ -396,36 +423,37 @@ public abstract class Renderable<
     
     public void removeChild(R child) {
         if(uiExecutor.isCurrentThread()){
-            removeChildInternal(child);
+            runTreeMutationWhenLayoutIdle(() -> removeChildInternal(child));
         }else{
-            uiExecutor.execute(() -> removeChildInternal(child));
+            uiExecutor.runLater(
+                () -> runTreeMutationWhenLayoutIdle(() -> removeChildInternal(child))
+            );
         }
     }
 
     protected void removeChildInternal(R child) {
         boolean removed = children.remove(child);
         if (!removed) return;
-        invalidateRenderChildrenCache();
+        childrenDirty();
         
         // Damage the region where child was
         if (child.region != null && !child.region.isEmpty()) {
             try (PooledRegion<S> childLocal = regionPool.obtainPooled()) {
                 S damage = childLocal.get();
                 damage.copyFrom(child.region);
-                damage.setToIdentityPosition();          // local origin = (0,0)
-                damage.transformByParent(child.region);  // now in parent-local space
+                damage.translate(child.region.getParentAbsolutePosition());
                 propagateDamageUp(damage);
             }
         }
         child.setDamageAccumulator(null);
+        child.pendingInvalidate = false;
         childLayoutCallbacks.remove(child);
-        removeChildGroupMember(child);
+        removeLayoutGroupMember(child);
         child.parent = null;
         child.stateMachine.removeState(RenderableStates.STATE_ATTACHED);
-        
+
         if (layoutManager != null) layoutManager.unregister(child);
     }
-
     /**
      * Removes all children in a single batched operation.
      *
@@ -439,32 +467,38 @@ public abstract class Renderable<
      */
     public void clearChildren(){
         if(uiExecutor.isCurrentThread()){
-            clearChildrenInternal();
+            runTreeMutationWhenLayoutIdle(this::clearChildrenInternal);
         }else{
-             uiExecutor.execute(this::clearChildrenInternal);
+            uiExecutor.runLater(
+                () -> runTreeMutationWhenLayoutIdle(this::clearChildrenInternal)
+            );
         }
     }
 
     private void clearChildrenInternal() {
         if (children.isEmpty()) return;
 
-        // 1. Snapshot before clearing
         final List<R> removed = new ArrayList<>(children);
 
- 
         children.clear();
-        invalidateRenderChildrenCache();
+        childrenDirty();
 
+        // Build one union damage rect from all removed children.
+        // child.region is already in parent-local coords — no transform needed.
         S unionDamage = null;
         for (R child : removed) {
             if (child.region != null && !child.region.isEmpty()) {
                 if (unionDamage == null) {
                     unionDamage = regionPool.obtain();
                     unionDamage.copyFrom(child.region);
+                    unionDamage.setPosition(child.region.getAbsolutePosition());
                 } else {
-                    S merged = unionDamage.union(child.region);
-                    regionPool.recycle(unionDamage);
-                    unionDamage = merged;
+                    try(PooledRegion<S> pooledRegion = regionPool.obtainPooled();){
+                        S childRegion = pooledRegion.get();
+                        childRegion.copyFrom(child.region);
+                        childRegion.setPosition(child.region.getAbsolutePosition());
+                        unionDamage.unionInPlace(childRegion);
+                    }
                 }
             }
         }
@@ -476,14 +510,14 @@ public abstract class Renderable<
 
         for (R child : removed) {
             child.setDamageAccumulator(null);
-            removeChildGroupMember(child);
+            child.pendingInvalidate = false;   // drain deferred invalidate
+            removeLayoutGroupMember(child);
             child.parent = null;
             child.stateMachine.removeState(RenderableStates.STATE_ATTACHED);
             if (layoutManager != null) layoutManager.unregister(child);
         }
 
         Log.logMsg("[Renderable:" + name + "] clearChildren() removed " + removed.size() + " children", LOG_LEVEL);
-    
     }
         
     public int getZOrder() { return zOrder; }
@@ -492,7 +526,7 @@ public abstract class Renderable<
         if(uiExecutor.isCurrentThread()){
             setZOrderInternal(z);
         }else{
-            uiExecutor.executeFireAndForget(()->setZOrderInternal(z));
+            uiExecutor.runLater(()->setZOrderInternal(z));
         }
     }
 
@@ -512,14 +546,14 @@ public abstract class Renderable<
         if(uiExecutor.isCurrentThread()){
             sortChildrenInternal();
         }else{
-            uiExecutor.executeFireAndForget(this::sortChildrenInternal);
+            uiExecutor.runLater(this::sortChildrenInternal);
         }
         
     }
 
     private void sortChildrenInternal() {
         children.sort(Comparator.comparingInt(Renderable::getZOrder));
-        invalidateRenderChildrenCache();
+        childrenDirty();
     }
     
     // ===== SPATIAL OPERATIONS =====
@@ -538,11 +572,10 @@ public abstract class Renderable<
     }
 
     public S getEffectiveAbsoluteRegion(){
-        if(isEffectivelyVisible() && !isHidden()){
+        if (isVisible()) {
             return getAbsoluteRegion();
-        }else{
-            return null;
         }
+        return null;
     }
   
     public boolean hitTest(P point) {
@@ -568,57 +601,119 @@ public abstract class Renderable<
      * @param localRegion Region to invalidate in local coordinates, null for full invalidation
      */
     public void invalidate(S localRegion) {
-      
-        // Accumulate local damage
-        if (localRegion == null) {
-            if (localDamage != null) {
-                regionPool.recycle(localDamage);
-            }
-            localDamage = regionPool.obtain();
-            localDamage.copyFrom(region);
-        } else {
-            if (localDamage == null) {
-                localDamage = regionPool.obtain();
-                localDamage.copyFrom(localRegion);
-            } else {
-                localDamage.unionInPlace(localRegion);
-                
-                if (localDamage.contains(region)) {
-                    localDamage.copyFrom(region);
-                }
-            }
-        }
-        
-        updateAbsoluteDamage();
-        reportDamage(absoluteDamage);
-        propagateDamageToParent();
-        
-        if (parent == null && onRenderRequest != null) {
-            onRenderRequest.accept(self());
-        }
-    }
-
-    protected void updateAbsoluteDamage() {
-        if (localDamage == null) {
-            if (absoluteDamage != null) {
-                regionPool.recycle(absoluteDamage);
-                absoluteDamage = null;
-            }
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(()->invalidate(localRegion));
             return;
         }
-        
-        if (absoluteDamage == null) {
-            absoluteDamage = regionPool.obtain();
+        RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = layoutManager;
+        if (lm == null || !isStarted()) {
+            // Coordinates are not final yet — defer. The post-layout
+            // invalidateFromLayout() will emit correct damage after commit.
+            pendingInvalidate = true;
+            return;
         }
-        
-        absoluteDamage.copyFrom(localDamage);
-        
-        absoluteDamage.setParentAbsolutePosition(
-            region.getParentAbsolutePosition()
-        );
-      
+
+        if (lm.isLayoutExecuting()) {
+            if (lm.isInCurrentPass(self())) {
+                // This node is being committed in the active pass — let applyLayoutData()
+                // consume pendingInvalidate after final geometry is known.
+                pendingInvalidate = true;
+                return;
+            }
+            // This node is outside the active pass. Defer to preserve ordering
+            // with in-flight layout commits and use fresh absolute transforms.
+            deferInvalidateWhenLayoutIdle(lm, localRegion);
+            return;
+        }
+
+        if(localRegion != null){
+            localRegion.translate(region.getParentAbsolutePosition());
+            invalidateImmediate(localRegion);
+        }else{
+            invalidateImmediate(null);
+        }
     }
 
+    private void deferInvalidateWhenLayoutIdle(
+        RenderableLayoutManagerHandle<R, LCB,G, GCB> lm,
+        S localRegion
+    ) {
+        lm.deferInvalidateWhenLayoutIdle(() -> {
+            if (isDestroyed() || region == null) {
+                if (localRegion != null) regionPool.recycle(localRegion);
+                return;
+            }
+
+            if (layoutManager == null || !isStarted()) {
+                pendingInvalidate = true;
+                if (localRegion != null) regionPool.recycle(localRegion);
+                return;
+            }
+
+            if (localRegion != null) {
+                localRegion.translate(region.getParentAbsolutePosition());
+                invalidateImmediate(localRegion);
+            } else {
+                invalidateImmediate(null);
+            }
+        });
+    }
+
+
+    /**
+     * Unconditional damage accumulation and propagation.
+     */
+    private void invalidateImmediate(S absoluteDamage) {
+        if (absoluteDamage == null) {
+            if (damage != null) regionPool.recycle(damage);
+            damage = regionPool.obtain();
+            damage.copyFrom(region);
+            damage.translate(region.getParentAbsolutePosition());
+        } else {
+
+
+            if (damage == null) {
+                damage = regionPool.obtain();
+                damage.set(absoluteDamage);
+            } else {
+                damage.unionInPlace(absoluteDamage);
+    
+                try (PooledRegion<S> fullNode = regionPool.obtainPooled()) {
+                    S absFullNode = fullNode.get();
+                    absFullNode.copyFrom(region);
+                    absFullNode.translate(region.getParentAbsolutePosition());
+                    if (damage.contains(absFullNode)) {
+                        damage.set(absFullNode);
+                    }
+                }
+            }
+            regionPool.recycle(absoluteDamage);
+        }
+
+        propagateDamageToParent();
+
+        if (parent == null) {
+            // Root handoff: translate the final damage region to absolute
+            // coordinates before it enters the container accumulator.
+            reportDamage(damage);
+            scheduleRender();
+        }
+    }
+
+    private boolean renderRequested = false;
+
+    private void scheduleRender() {
+        if (renderRequested) return;
+        renderRequested = true;
+        
+        uiExecutor.runLater(() -> {
+            renderRequested = false;
+            if (onRenderRequest != null) {
+                onRenderRequest.accept(self());
+            }
+        });
+    }
+    
     // ===== PER-AXIS SIZE DEPENDENCY ==========================================
  
     public abstract int getNumSpatialAxes();
@@ -648,17 +743,9 @@ public abstract class Renderable<
      */
     protected void propagateDamageToParent() {
         R damageTarget = isFloating ? getLogicalParent() : getRenderingParent();
-        
-        if (damageTarget == null || localDamage == null) return;
-        
-        try (PooledRegion<S> pooled = regionPool.obtainPooled()) {
-            S parentLocalDamage = pooled.get();
-            
-            parentLocalDamage.copyFrom(localDamage);
-            parentLocalDamage.transformByParent(region);
-            
-            damageTarget.propagateDamageUp(parentLocalDamage);
-        }
+        if (damageTarget == null || damage == null) return;
+
+        damageTarget.propagateDamageUp(damage);
     }
 
     /**
@@ -667,25 +754,23 @@ public abstract class Renderable<
      * @param childDamageInOurLocalSpace Damage region in our local coordinate space
      *                                   (caller will recycle this after we return)
      */
-    protected void propagateDamageUp(S childDamageInOurLocalSpace) {
+    protected void propagateDamageUp(S absChildDamage) {
         childrenDirty = true;
-        
-        if (localDamage == null) {
-            // First child damage - obtain and copy
-            localDamage = regionPool.obtain();
-            localDamage.set(childDamageInOurLocalSpace);
+
+        if (damage == null) {
+            damage = regionPool.obtain();
+            damage.set(absChildDamage);
         } else {
-            // Merge with existing damage IN PLACE
-            localDamage.unionInPlace(childDamageInOurLocalSpace);
+            damage.unionInPlace(absChildDamage);
         }
-        
-        updateAbsoluteDamage();
+
         propagateDamageToParent();
-        
-        if (parent == null && onRenderRequest != null) {
-            Log.logMsg("[Renderable: " + getName() +"] invalidateChild called renderRequest - localDamage: " + localDamage, LOG_LEVEL);
-        
-            onRenderRequest.accept(self());
+
+        if (parent == null) {
+            Log.logMsg("[Renderable: " + getName() + "] propagateDamageUp reached root"
+                + " - localDamage: " + damage, LOG_LEVEL);
+            reportDamage(damage);
+            scheduleRender();
         }
     }
     
@@ -703,13 +788,13 @@ public abstract class Renderable<
      * Guards the common "nothing at all to do" case before allocating anything.
      */
     public void toBatch(B batch) {
-        if (absoluteDamage == null && !childrenDirty) {
+        if (damage == null && !childrenDirty) {
             return;
         }
 
         S fullSpace = regionPool.obtain();
         fullSpace.copyFrom(region);
-
+        fullSpace.translate(region.getParentAbsolutePosition());
         toBatch(batch, fullSpace);
 
         regionPool.recycle(fullSpace);
@@ -756,12 +841,7 @@ public abstract class Renderable<
         try (PooledRegion<S> absBoundsPooled = regionPool.obtainPooled()) {
             S absBounds = absBoundsPooled.get();
             absBounds.copyFrom(region);
-
-            R node = getRenderingParent();
-            while (node != null) {
-                absBounds.transformByParent(node.region);
-                node = node.getRenderingParent();
-            }
+            absBounds.translate(region.getParentAbsolutePosition());
 
             if (!absBounds.intersects(clipRegion)) return;
 
@@ -769,16 +849,15 @@ public abstract class Renderable<
                 S visibleClip = visibleClipPooled.get();
                 visibleClip.copyFrom(absBounds.intersection(clipRegion));
 
-                boolean hasSelfDamage = absoluteDamage != null;
+                boolean hasSelfDamage = damage != null;
                 boolean isForced      = forcedRegion != null && absBounds.intersects(forcedRegion);
 
                 if (hasSelfDamage) {
-                    // Constrain renderSelf to the ACTUAL damaged area only.
-                    // This prevents the background fill from overwriting undamaged cells
-                    // (e.g. labels) that are already correct on the terminal.
+    
                     try (PooledRegion<S> renderClipPooled = regionPool.obtainPooled()) {
                         S renderClip = renderClipPooled.get();
-                        renderClip.copyFrom(absoluteDamage.intersection(visibleClip));
+                        renderClip.copyFrom(damage.intersection(visibleClip));
+                        
 
                         if (!renderClip.isEmpty()) {
                             batch.pushClipRegion(renderClip);
@@ -800,11 +879,8 @@ public abstract class Renderable<
                                 Log.logError("[Renderable:" + getName() + "] renderChildren exception", e);
                             }
                         }
-                        if (localDamage != null) { regionPool.recycle(localDamage); localDamage = null; }
-                        if (absoluteDamage != null) { regionPool.recycle(absoluteDamage); absoluteDamage = null; }
+                        recycleDamage();
                     }
-
-                
 
                 } else if (isForced) {
                     // A parent painted over us — render with full visibleClip and
@@ -825,16 +901,7 @@ public abstract class Renderable<
                     } catch (Exception e) {
                         Log.logError("[Renderable:" + getName() + "] renderChildren (forced) exception", e);
                     }
-                    S lD = localDamage;
-                    localDamage = null;
-                    if (lD != null) { 
-                        regionPool.recycle(lD); 
-                    }
-                    S aD = absoluteDamage;
-                    absoluteDamage = null;
-                    if (aD != null) { 
-                        regionPool.recycle(aD); 
-                    }
+                    recycleDamage();
                 }
                 
                 if (childrenDirty) {
@@ -852,7 +919,17 @@ public abstract class Renderable<
             Log.logError("[Renderable:" + getName() + "] toBatch failed", e);
         }
     }
+
+    private void recycleDamage() {
+        S dm = damage;
+        damage = null;
+        if (dm != null) { 
+            regionPool.recycle(dm); 
+        }
+    }
     
+    protected abstract R[] createRenderableArray(int size);
+
     /**
      * Render all rendering-children sorted by layer then z-order.
      *
@@ -863,22 +940,58 @@ public abstract class Renderable<
      *                     themselves even with no own pending damage
      */
     protected void renderChildrenByLayer(B batch, S visibleClip, S forcedRegion) {
-        if (sortedRenderChildren == null) {
-            sortedRenderChildren = children.stream()
-                .filter(c -> c.getRenderingParent() == self())
-                .sorted(Comparator.comparingInt(R::getLayerIndex)
-                                .thenComparingInt(R::getZOrder))
-                .collect(Collectors.toList());
+        if (childrenDirty) {
+            int size = children.size();
+            if (renderBuffer == null || renderBuffer.length < size) {
+                renderBuffer  = createRenderableArray(size);
+                sortScratch   = createRenderableArray(size);
+                sortKeys      = new long[size];
+            }
+
+            int count = 0;
+            for (int i = 0; i < size; i++) {
+                R child = children.get(i);
+                if (child.getRenderingParent() == self()) {
+                    // bit layout (64 bits total):
+                    // [63:60] layerIndex —  4 bits  (0–15)
+                    // [59:28] zOrder     — 32 bits  (biased unsigned)
+                    // [27:0]  index      — 28 bits  (0–268,435,455)
+                   sortKeys[count] = ((long) child.getLayerIndex() << 60)
+                        | (((long) child.getZOrder() - Integer.MIN_VALUE) << 28)
+                        | (long) count;
+                    renderBuffer[count] = child;
+                    count++;
+                }
+            }
+
+            Arrays.sort(sortKeys, 0, count);
+
+            // reconstruct renderBuffer in sorted order via embedded index
+            for (int i = 0; i < count; i++) {
+                sortScratch[i] = renderBuffer[(int)(sortKeys[i] & 0xFFFFFFFL)];
+            }
+
+            // swap so renderBuffer holds sorted refs; sortScratch becomes next rebuild's workspace
+            R[] tmp    = renderBuffer;
+            renderBuffer = sortScratch;
+            sortScratch  = tmp;
+
+            // null stale refs to avoid GC retention
+            for (int i = count; i < renderCount; i++) {
+                renderBuffer[i] = null;
+            }
+
+            renderCount  = count;
+            childrenDirty = false;
         }
-        for (R child : sortedRenderChildren) {
-            child.toBatchInternal(batch, visibleClip, forcedRegion);
+
+        for (int i = 0; i < renderCount; i++) {
+            renderBuffer[i].toBatchInternal(batch, visibleClip, forcedRegion);
         }
-        childrenDirty = false;
     }
 
 
     
-   
     
     /**
      * Subclasses implement to render their content
@@ -903,7 +1016,7 @@ public abstract class Renderable<
     
 
     public boolean dispatchEvent(RoutedEvent event) {
-        if (!canReceiveEvents()) {
+        if (!isVisible()) {
             return false;
         }
         
@@ -955,10 +1068,6 @@ public abstract class Renderable<
                 case IDLE:
                     onIdle();
             }
-        }else{
-            Log.logError("[Renderable:" +name+"] "
-                + " advanceRenderPhase was: " + was + " should be:" + next
-            );
         }
     }
 
@@ -977,7 +1086,7 @@ public abstract class Renderable<
      * and set context.setContentMeasurement(measuredBounds)
      * @param context
      */
-    public abstract void measureContent(LC context);
+    public abstract S measureContent(LC[] childContexts);
 
     private boolean isKeyboardEvent(RoutedEvent event) {
         NoteBytes type = event.getEventTypeBytes();
@@ -1080,10 +1189,8 @@ public abstract class Renderable<
     
 
     public boolean isVisible() {
-        StateSnapshot snap = stateMachine.getSnapshot();
-        return !snap.hasState(RenderableStates.STATE_HIDDEN) 
-            && !snap.hasState(RenderableStates.STATE_INVISIBLE)
-            && snap.hasState(RenderableStates.STATE_EFFECTIVELY_VISIBLE);
+        return RenderableStates.isRenderableVisible(stateMachine.getSnapshot());
+        
     }
         
 
@@ -1134,8 +1241,14 @@ public abstract class Renderable<
         }
     }
 
-    public boolean isEffectivelyVisible() {
-        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_VISIBLE);
+
+
+    public boolean isEffectivelyHidden() {
+        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_HIDDEN);
+    }
+
+    public boolean isEffectivelyInvisible() {
+        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_INVISIBLE);
     }
 
     public void collapse() {
@@ -1162,8 +1275,12 @@ public abstract class Renderable<
         }
     }
     
+    public boolean isHiddenDesired() {
+        return stateMachine.hasState(RenderableStates.STATE_HIDDEN_DESIRED);
+    }
+
     public boolean isHidden() {
-        return stateMachine.hasAnyState(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_HIDDEN);
+        return stateMachine.hasAnyState(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_EFFECTIVELY_HIDDEN);
     }
 
    public  void setInvisible(boolean invisible) {
@@ -1172,7 +1289,7 @@ public abstract class Renderable<
             !state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)
             || state.hasState(RenderableStates.STATE_HIDDEN_DESIRED)
         )) {
-            stateMachine.setState(RenderableStates.STATE_INVISIBLE_DESIRED);
+            stateMachine.addState(RenderableStates.STATE_INVISIBLE_DESIRED);
             stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED);
             requestLayoutUpdate();
         } else if(!invisible && state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)){
@@ -1180,22 +1297,17 @@ public abstract class Renderable<
             requestLayoutUpdate();
         }
     }
+
+    public boolean isInvisibleDesired() {
+        return stateMachine.hasState(RenderableStates.STATE_INVISIBLE_DESIRED);
+    }
             
     public boolean isInvisible() {
-        return stateMachine.hasState(RenderableStates.STATE_INVISIBLE);
+        return stateMachine.hasAnyState(
+            RenderableStates.STATE_INVISIBLE_DESIRED,
+            RenderableStates.STATE_EFFECTIVELY_INVISIBLE
+        );
     }
-    
-    // ===== ENABLED/DISABLED API =====
-    
-    public void enable() {
-        setEnabled(true);
-    }
-    
-    public void disable() {
-        setEnabled(false);
-    }
-    
-
     
 
     // ===== FOCUS API =====
@@ -1230,14 +1342,6 @@ public abstract class Renderable<
     }
         
 
-    // ===== STATE QUERIES =====
-    
-    /**
-     * Can this renderable receive events?
-     */
-    public boolean canReceiveEvents() {
-        return isEffectivelyVisible();
-    }
     
     /**
      * Should this renderable participate in layout?
@@ -1272,6 +1376,8 @@ public abstract class Renderable<
     protected void onUnhide() {}
     protected void onEnabled() {}
     protected void onDisabled() {}
+    protected void onInvisible() {}
+    protected void onInvisibleRemoved() {}
 
     /*Clean up handlers if not needed*/
     protected void onRemovedFromLayout() { }
@@ -1283,35 +1389,46 @@ public abstract class Renderable<
         if(notifyRemovedFromLayout != null){ notifyRemovedFromLayout.accept(self()); }
         clearLayoutManager();
     
-        // Recycle damage regions
-        if (localDamage != null) {
-            regionPool.recycle(localDamage);
-            localDamage = null;
-        }
-        if (absoluteDamage != null) {
-            regionPool.recycle(absoluteDamage);
-            absoluteDamage = null;
-        }
-        // Child callbacks no longer needed
- 
+        recycleDamage();
         onRemovedFromLayout();
 
     }
+    /**
+     * destroy() is intentionally non-recursive — children are NOT destroyed
+     * here. Callers that need child teardown must destroy children explicitly
+     * before or after calling destroy() on the parent.
+     */
+    public void destroy() {
+        if(uiExecutor.isCurrentThread()){
+            destroyInternal();
+        }else{
+            uiExecutor.runLater(this::destroyInternal);
+        }
+   
+    }
 
-    public void destroy(){
+    protected void onInternalDestroying() { }
+
+    private final void destroyInternal(){
+     
+        onInternalDestroying();
         onDestroying();
         stateMachine.addState(RenderableStates.DESTROYED);
-        clearOwnDamage();
+        if (!children.isEmpty()) {
+            clearChildrenInternal();
+        }
+        
+        recycleDamage();
         childGroups.clear();
         childLayoutCallbacks.clear();
         stateMachine.clearAllStates();
         cleanupEventHandlers();
-        if(region != null){
+        if (region != null) {
             S oldRegion = region;
             region = null;
             regionPool.recycle(oldRegion);
         }
-        if(requestedRegion != null){
+        if (requestedRegion != null) {
             S oldRegion = requestedRegion;
             requestedRegion = null;
             regionPool.recycle(oldRegion);
@@ -1320,21 +1437,7 @@ public abstract class Renderable<
 
     protected void onDestroying(){ }
 
-    public void setEnabled(boolean enabled) {
-        updateRequestState(RenderableStates.STATE_ENABLED_DESIRED, enabled);
-    }
 
-    private void updateRequestState(int state, boolean value) {
-        if (value) {
-            stateMachine.addState(state);
-        } else {
-            stateMachine.removeState(state);
-        }
-        // Trigger layout to recompute RESOLVED states
-        if (layoutManager != null) {
-            layoutManager.markLayoutDirty(self());
-        }
-    }
 
     
 
@@ -1390,9 +1493,10 @@ public abstract class Renderable<
         }
     }
 
+
     private void reportDamage(S absoluteRegion) {
-        if (damageAccumulator != null) {
-            damageAccumulator.accept(absoluteRegion.copy());
+        if (damageAccumulator != null && absoluteRegion != null) {
+            damageAccumulator.accept(absoluteRegion.copy(regionPool));
         }
     }
 
@@ -1487,8 +1591,7 @@ public abstract class Renderable<
      * @return true if there's any damage to render
      */
     public boolean needsRender() {
-        boolean needsRender =  localDamage != null || absoluteDamage != null || childrenDirty;
-        return needsRender;
+        return damage != null || childrenDirty;
     }
 
     /**
@@ -1499,21 +1602,12 @@ public abstract class Renderable<
      * but this provides explicit confirmation that render completed
      */
     public void clearRenderFlag() {
-        // Damage should already be cleared by toBatch()
-        // This is a safety net in case toBatch() wasn't called
-        if (localDamage != null) {
-            regionPool.recycle(localDamage);
-            localDamage = null;
-        }
-        if (absoluteDamage != null) {
-            regionPool.recycle(absoluteDamage);
-            absoluteDamage = null;
-        }
+        recycleDamage();
         childrenDirty = false;
     }
 
     public S copyAbsoluteDamage(){
-        return absoluteDamage == null ? null : absoluteDamage.copy();
+        return damage.copy(regionPool);
     }
 
 
@@ -1641,18 +1735,28 @@ public abstract class Renderable<
 
 
     public void setLayoutManager(RenderableLayoutManagerHandle<R, LCB,G,GCB> manager) {
+        if(manager == null){
+            onLayoutManagerCleared();
+        }
         this.layoutManager = manager;
+        onLayoutManagerSet();
     }
+
+    protected void onLayoutManagerSet() {}
+    protected void onLayoutManagerCleared() {}
 
     public void clearLayoutManager() {
-
+        onLayoutManagerCleared();
         this.layoutManager = null;
+        
     }
+
 
 
     public void beginLayoutBatch() { 
         RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = this.layoutManager;
         if(lm != null){
+            this.batching = true;
             lm.beginBatch();
         }
     }
@@ -1661,9 +1765,9 @@ public abstract class Renderable<
      * End batching and trigger single layout pass
      */
     public void endLayoutBatch(){
-        RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = this.layoutManager;
-        if(lm != null){
-            lm.endBatch();
+        if(this.layoutManager != null){
+            this.layoutManager.endBatch();
+            this.batching = false;
         }
     }
     
@@ -1672,13 +1776,20 @@ public abstract class Renderable<
      * Ensures single layout pass regardless of how many dirty marks
      */
     public void batch(Runnable operations) {
-        RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = this.layoutManager;
-        if(lm != null){
-            lm.beginBatch();
+   
+        if(this.layoutManager != null){
+            if(batching){
+                // Already in a batch — just run the operations
+                operations.run();
+                return;
+            }
+            batching = true;
+            this.layoutManager.beginBatch();
             try {
                 operations.run();
             } finally {
-                lm.endBatch();
+                this.layoutManager.endBatch();
+                batching = false;
             }
         }
     }
@@ -1692,53 +1803,60 @@ public abstract class Renderable<
      * @param layoutData Data carrier (spatialRegion != null means damaged)
      */
     void applyLayoutData(LD layoutData) {
-        if (layoutData.hasRegion() && layoutData.hasAnyAxisChange()) {
-            applySpatialChange(layoutData);
-        }
-        
-        // Apply state changes - IMMEDIATE state machine update
-        // Callbacks from state transitions will be deferred by state machine
-        if (layoutData.hasStateChanges()) {
-            applyStateChanges(layoutData);
+        S spatialDamage = layoutData.hasRegion() 
+            ? applySpatialChange(layoutData)
+            : null;
+
+        boolean hasStateChanges = layoutData.hasStateChanges() 
+            ? applyStateChanges(layoutData) 
+            : false;
+    
+
+        if (spatialDamage != null || hasStateChanges || pendingInvalidate) {
+            pendingInvalidate = false;
+            if (spatialDamage != null) {
+                try {
+                    invalidateImmediate(spatialDamage);
+                } finally {
+                    regionPool.recycle(spatialDamage);
+                }
+            } else {
+                invalidateImmediate(null);
+            }
         }
     }
 
     /**
-     * Axis-selective spatial update.
-     *
-     * Instead of replacing the entire region from the layout data, this method
-     * calls {@code layoutData.mergeIntoRegion(current, target)} which copies the
-     * current region into a scratch region and then overwrites only the axes that
-     * were explicitly set (and not masked by the current LayoutPhase).  This
-     * ensures a top-down pass never clobbers a FIT_CONTENT height committed by
-     * the bottom-up pass, and vice versa.
+     * 
+     * @param layoutData
+     * @return returns union of old damage and new damage
      */
-    private void applySpatialChange(LD layoutData) {
+    private S applySpatialChange(LD layoutData) {
+   
         try (PooledRegion<S> pooledMerged = regionPool.obtainPooled()) {
             S merged = pooledMerged.get();
-            // Merge: unchanged axes come from current region; changed axes
-            // come from layoutData (only the flagged ones).
-            layoutData.mergeIntoRegion(region, merged);
+
+            layoutData.mergeIntoRegion(
+                region, 
+                merged
+            );
 
             boolean changed = !region.equals(merged);
             if (!changed) {
                 clearRequestedRegion();
-                return;
+                return null;
             }
 
-            S oldRegion = regionPool.obtain();
-            oldRegion.copyFrom(region);
-
+            S oldRegion = region.copy(regionPool);
+            
             region.copyFrom(merged);
             clearRequestedRegion();
 
-            // Damage must include both old and new occupied areas.
-            try (PooledRegion<S> pooledDamage = regionPool.obtainPooled()) {
-                S damage = pooledDamage.get();
-                damage.copyFrom(oldRegion);
-                damage.unionInPlace(region);
-                invalidate(damage);
-            }
+            S unionRegionChange = regionPool.obtain();
+            unionRegionChange.copyFrom(oldRegion);
+            unionRegionChange.translate(oldRegion.getParentAbsolutePosition());
+            merged.translate(merged.getParentAbsolutePosition());
+            unionRegionChange.unionInPlace(merged);
 
             onRegionChanged(oldRegion, region);
             if (notifyOnRegionChanged != null) {
@@ -1746,6 +1864,8 @@ public abstract class Renderable<
             } else {
                 regionPool.recycle(oldRegion);
             }
+
+            return unionRegionChange;
         }
     }
 
@@ -1776,59 +1896,76 @@ public abstract class Renderable<
      * Apply state changes - immediate state machine updates
      * State machine callbacks execute on uiExecutor (deferred)
      */
-    private void applyStateChanges(LD layoutData) {
+    private boolean applyStateChanges(LD layoutData) {
+
         StateSnapshot beforeState = stateMachine.getSnapshot();
 
-        // Apply MODIFIER states (may have been set by callback)
-        applyStateIfPresent(layoutData.getHidden(), RenderableStates.STATE_HIDDEN);
-        applyStateIfPresent(layoutData.getInvisible(), RenderableStates.STATE_INVISIBLE);
-        applyStateIfPresent(layoutData.getEnabled(), RenderableStates.STATE_ENABLED_DESIRED);
-        // Apply RESOLVED states (computed by manager post-callback)
-        applyStateIfPresent(layoutData.getEffectivelyVisible(), RenderableStates.STATE_EFFECTIVELY_VISIBLE);
+        Boolean applyHidden = layoutData.getHidden();
+        Boolean applyEffectivelyHidden = layoutData.getEffectivelyHidden();
+
+        Boolean applyInvisible = layoutData.getInvisible();
+        
+        Boolean applyEffectivelyInvisible = layoutData.getEffectivelyInvisible();
+        
+        if(Boolean.TRUE.equals(applyHidden)){
+            applyStateIfPresent(applyHidden, RenderableStates.STATE_HIDDEN_DESIRED);
+            if(applyInvisible != null || applyEffectivelyInvisible != null){
+                applyStateIfPresent(false, RenderableStates.STATE_INVISIBLE_DESIRED);
+                applyStateIfPresent(false, RenderableStates.STATE_EFFECTIVELY_INVISIBLE);
+            }
+        }else{
+            applyStateIfPresent(applyHidden, RenderableStates.STATE_HIDDEN_DESIRED);
+            applyStateIfPresent(applyInvisible, RenderableStates.STATE_INVISIBLE_DESIRED);
+            applyStateIfPresent(applyEffectivelyInvisible, RenderableStates.STATE_EFFECTIVELY_INVISIBLE);
+        }
+        
+        applyStateIfPresent(applyEffectivelyHidden, RenderableStates.STATE_EFFECTIVELY_HIDDEN);
+        
 
         StateSnapshot snapShot = stateMachine.getSnapshot();
 
-        boolean isRenderable = snapShot.hasState(RenderableStates.STATE_EFFECTIVELY_VISIBLE);
+        boolean isVisible = RenderableStates.isRenderableVisible(snapShot);
 
-        if(isRenderable != stateMachine.hasState(RenderableStates.STATE_RENDERABLE)){
-            if(isRenderable){
+        if(isVisible != stateMachine.hasState(RenderableStates.STATE_RENDERABLE)){
+            if(isVisible){
                 stateMachine.addState(RenderableStates.STATE_RENDERABLE);
             }else{
                 stateMachine.removeState(RenderableStates.STATE_RENDERABLE);
             }
         }
 
-        handleStateTransitionDamage(beforeState, stateMachine.getSnapshot());
+        return handleStateTransitionDamage(beforeState, stateMachine.getSnapshot());
     }
 
-    private void handleStateTransitionDamage(StateSnapshot beforeState, StateSnapshot afterState) {
-        boolean wasVisible = RenderableStates.isVisible(beforeState);
-        boolean isVisibleNow = RenderableStates.isVisible(afterState);
+    private boolean handleStateTransitionDamage(StateSnapshot beforeState, StateSnapshot afterState) {
+        boolean wasVisible = RenderableStates.isRenderableVisible(beforeState);
+        boolean isVisibleNow = RenderableStates.isRenderableVisible(afterState);
 
         if (wasVisible && !isVisibleNow) {
             childrenDirty = false;
-            invalidate();
-            clearOwnDamage();
-            return;
+            return true;
         }
 
         if (!wasVisible && isVisibleNow) {
             childrenDirty = true;
-            invalidate();
-            return;
+            return true;
         }
-}
 
-    private void clearOwnDamage() {
-        if (localDamage != null) {
-            regionPool.recycle(localDamage);
-            localDamage = null;
+        boolean wasInvisible = RenderableStates.isRenderableInvisible(beforeState);
+        boolean isInvisible = RenderableStates.isRenderableInvisible(afterState);
+
+        if (wasInvisible && !isInvisible) {
+            childrenDirty = true;
         }
-        if (absoluteDamage != null) {
-            regionPool.recycle(absoluteDamage);
-            absoluteDamage = null;
+
+        if (!wasInvisible && isInvisible) {
+            childrenDirty = false;
         }
+
+        return wasInvisible != isInvisible;
     }
+
+    
 
     private void applyStateIfPresent(Boolean value, int state) {
         if (value == null) return;
@@ -1852,7 +1989,7 @@ public abstract class Renderable<
         if(uiExecutor.isCurrentThread()){
             makeFloatingInternal(anchor);
         }else{
-            uiExecutor.executeFireAndForget(()->makeFloatingInternal(anchor));
+            uiExecutor.runLater(()->makeFloatingInternal(anchor));
         }
     }
 
@@ -1865,20 +2002,16 @@ public abstract class Renderable<
         this.positionAnchor = anchor;
         this.layerIndex = LAYER_FLOATING;
         this.logicalParent = parent;  // Preserve for events
-        invalidateRenderChildrenCache();
+        childrenDirty();
         if (parent != null) {
-            invalidateRenderChildrenCache(parent);
+            parent.childrenDirty();
         }
         // Migrate to floating layer in layout manager
         if (layoutManager != null) {
             layoutManager.migrateToFloating(self(), anchor);
         }
         
-        // Force a frame so the inline composition is cleared and this node can
-        // repaint from the floating layer even before the next layout update.
-        invalidate();
-
-        // Mark for re-layout with floating constraints
+        pendingInvalidate = true;
         requestLayoutUpdate();
   
     }
@@ -1887,28 +2020,34 @@ public abstract class Renderable<
      * Make this renderable static (normal parent-child rendering)
      */
     public void makeStatic() {
+        
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(this::makeStaticInternal);
+        }else{
+            makeStaticInternal();
+        }
+    }
+
+    private void makeStaticInternal(){
         if (!isFloating) {
             return;
         }
+        this.isFloating = false;
+        this.positionAnchor = null;
+        this.layerIndex = LAYER_NORMAL;
+        this.logicalParent = null;
+        this.renderingParent = null;
+        if (parent != null) {
+            parent.childrenDirty();
+        }
         
-        uiExecutor.executeFireAndForget(() -> {
-            this.isFloating = false;
-            this.positionAnchor = null;
-            this.layerIndex = LAYER_NORMAL;
-            this.logicalParent = null;
-            this.renderingParent = null;
-            if (parent != null) {
-                invalidateRenderChildrenCache(parent);
-            }
-            
-            // Migrate back to regular layout
-            if (layoutManager != null) {
-                layoutManager.migrateToRegular(self());
-            }
-            
-            invalidate();
-            requestLayoutUpdate();
-        });
+        // Migrate back to regular layout
+        if (layoutManager != null) {
+            layoutManager.migrateToRegular(self());
+        }
+        
+        pendingInvalidate = true;
+        requestLayoutUpdate();
     }
     
     /**
@@ -1918,7 +2057,7 @@ public abstract class Renderable<
         if (this.layerIndex != layer) {
             this.layerIndex = layer;
             if (!isFloating && parent != null) {
-                invalidateRenderChildrenCache(parent);
+                parent.childrenDirty();
             }
             invalidate();  // Re-render in new layer
         }
@@ -1973,34 +2112,10 @@ public abstract class Renderable<
         return null;
     }
     
-    /**
-     * Remove renderable from its group
-     */
-    protected void removeChildGroupMember(R renderable) {
-        Iterator<Entry<String, GSE>> it = childGroups.entrySet().iterator();
-        while (it.hasNext()) {
-            Entry<String, GSE> stateEntry = it.next();
-            GSE state = stateEntry.getValue();
-            List<R> members = state.getMembers();
-            members.remove(renderable);
-        }
-    }
     
-    /**
-     * Destroy a group
-     */
-    protected void destroyChildGroup(String groupId) {
-        childGroups.remove(groupId);
-    }
+   
     
-    /**
-     * Register callback for a group
-     */
-    protected void registerChildGroupCallback(String groupId, GCB callbackEntry) {
-        createChildGroup(groupId);
-        GSE state = childGroups.get(groupId);
-        state.setLayoutCallback(callbackEntry);
-    }
+ 
 
 
     /**
@@ -2043,13 +2158,7 @@ public abstract class Renderable<
     public abstract SizePreference getSizePreference(int axis);
 
 
-    public abstract int getPreferredSize(int axis); 
     public abstract int getMinSize(int axis);
-
-
-    protected void destroyChildGroups(){
-        childGroups.clear();
-    }
 
     /**
      * Check if there are any pending groups
@@ -2129,7 +2238,13 @@ public abstract class Renderable<
      * @param renderable renderable to remove
      */
     public void removeLayoutGroupMember(R renderable) {
-        removeChildGroupMember(renderable);             // always
+        Iterator<Entry<String, GSE>> it = childGroups.entrySet().iterator();
+        while (it.hasNext()) {
+            Entry<String, GSE> stateEntry = it.next();
+            GSE state = stateEntry.getValue();
+            List<R> members = state.getMembers();
+            members.remove(renderable);
+        }
         if (isAttachedToLayoutManager()) {
             layoutManager.removeLayoutGroupMember(renderable);
         }
@@ -2140,8 +2255,8 @@ public abstract class Renderable<
      * 
      * @param groupId group to destroy
      */
-    public void destroyLayoutGroup(String groupId) {
-        destroyChildGroup(groupId);                    // always
+    public void removeLayoutGroup(String groupId) {
+        childGroups.remove(groupId);
         if (isAttachedToLayoutManager()) {
             layoutManager.destroyLayoutGroup(groupId);
         }
@@ -2184,7 +2299,9 @@ public abstract class Renderable<
      * @param callback callback to manage group members
      */
     public void setGroupLayoutCallback(String groupId, GCB callback){
-        registerChildGroupCallback(groupId, callback);
+        createChildGroup(groupId);
+        GSE state = childGroups.get(groupId);
+        state.setLayoutCallback(callback);
         if (isAttachedToLayoutManager()) {
             layoutManager.setGroupLayoutCallback(groupId, callback);
         }

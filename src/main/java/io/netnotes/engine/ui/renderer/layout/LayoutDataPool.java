@@ -1,5 +1,7 @@
 package io.netnotes.engine.ui.renderer.layout;
 
+import io.netnotes.engine.ui.renderer.LayoutData;
+
 /**
  * Pool for LayoutData instances
  * 

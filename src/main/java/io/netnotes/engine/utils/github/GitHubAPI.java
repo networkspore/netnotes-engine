@@ -5,7 +5,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 
 import io.netnotes.engine.utils.streams.UrlStreamHelpers;
-
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -19,8 +19,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
 
 public class GitHubAPI {
 

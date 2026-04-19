@@ -11,3 +11,4 @@ netnotes-log.txt
 **/*.back
 **/back/
 **/logs
+.codex

@@ -1,4 +1,4 @@
-package io.netnotes.engine.utils.virtualExecutors;
+package io.netnotes.engine.virtualExecutors;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -6,7 +6,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
+import io.netnotes.engine.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
 
 public class VirtualExecutors {
     

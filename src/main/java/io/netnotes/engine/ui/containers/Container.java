@@ -30,8 +30,8 @@ import io.netnotes.engine.ui.SpatialRegion;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
-import io.netnotes.engine.utils.virtualExecutors.SerializedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
 /**
  * Container - Abstract base class for all container implementations

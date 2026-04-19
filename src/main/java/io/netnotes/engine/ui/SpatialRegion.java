@@ -77,7 +77,7 @@ public abstract class SpatialRegion<
      * Create a copy of this region
      */
     public abstract S copy();
-
+    public abstract S copy(SpatialRegionPool<S> pool);
 
     /**
      * Set this region's values from another
@@ -108,10 +108,20 @@ public abstract class SpatialRegion<
 
     public abstract NoteBytesObject toNoteBytes();
 
+     /**
+     * 
+     * @return a copy of the absolute position as a new SpatialPoint
+     */
     public abstract P getParentAbsolutePosition();
 
-    public abstract void setParentAbsolutePosition(P point);
 
+    public abstract void setParentAbsolutePosition(P point);
+    public abstract void zeroParentAbsolutePosition();
+
+    /**
+     * 
+     * @return a copy of the absolute position as a new SpatialPoint
+     */
     public abstract P getAbsolutePosition();
 
     public abstract void clear();

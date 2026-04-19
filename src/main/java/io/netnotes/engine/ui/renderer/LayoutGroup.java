@@ -1,4 +1,4 @@
-package io.netnotes.engine.ui.renderer.layout;
+package io.netnotes.engine.ui.renderer;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -7,8 +7,7 @@ import java.util.Map;
 
 import io.netnotes.engine.ui.SpatialPoint;
 import io.netnotes.engine.ui.SpatialRegion;
-import io.netnotes.engine.ui.renderer.BatchBuilder;
-import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.ui.renderer.layout.GroupLayoutCallback;
 
 /**
  * LayoutGroup - A set of sibling renderables laid out together by a shared
@@ -71,8 +70,7 @@ public abstract class LayoutGroup<
      * casting is needed. Passed to the layout callback so it can read and write
      * member geometry without needing direct access to LayoutNode internals.
      */
-    private final Map<String, LayoutDataInterface<LD>> layoutDataInterfaces
-        = new LinkedHashMap<>();
+    private final Map<String, LayoutDataInterface<LD>> layoutDataInterfaces = new LinkedHashMap<>();
 
     /**
      * The single layout callback for this group.
@@ -81,20 +79,6 @@ public abstract class LayoutGroup<
      */
     private GCB layoutCallback = null;
 
-    // ── Per-pass state ────────────────────────────────────────────────────────
-
-    /**
-     * True once the layout callback has fired this pass.
-     * Reset by resetForPass() at the start of each pass.
-     */
-    private boolean appliedThisPass = false;
-
-    /**
-     * True once content callbacks have fired for this group's members this pass.
-     * Prevents redundant re-measurement when multiple ancestors call
-     * getMeasuredSize() on members of this group.
-     */
-    private boolean contentMeasuredThisPass = false;
 
     public LayoutGroup(String groupId) {
         this.groupId = groupId;
@@ -162,10 +146,6 @@ public abstract class LayoutGroup<
 
     // ── Content execution (bottom-up, on-demand) ──────────────────────────────
 
-
-
-
-    public void markContentMeasuredThisPass() { contentMeasuredThisPass = true; }
     // ── Layout execution (top-down, after owner commits) ──────────────────────
 
     /**
@@ -187,19 +167,6 @@ public abstract class LayoutGroup<
         layoutCallback.calculate(contexts, layoutDataInterfaces);
     }
 
-    // ── Pass state ────────────────────────────────────────────────────────────
-
-    public void markAppliedThisPass()          { appliedThisPass = true; }
-    public boolean hasAppliedThisPass()        { return appliedThisPass; }
-    public boolean hasContentMeasuredThisPass(){ return contentMeasuredThisPass; }
-
-    /**
-     * Reset all per-pass state. Called once at the start of each layout pass.
-     */
-    public void resetForPass() {
-        appliedThisPass         = false;
-        contentMeasuredThisPass = false;
-    }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
