@@ -266,14 +266,13 @@ public abstract class ContainerHandle<
         this.containerPredicate = createContainerPredicate();
         this.eventsFactory = createEventsFactory(regionPool);
         this.stateMachine = new ConcurrentBitFlagStateMachine("ContainerHandle:" + containerId);
-        //runs state changes on UI executor, deffers if during layout
         this.stateMachine.setSerialExecutor(uiExecutor);
- 
-        //this.ioDaemonPath = builder.ioDaemonPath == null ? CoreConstants.IO_DAEMON_PATH : builder.ioDaemonPath;
+
         
         this.floatingLayerManager = createFloatingLayerManager();
         this.renderableLayoutManager = createRenderableLayoutManager(floatingLayerManager);
         this.renderableLayoutManager.setFocusRequester(this::requestFocusInternal);
+        this.renderableLayoutManager.setRenderRequester(this::renderableRequestRender);
         setupRoutedMessageMap();
         setupEventHandlers();
         setupBaseStateHandler();
@@ -513,9 +512,13 @@ public abstract class ContainerHandle<
         }
 
         if (rootRenderable != null && (renderReadySnapshot && (forceRender || renderReadySnapshot != prev))) {
-            renderableLayoutManager.flushLayout().thenRun(this::render);
+            if (forceRender) {
+                rootRenderable.invalidate();
+            } else {
+                renderableLayoutManager.requestRender(rootRenderable);
+            }
         }
-    
+
     }
 
     protected abstract void setupStateTransitions();
@@ -1316,59 +1319,38 @@ public abstract class ContainerHandle<
         }
     }
 
-    private void setRenderableInternal(R renderable, LCB callback){
+    private void setRenderableInternal(R renderable, LCB callback) {
         R old = rootRenderable;
-        if(old == renderable){
-            return;
-        }
+        if (old == renderable) return;
+
         if (old != null) {
             old.unregisterRenderable();
-            old.setRenderRequest(null);
+            // Remove: old.setRenderRequest(null);
             old.setDamageAccumulator(null);
             damageAccumulator.clear();
-            if (onRenderableUnregistered != null) {
-                onRenderableUnregistered.accept(old);
-            }
+            if (onRenderableUnregistered != null) onRenderableUnregistered.accept(old);
         }
-        
+
         this.rootRenderable = renderable;
         resetFocusInternal();
 
         if (onRenderableChanged != null && old != renderable) {
             onRenderableChanged.accept(old, renderable);
         }
-        
+
         if (renderable != null && old != renderable) {
-            renderable.setRenderRequest(this::renderableRequestRender);
+
             renderable.setDamageAccumulator(this::accumulateDamage);
-          
+
             renderableLayoutManager.registerRenderable(renderable, callback);
-            
+
             if (dimensionsInitialized && allocatedRegion != null) {
                 applyRegionToRenderable(renderable, allocatedRegion, isLayoutManaged(), isOffScreen());
-            }else{
-               
-                Log.logMsg("[ContainerHandle: "+getName()+"] setRenderable:"
-                    + "\n\t dimensionsInitialized: " + dimensionsInitialized
-                    + "\n\t allocatedRegion: " + (allocatedRegion != null ? allocatedRegion.toString() : "null")
-                , LOG_LEVEL);
-
+            } else {
                 renderable.requestLayoutUpdate();
             }
 
-            if (renderReadySnapshot) {
-                renderableLayoutManager.flushLayout().thenRun(() -> {
-                    if (rootRenderable == renderable && renderReadySnapshot) {
-                        render();
-                    }
-                });
-            }
-            
-        
-            if (onRenderableRegistered != null) {
-                onRenderableRegistered.accept(renderable);
-            }
-        
+            if (onRenderableRegistered != null) onRenderableRegistered.accept(renderable);
         }
     }
 
@@ -1377,13 +1359,12 @@ public abstract class ContainerHandle<
     }
 
     protected void renderableRequestRender(R renderable) {
-        uiExecutor.runRentrant(()->renderableRequestRenderInternal(renderable));
-    }
-
-    private volatile boolean renderPendingAfterLayout = false;
-
-    private void renderableRequestRenderInternal(R renderable) {
-        if (rootRenderable != renderable) {
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(() -> renderableRequestRender(renderable));
+            return;
+        }
+        
+        if (renderable != null && rootRenderable != renderable) {
             logRenderDropped(
                 String.format(
                     "stale render request from %s while root is %s",
@@ -1428,28 +1409,20 @@ public abstract class ContainerHandle<
         return rootRenderable;
     }
 
-    public CompletableFuture<Void> clearRenderable() {
-        return uiExecutor.execute(this::clearRenderableInternal);
-      
-        
-    }
-
-    private Void clearRenderableInternal(){
+    public void clearRenderable() {
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(this::clearRenderable);
+            return;
+        }
         R oldRenderable = this.rootRenderable;
         this.rootRenderable = null;
         if (oldRenderable != null) {
-            // Async unregister
             renderableLayoutManager.unregisterRenderableTree(oldRenderable);
-            
-            oldRenderable.setRenderRequest(null);
+            // Remove: oldRenderable.setRenderRequest(null);
             oldRenderable.setDamageAccumulator(null);
             damageAccumulator.clear();
-            if (onRenderableUnregistered != null) {
-                onRenderableUnregistered.accept(oldRenderable);
-            }
+            if (onRenderableUnregistered != null) onRenderableUnregistered.accept(oldRenderable);
         }
-    
-        return null;
     }
 
     public void setOnRenderableRegistered(Consumer<R> callback) {
@@ -1468,18 +1441,11 @@ public abstract class ContainerHandle<
    
 
     private void render() {
-        if (uiExecutor.isCurrentThread()) {
-            renderInternal();
-        } else {
-            uiExecutor.runLater(this::renderInternal);
+        if (!uiExecutor.isCurrentThread()) {
+            uiExecutor.runLater(this::render);
+            return;
         }
-    }
-
     
-    /**
-     * Perform actual render - runs on serialExec
-     */
-    private void renderInternal() {
         if (rootRenderable == null) {
             logRenderDropped(
                 "renderInternal invoked with no root renderable",
@@ -1533,17 +1499,17 @@ public abstract class ContainerHandle<
             // If drainRegions already ran, recycle what we drained so regions aren't leaked.
             throw new RuntimeException(e);
         } finally {
-            recycleDamageRegions(damageRegions);
+            damageRegions = null;
         }
     }
 
-    private void recycleDamageRegions(List<S> regions) {
+    /*private void recycleDamageRegions(List<S> regions) {
         if (regions == null || regions.isEmpty()) return;
         for (S region : regions) {
             regionPool.recycle(region);
         }
         regions.clear();
-    }
+    }*/
 
     /**
      * Hook for renderer-specific batch metadata.

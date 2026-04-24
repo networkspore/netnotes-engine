@@ -168,7 +168,9 @@ public class StreamUtils {
     }
 
     public static byte[] readByteAmount(int size, InputStream inputStream) throws IOException{
-        try(UnsynchronizedByteArrayOutputStream byteOutput = new UnsynchronizedByteArrayOutputStream(size)){
+        UnsynchronizedByteArrayOutputStream.Builder builder = UnsynchronizedByteArrayOutputStream.builder().setBufferSize(size);
+
+        try(UnsynchronizedByteArrayOutputStream byteOutput = builder.get()){
             int bufferSize = size < StreamUtils.BUFFER_SIZE ? size : StreamUtils.BUFFER_SIZE;
             byte[] buffer = new byte[bufferSize];
             int length = 0;
@@ -213,8 +215,8 @@ public class StreamUtils {
     }
 
     public static byte[] readInputStreamAsBytes(InputStream inputStream) throws IOException{
-     
-        try(UnsynchronizedByteArrayOutputStream outputStream = new UnsynchronizedByteArrayOutputStream()){
+ 
+        try(UnsynchronizedByteArrayOutputStream outputStream = UnsynchronizedByteArrayOutputStream.builder().get()){
             byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
             int length = 0;
 

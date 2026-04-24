@@ -32,32 +32,42 @@ public class DamageAccumulator<
             pool.recycle(region);
             return;
         }
-        for (int i = 0; i < regions.size(); i++) {
-            S existing = regions.get(i);
-            if (existing.contains(region)) {
-                pool.recycle(region);
-                return;
+
+        boolean merged;
+        do {
+
+            merged = false;
+            for (int i = 0; i < regions.size(); i++) {
+                S existing = regions.get(i);
+           
+                if (existing.contains(region)) {
+                    pool.recycle(region);
+                    return;
+                }
+                if (region.contains(existing)) {
+                    pool.recycle(existing);
+                    regions.set(i, region);
+                    // Don't return — the new region might absorb more entries
+                    region = regions.get(i); // continue with promoted region
+                    // remove and re-add to continue checking remaining entries
+                    regions.remove(i);
+                    i--;
+                    merged = true;
+                    continue;
+                }
+                if (existing.intersects(region)) {
+                    S mergedRegion = existing.union(region);
+                    pool.recycle(existing);
+                    pool.recycle(region);
+                    regions.remove(i);
+                    region = mergedRegion;
+                    i--;
+                    merged = true;
+                    continue;
+                }
             }
-            if (region.contains(existing)) {
-                pool.recycle(existing);
-                regions.set(i, region);
-                // Don't return — the new region might absorb more entries
-                region = regions.get(i); // continue with promoted region
-                // remove and re-add to continue checking remaining entries
-                regions.remove(i);
-                i--;
-                continue;
-            }
-            if (existing.intersects(region)) {
-                S merged = existing.union(region);
-                pool.recycle(existing);
-                pool.recycle(region);
-                regions.remove(i);
-                i--;
-                region = merged; // continue merging with the rest
-                continue;
-            }
-        }
+       } while (merged);
+
         regions.add(region);
     }
     

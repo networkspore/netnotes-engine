@@ -2,6 +2,8 @@ package io.netnotes.engine.ui;
 
 import java.util.ArrayDeque;
 
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
 /**
  * Thread-local pool implementation with adaptive sizing
  * 
@@ -49,6 +51,7 @@ public abstract class ThreadLocalSpatialRegionPool<S extends SpatialRegion<?,S>>
         
         S region = data.pool.poll();
         if (region != null) {
+            region.setInPool(false);
             region.setToIdentity();
             data.consecutiveMisses = 0;  // Reset miss counter on hit
             return region;
@@ -70,7 +73,11 @@ public abstract class ThreadLocalSpatialRegionPool<S extends SpatialRegion<?,S>>
     @Override
     public void recycle(S region) {
         if (region == null) return;
-        
+        if(region.isInPool()){
+            IllegalStateException ex = new IllegalStateException("Double recycle detected for region: " + region);
+            Log.logError("[ThreadLocalSpatialRegionPool] recycle", ex);
+            throw ex;
+        }
         PoolData data = threadLocalPool.get();
         
         // Only add to pool if not at hard maximum

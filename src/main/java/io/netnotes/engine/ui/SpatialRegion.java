@@ -11,10 +11,15 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
 public abstract class SpatialRegion<
     P extends SpatialPoint<P>,
     S extends SpatialRegion<P,S>
-> {
+>  {
+
+    private volatile boolean isInPool = false;
 
     public static final NoteBytesReadOnly PARENT_ABS_X = new NoteBytesReadOnly("parentAbsX");
     public static final NoteBytesReadOnly PARENT_ABS_Y = new NoteBytesReadOnly("parentAbsY");
+
+    public boolean isInPool(){ return this.isInPool; }
+    public void setInPool(boolean inPool) { this.isInPool = inPool; }
 
     public abstract void setPosition(P point);
     public abstract void setToIdentityPosition();

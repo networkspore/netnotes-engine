@@ -23,6 +23,7 @@ import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
+
 import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
@@ -596,13 +597,23 @@ public abstract class Renderable<
     }
     
     // ===== DAMAGE TRACKING =====
-    
+    protected abstract void onInvalidateRequested(R renderable, S damage);
+    protected abstract void onPendingInvalidateSet(R renderable, String text);
+    protected abstract void onInvalidateDeferred(R renderable, String text);
     /**
      * @param localRegion Region to invalidate in local coordinates, null for full invalidation
      */
     public void invalidate(S localRegion) {
+        onInvalidateRequested(self(), localRegion);
         if(!uiExecutor.isCurrentThread()){
-            uiExecutor.runLater(()->invalidate(localRegion));
+            S copy = localRegion != null ? localRegion.copy(regionPool) : null;
+            uiExecutor.runLater(()->{
+                try{
+                    invalidate(copy);
+                }finally{
+                    if(copy != null) regionPool.recycle(copy);
+                }
+            });
             return;
         }
         RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = layoutManager;
@@ -610,6 +621,7 @@ public abstract class Renderable<
             // Coordinates are not final yet — defer. The post-layout
             // invalidateFromLayout() will emit correct damage after commit.
             pendingInvalidate = true;
+            onPendingInvalidateSet(self(), "noLayoutManagerOrNotStarted");
             return;
         }
 
@@ -618,6 +630,7 @@ public abstract class Renderable<
                 // This node is being committed in the active pass — let applyLayoutData()
                 // consume pendingInvalidate after final geometry is known.
                 pendingInvalidate = true;
+                onInvalidateDeferred(self(), "inCurrentLayoutPass");
                 return;
             }
             // This node is outside the active pass. Defer to preserve ordering
@@ -659,11 +672,13 @@ public abstract class Renderable<
         });
     }
 
-
+    protected abstract void onInvalidateImmediate(R renderable, S damage);
     /**
      * Unconditional damage accumulation and propagation.
      */
     private void invalidateImmediate(S absoluteDamage) {
+        onInvalidateImmediate(self(), absoluteDamage);
+        //RenderableTraceAspect.onInvalidateImmediate(this, absoluteDamage);
         if (absoluteDamage == null) {
             if (damage != null) regionPool.recycle(damage);
             damage = regionPool.obtain();
@@ -677,7 +692,7 @@ public abstract class Renderable<
                 damage.set(absoluteDamage);
             } else {
                 damage.unionInPlace(absoluteDamage);
-    
+
                 try (PooledRegion<S> fullNode = regionPool.obtainPooled()) {
                     S absFullNode = fullNode.get();
                     absFullNode.copyFrom(region);
@@ -695,14 +710,23 @@ public abstract class Renderable<
         if (parent == null) {
             // Root handoff: translate the final damage region to absolute
             // coordinates before it enters the container accumulator.
+            onDamageReported(self(), damage);
             reportDamage(damage);
             scheduleRender();
         }
     }
 
+    protected abstract void onDamageReported(R renderable, S damage);
+
     private boolean renderRequested = false;
 
     private void scheduleRender() {
+        RenderableLayoutManagerHandle<R, LCB, G, GCB> lm = layoutManager;
+        if (lm != null) {
+            lm.requestRender(self());
+            return;
+        }
+
         if (renderRequested) return;
         renderRequested = true;
         
@@ -748,6 +772,8 @@ public abstract class Renderable<
         damageTarget.propagateDamageUp(damage);
     }
 
+    protected abstract void onDamagePropagated(R renderable, R parent, S absChildDamage);
+
     /**
      * Child invalidated - accumulate damage
      * 
@@ -755,6 +781,7 @@ public abstract class Renderable<
      *                                   (caller will recycle this after we return)
      */
     protected void propagateDamageUp(S absChildDamage) {
+        onDamagePropagated(self(), parent, absChildDamage);
         childrenDirty = true;
 
         if (damage == null) {
@@ -782,13 +809,16 @@ public abstract class Renderable<
     }
     
     // ===== RENDERING =====
-    
+    protected abstract void onToBatchStart(R renderable);
+    protected abstract void onToBatchEnd(R rendreable, boolean b);
       /**
      * Root-level entry point. Called by ContainerHandle with no incoming clip.
      * Guards the common "nothing at all to do" case before allocating anything.
      */
     public void toBatch(B batch) {
+        onToBatchStart(self());
         if (damage == null && !childrenDirty) {
+            onToBatchEnd(self(), false);
             return;
         }
 
@@ -798,6 +828,7 @@ public abstract class Renderable<
         toBatch(batch, fullSpace);
 
         regionPool.recycle(fullSpace);
+        onToBatchEnd(self(), damage != null || childrenDirty);
     }
 
     /**
@@ -1044,11 +1075,13 @@ public abstract class Renderable<
         return handled;
     }
 
+    protected abstract void onPhaseAdvance(R renderable, String was, String next);
+
     void advanceRenderPhase(RenderPhase next) {
         RenderPhase was = this.renderPhase;
         if (was != next){
             this.renderPhase = next;
-            
+            onPhaseAdvance(self(), was.name(), next.name());
             switch(next){
                 case APPLYING:
                     onApplying();
@@ -1803,28 +1836,25 @@ public abstract class Renderable<
      * @param layoutData Data carrier (spatialRegion != null means damaged)
      */
     void applyLayoutData(LD layoutData) {
-        S spatialDamage = layoutData.hasRegion() 
+        S spatialDamage = layoutData.hasRegion()
             ? applySpatialChange(layoutData)
             : null;
 
-        boolean hasStateChanges = layoutData.hasStateChanges() 
-            ? applyStateChanges(layoutData) 
+        boolean hasStateChanges = layoutData.hasStateChanges()
+            ? applyStateChanges(layoutData)
             : false;
-    
+
+        boolean hadPendingInvalidate = pendingInvalidate;
 
         if (spatialDamage != null || hasStateChanges || pendingInvalidate) {
             pendingInvalidate = false;
-            if (spatialDamage != null) {
-                try {
-                    invalidateImmediate(spatialDamage);
-                } finally {
-                    regionPool.recycle(spatialDamage);
-                }
-            } else {
-                invalidateImmediate(null);
-            }
+            invalidateImmediate(spatialDamage);
         }
+
+        onApplyLayoutData(self(), layoutData.hasRegion(), hasStateChanges, hadPendingInvalidate);
     }
+
+    protected abstract void onApplyLayoutData(R renderable, boolean hasRegion, boolean hasStateChanges, boolean hadPendingInvalidate);
 
     /**
      * 

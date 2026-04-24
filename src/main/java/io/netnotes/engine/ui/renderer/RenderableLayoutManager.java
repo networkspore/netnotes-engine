@@ -77,27 +77,25 @@ public abstract class RenderableLayoutManager<
         }
     }
 
+
     private static final LogLevel LOG_LEVEL                    = LogLevel.GENERAL;
     private static final LogLevel DIAGNOSTIC_LOG_LEVEL         = LogLevel.IMPORTANT;
     private static final LogLevel ROUTINE_DIAGNOSTIC_LOG_LEVEL = LogLevel.GENERAL;
     private static final int      DIAGNOSTIC_NODE_SAMPLE_SIZE  = 4;
     private static final long     DIAGNOSTIC_LOG_THROTTLE_MS   = 250;
 
-    public static final long DEFAULT_DEBOUNCE_MS = 3;
-    private static final long   MIN_DEBOUNCE_MS              = 2;
-    private static final long   MAX_DEBOUNCE_MS              = 100;
-    private static final double EXECUTION_TIME_MULTIPLIER    = 0.5;
-    private static final long   DEBOUNCE_PER_NODE_MICROS     = 50;
-    private static final double SMOOTHING_ALPHA              = 0.3;
+    public static final long DEFAULT_DEBOUNCE_MS = 2;
+    private static final long[] LAYOUT_DEBOUNCE_STEPS_MS = new long[] {2L, 4L, 8L};
+    private static final long LAYOUT_DEBOUNCE_MAX_WAIT_MS = 8L;
+    private static final int LAYOUT_DEBOUNCE_SUPERSEDES_PER_STEP = 3;
 
     // ── Infrastructure ────────────────────────────────────────────────────────
 
     protected final SerializedVirtualExecutor uiExecutor;
     protected final String containerName;
 
-    private long debounceDelayMs;
     private final SerializedDebouncedExecutor layoutDebouncer;
-    private double avgExecutionTimeMs  = 0.0;
+    private volatile long minDebounceMs = DEFAULT_DEBOUNCE_MS;
     private volatile long currentDebounceMs = DEFAULT_DEBOUNCE_MS;
 
     // ── Registries ────────────────────────────────────────────────────────────
@@ -109,6 +107,7 @@ public abstract class RenderableLayoutManager<
     protected FloatingLayerManager<B,R,P,S,LC,LD,LCB> floatingLayer;
 
     // ── Dirty tracking ────────────────────────────────────────────────────────
+    private volatile boolean deferredLayoutRequested = false;
 
     protected Set<L> dirtyLayoutNodes   = new LinkedHashSet<>();
     protected Set<L> dirtyFloatingNodes = new LinkedHashSet<>();
@@ -131,11 +130,16 @@ public abstract class RenderableLayoutManager<
     private boolean layoutExecuting = false;
     private final Deque<Runnable> deferredInvalidations = new ArrayDeque<>();
     private final Deque<Runnable> deferredTreeMutations = new ArrayDeque<>();
+    private final List<L> pendingInjections = new ArrayList<>();
 
     private final Set<R> committingNodes     = new LinkedHashSet<>();
     private Consumer<Boolean> layoutStateListener = null;
+   // private Consumer<Set<L>>  onAfterLayoutPass = null;
     private Consumer<R>       focusRequester      = null;
     private R                 pendingFocusRequest  = null;
+    private Consumer<R>       renderRequester      = null;
+    private boolean           renderRequested      = false;
+    private R                 renderRequestedBy    = null;
 
     private volatile DiagnosticMode diagnosticMode = DiagnosticMode.TRACE;
     private final Map<String, Long>  diagnosticLogTimes = new HashMap<>();
@@ -158,9 +162,18 @@ public abstract class RenderableLayoutManager<
         this.uiExecutor      = uiExec;
         this.containerName   = containerName;
         this.floatingLayer   = floatingLayer;
-        this.debounceDelayMs = debounceDelayMs;
+        this.minDebounceMs = debounceDelayMs > 0 ? debounceDelayMs : DEFAULT_DEBOUNCE_MS;
+        this.currentDebounceMs = this.minDebounceMs;
         this.layoutDebouncer = new SerializedDebouncedExecutor(
-            uiExec, debounceDelayMs, TimeUnit.MILLISECONDS);
+            uiExec,
+            this.minDebounceMs,
+            TimeUnit.MILLISECONDS,
+            SerializedDebouncedExecutor.DebounceStrategy.STEPPED_TRAILING,
+            LAYOUT_DEBOUNCE_STEPS_MS,
+            LAYOUT_DEBOUNCE_MAX_WAIT_MS,
+            LAYOUT_DEBOUNCE_SUPERSEDES_PER_STEP,
+            null
+        );
     }
 
     // ── Abstract factories ────────────────────────────────────────────────────
@@ -298,6 +311,7 @@ public abstract class RenderableLayoutManager<
     protected void cleanupNode(L node) {
         R renderable = node.getRenderable();
         if (pendingFocusRequest == renderable) pendingFocusRequest = null;
+        if (renderRequestedBy == renderable) renderRequestedBy = null;
 
         G memberGroup = node.getMemberGroup();
         if (memberGroup != null) {
@@ -447,24 +461,95 @@ public abstract class RenderableLayoutManager<
     // SCHEDULING
     // =========================================================================
 
-    void setLayoutStateListener(Consumer<Boolean> listener) {
+    public void setLayoutStateListener(Consumer<Boolean> listener) {
         this.layoutStateListener = listener;
     }
 
-    protected void requestLayout() {
-        if (batchingRequests) return;
-        layoutDebouncer.submit(this::performUpdate, debounceDelayMs, TimeUnit.MILLISECONDS);
+    /**
+     * Set a callback to be invoked after a layout pass completes.
+     * The callback receives the set of nodes that were processed in the layout pass.
+     *
+     * @param callback callback to invoke after layout pass completes
+    
+    public void setOnAfterLayoutPass(Consumer<Set<L>> callback) {
+        this.onAfterLayoutPass = callback;
+    } */
+
+    /**
+     * Called after a layout pass completes.
+     * This is the hook that tests should use to know when layout has finished.
+     
+    protected void onAfterLayoutPass(Set<L> processedNodes) {
+        if (onAfterLayoutPass != null) {
+            onAfterLayoutPass.accept(processedNodes);
+        }
+    }*/
+    
+
+    
+
+    public void setRenderRequester(Consumer<R> requester) {
+        this.renderRequester = requester;
+        if (isCurrentThread()) {
+            fireRenderIfIdle();
+        } else {
+            uiExecutor.runLater(this::fireRenderIfIdle);
+        }
     }
 
-    public CompletableFuture<Void> flushLayout() {
-        if (!dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty()) {
-            return layoutDebouncer.executeNow(this::performUpdate);
+
+    protected void requestLayout() {
+        if (batchingRequests) {
+            deferredLayoutRequested = true;
+            return;
         }
-        return CompletableFuture.completedFuture(null);
+        layoutDebouncer.submit(this::performUpdate, minDebounceMs, TimeUnit.MILLISECONDS);
+        currentDebounceMs = layoutDebouncer.getLastScheduledDelayMs();
     }
 
     public boolean hasPendingLayout() {
         return !dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty();
+    }
+
+    public void requestRender(R requester) {
+        if (!isCurrentThread()) {
+            uiExecutor.runLater(() -> requestRender(requester));
+            return;
+        }
+        R renderRoot = resolveRenderRoot(requester);
+        if (requester != null && renderRoot == null) {
+            return;
+        }
+        renderRequested = true;
+        if (renderRoot != null) {
+            renderRequestedBy = renderRoot;
+        }
+        fireRenderIfIdle();
+    }
+
+    private R resolveRenderRoot(R requester) {
+        if (requester == null) return null;
+        R root = requester;
+        while (root.getParent() != null) {
+            root = root.getParent();
+        }
+        return isRegistered(root) ? root : null;
+    }
+
+    private void fireRenderIfIdle() {
+        if (!renderRequested) return;
+        if (layoutExecuting) return;
+        if (batchingRequests) {                                                          
+          deferredLayoutRequested = true;                                                          
+          return;                                                                                                        
+        }  
+        if (!dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty()) return;
+        if (renderRequester == null) return;
+        
+        R requester = renderRequestedBy;
+        renderRequested = false;
+        renderRequestedBy = null;
+        renderRequester.accept(requester);
     }
 
 
@@ -541,7 +626,7 @@ public abstract class RenderableLayoutManager<
             if (!allDirty.isEmpty()) {
                 try {
                     performUnifiedLayoutUpdate(allDirty);
-                    onAfterLayoutPass(allDirty);
+                  //  onAfterLayoutPass(allDirty);
                 } catch (Exception e) {
                     Log.logError(String.format(
                         "[LayoutManager:%s] layout pass failed (nodes=%s)",
@@ -561,19 +646,18 @@ public abstract class RenderableLayoutManager<
         drainDefferedInvalidations();
    
         long endTime = System.nanoTime();
-        
         double ms = (endTime - startTime) / 1_000_000.0;
-        long nextDebounce = calculateAdaptiveDebounce(ms, dirtyCount);
-        setDebounceDelay(nextDebounce);
 
         if (dirtyCount > 0) {
             logSummaryDiagnostic(String.format(
                 "[LayoutManager:%s] pass end %.2fms (nodes=%d, nextDebounce=%dms)",
-                containerName, ms, dirtyCount, nextDebounce));
+                containerName, ms, dirtyCount, currentDebounceMs));
         }
 
         if (!dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty()) {
             requestLayout();
+        } else {
+            fireRenderIfIdle();
         }
     }
 
@@ -586,6 +670,9 @@ public abstract class RenderableLayoutManager<
             node.clear();
             node.setInFlightContext(null);
         }
+        for (R r : committingNodes) {                                                                                      
+          r.advanceRenderPhase(RenderPhase.IDLE);                                                                        
+        } 
         committingNodes.clear(); 
         dirtyLayoutNodes.addAll(currentLayoutDirty);
         dirtyFloatingNodes.addAll(currentFloatingDirty);
@@ -623,7 +710,7 @@ public abstract class RenderableLayoutManager<
         return node != null && pass.contains(node);
     }
 
-    protected void onAfterLayoutPass(Set<L> processedNodes) {}
+   
 
     // =========================================================================
     // UNIFIED LAYOUT PASS
@@ -645,11 +732,26 @@ public abstract class RenderableLayoutManager<
         currentPassTraversal = sorted;
         currentPassCursor = 0;
         while (currentPassTraversal != null && currentPassCursor < currentPassTraversal.size()) {
+            if (!pendingInjections.isEmpty()) {
+                mergeInjections(); // single atomic operation at a safe checkpoint
+            }
             L node = currentPassTraversal.get(currentPassCursor++);
             processNode(node);
         }
     }
 
+    private void mergeInjections() {
+        int insertionPoint = currentPassCursor;
+        List<L> tail = new ArrayList<>(
+            currentPassTraversal.subList(insertionPoint, currentPassTraversal.size())
+        );
+        tail.addAll(pendingInjections);
+        pendingInjections.clear();
+        depthSort(tail);
+        // Replace tail atomically — list is not touched between subList.clear and addAll
+        currentPassTraversal.subList(insertionPoint, currentPassTraversal.size()).clear();
+        currentPassTraversal.addAll(tail);
+    }
 
     private void processNode(L node) {
         // Reuse in-flight context if content pre-pass created one,
@@ -827,26 +929,12 @@ public abstract class RenderableLayoutManager<
     private void injectSubtreeIntoCurrentPass(R renderable) {
         L root = renderableRegistry.get(renderable);
         if (root == null) return;
-
         Set<L> passNodes = currentPassNodes;
-        List<L> traversal = currentPassTraversal;
-        if (passNodes == null || traversal == null) {
-            // No active traversal to inject into — queue normally for next pass.
+        if (passNodes == null || currentPassTraversal == null) {
             markLayoutDirtySubtree(renderable);
             return;
         }
-
-        List<L> injected = new ArrayList<>();
-        collectSubtreeForCurrentPass(root, injected, passNodes);
-        if (injected.isEmpty()) return;
-
-        int insertionPoint = Math.max(0, Math.min(currentPassCursor, traversal.size()));
-        traversal.addAll(injected);
-
-        List<L> tail = depthSort(new ArrayList<>(traversal.subList(insertionPoint, traversal.size())));
-        for (int i = 0; i < tail.size(); i++) {
-            traversal.set(insertionPoint + i, tail.get(i));
-        }
+        collectSubtreeForCurrentPass(root, pendingInjections, passNodes);
     }
 
     private void collectSubtreeForCurrentPass(L node, List<L> injected, Set<L> passNodes) {
@@ -923,17 +1011,17 @@ public abstract class RenderableLayoutManager<
     // RENDER DISPATCH
     // =========================================================================
 
-    void notifyRenderDispatched() {
+    public void notifyRenderDispatched() {
         for (R r : committingNodes) r.advanceRenderPhase(RenderPhase.RENDERED);
         committingNodes.clear();
     }
-
-    void clearIdleCommittingNodes() {
+    
+    public void clearIdleCommittingNodes() {
         for (R r : committingNodes) r.advanceRenderPhase(RenderPhase.IDLE);
         committingNodes.clear();
     }
 
-    String summarizeCommittingNodes() { return summarizeRenderables(committingNodes); }
+    public String summarizeCommittingNodes() { return summarizeRenderables(committingNodes); }
 
     // =========================================================================
     // FLOATING
@@ -995,6 +1083,7 @@ public abstract class RenderableLayoutManager<
             dirtyFloatingNodes.remove(node);
             floatingLayer.remove(renderable);
             if (pendingFocusRequest == renderable) pendingFocusRequest = null;
+            if (renderRequestedBy == renderable) renderRequestedBy = null;
 
             renderable.removedFromLayout();
         }
@@ -1135,7 +1224,7 @@ public abstract class RenderableLayoutManager<
     // FOCUS
     // =========================================================================
 
-    void setFocusRequester(Consumer<R> focusRequester) {
+    public void setFocusRequester(Consumer<R> focusRequester) {
         this.focusRequester = focusRequester;
     }
 
@@ -1164,11 +1253,27 @@ public abstract class RenderableLayoutManager<
     // BATCHING
     // =========================================================================
 
-    public void beginRequestBatch() { batchingRequests = true; }
+    public void beginRequestBatch() { 
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(this::beginRequestBatch);
+            return;
+        }
+        batchingRequests = true; 
+    }
 
     public void endRequestBatch() {
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(this::endRequestBatch);
+            return;
+        }
         batchingRequests = false;
-        if (!dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty()) requestLayout();
+        if(!dirtyLayoutNodes.isEmpty()                                                                                
+              || !dirtyFloatingNodes.isEmpty()                                                                           
+              || deferredLayoutRequested
+        ) {  
+            deferredLayoutRequested = false;
+            requestLayout();
+        }
     }
 
     public void batchRequests(Runnable requests) {
@@ -1253,30 +1358,19 @@ public abstract class RenderableLayoutManager<
     public String getDiagnostics() {
         return String.format(
             "LayoutManager[container=%s, renderables=%d, groups=%d, dirtyLayout=%d, " +
-            "debounce=%dms, avgExec=%.2fms, diagnosticMode=%s]",
+            "debounce=%dms, diagnosticMode=%s]",
             containerName, renderableRegistry.size(), groupRegistry.size(),
-            dirtyLayoutNodes.size(), currentDebounceMs, avgExecutionTimeMs, diagnosticMode);
+            dirtyLayoutNodes.size(), currentDebounceMs, diagnosticMode);
     }
 
     // =========================================================================
-    // ADAPTIVE DEBOUNCE
+    // DEBOUNCE CONFIG
     // =========================================================================
-
-    private long calculateAdaptiveDebounce(double executionTimeMs, int dirtyNodeCount) {
-        avgExecutionTimeMs = avgExecutionTimeMs == 0.0
-            ? executionTimeMs
-            : (SMOOTHING_ALPHA * executionTimeMs) + ((1.0 - SMOOTHING_ALPHA) * avgExecutionTimeMs);
-        long executionBased  = (long)(avgExecutionTimeMs * EXECUTION_TIME_MULTIPLIER);
-        long complexityBased = (dirtyNodeCount * DEBOUNCE_PER_NODE_MICROS) / 1000;
-        long adaptive = Math.max(MIN_DEBOUNCE_MS,
-            Math.min(MAX_DEBOUNCE_MS, MIN_DEBOUNCE_MS + executionBased + complexityBased));
-        currentDebounceMs = adaptive;
-        return adaptive;
-    }
 
     public void setDebounceDelay(long delayMs) {
         if (delayMs < 0) throw new IllegalArgumentException("Delay must be non-negative");
-        this.debounceDelayMs = delayMs;
+        this.minDebounceMs = delayMs;
+        this.currentDebounceMs = delayMs;
     }
 
     private boolean isCurrentThread() { return uiExecutor.isCurrentThread(); }
@@ -1300,13 +1394,13 @@ public abstract class RenderableLayoutManager<
     private class ManagerHandle implements RenderableLayoutManagerHandle<R, LCB, G, GCB> {
        
         private void runMutation(Runnable mutation) {
-            uiExecutor.runRentrant(() -> runMutation(mutation)); 
+            uiExecutor.runRentrant(() -> RenderableLayoutManager.this.runWhenLayoutIdle(mutation));
         }
 
         @Override public boolean isInCurrentPass(R r)           { return RenderableLayoutManager.this.isInCurrentPass(r); }
         @Override public void markLayoutDirty(R r)              { RenderableLayoutManager.this.markLayoutDirty(r); }
         @Override public void markLayoutDirtyImmediate(R r)     { RenderableLayoutManager.this.markLayoutDirtyImmediate(r); }
-        @Override public CompletableFuture<Void> flushLayout()  { return RenderableLayoutManager.this.flushLayout(); }
+       
        
         @Override public void migrateToFloating(R r, R anchor) { 
             RenderableLayoutManager.this.runWhenLayoutIdle(
@@ -1340,6 +1434,7 @@ public abstract class RenderableLayoutManager<
         @Override public void destroyLayoutGroup(String id)             { runMutation(()->RenderableLayoutManager.this.destroyGroup(id)); }
         @Override public void setGroupLayoutCallback(String id, GCB cb) { runMutation(()->RenderableLayoutManager.this.setGroupLayoutCallback(id, cb)); }
         @Override public String getLayoutGroupIdByRenderable(R r)       { return RenderableLayoutManager.this.getRenderableGroupId(r); }
+        @Override public void requestRender(R r)                        { RenderableLayoutManager.this.requestRender(r); }
         
         @Override public void beginBatch()                      { RenderableLayoutManager.this.beginRequestBatch(); }
         @Override public void endBatch()                        { RenderableLayoutManager.this.endRequestBatch(); }

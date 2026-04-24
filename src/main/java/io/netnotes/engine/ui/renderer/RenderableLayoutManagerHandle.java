@@ -1,6 +1,5 @@
 package io.netnotes.engine.ui.renderer;
 
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Handle for Renderables to communicate with their LayoutManager
@@ -13,7 +12,6 @@ public interface RenderableLayoutManagerHandle<R, LCB,G, GCB> {
     boolean isInCurrentPass(R r);
     void markLayoutDirty(R r);
     void markLayoutDirtyImmediate(R r);
-    CompletableFuture<Void> flushLayout();
     void migrateToFloating(R r, R anchor);
     void migrateToRegular(R r);
     void registerChild(R child, LCB layoutCallback);
@@ -30,6 +28,7 @@ public interface RenderableLayoutManagerHandle<R, LCB,G, GCB> {
     void setGroupLayoutCallback(String id, GCB cb);
     String getLayoutGroupIdByRenderable(R r);
     void deferInvalidateWhenLayoutIdle(Runnable r);
+    void requestRender(R r);
     /**
      * Execute operations within a batch transaction
      * Ensures single layout pass regardless of how many dirty marks

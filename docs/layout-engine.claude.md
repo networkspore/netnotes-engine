@@ -2,7 +2,7 @@
                                                                                                                                        
   Overview                                                                                                                             
                                                                                                                                        
-  The Netnotes Engine layout system is a sophisticated, incremental layout engine that processes nodes individually through callbacks. 
+  The package io.netnotes.engine.ui.renderer package contains an incremental layout engine that processes nodes individually through callbacks. 
   It uses a two-callback model (content and layout) and supports grouping of children for coordinated layout updates. The system is
   designed for efficiency with object pooling and damage propagation for minimal re-rendering.                                         
                   
