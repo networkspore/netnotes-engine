@@ -11,34 +11,6 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * LayoutNode - One node in the layout tree, paired 1:1 with a Renderable.
- *
- * TWO-CALLBACK MODEL:
- *
- *   contentCallback  — answers "what size do I need to fit my content?"
- *                      fires on-demand, bottom-up, when a parent or group
- *                      callback calls context.getMeasuredSize() on this node.
- *                      null if this node is not content-sized.
- *                      Fires at most once per pass (gated by contentMeasured).
- *
- *   layoutCallback   — answers "given my committed space, how do I arrange
- *                      things / what is my position?"
- *                      fires top-down during the normal depth-sorted pass.
- *                      null if this node is purely reactive (accepts whatever
- *                      its parent or group sets).
- *
- * Either or both callbacks may be null. A node with both null is still
- * managed if it belongs to a member group — the group's callbacks speak
- * for it.
- *
- * OWNED GROUPS:
- * A node owns the groups whose members are its direct children.
- * The manager fires owned groups immediately after committing this node,
- * so group callbacks always have valid parent geometry.
- *
- * SINGLE COMMIT:
- * calculatedLayout is committed by applyNode() exactly once per pass.
- * Content callbacks and group callbacks only populate calculatedLayout —
- * they never touch apply. clear() happens after apply state
  */
 public abstract class LayoutNode<
     B extends BatchBuilder<S>,

@@ -15,7 +15,7 @@ public final class RenderableStates {
     // ===== REQUEST LAYER =====
     // User never directly requests "VISIBLE" - it's derived
 
-
+    public static final int STATE_FORCED_HIDDEN_DESIRED = 1;
     public static final int STATE_HIDDEN_DESIRED = 2;
     public static final int STATE_INVISIBLE_DESIRED = 3;
     public static final int STATE_FOCUS_DESIRED = 4;

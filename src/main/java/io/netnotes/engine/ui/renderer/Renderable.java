@@ -1392,12 +1392,18 @@ public abstract class Renderable<
         Log.logMsg("[ContainerHandle] + shouldRender()? " + shouldRender, LOG_LEVEL);
         return shouldRender;
     }
+
+    public boolean isHiddenForced(){
+        return stateMachine.hasAllStates(RenderableStates.STATE_FORCED_HIDDEN_DESIRED, RenderableStates.STATE_HIDDEN_DESIRED);
+    }
   
     public void hide() {
+        stateMachine.addState(RenderableStates.STATE_FORCED_HIDDEN_DESIRED);
         setVisible(false);
     }
 
     public void show() {
+        stateMachine.removeState(RenderableStates.STATE_FORCED_HIDDEN_DESIRED);
         setVisible(true);
     }
     protected void onRemovedFromParent() {}

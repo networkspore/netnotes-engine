@@ -916,10 +916,12 @@ public abstract class RenderableLayoutManager<
             for (R child : renderable.getChildren()) {
                 markLayoutDirtySubtree(child);
             }
+            dirtyAffectedAncestors(node);
         }else if (becameHidden) {
             for (R child : renderable.getChildren()) {
                 injectSubtreeIntoCurrentPass(child);
             }
+            dirtyAffectedAncestors(node);
         }
         
         committingNodes.add(renderable);
