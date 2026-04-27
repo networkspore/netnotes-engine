@@ -865,7 +865,6 @@ public abstract class RenderableLayoutManager<
         if (child.isSizedByContent() && !child.isContentMeasured()) {
             return measureSingleNode(child, passNodes);
         }
-
         context = createRenderableContext(child);
         context.initialize(child);
         child.setInFlightContext(context);

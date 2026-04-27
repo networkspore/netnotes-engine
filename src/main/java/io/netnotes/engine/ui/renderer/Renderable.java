@@ -1254,6 +1254,33 @@ public abstract class Renderable<
     }
 
   
+    
+
+
+
+    public boolean isEffectivelyHidden() {
+        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_HIDDEN);
+    }
+
+    public boolean isEffectivelyInvisible() {
+        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_INVISIBLE);
+    }
+
+    public void collapse() {
+        setVisible(false);
+    }
+    
+    public void expand() {
+        setVisible(true);
+    }
+    
+
+
+    /**
+     * Does not force hide
+     *  
+     * @param visible
+     */
     public void setVisible(boolean visible) {
         if (visible) {
             // Only act if we need to clear visibility blockers
@@ -1270,40 +1297,6 @@ public abstract class Renderable<
                 return;
             }
             stateMachine.addState(RenderableStates.STATE_HIDDEN_DESIRED);
-            requestLayoutUpdate();
-        }
-    }
-
-
-
-    public boolean isEffectivelyHidden() {
-        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_HIDDEN);
-    }
-
-    public boolean isEffectivelyInvisible() {
-        return stateMachine.hasState(RenderableStates.STATE_EFFECTIVELY_INVISIBLE);
-    }
-
-    public void collapse() {
-        setHidden(true);
-    }
-    
-    public void expand() {
-        setHidden(false);
-    }
-    
-    public void setHidden(boolean hidden) {
-        StateSnapshot state = stateMachine.getSnapshot();
-        if (hidden
-            && (!state.hasState(RenderableStates.STATE_HIDDEN_DESIRED)
-              ||    state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)
-            )
-        ) {
-            stateMachine.addState(RenderableStates.STATE_HIDDEN_DESIRED);
-            stateMachine.removeState(RenderableStates.STATE_INVISIBLE_DESIRED); // Mutually exclusive
-            requestLayoutUpdate();
-        } else if(!hidden && state.hasState(RenderableStates.STATE_HIDDEN_DESIRED)){
-            stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED);
             requestLayoutUpdate();
         }
     }
@@ -1324,6 +1317,7 @@ public abstract class Renderable<
         )) {
             stateMachine.addState(RenderableStates.STATE_INVISIBLE_DESIRED);
             stateMachine.removeState(RenderableStates.STATE_HIDDEN_DESIRED);
+            stateMachine.removeState(RenderableStates.STATE_FORCED_HIDDEN_DESIRED);
             requestLayoutUpdate();
         } else if(!invisible && state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)){
             stateMachine.removeState(RenderableStates.STATE_INVISIBLE_DESIRED);
@@ -1397,6 +1391,9 @@ public abstract class Renderable<
         return stateMachine.hasAllStates(RenderableStates.STATE_FORCED_HIDDEN_DESIRED, RenderableStates.STATE_HIDDEN_DESIRED);
     }
   
+    /***
+     * Hides a renderable until show() is called
+     */
     public void hide() {
         stateMachine.addState(RenderableStates.STATE_FORCED_HIDDEN_DESIRED);
         setVisible(false);

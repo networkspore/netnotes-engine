@@ -90,14 +90,16 @@ public abstract class LayoutContext<
         return node.getRenderable().isInvisibleDesired();
     }
 
+    public boolean isHiddenForced(){ return node.getRenderable().isHiddenForced(); }
+
     public S getCurrentRegion() {
         R r = node.getRenderable();
-        return r.isHidden() ? null : r.getRegion();
+        return r.getRegion();
     }
 
     public S getCurrentAbsoluteRegion() {
         R r = node.getRenderable();
-        return r.isHidden() ? null : r.getAbsoluteRegion();
+        return r.getAbsoluteRegion();
     }
 
     public S getRequestedRegion() {
