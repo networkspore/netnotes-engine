@@ -19,7 +19,7 @@ public final class RenderableStates {
     public static final int STATE_HIDDEN_DESIRED = 2;
     public static final int STATE_INVISIBLE_DESIRED = 3;
     public static final int STATE_FOCUS_DESIRED = 4;
-
+    public static final int STATE_FOCUSABLE = 5;
 
     // ===== EXECUTION LAYER =====
   
@@ -52,6 +52,9 @@ public final class RenderableStates {
 
     public static final int DESTROYED = 19;
 
+    public static boolean isRenderableFocusable(StateSnapshot snap){
+        return !snap.hasAnyState(STATE_FOCUSABLE, STATE_EFFECTIVELY_HIDDEN, STATE_HIDDEN_DESIRED);
+    }
 
     public static boolean isRenderableVisible(StateSnapshot snap){
         return !snap.hasAnyState(STATE_EFFECTIVELY_HIDDEN, STATE_HIDDEN_DESIRED);

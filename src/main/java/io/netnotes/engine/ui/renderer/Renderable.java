@@ -19,7 +19,7 @@ import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
@@ -38,6 +38,7 @@ import java.util.Set;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -95,7 +96,7 @@ public abstract class Renderable<
     
     // ===== IDENTITY =====
     protected final String name;
-    protected final BitFlagStateMachine stateMachine;
+    protected final ConcurrentBitFlagStateMachine stateMachine;
     
     // ===== HIERARCHY =====
     protected R parent = null;
@@ -135,12 +136,11 @@ public abstract class Renderable<
     protected final SerializedVirtualExecutor uiExecutor = VirtualExecutors.getUiExecutor();
 
     // ===== FOCUS =====
-    private static long FOCUS_REQUEST_SEQ = 0;
-    protected boolean focusable = false;
+    private static AtomicLong FOCUS_REQUEST_SEQ = new AtomicLong(0);
     protected int focusIndex = -1;
     private long focusRequestToken = 0;
     
-    protected RenderableLayoutManagerHandle<R,LCB,G,GCB> layoutManager = null;
+    protected volatile RenderableLayoutManagerHandle<R,LCB,G,GCB> layoutManager = null;
     protected Consumer<R> onRenderRequest = null;
     protected BiConsumer<S,S> notifyOnRegionChanged = null;
     protected Consumer<R> notifyRemovedFromLayout = null;
@@ -148,7 +148,7 @@ public abstract class Renderable<
     protected BiConsumer<R, StateSnapshot> onVisibilityChanged = null;
     protected BiConsumer<R, Boolean> onFocusChanged = null;
     protected Consumer<S> damageAccumulator = null;
-    protected RenderPhase renderPhase = RenderPhase.DETACHED;
+    protected volatile RenderPhase renderPhase = RenderPhase.DETACHED;
     protected boolean batching = false;
 
     private R[] renderBuffer;
@@ -164,8 +164,8 @@ public abstract class Renderable<
     protected Renderable(String name, SpatialRegionPool<S> regionPool) {
         this.name = name;
         this.regionPool = regionPool;
-        this.stateMachine = new BitFlagStateMachine(name);
-        this.stateMachine.setSerialExecutor(uiExecutor); //on state changes execute on executor
+        this.stateMachine = new ConcurrentBitFlagStateMachine(name);
+        this.stateMachine.setSerialExecutor(uiExecutor);
         this.region = regionPool.obtain();
         this.region.setToIdentity();
         
@@ -173,15 +173,18 @@ public abstract class Renderable<
         setupStateTransitions();
         setupEventHandlers();
     }
-    
+
     public void setOnVisibilityChanged(BiConsumer<R, StateSnapshot> onVisibilityChanged){
+        assertUiThread();
         this.onVisibilityChanged = onVisibilityChanged;
     }
 
     public void setVisibilityPolicy(VisibilityPredicate<R> visibilityPolicy){
+        assertUiThread();
         this.visibilityPolicy = visibilityPolicy;
     }
     public void setNotifyRemovedFromLayout(Consumer<R> notifyRemovedFromLayout){
+        assertUiThread();
         this.notifyRemovedFromLayout = notifyRemovedFromLayout;
     }
     public abstract SpatialRegionPool<S> getRegionPool();
@@ -265,6 +268,8 @@ public abstract class Renderable<
             destroyInternal();
         });
     }
+
+
     
     protected abstract void setupStateTransitions(); 
 
@@ -274,8 +279,8 @@ public abstract class Renderable<
     
     // ===== HIERARCHY =====
     
-    public R getParent() { return parent; }
-    public List<R> getChildren() { return new ArrayList<>(children); }
+    public R getParent() { assertUiThread(); return parent; }
+    public List<R> getChildren() { assertUiThread(); return new ArrayList<>(children); }
     
     public void addChild(R child) {
         addChild(child, null);
@@ -337,13 +342,15 @@ public abstract class Renderable<
     public LCB getChildLayoutCallback(R child)  { return childLayoutCallbacks.get(child); }
 
     protected void ensureRequestedRegion() {
+        assertUiThread();
         if (requestedRegion == null) {
             requestedRegion = regionPool.obtain();
             requestedRegion.copyFrom(region);
         }
     }
-    
+
     public void clearRequestedRegion(){
+        assertUiThread();
         S oldRequestedRegion = requestedRegion;
         requestedRegion = null;
         if(oldRequestedRegion != null){
@@ -352,6 +359,7 @@ public abstract class Renderable<
     }
     
     public S getRequestedRegion() {
+        assertUiThread();
         if (requestedRegion != null) {
             S copy = regionPool.obtain();
             copy.copyFrom(requestedRegion);
@@ -361,6 +369,7 @@ public abstract class Renderable<
     }
     
     public boolean hasRequestedRegion() {
+        assertUiThread();
         return requestedRegion != null;
     }
 
@@ -372,11 +381,12 @@ public abstract class Renderable<
     }
 
     public void setPosition(P position) {
-        // Silent no-op while hidden - use setHiddenRegion() for explicit staging
+        assertUiThread();
+
         if (isHidden()) {
             return;
         }
-        
+
         ensureRequestedRegion();
         requestedRegion.setPosition(position);
         requestLayoutUpdate();
@@ -388,6 +398,7 @@ public abstract class Renderable<
      * @param region Spatial Region
      */
     public void setRegion(S region) {
+        assertUiThread();
         ensureRequestedRegion();
         requestedRegion.copyFrom(region);
         requestLayoutUpdate();
@@ -413,12 +424,14 @@ public abstract class Renderable<
     }
 
     void updateRegion(S region, boolean isLayoutManaged, boolean isOffScreen) {
+        assertUiThread();
         ensureRequestedRegion();
         requestedRegion.copyFrom(region);
         requestLayoutUpdate();
     }
 
     public void setBounds(S bounds){
+        assertUiThread();
         setRegion(bounds);
     }
     
@@ -521,7 +534,7 @@ public abstract class Renderable<
         Log.logMsg("[Renderable:" + name + "] clearChildren() removed " + removed.size() + " children", LOG_LEVEL);
     }
         
-    public int getZOrder() { return zOrder; }
+    public int getZOrder() { assertUiThread(); return zOrder; }
     
     public void setZOrder(int z) {
         if(uiExecutor.isCurrentThread()){
@@ -560,12 +573,14 @@ public abstract class Renderable<
     // ===== SPATIAL OPERATIONS =====
 
     public S getRegion() {
+        assertUiThread();
         S copy = regionPool.obtain();
         copy.copyFrom(region);
         return copy;
     }
 
     public S getAbsoluteRegion() {
+        assertUiThread();
         S copy = regionPool.obtain();
         copy.copyFrom(region);
         copy.setPosition(region.getAbsolutePosition());
@@ -573,6 +588,7 @@ public abstract class Renderable<
     }
 
     public S getEffectiveAbsoluteRegion(){
+        assertUiThread();
         if (isVisible()) {
             return getAbsoluteRegion();
         }
@@ -584,10 +600,11 @@ public abstract class Renderable<
     }
     
     public R hitTestChildren(P point) {
+        assertUiThread();
         for (int i = children.size() - 1; i >= 0; i--) {
             R child = children.get(i);
             if (!child.isVisible()) continue;
-            
+
             if (child.hitTest(point)) {
                 R deeperHit = child.hitTestChildren(point);
                 return deeperHit != null ? deeperHit : child;
@@ -816,6 +833,7 @@ public abstract class Renderable<
      * Guards the common "nothing at all to do" case before allocating anything.
      */
     public void toBatch(B batch) {
+        assertUiThread();
         onToBatchStart(self());
         if (damage == null && !childrenDirty) {
             onToBatchEnd(self(), false);
@@ -838,6 +856,7 @@ public abstract class Renderable<
      * @param clipRegion clip in absolute screen coordinates
      */
     public void toBatch(B batch, S clipRegion) {
+        assertUiThread();
         toBatchInternal(batch, clipRegion, null);
     }
 
@@ -882,6 +901,7 @@ public abstract class Renderable<
 
                 boolean hasSelfDamage = damage != null;
                 boolean isForced      = forcedRegion != null && absBounds.intersects(forcedRegion);
+                S childClipRegion     = getChildClipRegion(clipRegion, visibleClip);
 
                 if (hasSelfDamage) {
     
@@ -904,7 +924,7 @@ public abstract class Renderable<
                             // overwritten and must restore itself — pass renderClip as forcedRegion.
                             // Children outside renderClip are untouched — skip them.
                             try {
-                                renderChildrenByLayer(batch, visibleClip, renderClip);
+                                renderChildrenByLayer(batch, childClipRegion, renderClip);
                     
                             } catch (Exception e) {
                                 Log.logError("[Renderable:" + getName() + "] renderChildren exception", e);
@@ -927,7 +947,7 @@ public abstract class Renderable<
                     }
 
                     try {
-                        renderChildrenByLayer(batch, visibleClip, visibleClip);
+                        renderChildrenByLayer(batch, childClipRegion, visibleClip);
           
                     } catch (Exception e) {
                         Log.logError("[Renderable:" + getName() + "] renderChildren (forced) exception", e);
@@ -937,7 +957,7 @@ public abstract class Renderable<
                 
                 if (childrenDirty) {
                     try {
-                        renderChildrenByLayer(batch, visibleClip, null);
+                        renderChildrenByLayer(batch, childClipRegion, null);
                     } catch (Exception e) {
                         Log.logError("[Renderable:" + getName() + "] renderChildren (structural) exception", e);
                     }
@@ -962,6 +982,21 @@ public abstract class Renderable<
     protected abstract R[] createRenderableArray(int size);
 
     /**
+     * Resolve the clip region used when rendering this node's children.
+     *
+     * Default behavior clips children to this node's own visible bounds
+     * (self bounds intersected with incoming clip). Subclasses may return
+     * {@code incomingClip} to allow children to render outside this node's
+     * bounds while still respecting ancestor clipping.
+     *
+     * Implementations should return either {@code incomingClip} or
+     * {@code visibleClip}; allocating a new region here is discouraged.
+     */
+    protected S getChildClipRegion(S incomingClip, S visibleClip) {
+        return visibleClip;
+    }
+
+    /**
      * Render all rendering-children sorted by layer then z-order.
      *
      * @param batch        target batch builder
@@ -971,6 +1006,7 @@ public abstract class Renderable<
      *                     themselves even with no own pending damage
      */
     protected void renderChildrenByLayer(B batch, S visibleClip, S forcedRegion) {
+        assertUiThread();
         if (childrenDirty) {
             int size = children.size();
             if (renderBuffer == null || renderBuffer.length < size) {
@@ -1047,6 +1083,7 @@ public abstract class Renderable<
     
 
     public boolean dispatchEvent(RoutedEvent event) {
+        assertUiThread();
         if (!isVisible()) {
             return false;
         }
@@ -1160,13 +1197,14 @@ public abstract class Renderable<
     // ===== FOCUS =====
     
     public boolean isFocusable() {
-        return focusable && isVisible();
+        return RenderableStates.isRenderableFocusable(stateMachine.getSnapshot());
     }
     
-    public void setFocusable(boolean f) { this.focusable = f; }
+    public void setFocusable(boolean f) { stateMachine.addState(RenderableStates.STATE_FOCUSABLE); }
     public boolean hasFocus() { return stateMachine.hasState(RenderableStates.STATE_FOCUSED); }
 
     public void setOnFocusChanged(BiConsumer<R,Boolean> onFocusChanged){
+        assertUiThread();
         this.onFocusChanged = onFocusChanged;
     }
 
@@ -1190,13 +1228,14 @@ public abstract class Renderable<
     protected void onFocus() {}
     protected void onBlur() {}
     
-    public int getFocusIndex() { return focusIndex; }
-    public void setFocusIndex(int index) { this.focusIndex = index; }
+    public int getFocusIndex() { assertUiThread(); return focusIndex; }
+    public void setFocusIndex(int index) { assertUiThread(); this.focusIndex = index; }
     
     public List<R> getFocusableDescendants() {
+        assertUiThread();
         List<R> result = new ArrayList<>();
         collectFocusable(result);
-        
+
         result.sort((a, b) -> {
             int ai = a.getFocusIndex();
             int bi = b.getFocusIndex();
@@ -1205,11 +1244,12 @@ public abstract class Renderable<
             if (bi >= 0) return 1;
             return 0;
         });
-        
+
         return result;
     }
-    
+
     protected void collectFocusable(List<R> result) {
+        assertUiThread();
         if (isFocusable()) {
             result.add(self());
         }
@@ -1244,11 +1284,13 @@ public abstract class Renderable<
     }
 
     public void attachAsRoot() {
+        assertUiThread();
         stateMachine.addState(RenderableStates.STATE_ATTACHED);
         requestLayoutUpdate();
     }
-    
+
     public void detachFromRoot() {
+        assertUiThread();
         stateMachine.removeState(RenderableStates.STATE_ATTACHED);
         requestLayoutUpdate();
     }
@@ -1282,6 +1324,10 @@ public abstract class Renderable<
      * @param visible
      */
     public void setVisible(boolean visible) {
+        if(!uiExecutor.isCurrentThread()){
+            uiExecutor.runLater(()->setVisible(visible));
+            return;
+        }
         if (visible) {
             // Only act if we need to clear visibility blockers
             if (!stateMachine.hasAnyState(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_INVISIBLE_DESIRED)) {
@@ -1309,7 +1355,8 @@ public abstract class Renderable<
         return stateMachine.hasAnyState(RenderableStates.STATE_HIDDEN_DESIRED, RenderableStates.STATE_EFFECTIVELY_HIDDEN);
     }
 
-   public  void setInvisible(boolean invisible) {
+    public void setInvisible(boolean invisible) {
+        assertUiThread();
         StateSnapshot state = stateMachine.getSnapshot();
         if (invisible && (
             !state.hasState(RenderableStates.STATE_INVISIBLE_DESIRED)
@@ -1340,17 +1387,19 @@ public abstract class Renderable<
     // ===== FOCUS API =====
     
     public void requestFocus() {
-        if (!focusable) {
+        assertUiThread();
+        if (!isFocusable()) {
             return;
         }
-        focusRequestToken = FOCUS_REQUEST_SEQ++;
+        focusRequestToken = FOCUS_REQUEST_SEQ.incrementAndGet();
         stateMachine.addState(RenderableStates.STATE_FOCUS_DESIRED);
         if (layoutManager != null) {
             layoutManager.requestFocus(self());
         }
     }
-    
+
     public void clearFocus() {
+        assertUiThread();
         if (hasFocus()) {
             stateMachine.removeState(RenderableStates.STATE_FOCUSED);
         }
@@ -1358,6 +1407,7 @@ public abstract class Renderable<
     }
 
     public void focus() {
+        assertUiThread();
         if (isFocusable()) {
             stateMachine.addState(RenderableStates.STATE_FOCUSED);
             stateMachine.removeState(RenderableStates.STATE_FOCUS_DESIRED);
@@ -1485,9 +1535,10 @@ public abstract class Renderable<
     protected R self() { return (R) this; }
     
     public String getName() { return name; }
-    public BitFlagStateMachine getStateMachine() { return stateMachine; }
+    public ConcurrentBitFlagStateMachine getStateMachine() { return stateMachine; }
     
     public R getRoot() {
+        assertUiThread();
         R node = self();
         while (node.parent != null) {
             node = node.parent;
@@ -1496,6 +1547,7 @@ public abstract class Renderable<
     }
     
     public int getDepth() {
+        assertUiThread();
         int depth = 0;
         R node = parent;
         while (node != null) {
@@ -1513,6 +1565,7 @@ public abstract class Renderable<
     }
 
     public void setRenderRequest(Consumer<R> onRequest) {
+        assertUiThread();
         onRenderRequest = onRequest;
         if (onRequest != null) {
             attachAsRoot();
@@ -1522,6 +1575,7 @@ public abstract class Renderable<
     }
 
     public void setDamageAccumulator(Consumer<S> accumulator) {
+        assertUiThread();
         this.damageAccumulator = accumulator;
         // Propagate to children — they share the same frame accumulator
         for (R child : getChildren()) {
@@ -1539,7 +1593,16 @@ public abstract class Renderable<
     public SerializedVirtualExecutor getUIExecutor() {
         return uiExecutor;
     }
-    
+
+    protected final void assertUiThread() {
+        if (layoutManager != null && !uiExecutor.isCurrentThread()) {
+            throw new IllegalStateException(
+                "Method must be called on UI thread. " +
+                "Current thread: " + Thread.currentThread()
+            );
+        }
+    }
+
     // ===== KEY EVENT HELPERS =====
     
     public NoteBytesReadOnly addKeyCharHandler(Consumer<RoutedEvent> handler) {
@@ -1627,6 +1690,7 @@ public abstract class Renderable<
      * @return true if there's any damage to render
      */
     public boolean needsRender() {
+        assertUiThread();
         return damage != null || childrenDirty;
     }
 
@@ -1638,11 +1702,13 @@ public abstract class Renderable<
      * but this provides explicit confirmation that render completed
      */
     public void clearRenderFlag() {
+        assertUiThread();
         recycleDamage();
         childrenDirty = false;
     }
 
     public S copyAbsoluteDamage(){
+        assertUiThread();
         return damage.copy(regionPool);
     }
 
@@ -1782,6 +1848,7 @@ public abstract class Renderable<
     protected void onLayoutManagerCleared() {}
 
     public void clearLayoutManager() {
+        assertUiThread();
         onLayoutManagerCleared();
         this.layoutManager = null;
         
@@ -1789,30 +1856,33 @@ public abstract class Renderable<
 
 
 
-    public void beginLayoutBatch() { 
+    public void beginLayoutBatch() {
+        assertUiThread();
         RenderableLayoutManagerHandle<R, LCB,G, GCB> lm = this.layoutManager;
         if(lm != null){
             this.batching = true;
             lm.beginBatch();
         }
     }
-    
+
     /**
      * End batching and trigger single layout pass
      */
     public void endLayoutBatch(){
+        assertUiThread();
         if(this.layoutManager != null){
             this.layoutManager.endBatch();
             this.batching = false;
         }
     }
-    
+
     /**
      * Execute operations within a batch transaction
      * Ensures single layout pass regardless of how many dirty marks
      */
     public void batch(Runnable operations) {
-   
+        assertUiThread();
+
         if(this.layoutManager != null){
             if(batching){
                 // Already in a batch — just run the operations
@@ -1922,6 +1992,7 @@ public abstract class Renderable<
      * @param onRegionChanged BiConsumer (oldRegion, newRegion)
      */
     public void setOnRegionChanged(BiConsumer<S,S> onRegionChanged){
+        assertUiThread();
         notifyOnRegionChanged = onRegionChanged;
     }
 
@@ -2087,6 +2158,7 @@ public abstract class Renderable<
      * Set layer index for rendering order
      */
     public void setLayerIndex(int layer) {
+        assertUiThread();
         if (this.layerIndex != layer) {
             this.layerIndex = layer;
             if (!isFloating && parent != null) {
@@ -2095,11 +2167,12 @@ public abstract class Renderable<
             invalidate();  // Re-render in new layer
         }
     }
-    
+
     /**
      * Set position anchor for floating elements
      */
     public void setPositionAnchor(R anchor) {
+        assertUiThread();
         if (this.positionAnchor != anchor) {
             this.positionAnchor = anchor;
             if (isFloating) {
@@ -2172,6 +2245,7 @@ public abstract class Renderable<
     }
 
     public Map<String,GSE> getChildGroups(){
+        assertUiThread();
         return childGroups;
     }    
     
@@ -2203,19 +2277,21 @@ public abstract class Renderable<
 
 
     public void clearChildGroups() {
+        assertUiThread();
         childGroups.clear();
     }
-    
+
 
     // ===== GROUP MANAGEMENT API =====
     // These methods automatically handle attached vs pending state
-    
+
     /**
      * Create a group
-     * 
+     *
      * @param groupId group identifier
      */
     public void createLayoutGroup(String groupId) {
+        assertUiThread();
         if (isAttachedToLayoutManager()) {
             layoutManager.createLayoutGroup(groupId);
         } else {
@@ -2239,6 +2315,7 @@ public abstract class Renderable<
      * @param groupId group identifier to add the renderable to
      */
     public void addToLayoutGroup(R renderable, String groupId) {
+        assertUiThread();
         addToChildGroup(renderable, groupId);          // always
         if (isAttachedToLayoutManager()) {
             layoutManager.addToLayoutGroup(renderable, groupId);
@@ -2246,9 +2323,9 @@ public abstract class Renderable<
     }
 
     public GCB getLayoutGroupCallback(String groupId){
-    
+        assertUiThread();
         return getChildLayoutGroupCallback(groupId);
-        
+
     }
     
     /**
@@ -2258,6 +2335,7 @@ public abstract class Renderable<
      * @return group ID or null
      */
     public String getLayoutGroupIdByRenderable(R renderable) {
+        assertUiThread();
         if (isAttachedToLayoutManager() ) {
             return layoutManager.getLayoutGroupIdByRenderable(renderable);
         } else {
@@ -2271,6 +2349,7 @@ public abstract class Renderable<
      * @param renderable renderable to remove
      */
     public void removeLayoutGroupMember(R renderable) {
+        assertUiThread();
         Iterator<Entry<String, GSE>> it = childGroups.entrySet().iterator();
         while (it.hasNext()) {
             Entry<String, GSE> stateEntry = it.next();
@@ -2289,18 +2368,19 @@ public abstract class Renderable<
      * @param groupId group to destroy
      */
     public void removeLayoutGroup(String groupId) {
+        assertUiThread();
         childGroups.remove(groupId);
         if (isAttachedToLayoutManager()) {
             layoutManager.destroyLayoutGroup(groupId);
         }
     }
-        
+
     /**
      * Register callback for a group
-     * 
+     *
      * Callback signature:
      *   (LC[] contexts, HashMap<String, LayoutDataInterface<LD>> layoutDataInterface)
-     * 
+     *
      * Callback parameters:
      * - LC[] contexts: Array of contexts per group member
      * - HashMap<String, LayoutDataInterface<LD>>: map to apply LayoutData for group members
@@ -2309,7 +2389,7 @@ public abstract class Renderable<
      *     - String getLayoutDataName()
      *     - LD getLayoutData()
      *     - void setLayoutData(LD layoutData)
-     * 
+     *
      * Example usage:
      * <pre>
      * registerGroupCallback("stack_items", "layout", null, (ctxs, layoutDataInterface) -> {
@@ -2325,13 +2405,14 @@ public abstract class Renderable<
      *     }
      * });
      * </pre>
-     * 
+     *
      * @param groupId group to add the callback to
      * @param callbackId unique callback identifier
      * @param predicate predicate to determine if the callback runs or null
      * @param callback callback to manage group members
      */
     public void setGroupLayoutCallback(String groupId, GCB callback){
+        assertUiThread();
         createChildGroup(groupId);
         GSE state = childGroups.get(groupId);
         state.setLayoutCallback(callback);
@@ -2366,18 +2447,22 @@ public abstract class Renderable<
     }
     
     public int getLayerIndex() {
+        assertUiThread();
         return layerIndex;
     }
     
     public R getPositionAnchor() {
+        assertUiThread();
         return positionAnchor;
     }
     
     public R getLogicalParent() {
+        assertUiThread();
         return logicalParent != null ? logicalParent : parent;
     }
     
     public R getRenderingParent() {
+        assertUiThread();
         // A floating node is rendered exclusively by FloatingLayerManager.
         // Returning parent here would cause it to participate in the normal
         // child render loop, producing a double-render.

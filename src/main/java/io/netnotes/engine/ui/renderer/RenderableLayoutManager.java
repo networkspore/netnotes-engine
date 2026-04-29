@@ -121,6 +121,8 @@ public abstract class RenderableLayoutManager<
     // ── Runtime state ─────────────────────────────────────────────────────────
 
     private volatile boolean batchingRequests = false;
+    private volatile boolean layoutScheduled = false;
+
 
     /**
      * True while a layout pass is executing. Read by Renderable.invalidate()
@@ -445,6 +447,7 @@ public abstract class RenderableLayoutManager<
     }
 
     private void markLayoutDirtySubtree(R renderable) {
+        if (renderable.isHiddenForced()) return;  // ← add this guard
         L node = renderableRegistry.get(renderable);
         if (node == null) return;
         addToDirtySet(node);
@@ -503,12 +506,13 @@ public abstract class RenderableLayoutManager<
             deferredLayoutRequested = true;
             return;
         }
+        layoutScheduled = true;
         layoutDebouncer.submit(this::performUpdate, minDebounceMs, TimeUnit.MILLISECONDS);
         currentDebounceMs = layoutDebouncer.getLastScheduledDelayMs();
     }
 
     public boolean hasPendingLayout() {
-        return !dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty();
+        return !dirtyLayoutNodes.isEmpty() || !dirtyFloatingNodes.isEmpty() || layoutScheduled;
     }
 
     public void requestRender(R requester) {
@@ -588,6 +592,14 @@ public abstract class RenderableLayoutManager<
     // =========================================================================
 
     protected final void performUpdate() {
+        if (!uiExecutor.isCurrentThread()) {
+            throw new IllegalStateException(
+                "performUpdate must run on uiExecutor thread. " +
+                "Called from: " + Thread.currentThread() +
+                " (isUIThread=" + uiExecutor.isCurrentThread() + ")"
+            );
+        }
+        layoutScheduled = false;
         if (layoutStateListener != null) layoutStateListener.accept(true);
         try {
             performUpdateInternal();
@@ -818,11 +830,9 @@ public abstract class RenderableLayoutManager<
     }
 
     private void runContentPrePass(List<L> dirtyNodes, Set<L> passNodes) {
-        // dirtyNodes is depth-sorted ascending — reverse gives leaves first,
-        // guaranteeing children are measured before parents with no group
-        // coordination needed (all members are individually dirty)
         for (int i = dirtyNodes.size() - 1; i >= 0; i--) {
             L node = dirtyNodes.get(i);
+            
             if (!node.isSizedByContent()) continue;
             if (node.isContentMeasured()) continue;
             measureSingleNode(node, passNodes);
@@ -841,6 +851,7 @@ public abstract class RenderableLayoutManager<
         if (!node.isContentMeasured()) {
             List<L> managedChildren = new ArrayList<>();
             for (L child : node.getChildren()) {
+                if (child.getRenderable().isHiddenForced()) continue; 
                 if (passNodes.contains(child)) {
                     managedChildren.add(child);
                 } else {
@@ -909,33 +920,49 @@ public abstract class RenderableLayoutManager<
         boolean becameHidden = wasEffectivelyVisible && renderable.isEffectivelyHidden();
 
         if (becameVisible) {
-            logSummaryDiagnostic(String.format(
-                "[LayoutManager:%s] %s became visible — queueing subtree for follow-up pass",
+            System.out.println(String.format(
+                 "[LayoutManager:%s] %s became visible — injecting subtree with content pre-pass",
                 containerName, renderable.getName()));
             for (R child : renderable.getChildren()) {
-                markLayoutDirtySubtree(child);
+                injectSubtreeWithContentPrePass(child);
             }
             dirtyAffectedAncestors(node);
-        }else if (becameHidden) {
-            for (R child : renderable.getChildren()) {
-                injectSubtreeIntoCurrentPass(child);
-            }
+        } else if (becameHidden) {
             dirtyAffectedAncestors(node);
         }
-        
+                
         committingNodes.add(renderable);
         node.clear();
     }
 
-    private void injectSubtreeIntoCurrentPass(R renderable) {
+
+    private void injectSubtreeWithContentPrePass(R renderable) {
         L root = renderableRegistry.get(renderable);
         if (root == null) return;
+
         Set<L> passNodes = currentPassNodes;
         if (passNodes == null || currentPassTraversal == null) {
             markLayoutDirtySubtree(renderable);
             return;
         }
+
+        // ── Phase 1: register subtree into passNodes + pendingInjections ─────────
+        // Must happen before measurement so passNodes.contains() passes in
+        // measureSingleNode when it checks managed children.
+        int sizeBefore = pendingInjections.size();
         collectSubtreeForCurrentPass(root, pendingInjections, passNodes);
+
+        // ── Phase 2: content pre-pass over the newly added slice ─────────────────
+        // Reverse order = bottom-up within the slice. measureSingleNode's own
+        // ensureChildMeasurementContext recursion handles deeper chains, so we
+        // only need to drive the top-level content-sized nodes here.
+        for (int i = pendingInjections.size() - 1; i >= sizeBefore; i--) {
+            L node = pendingInjections.get(i);
+            if (node.getRenderable().isHiddenForced()) continue;
+            if (!node.isSizedByContent())              continue;
+            if (node.isContentMeasured())              continue;
+            measureSingleNode(node, passNodes);
+        }
     }
 
     private void collectSubtreeForCurrentPass(L node, List<L> injected, Set<L> passNodes) {
@@ -946,6 +973,7 @@ public abstract class RenderableLayoutManager<
             collectSubtreeForCurrentPass(child, injected, passNodes);
         }
     }
+
 
     private void applyParentAbsolutePosition(L node, LD calculatedLayout) {
         L parent = node.getParent();
@@ -995,6 +1023,7 @@ public abstract class RenderableLayoutManager<
 
     private void collectDescendants(L node, Set<L> result) {
         for (L child : node.getChildren()) {
+            if (child.getRenderable().isHiddenForced()) continue;
             if (child.isManaged() && result.add(child)) {
                 collectDescendants(child, result);
             }
@@ -1420,13 +1449,15 @@ public abstract class RenderableLayoutManager<
                 () -> RenderableLayoutManager.this.unregisterRenderableInternal(r));
         }
         @Override public void requestFocus(R r) {
-            RenderableLayoutManager.this.consumeFocusDesired(r);
-            if (focusRequester != null && r != null && r.isFocusable()) {
-                if (pendingFocusRequest == r) pendingFocusRequest = null;
-                focusRequester.accept(r);
-            } else {
-                pendingFocusRequest = r;
-            }
+            uiExecutor.runRentrant(() -> runWhenLayoutIdle(() -> {
+                RenderableLayoutManager.this.consumeFocusDesired(r);
+                if (focusRequester != null && r != null && r.isFocusable()) {
+                    if (pendingFocusRequest == r) pendingFocusRequest = null;
+                    focusRequester.accept(r);
+                } else {
+                    pendingFocusRequest = r;
+                }
+            }));
         }
 
         @Override public void createLayoutGroup(String id)              { runMutation(()->RenderableLayoutManager.this.createGroup(id));  }

@@ -252,8 +252,17 @@ public abstract class LayoutNode<
         boolean parentEffectivelyInvisible = false;
 
         if (parent != null) {
-            parentEffectivelyHidden = parent.getRenderable().isEffectivelyHidden();
-            parentEffectivelyInvisible = parent.getRenderable().isEffectivelyInvisible();
+            LD parentCalculated = parent.getCalculatedLayout();
+            if (parentCalculated != null && parentCalculated.getEffectivelyHidden() != null) {
+                parentEffectivelyHidden = parentCalculated.getEffectivelyHidden();
+            } else {
+                parentEffectivelyHidden = parent.getRenderable().isEffectivelyHidden();
+            }
+            if (parentCalculated != null && parentCalculated.getEffectivelyInvisible() != null) {
+                parentEffectivelyInvisible = parentCalculated.getEffectivelyInvisible();
+            } else {
+                parentEffectivelyInvisible = parent.getRenderable().isEffectivelyInvisible();
+            }
         }
 
         boolean hiddenDesired = resolveHiddenDesired();
