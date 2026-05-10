@@ -12,3 +12,6 @@ netnotes-log.txt
 **/back/
 **/logs
 .codex
+.openclaude-profile.json
+target/
+src/test/
