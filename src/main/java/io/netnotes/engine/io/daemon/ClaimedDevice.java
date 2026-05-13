@@ -63,6 +63,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
     private final ContextPath ioDaemonPath;
     private final IEventFactory eventFactory; 
     private final NoteBytesReadOnly sessionId;
+    private final NoteBytesReadOnly moduleId;
     private DeviceState deviceState;
     
 
@@ -133,6 +134,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
      */
     public ClaimedDevice(
         NoteBytes sessionId,
+        NoteBytes moduleId,
         NoteBytes deviceId, 
         ContextPath devicePath, 
         NoteBytes deviceType, 
@@ -144,6 +146,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         super(deviceId.getAsString(), ProcessType.BIDIRECTIONAL);
         this.deviceId = deviceId.readOnly();
         this.sessionId = sessionId.readOnly();
+        this.moduleId = moduleId.readOnly();
         this.devicePath = devicePath;
         this.deviceType = deviceType.readOnly();
         this.ioDaemonPath = ioDaemonPath;
@@ -158,8 +161,7 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
         );
 
         ackBytes = new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.EVENT, EventBytes.TYPE_CMD),
-            new NoteBytesPair(Keys.CMD, ProtocolMesssages.RESUME),
+            new NoteBytesPair(Keys.EVENT, ProtocolMesssages.RESUME),
             new NoteBytesPair(Keys.DEVICE_ID, deviceId),
             new NoteBytesPair(Keys.PROCESSED_COUNT, 0)
         }).get();
@@ -169,6 +171,10 @@ public class ClaimedDevice extends FlowProcess implements InputDevice {
 
    public NoteBytesReadOnly getSessionId(){
         return sessionId;
+   }
+   
+   public NoteBytesReadOnly getModuleId(){
+        return moduleId;
    }
 
     

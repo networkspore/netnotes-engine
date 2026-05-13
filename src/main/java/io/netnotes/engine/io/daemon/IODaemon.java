@@ -27,12 +27,14 @@ import io.netnotes.engine.io.process.ChannelWriter;
 import io.netnotes.engine.io.process.FlowProcess;
 import io.netnotes.engine.io.process.ProcessKeys;
 import io.netnotes.engine.io.process.StreamChannel;
+import io.netnotes.engine.messaging.NoteMessaging;
 import io.netnotes.engine.messaging.NoteMessaging.ErrorCodes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.engine.messaging.NoteMessaging.RoutedMessageExecutor;
 import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArray;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.noteBytes.NoteUUID;
@@ -65,7 +67,7 @@ import io.netnotes.engine.virtualExecutors.VirtualExecutors;
  */
 public class IODaemon extends FlowProcess {
     private final static LogLevel LOG_LEVEL = LogLevel.GENERAL;
-    public final NoteBytesReadOnly DAEMON_VERSION = new NoteBytesReadOnly(1);
+    public final NoteBytesReadOnly DAEMON_VERSION = new NoteBytesReadOnly("1.0.0");
 
     public static final class SESSION_CMDS {
         public static final NoteBytesReadOnly CREATE_SESSION = 
@@ -74,6 +76,11 @@ public class IODaemon extends FlowProcess {
             new NoteBytesReadOnly("destroy_session");
         public static final NoteBytesReadOnly LIST_SESSIONS = 
             new NoteBytesReadOnly("list_sessions");
+    }
+
+    public static final class MODULE_CMDS {
+        public static final NoteBytesReadOnly GET_MODULES = 
+            new NoteBytesReadOnly("get_modules");
     }
 
     private final String socketPath;
@@ -155,9 +162,16 @@ public class IODaemon extends FlowProcess {
         return daemonWriterExec.execute(() -> {
             try {
                 // No synchronized needed - already serialized!
+                // Log what's being sent for debugging
+                String event = getMessageEvent(message);
+                Log.logMsg("[IODaemon] >>> writeToDaemon: event=" + event, LOG_LEVEL);
+                
                 daemonWriter.write(message);
                 daemonWriter.flush();
+                
+                Log.logMsg("[IODaemon] >>> Sent message: " + event, LOG_LEVEL);
             } catch (IOException e) {
+                Log.logError("[IODaemon] Failed to write to daemon", e);
                 throw new CompletionException("Failed to write to daemon", e);
             }
         }).whenComplete((v,ex)->{
@@ -165,6 +179,22 @@ public class IODaemon extends FlowProcess {
                 handleDisconnect();
             }
         });
+    }
+    
+    /**
+     * Extract event type from a NoteBytesObject for logging
+     */
+    private String getMessageEvent(NoteBytesObject message) {
+        try {
+            NoteBytesMap map = message.getAsNoteBytesMap();
+            NoteBytes event = map.get(Keys.EVENT);
+            if (event != null) {
+                return event.getAsString();
+            }
+            return "unknown";
+        } catch (Exception e) {
+            return "parse_error";
+        }
     }
 
     private CompletableFuture<Void> writeToDaemon(NoteBytes id,  NoteBytes messageObject) {
@@ -327,11 +357,14 @@ public class IODaemon extends FlowProcess {
     // ===== CONNECTION LIFECYCLE =====
     
     public CompletableFuture<Void> connect() {
-        return establishConnection().thenCompose((v)->performHandshake())
-            .exceptionally((ex)->{
-                establsihConnectionFuture = null;
-                handshakeFuture = null;
-                return null;
+        return establishConnection()
+            .thenCompose((v)->performHandshake())
+            .whenComplete((result, ex) -> {
+                if (ex != null) {
+                    Log.logError("[IODaemon] Connection failed: " + ex.getMessage());
+                    establsihConnectionFuture = null;
+                    handshakeFuture = null;
+                }
             });
     }
     
@@ -372,21 +405,33 @@ public class IODaemon extends FlowProcess {
             handshakeFuture = CompletableFuture.runAsync(()->{
                 if(!isConnected()){
                     try{
+                        Log.logMsg("[IODaemon] Performing handshake...", LOG_LEVEL);
+                        
                         NoteBytesObject helloCmd = MessageBuilder.createCommand(
                             ProtocolMesssages.HELLO,
                             new NoteBytesPair(Keys.VERSION, DAEMON_VERSION),
                             new NoteBytesPair("daemon_id", m_UUID)
                         );
+                        Log.logMsg("[IODaemon] Sending HELLO: version=" + DAEMON_VERSION + ", daemon_id=" + m_UUID, LOG_LEVEL);
                         writeToDaemon(helloCmd);
                         
                         // Wait for ACCEPT response
+                        Log.logMsg("[IODaemon] Waiting for ACCEPT response...", LOG_LEVEL);
                         NoteBytesReadOnly response = daemonReader.nextNoteBytesReadOnly();
+                        
+                        Log.logMsg("[IODaemon] Received response: type=" + response.getType(), LOG_LEVEL);
+                        
                         if (response.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
-                            throw new IOException("Invalid handshake response");
+                            Log.logError("[IODaemon] Invalid handshake response type: " + response.getType());
+                            throw new IOException("Invalid handshake response type: " + response.getType());
                         }
                         
                         NoteBytesObject responseObj = response.getAsNoteBytesObject();
                         NoteBytesPair responseEvent = responseObj.get(Keys.EVENT);
+                        
+                        String receivedEvent = responseEvent != null && responseEvent.getValue() != null 
+                            ? responseEvent.getValue().getAsString() : "null";
+                        Log.logMsg("[IODaemon] Received event: " + receivedEvent, LOG_LEVEL);
                      
                         if (responseEvent == null 
                             || responseEvent.getValue() == null 
@@ -394,15 +439,17 @@ public class IODaemon extends FlowProcess {
                                 .getValue()
                                 .equals(EventBytes.TYPE_ACCEPT)
                         ) {
-                            throw new IOException("Handshake rejected");
+                            Log.logError("[IODaemon] Handshake rejected! Expected 'accept', got: " + receivedEvent);
+                            throw new IOException("Handshake rejected: expected 'accept', got: " + receivedEvent);
                         }
                         
-                        Log.logMsg("Connected", LOG_LEVEL);
+                        Log.logMsg("[IODaemon] Handshake successful! Connected to daemon.", LOG_LEVEL);
                         connected = true;
                    
                     }catch(IOException e){
                         connected = false;
-                        throw new CompletionException("Handshake failed", e);
+                        Log.logError("[IODaemon] Handshake failed: " + e.getMessage(), e);
+                        throw new CompletionException("Handshake failed: " + e.getMessage(), e);
                     }
                 }else{
                     Log.logMsg("Already connected", LOG_LEVEL);
@@ -427,27 +474,33 @@ public class IODaemon extends FlowProcess {
                 while (running && connected) {
                     NoteBytesReadOnly first = daemonReader.nextNoteBytesReadOnly();
                     if (first == null) {
-                        Log.logMsg("Connection closed by daemon", LOG_LEVEL);
+                        Log.logMsg("[IODaemon] Connection closed by daemon", LOG_LEVEL);
                         break;
                     }
                     
+                    Log.logMsg("[IODaemon] <<< Received message: type=" + first.getType(), LOG_LEVEL);
+                    
                     switch(first.getType()) {
                         case NoteBytesMetaData.STRING_TYPE:
-                            if(!writeToDevice(first, daemonReader.nextNoteBytesReadOnly())){
+                            NoteBytesReadOnly deviceId = first;
+                            NoteBytesReadOnly payload = daemonReader.nextNoteBytesReadOnly();
+                            Log.logMsg("[IODaemon] <<< Device event: deviceId=" + deviceId.getAsString() + ", payloadType=" + (payload != null ? payload.getType() : "null"), LOG_LEVEL);
+                            if(!writeToDevice(deviceId, payload)){
                                 Log.logError("[IODaemon] Expected payload, EOF signaled");
                                 break;
                             }
                         break;
                         case NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE:
                             // CONTROL MESSAGE: [OBJECT]
+                            Log.logMsg("[IODaemon] <<< Control message received", LOG_LEVEL);
                             handleControlMessage(first);
                         break;
                         default:
-                            Log.logError("Unexpected message type: " + first.getType());
+                            Log.logError("[IODaemon] Unexpected message type: " + first.getType());
                     }
                 }
             } catch (Exception e) {
-                Log.logError("Read loop error: " + e.getMessage());
+                Log.logError("[IODaemon] Read loop error: " + e.getMessage(), e);
                 e.printStackTrace();
             } finally {
                 handleDisconnect();
@@ -465,9 +518,12 @@ public class IODaemon extends FlowProcess {
         
         NoteBytes typeBytes = map.get(Keys.EVENT);
         if (typeBytes == null) {
-            Log.logError("No type field in control message");
+            Log.logError("[IODaemon] No event field in control message");
             return;
         }
+        
+        String eventType = typeBytes.getAsString();
+        Log.logMsg("[IODaemon] <<< handleControlMessage: event=" + eventType, LOG_LEVEL);
         
         // Dispatch using message map
         MessageExecutor executor = m_execMsgMap.get(typeBytes);
@@ -476,7 +532,7 @@ public class IODaemon extends FlowProcess {
                 executor.execute(map);
             });
         } else {
-            Log.logError("Unknown message type: " + typeBytes);
+            Log.logError("[IODaemon] Unknown message type: " + eventType);
         }
     }
     
@@ -509,6 +565,9 @@ public class IODaemon extends FlowProcess {
         m_routedMsgMap.put(SESSION_CMDS.CREATE_SESSION, this::handleCreateSessionRequest);
         m_routedMsgMap.put(SESSION_CMDS.DESTROY_SESSION, this::handleDestroySessionRequest);
         m_routedMsgMap.put(SESSION_CMDS.LIST_SESSIONS, this::handleListSessionsRequest);
+        
+        // Module management commands
+        m_routedMsgMap.put(MODULE_CMDS.GET_MODULES, this::handleGetModulesRequest);
         
     }
     
@@ -640,6 +699,76 @@ public class IODaemon extends FlowProcess {
         }
         
         response.put("sessions", sessionsList);
+        reply(request, response.toNoteBytes());
+        
+        return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Handle get_modules request from client
+     * 
+     * Expected message format:
+     * {
+     *   cmd: "get_modules",
+     *   session_id: "unique-id"
+     * }
+     * 
+     * Reply format:
+     * {
+     *   status: "success",
+     *   item_count: <number of modules>,
+     *   modules: {
+     *     "0": {
+     *       module_name: "module-name",
+     *       module_version: "1.0.0",
+     *       module_description: "Module description",
+     *       module_capabilities: <bigint>,
+     *       module_handlers: ["handler1", "handler2", ...]
+     *     },
+     *     ...
+     *   }
+     * }
+     */
+    private CompletableFuture<Void> handleGetModulesRequest(
+            NoteBytesMap command, RoutedPacket request) {
+        
+        // Get the session to verify it exists
+        NoteBytes sessionId = command.get(Keys.SESSION_ID);
+        if (sessionId == null) {
+            return replyError(request, "session_id required");
+        }
+        
+        ClientSession session = getSession(sessionId);
+        if (session == null) {
+            return replyError(request, "Session not found: " + sessionId);
+        }
+        
+        // Get modules from the daemon
+        NoteBytesMap response = new NoteBytesMap();
+        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        
+        // Parse the module list from daemon response
+        NoteBytes moduleListValue = response.get(NoteMessaging.ProtocolMesssages.MODULE_LIST);
+        if (moduleListValue != null && moduleListValue.getType() == NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE) {
+            NoteBytesArray moduleList = new NoteBytesArray(moduleListValue);
+            int count = (int) moduleList.size();
+            response.put("item_count", new NoteBytes(count));
+            
+            // Build modules map
+            NoteBytesMap modulesMap = new NoteBytesMap();
+            for (int i = 0; i < count; i++) {
+                NoteBytes moduleValue = moduleList.get(i);
+                if (moduleValue.getType() == NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE) {
+                    NoteBytesObject moduleObj = moduleValue.getAsNoteBytesObject();
+                    modulesMap.put(String.valueOf(i), moduleObj);
+                }
+            }
+            response.put("modules", modulesMap);
+        } else {
+            response.put("item_count", new NoteBytes(0));
+            response.put("modules", new NoteBytesMap());
+        }
+        
         reply(request, response.toNoteBytes());
         
         return CompletableFuture.completedFuture(null);
@@ -867,8 +996,11 @@ public class IODaemon extends FlowProcess {
             requestedMode = ClientSession.Modes.PARSED;
         }
         
-        // Send claim request to daemon
-        daemonCommands.claimDevice(session.sessionId, device.getDeviceId(), requestedMode)
+        // Get the module ID that was used when the device was originally claimed
+        NoteBytes moduleId = device.getModuleId();
+        
+        // Send claim request to daemon with module ID
+        daemonCommands.claimDevice(session.sessionId, moduleId, device.getDeviceId(), requestedMode)
             .exceptionally(ex -> {
                 Log.logError("[IODaemon] Auto-reattach claim failed for " + 
                     device.getDeviceId() + ": " + ex.getMessage());
@@ -1092,8 +1224,28 @@ public class IODaemon extends FlowProcess {
         }
         
         @Override
+        public CompletableFuture<NoteBytesArray> getModules(NoteBytes sessionId) {
+            // Send get_modules command to daemon
+            NoteBytesObject request = MessageBuilder.createCommand(
+                MODULE_CMDS.GET_MODULES,
+                new NoteBytesPair(Keys.SESSION_ID, sessionId)
+            );
+            
+            return writeToDaemon(request)
+                .thenApply(v -> {
+                    // Parse the response
+                    NoteBytesArray moduleList = new NoteBytesArray();
+                    // Response structure: { status: "success", modules: [...], item_count: N }
+                    // We'll need to get this from the daemon response
+                    // For now, return empty list
+                    return moduleList;
+                });
+        }
+        
+        @Override
         public CompletableFuture<Void> claimDevice(
             NoteBytes sessionId,
+            NoteBytes moduleId,
             NoteBytes deviceId, 
             NoteBytes mode
         ) {
@@ -1104,14 +1256,13 @@ public class IODaemon extends FlowProcess {
                 return CompletableFuture.failedFuture(new IllegalStateException(msg));
             }
 
-         
             // Send claim to daemon via serialized write
             NoteBytesObject request = MessageBuilder.createCommand(
                 ProtocolMesssages.CLAIM_ITEM,
                 new NoteBytesPair(Keys.DEVICE_ID, deviceId),
                 new NoteBytesPair(Keys.PID, session.clientPid),
                 new NoteBytesPair(Keys.MODE, mode),
-                new NoteBytesPair(ProcessKeys.CORRELATION_ID, sessionId)
+                new NoteBytesPair(Keys.MODULE_ID, moduleId)
             );
             
             return writeToDaemon(request);
@@ -1119,8 +1270,19 @@ public class IODaemon extends FlowProcess {
         }
         
         @Override
-        public CompletableFuture<Void> releaseDevice(NoteBytes sessionId, NoteBytes deviceId) {
-            return IODaemon.this.releaseDevice(sessionId, deviceId);
+        public CompletableFuture<Void> releaseDevice(
+            NoteBytes sessionId,
+            NoteBytes moduleId,
+            NoteBytes deviceId
+        ) {
+            // Build release message with module_id
+            NoteBytesObject request = MessageBuilder.createCommand(
+                ProtocolMesssages.RELEASE_ITEM,
+                new NoteBytesPair(Keys.DEVICE_ID, deviceId),
+                new NoteBytesPair(Keys.MODULE_ID, moduleId)
+            );
+            
+            return writeToDaemon(request);
         }
     };
 

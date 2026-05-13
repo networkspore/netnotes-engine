@@ -45,7 +45,8 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly ITEM_INFO         = new NoteBytesReadOnly("item_info");
         public static final NoteBytesReadOnly GET_CAPABILITIES  = new NoteBytesReadOnly("get_capabilities");
         public static final NoteBytesReadOnly NODE_LIST         = new NoteBytesReadOnly("node_list");
-
+        public static final NoteBytesReadOnly MODULE_LIST       = new NoteBytesReadOnly("module_list");
+        
          // Claim
         public static final NoteBytesReadOnly CLAIM_ITEM            = new NoteBytesReadOnly("claim_item");
         public static final NoteBytesReadOnly ITEM_CLAIMED          = new NoteBytesReadOnly("item_claimed");
@@ -140,6 +141,7 @@ public class NoteMessaging {
         public static final NoteBytesReadOnly TYPE          = new NoteBytesReadOnly("type");
         public static final NoteBytesReadOnly SOURCE_ID     = new NoteBytesReadOnly("source_id");
         public static final NoteBytesReadOnly DEVICE_ID     = new NoteBytesReadOnly("device_id");
+        public static final NoteBytesReadOnly MODULE_ID     = new NoteBytesReadOnly("module_id");
         public static final NoteBytesReadOnly SESSION_ID    = new NoteBytesReadOnly("session_id");
         public static final NoteBytesReadOnly PACKAGE_ID    = new NoteBytesReadOnly("package_id");
         public static final NoteBytesReadOnly PROCESS_ID    = new NoteBytesReadOnly("process_id");

@@ -282,9 +282,13 @@ public class ClientSession {
             .append(sessionId)
             .append(deviceId);
 
+        // Get module ID for this device type (for USB devices, use "note_usb")
+        NoteBytes moduleId = new NoteBytesReadOnly("note_usb");
+
         // Create ClaimedDevice with injected event factory
         ClaimedDevice claimedDevice = new ClaimedDevice(
             this.sessionId,
+            moduleId,
             deviceId,
             claimedDevicePath,
             deviceInfo.usbDevice().getDeviceType(),
@@ -302,9 +306,8 @@ public class ClientSession {
         PendingDevice pendingDevice = new PendingDevice(claimedDevice);
         pendingClaims.put(deviceId, pendingDevice);
 
-
         // Request daemon claim (async)
-        daemonInterface.claimDevice(sessionId, deviceId, requestedMode)
+        daemonInterface.claimDevice(sessionId, moduleId, deviceId, requestedMode)
             .exceptionally(ex -> {
                 Log.logError("[ClientSession:" + sessionId + "] Claim request failed: " + 
                     ex.getMessage());
@@ -362,8 +365,11 @@ public class ClientSession {
                 return null;
             });
             
+        // Get module ID for this device type (for USB devices, use "note_usb")
+        NoteBytes moduleId = new NoteBytesReadOnly("note_usb");
+        
         // Request daemon release (async)
-        daemonInterface.releaseDevice(sessionId, deviceId)
+        daemonInterface.releaseDevice(sessionId, moduleId, deviceId)
             .exceptionally(ex -> {
                 Log.logError("[ClientSession:" + sessionId + "] Release request failed: " + 
                     ex.getMessage());

@@ -9,8 +9,8 @@ import io.netnotes.noteBytes.collections.NoteBytesPair;
 public class MessageBuilder {
     public static NoteBytesObject createCommand(NoteBytesReadOnly command, NoteBytesPair... params) {
         NoteBytesObject msg = new NoteBytesObject();
-        msg.add(Keys.EVENT, EventBytes.TYPE_CMD);
-        msg.add(Keys.CMD, command);
+        // Protocol standard: use EVENT as the canonical message type.
+        msg.add(Keys.EVENT, command);
         
         for (NoteBytesPair param : params) {
             msg.add(param.getKey(), param.getValue());
